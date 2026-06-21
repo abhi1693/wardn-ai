@@ -273,6 +273,51 @@ def test_install_server_runtime_creates_oci_runtime_manifest(tmp_path, monkeypat
     assert install.secret_config == {"environment": {"WEATHER_TOKEN": "secret"}}
 
 
+def test_install_server_runtime_passes_custom_headers_to_oci_container(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "oci",
+                "identifier": "docker.io/example/weather:1.0.0",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"headers.X-Workspace": "prod"},
+        install_root=tmp_path,
+    )
+
+    assert install.runtime_config["args"] == [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "WARDN_MCP_CUSTOM_HEADERS",
+        "docker.io/example/weather:1.0.0",
+    ]
+    assert install.secret_config == {"headers": {"X-Workspace": "prod"}}
+    assert install.runtime_config["package"]["headers"] == [
+        {
+            "name": "X-Workspace",
+            "configured": True,
+            "custom": True,
+            "isSecret": True,
+        }
+    ]
+
+
 def test_install_server_runtime_adds_configured_oci_package_arguments(
     tmp_path,
     monkeypatch,
@@ -434,6 +479,36 @@ def test_install_server_runtime_creates_uvx_runtime_manifest(tmp_path, monkeypat
             "GRAFANA_SERVICE_ACCOUNT_TOKEN": "token",
         }
     }
+
+
+def test_install_server_runtime_stores_custom_package_headers(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "uvx",
+                "identifier": "weather-mcp",
+                "version": "latest",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+
+    install = install_server_runtime(
+        server,
+        config_values={"headers.X-Workspace": "prod"},
+        install_root=tmp_path,
+    )
+
+    assert install.secret_config == {"headers": {"X-Workspace": "prod"}}
+    assert install.runtime_config["package"]["headers"] == [
+        {
+            "name": "X-Workspace",
+            "configured": True,
+            "custom": True,
+            "isSecret": True,
+        }
+    ]
 
 
 def test_install_server_runtime_rewrites_package_tmp_paths(tmp_path, monkeypatch) -> None:

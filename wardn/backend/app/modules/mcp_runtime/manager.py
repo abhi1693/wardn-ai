@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -46,9 +47,20 @@ def secret_headers(installation: MCPServerInstallation) -> dict[str, str]:
 def secret_environment(installation: MCPServerInstallation) -> dict[str, str]:
     secret_config = installation.secret_config or {}
     environment = secret_config.get("environment")
-    if not isinstance(environment, dict):
-        return {}
-    return {str(key): str(value) for key, value in environment.items() if value is not None}
+    values = {}
+    if isinstance(environment, dict):
+        values.update(
+            {str(key): str(value) for key, value in environment.items() if value is not None}
+        )
+
+    headers = secret_headers(installation)
+    if headers:
+        values["WARDN_MCP_CUSTOM_HEADERS"] = json.dumps(
+            headers,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    return values
 
 
 def require_remote_installation(installation: MCPServerInstallation) -> tuple[str, dict[str, str]]:

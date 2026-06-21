@@ -213,6 +213,17 @@ def public_package_config(
             else argument
             for argument in package_args
         ]
+    custom_headers = custom_header_values(config_values)
+    if custom_headers:
+        public_package["headers"] = [
+            {
+                "name": name,
+                "configured": True,
+                "custom": True,
+                "isSecret": True,
+            }
+            for name in custom_headers
+        ]
     return public_package
 
 
@@ -224,10 +235,13 @@ def package_secret_config(
     secret_config = {}
     configured_env = configured_values(env_vars, config_values)
     configured_args = configured_values(package_args, config_values)
+    custom_headers = custom_header_values(config_values)
     if configured_env:
         secret_config["environment"] = configured_env
     if configured_args:
         secret_config["packageArguments"] = configured_args
+    if custom_headers:
+        secret_config["headers"] = custom_headers
     return secret_config
 
 
@@ -662,9 +676,13 @@ def build_oci_install(
     configured_args = configured_package_arguments(package_args, config_values)
     public_package = public_package_config(package, env_vars, package_args, config_values)
     secret_config = package_secret_config(env_vars, package_args, config_values)
+    docker_env_names = [
+        *configured_env.keys(),
+        *(["WARDN_MCP_CUSTOM_HEADERS"] if secret_config.get("headers") else []),
+    ]
     docker_env_args = [
         argument
-        for name in configured_env
+        for name in docker_env_names
         for argument in ("-e", name)
     ]
     runtime_config = {

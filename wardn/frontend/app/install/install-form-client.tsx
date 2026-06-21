@@ -429,9 +429,9 @@ export function InstallFormClient({
       return;
     }
 
-    const incompleteCustomHeaders = selectedInstallTarget === "remote"
-      ? customHeaders.filter((header) => header.name.trim() || header.value.trim()).filter((header) => !header.name.trim() || !header.value.trim())
-      : [];
+    const incompleteCustomHeaders = customHeaders
+      .filter((header) => header.name.trim() || header.value.trim())
+      .filter((header) => !header.name.trim() || !header.value.trim());
     if (incompleteCustomHeaders.length > 0) {
       setError("Custom headers require both a key and a value.");
       return;
@@ -657,7 +657,7 @@ export function InstallFormClient({
             </Card>
           ) : null}
 
-          {selectedInstallTarget === "remote" ? (
+          {selectedServer ? (
             <Card>
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <CardTitle>Custom headers</CardTitle>
