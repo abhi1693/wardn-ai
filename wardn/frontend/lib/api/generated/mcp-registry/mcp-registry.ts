@@ -14,6 +14,8 @@ import type {
   MCPServerInstallRequest,
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
+  MCPServerInstallationToolValidationRequest,
+  MCPServerInstallationToolValidationResponse,
   McpRegistryGetServerVersionParams,
   McpRegistryListServerVersionsParams,
   McpRegistryListServersParams
@@ -71,6 +73,61 @@ export const mcpRegistryUninstallServerConfig = async (installationId: string, o
 
   const data: mcpRegistryUninstallServerConfigResponse['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as mcpRegistryUninstallServerConfigResponse
+}
+
+
+export type mcpRegistryValidateInstalledServerToolResponse200 = {
+  data: MCPServerInstallationToolValidationResponse
+  status: 200
+}
+
+export type mcpRegistryValidateInstalledServerToolResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRegistryValidateInstalledServerToolResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryValidateInstalledServerToolResponseSuccess = (mcpRegistryValidateInstalledServerToolResponse200) & {
+  headers: Headers;
+};
+export type mcpRegistryValidateInstalledServerToolResponseError = (mcpRegistryValidateInstalledServerToolResponse404 | mcpRegistryValidateInstalledServerToolResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryValidateInstalledServerToolResponse = (mcpRegistryValidateInstalledServerToolResponseSuccess | mcpRegistryValidateInstalledServerToolResponseError)
+
+export const getMcpRegistryValidateInstalledServerToolUrl = (installationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/installed-server-configs/${installationId}/validate-tool`
+}
+
+/**
+ * @summary Validate Installed Mcp Server Tool
+ */
+export const mcpRegistryValidateInstalledServerTool = async (installationId: string,
+    mCPServerInstallationToolValidationRequest: MCPServerInstallationToolValidationRequest, options?: RequestInit): Promise<mcpRegistryValidateInstalledServerToolResponse> => {
+
+  const res = await fetch(getMcpRegistryValidateInstalledServerToolUrl(installationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mCPServerInstallationToolValidationRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryValidateInstalledServerToolResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as mcpRegistryValidateInstalledServerToolResponse
 }
 
 

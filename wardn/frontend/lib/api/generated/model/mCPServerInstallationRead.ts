@@ -5,10 +5,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MCPServerDocument } from './mCPServerDocument';
+import type { MCPServerInstallationReadConfiguredValues } from './mCPServerInstallationReadConfiguredValues';
 import type { MCPServerInstallationReadRuntimeConfig } from './mCPServerInstallationReadRuntimeConfig';
 
 export interface MCPServerInstallationRead {
   configName: string;
+  configuredValues?: MCPServerInstallationReadConfiguredValues;
   id: string;
   installError?: string | null;
   installPath: string;

@@ -18,6 +18,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/health/ready",
         "/api/v1/mcp/gateway",
         "/api/v1/mcp/registry/installed-server-configs/{installation_id}",
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}/validate-tool",
         "/api/v1/mcp/registry/installed-servers",
         "/api/v1/mcp/registry/installed-servers/updates",
         "/api/v1/mcp/registry/installed-servers/{server_name}",
@@ -84,6 +85,9 @@ def test_mcp_registry_openapi_contract() -> None:
     installed_config_path = schema["paths"][
         "/api/v1/mcp/registry/installed-server-configs/{installation_id}"
     ]
+    installed_config_validation = schema["paths"][
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}/validate-tool"
+    ]["post"]
     installation_path = schema["paths"]["/api/v1/mcp/registry/installed-servers/{server_name}"]
     install = installation_path["put"]
     uninstall = installation_path["delete"]
@@ -119,6 +123,16 @@ def test_mcp_registry_openapi_contract() -> None:
     assert uninstall["responses"]["204"]["description"] == "Successful Response"
     assert installed_config_path["delete"]["operationId"] == "mcp_registry_uninstall_server_config"
     assert installed_config_path["delete"]["responses"]["204"]["description"] == "Successful Response"
+    assert (
+        installed_config_validation["operationId"]
+        == "mcp_registry_validate_installed_server_tool"
+    )
+    assert installed_config_validation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPServerInstallationToolValidationRequest"
+    }
+    assert installed_config_validation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPServerInstallationToolValidationResponse"
+    }
     assert update["operationId"] == "mcp_registry_update_installed_servers"
     assert update["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"

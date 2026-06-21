@@ -492,6 +492,13 @@
             "title": "Configname",
             "type": "string"
           },
+          "configuredValues": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Configuredvalues",
+            "type": "object"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -575,6 +582,86 @@
           "latestServer"
         ],
         "title": "MCPServerInstallationRead",
+        "type": "object"
+      },
+      "MCPServerInstallationToolValidationRequest": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "toolName": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Toolname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "toolName"
+        ],
+        "title": "MCPServerInstallationToolValidationRequest",
+        "type": "object"
+      },
+      "MCPServerInstallationToolValidationResponse": {
+        "properties": {
+          "configName": {
+            "title": "Configname",
+            "type": "string"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "isError": {
+            "title": "Iserror",
+            "type": "boolean"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          },
+          "validatedAt": {
+            "format": "date-time",
+            "title": "Validatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverName",
+          "configName",
+          "toolName",
+          "status",
+          "isError",
+          "validatedAt"
+        ],
+        "title": "MCPServerInstallationToolValidationResponse",
         "type": "object"
       },
       "UserRead": {
@@ -862,6 +949,69 @@
           }
         },
         "summary": "Uninstall Mcp Server Config",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-server-configs/{installation_id}/validate-tool": {
+      "post": {
+        "operationId": "mcp_registry_validate_installed_server_tool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPServerInstallationToolValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerInstallationToolValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server configuration is not installed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Installed Mcp Server Tool",
         "tags": [
           "mcp-registry"
         ]

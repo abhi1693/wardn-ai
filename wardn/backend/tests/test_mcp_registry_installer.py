@@ -273,6 +273,83 @@ def test_install_server_runtime_creates_oci_runtime_manifest(tmp_path, monkeypat
     assert install.secret_config == {"environment": {"WEATHER_TOKEN": "secret"}}
 
 
+def test_install_server_runtime_adds_configured_oci_package_arguments(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "oci",
+                "identifier": "docker.io/grafana/mcp-grafana:0.16.0",
+                "version": "0.16.0",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {"name": "GRAFANA_URL", "isRequired": True},
+                    {"name": "GRAFANA_SERVICE_ACCOUNT_TOKEN", "isSecret": True},
+                ],
+                "packageArguments": [
+                    {"value": "-t"},
+                    {"value": "stdio"},
+                    {
+                        "name": "GRAFANA_CLI_DISABLE_WRITE",
+                        "flag": "--disable-write",
+                        "format": "boolean",
+                        "default": "true",
+                    },
+                    {
+                        "name": "GRAFANA_CLI_TLS_SKIP_VERIFY",
+                        "flag": "--tls-skip-verify",
+                        "format": "boolean",
+                    },
+                    {
+                        "name": "GRAFANA_CLI_LOG_LEVEL",
+                        "flag": "--log-level",
+                        "format": "select",
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={
+            "GRAFANA_URL": "https://grafana.example.com",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "token",
+            "GRAFANA_CLI_TLS_SKIP_VERIFY": "true",
+            "GRAFANA_CLI_LOG_LEVEL": "warn",
+        },
+        install_root=tmp_path,
+    )
+
+    assert install.runtime_config["args"] == [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "GRAFANA_URL",
+        "-e",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        "docker.io/grafana/mcp-grafana:0.16.0",
+        "-t",
+        "stdio",
+        "--disable-write",
+        "--tls-skip-verify",
+        "--log-level",
+        "warn",
+    ]
+    assert install.secret_config["packageArguments"] == {
+        "GRAFANA_CLI_TLS_SKIP_VERIFY": "true",
+        "GRAFANA_CLI_LOG_LEVEL": "warn",
+    }
+
+
 def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(
     tmp_path,
     monkeypatch,

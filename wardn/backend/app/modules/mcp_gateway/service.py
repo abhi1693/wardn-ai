@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.mcp_gateway import repository
+from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
@@ -122,6 +123,20 @@ def text_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "structuredContent": payload,
         "isError": False,
+    }
+
+
+def error_tool_result(message: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    structured_content = payload or {}
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": message,
+            }
+        ],
+        "structuredContent": structured_content,
+        "isError": True,
     }
 
 
@@ -386,6 +401,16 @@ async def run_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
             arguments=tool_arguments,
         )
         await session.commit()
+    except MCPGatewayUpstreamError as exc:
+        await session.commit()
+        return error_tool_result(
+            str(exc),
+            {
+                "serverName": server_name,
+                "toolName": tool_name,
+                "error": str(exc),
+            },
+        )
     except Exception:
         await session.commit()
         raise

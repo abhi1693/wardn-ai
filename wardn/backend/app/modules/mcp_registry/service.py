@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+
+from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
@@ -20,7 +23,10 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallationListResponse,
     MCPServerInstallationRead,
     MCPServerInstallRequest,
+    MCPServerInstallationToolValidationRequest,
+    MCPServerInstallationToolValidationResponse,
 )
+from app.modules.mcp_runtime.service import call_tool_with_tracking
 
 
 def official_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
@@ -62,7 +68,7 @@ def install_config_values_from_secret_config(secret_config: dict | None) -> dict
     if not secret_config:
         return {}
     values = {}
-    for namespace in ("headers", "environment"):
+    for namespace in ("headers", "environment", "packageArguments"):
         namespace_values = secret_config.get(namespace)
         if isinstance(namespace_values, dict):
             values.update(
@@ -73,6 +79,57 @@ def install_config_values_from_secret_config(secret_config: dict | None) -> dict
                 }
             )
     return values
+
+
+def visible_config_field_names(server: MCPServerVersion, installation: MCPServerInstallation) -> set[str]:
+    runtime_config = installation.runtime_config or {}
+    package = runtime_config.get("package")
+    transport = runtime_config.get("transport")
+    definitions = []
+
+    for package_definition in server.packages or []:
+        definitions.extend(package_definition.get("environmentVariables", []))
+        definitions.extend(package_definition.get("packageArguments", []))
+    for remote in server.remotes or []:
+        definitions.extend(remote.get("headers", []))
+
+    if isinstance(package, dict):
+        definitions.extend(package.get("environmentVariables", []))
+        definitions.extend(package.get("packageArguments", []))
+    if isinstance(transport, dict):
+        definitions.extend(transport.get("headers", []))
+
+    return {
+        str(definition.get("name"))
+        for definition in definitions
+        if isinstance(definition, dict)
+        and definition.get("name")
+        and not definition.get("isSecret")
+    }
+
+
+def public_configured_values(
+    server: MCPServerVersion,
+    installation: MCPServerInstallation,
+) -> dict[str, str]:
+    visible_names = visible_config_field_names(server, installation)
+    stored_values = install_config_values_from_secret_config(installation.secret_config)
+    return {
+        key: value
+        for key, value in stored_values.items()
+        if key in visible_names
+    }
+
+
+def merged_install_config_values(
+    existing: MCPServerInstallation | None,
+    new_values: dict[str, str],
+) -> dict[str, str]:
+    merged = install_config_values_from_secret_config(
+        existing.secret_config if existing else None
+    )
+    merged.update({key: value for key, value in new_values.items() if value})
+    return merged
 
 
 def parse_cursor(cursor: str | None) -> int:
@@ -134,6 +191,7 @@ async def installation_response(
         install_type=installation.install_type,
         install_path=installation.install_path,
         runtime_config=installation.runtime_config,
+        configured_values=public_configured_values(installed, installation),
         install_error=installation.install_error or None,
         installed_at=installation.installed_at,
         updated_at=installation.updated_at,
@@ -327,6 +385,57 @@ async def list_installations(session) -> MCPServerInstallationListResponse:
     )
 
 
+async def validate_installation_tool(
+    session,
+    installation_id,
+    payload: MCPServerInstallationToolValidationRequest,
+) -> MCPServerInstallationToolValidationResponse:
+    installation = await repository.get_installation_by_id(session, installation_id)
+    if installation is None:
+        raise MCPServerInstallationNotFoundError("server configuration is not installed")
+
+    server = await repository.get_server_version(
+        session,
+        installation.server_name,
+        installation.installed_version,
+        include_deleted=True,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("installed server version not found")
+
+    error = ""
+    result = None
+    try:
+        result = await call_tool_with_tracking(
+            session,
+            installation,
+            server,
+            tool_name=payload.tool_name,
+            arguments=payload.arguments,
+        )
+        is_error = bool(result.get("isError"))
+        if is_error:
+            content = result.get("content")
+            if isinstance(content, list) and content:
+                first = content[0]
+                if isinstance(first, dict):
+                    error = str(first.get("text") or "")
+    except (MCPGatewayUpstreamError, ValueError) as exc:
+        is_error = True
+        error = str(exc)
+
+    return MCPServerInstallationToolValidationResponse(
+        server_name=installation.server_name,
+        config_name=installation.config_name or "default",
+        tool_name=payload.tool_name,
+        status="failed" if is_error else "passed",
+        is_error=is_error,
+        error=error,
+        result=result,
+        validated_at=datetime.now(UTC),
+    )
+
+
 async def install_server_version(
     session,
     name: str,
@@ -341,13 +450,14 @@ async def install_server_version(
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
+    installation = await repository.get_installation(session, name, payload.config_name)
+    config_values = merged_install_config_values(installation, payload.config_values)
     runtime_install = install_server_runtime(
         server,
-        config_values=payload.config_values,
+        config_values=config_values,
         install_target=payload.install_target,
         config_name=payload.config_name,
     )
-    installation = await repository.get_installation(session, name, payload.config_name)
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
         installation = MCPServerInstallation(

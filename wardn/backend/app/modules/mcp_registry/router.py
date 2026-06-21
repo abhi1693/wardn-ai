@@ -23,6 +23,8 @@ from app.modules.mcp_registry.schemas import (
     MCPServerCreate,
     MCPServerInstallationListResponse,
     MCPServerInstallationRead,
+    MCPServerInstallationToolValidationRequest,
+    MCPServerInstallationToolValidationResponse,
     MCPServerInstallRequest,
 )
 from app.modules.mcp_registry.service import (
@@ -37,6 +39,7 @@ from app.modules.mcp_registry.service import (
     uninstall_server,
     update_installed_servers,
     update_server_version,
+    validate_installation_tool,
 )
 
 router = APIRouter(prefix="/mcp/registry", tags=["mcp-registry"])
@@ -156,6 +159,33 @@ async def uninstall_mcp_server_config(
             detail="server configuration is not installed",
         ) from exc
     await session.commit()
+
+
+@router.post(
+    "/installed-server-configs/{installation_id}/validate-tool",
+    response_model=MCPServerInstallationToolValidationResponse,
+    operation_id="mcp_registry_validate_installed_server_tool",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "The requested server configuration is not installed.",
+        },
+    },
+)
+async def validate_installed_mcp_server_tool(
+    installation_id: UUID,
+    payload: MCPServerInstallationToolValidationRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MCPServerInstallationToolValidationResponse:
+    try:
+        response = await validate_installation_tool(session, installation_id, payload)
+    except (MCPServerInstallationNotFoundError, MCPServerNotFoundError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    await session.commit()
+    return response
 
 
 @router.delete(

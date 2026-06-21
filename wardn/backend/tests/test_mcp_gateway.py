@@ -1,5 +1,8 @@
+import json
+from io import BytesIO
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
 
@@ -195,6 +198,46 @@ def test_mcp_gateway_tools_list_is_bounded() -> None:
         "get_mcp_tool",
         "run_mcp_tool",
     ]
+
+
+def test_send_remote_request_preserves_jsonrpc_http_error(monkeypatch) -> None:
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Request had invalid authentication credentials.",
+                    }
+                ],
+                "isError": True,
+            },
+        }
+    ).encode("utf-8")
+
+    def urlopen_raises_http_error(*args, **kwargs):
+        raise HTTPError(
+            "https://example.com/mcp",
+            401,
+            "Unauthorized",
+            {},
+            BytesIO(body),
+        )
+
+    monkeypatch.setattr(gateway_client_module, "urlopen", urlopen_raises_http_error)
+
+    response, session_id = gateway_client_module.send_remote_request(
+        "https://example.com/mcp",
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {}},
+    )
+
+    assert session_id is None
+    assert response["result"]["isError"] is True
+    assert response["result"]["content"][0]["text"] == (
+        "Request had invalid authentication credentials."
+    )
 
 
 def test_mcp_gateway_search_servers(monkeypatch) -> None:
@@ -501,6 +544,49 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         "server_version": "1.0.0",
         "tool_name": "get_forecast",
         "arguments": {"location": "Delhi"},
+    }
+
+
+def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatch) -> None:
+    async def get_enabled_installation(*args, **kwargs):
+        return installed_server()
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise gateway_client_module.MCPGatewayUpstreamError(
+            "upstream tools/call returned no result"
+        )
+
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = gateway_client().post(
+        "/api/v1/mcp/gateway",
+        json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_mcp_tool",
+                "arguments": {
+                    "serverName": "io.github.example/weather",
+                    "toolName": "get_forecast",
+                    "arguments": {"location": "Delhi"},
+                },
+            },
+        },
+    )
+
+    payload = response.json()
+    assert "error" not in payload
+    result = payload["result"]
+    assert result["isError"] is True
+    assert result["content"] == [
+        {"type": "text", "text": "upstream tools/call returned no result"}
+    ]
+    assert result["structuredContent"] == {
+        "serverName": "io.github.example/weather",
+        "toolName": "get_forecast",
+        "error": "upstream tools/call returned no result",
     }
 
 

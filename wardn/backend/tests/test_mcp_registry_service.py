@@ -16,6 +16,7 @@ from app.modules.mcp_registry.schemas import (
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
     MCPServerInstallRequest,
+    MCPServerInstallationToolValidationRequest,
 )
 
 
@@ -217,6 +218,51 @@ def runtime_install(version: str = "1.0.0") -> MCPRuntimeInstall:
     )
 
 
+def test_public_configured_values_omits_secret_fields() -> None:
+    server = MCPServerVersion(
+        name="io.github.example/weather",
+        title="Weather",
+        description="Weather tools for forecasts",
+        version="1.0.0",
+        server_json={},
+        is_latest=True,
+        status="active",
+        status_message="",
+        packages=[
+            {
+                "environmentVariables": [
+                    {"name": "WEATHER_URL"},
+                    {"name": "WEATHER_TOKEN", "isSecret": True},
+                ],
+                "packageArguments": [
+                    {"name": "LOG_LEVEL"},
+                    {"name": "PRIVATE_FLAG", "isSecret": True},
+                ],
+            }
+        ],
+    )
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_config={
+            "environment": {
+                "WEATHER_URL": "https://weather.example.com",
+                "WEATHER_TOKEN": "secret-token",
+            },
+            "packageArguments": {
+                "LOG_LEVEL": "debug",
+                "PRIVATE_FLAG": "hidden",
+            },
+        },
+    )
+
+    assert service.public_configured_values(server, installation) == {
+        "WEATHER_URL": "https://weather.example.com",
+        "LOG_LEVEL": "debug",
+    }
+
+
 @pytest.mark.asyncio
 async def test_update_server_version_preserves_latest_marker(monkeypatch) -> None:
     server = server_version("1.0.0", is_latest=True)
@@ -341,6 +387,56 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_install_server_version_preserves_existing_config_values(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_config={
+            "environment": {"WEATHER_TOKEN": "old-token", "WEATHER_URL": "old-url"},
+            "packageArguments": {"LOG_LEVEL": "warn", "READ_ONLY": "true"},
+        },
+    )
+    seen = {}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    def install_runtime(server, **kwargs):
+        seen["config_values"] = kwargs["config_values"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            version="latest",
+            configValues={
+                "WEATHER_TOKEN": "",
+                "WEATHER_URL": "new-url",
+                "LOG_LEVEL": "debug",
+            },
+        ),
+    )
+
+    assert seen["config_values"] == {
+        "WEATHER_TOKEN": "old-token",
+        "WEATHER_URL": "new-url",
+        "LOG_LEVEL": "debug",
+        "READ_ONLY": "true",
+    }
+
+
+@pytest.mark.asyncio
 async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
@@ -382,6 +478,83 @@ async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> No
 
     assert session.deleted == [installation]
     assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_validate_installation_tool_reports_passed_result(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = await service.validate_installation_tool(
+        FakeSession(),
+        installation.id,
+        MCPServerInstallationToolValidationRequest(
+            toolName="get_forecast",
+            arguments={"location": "Delhi"},
+        ),
+    )
+
+    assert response.status == "passed"
+    assert response.is_error is False
+    assert response.result == {"content": [{"type": "text", "text": "ok"}], "isError": False}
+    assert response.error == ""
+
+
+@pytest.mark.asyncio
+async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        return {
+            "content": [{"type": "text", "text": "invalid authentication credentials"}],
+            "isError": True,
+        }
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = await service.validate_installation_tool(
+        FakeSession(),
+        installation.id,
+        MCPServerInstallationToolValidationRequest(toolName="list_projects"),
+    )
+
+    assert response.status == "failed"
+    assert response.is_error is True
+    assert response.error == "invalid authentication credentials"
 
 
 @pytest.mark.asyncio

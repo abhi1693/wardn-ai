@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
 MCPServerInstallTarget = Literal["remote", "package"]
 MCPServerStatus = Literal["active", "deprecated", "deleted"]
+MCPServerValidationStatus = Literal["passed", "failed"]
 
 
 class MCPServerDocument(BaseModel):
@@ -95,6 +96,7 @@ class MCPServerInstallationRead(BaseModel):
     install_type: str = Field(alias="installType")
     install_path: str = Field(alias="installPath")
     runtime_config: dict[str, Any] = Field(alias="runtimeConfig")
+    configured_values: dict[str, str] = Field(default_factory=dict, alias="configuredValues")
     install_error: str | None = Field(default=None, alias="installError")
     installed_at: datetime = Field(alias="installedAt")
     updated_at: datetime = Field(alias="updatedAt")
@@ -104,3 +106,21 @@ class MCPServerInstallationRead(BaseModel):
 
 class MCPServerInstallationListResponse(BaseModel):
     installations: list[MCPServerInstallationRead]
+
+
+class MCPServerInstallationToolValidationRequest(BaseModel):
+    tool_name: str = Field(alias="toolName", min_length=1, max_length=255)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPServerInstallationToolValidationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_name: str = Field(alias="serverName")
+    config_name: str = Field(alias="configName")
+    tool_name: str = Field(alias="toolName")
+    status: MCPServerValidationStatus
+    is_error: bool = Field(alias="isError")
+    error: str = ""
+    result: dict[str, Any] | None = None
+    validated_at: datetime = Field(alias="validatedAt")

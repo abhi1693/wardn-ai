@@ -125,6 +125,44 @@ def configured_values(
     }
 
 
+def truthy_config_value(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def configured_package_arguments(
+    definitions: list[dict[str, Any]],
+    config_values: dict[str, str],
+) -> list[str]:
+    args = []
+    for definition in definitions:
+        static_value = definition.get("value")
+        name = definition.get("name")
+        flag = definition.get("flag")
+        format_name = str(definition.get("format") or "string")
+
+        if static_value and not name:
+            args.append(str(static_value))
+            continue
+        if not isinstance(name, str) or not name:
+            continue
+
+        raw_value = config_values.get(name)
+        if raw_value is None:
+            raw_value = str(definition.get("default") or "")
+        raw_value = str(raw_value)
+
+        if format_name == "boolean":
+            if truthy_config_value(raw_value):
+                args.append(str(flag or static_value or name))
+            continue
+        if not raw_value:
+            continue
+        if flag:
+            args.append(str(flag))
+        args.append(raw_value)
+    return args
+
+
 def custom_header_values(config_values: dict[str, str]) -> dict[str, str]:
     header_prefix = "headers."
     headers = {}
@@ -148,6 +186,49 @@ def require_config_values(
         raise MCPServerInstallationUnsupportedError(
             f"Missing required {label}: {', '.join(missing)}"
         )
+
+
+def public_package_config(
+    package: dict[str, Any],
+    env_vars: list[dict[str, Any]],
+    package_args: list[dict[str, Any]],
+    config_values: dict[str, str],
+) -> dict[str, Any]:
+    public_package = dict(package)
+    if env_vars:
+        public_package["environmentVariables"] = [
+            {
+                **env_var,
+                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
+            }
+            for env_var in env_vars
+        ]
+    if package_args:
+        public_package["packageArguments"] = [
+            {
+                **argument,
+                "configured": bool(config_values.get(str(argument.get("name") or ""))),
+            }
+            if argument.get("name")
+            else argument
+            for argument in package_args
+        ]
+    return public_package
+
+
+def package_secret_config(
+    env_vars: list[dict[str, Any]],
+    package_args: list[dict[str, Any]],
+    config_values: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    secret_config = {}
+    configured_env = configured_values(env_vars, config_values)
+    configured_args = configured_values(package_args, config_values)
+    if configured_env:
+        secret_config["environment"] = configured_env
+    if configured_args:
+        secret_config["packageArguments"] = configured_args
+    return secret_config
 
 
 def parse_mcp_response_body(body: str) -> dict[str, Any]:
@@ -400,24 +481,26 @@ def build_npm_install(
 
     executable = npm_package_bin(install_path, identifier)
     command = str(executable) if executable else "npx"
-    args = [] if executable else ["--offline", identifier]
     env_vars = (
         package.get("environmentVariables", [])
         if isinstance(package.get("environmentVariables"), list)
         else []
     )
+    package_args = (
+        package.get("packageArguments", [])
+        if isinstance(package.get("packageArguments"), list)
+        else []
+    )
     require_config_values(env_vars, config_values, label="environment variables")
+    require_config_values(package_args, config_values, label="package arguments")
     configured_env = configured_values(env_vars, config_values)
-    public_package = dict(package)
-    if env_vars:
-        public_package["environmentVariables"] = [
-            {
-                **env_var,
-                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
-            }
-            for env_var in env_vars
-        ]
-    secret_config = {"environment": configured_env} if configured_env else {}
+    configured_args = configured_package_arguments(package_args, config_values)
+    public_package = public_package_config(package, env_vars, package_args, config_values)
+    if executable:
+        runtime_args = configured_args
+    else:
+        runtime_args = ["--offline", identifier, *configured_args]
+    secret_config = package_secret_config(env_vars, package_args, config_values)
     runtime_config = {
         "kind": "package",
         "registryType": "npm",
@@ -427,7 +510,7 @@ def build_npm_install(
         "package": public_package,
         "transport": package.get("transport", {"type": "stdio"}),
         "command": command,
-        "args": args,
+        "args": runtime_args,
         "cwd": str(install_path),
         "requiresConfiguration": False,
     }
@@ -462,18 +545,17 @@ def build_pypi_install(
         if isinstance(package.get("environmentVariables"), list)
         else []
     )
+    package_args = (
+        package.get("packageArguments", [])
+        if isinstance(package.get("packageArguments"), list)
+        else []
+    )
     require_config_values(env_vars, config_values, label="environment variables")
+    require_config_values(package_args, config_values, label="package arguments")
     configured_env = configured_values(env_vars, config_values)
-    public_package = dict(package)
-    if env_vars:
-        public_package["environmentVariables"] = [
-            {
-                **env_var,
-                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
-            }
-            for env_var in env_vars
-        ]
-    secret_config = {"environment": configured_env} if configured_env else {}
+    configured_args = configured_package_arguments(package_args, config_values)
+    public_package = public_package_config(package, env_vars, package_args, config_values)
+    secret_config = package_secret_config(env_vars, package_args, config_values)
     runtime_config = {
         "kind": "package",
         "registryType": "pypi",
@@ -483,7 +565,7 @@ def build_pypi_install(
         "package": public_package,
         "transport": package.get("transport", {"type": "stdio"}),
         "command": str(python_path),
-        "args": ["-m", identifier.replace("-", "_")],
+        "args": ["-m", identifier.replace("-", "_"), *configured_args],
         "cwd": str(install_path),
         "requiresConfiguration": False,
     }
@@ -521,22 +603,11 @@ def build_uvx_install(
         else []
     )
     require_config_values(env_vars, config_values, label="environment variables")
+    require_config_values(package_args, config_values, label="package arguments")
     configured_env = configured_values(env_vars, config_values)
-    configured_args = [
-        str(argument.get("value"))
-        for argument in package_args
-        if isinstance(argument, dict) and argument.get("value")
-    ]
-    public_package = dict(package)
-    if env_vars:
-        public_package["environmentVariables"] = [
-            {
-                **env_var,
-                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
-            }
-            for env_var in env_vars
-        ]
-    secret_config = {"environment": configured_env} if configured_env else {}
+    configured_args = configured_package_arguments(package_args, config_values)
+    public_package = public_package_config(package, env_vars, package_args, config_values)
+    secret_config = package_secret_config(env_vars, package_args, config_values)
     runtime_config = {
         "kind": "package",
         "registryType": "uvx",
@@ -586,22 +657,11 @@ def build_oci_install(
         else []
     )
     require_config_values(env_vars, config_values, label="environment variables")
+    require_config_values(package_args, config_values, label="package arguments")
     configured_env = configured_values(env_vars, config_values)
-    configured_args = [
-        str(argument.get("value"))
-        for argument in package_args
-        if isinstance(argument, dict) and argument.get("value")
-    ]
-    public_package = dict(package)
-    if env_vars:
-        public_package["environmentVariables"] = [
-            {
-                **env_var,
-                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
-            }
-            for env_var in env_vars
-        ]
-    secret_config = {"environment": configured_env} if configured_env else {}
+    configured_args = configured_package_arguments(package_args, config_values)
+    public_package = public_package_config(package, env_vars, package_args, config_values)
+    secret_config = package_secret_config(env_vars, package_args, config_values)
     docker_env_args = [
         argument
         for name in configured_env

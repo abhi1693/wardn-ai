@@ -8,6 +8,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from app.core.config import get_settings
 from app.modules.mcp_registry.installer import parse_mcp_response_body
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -58,6 +59,15 @@ def send_remote_request(
             return parse_mcp_response_body(body), response.headers.get("Mcp-Session-Id")
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()
+        if detail:
+            try:
+                parsed = parse_mcp_response_body(detail)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict) and (
+                "result" in parsed or "error" in parsed
+            ):
+                return parsed, exc.headers.get("Mcp-Session-Id")
         raise MCPGatewayUpstreamError(
             f"upstream MCP server returned HTTP {exc.code}: {detail or exc.reason}"
         ) from exc
@@ -152,12 +162,14 @@ def read_stdio_response(
     session: MCPStdioSession,
     request_id: int,
     *,
-    timeout: int = 30,
+    timeout: int | None = None,
 ) -> dict[str, Any]:
     process = session.process
     if process.stdout is None:
         raise MCPGatewayUpstreamError("stdio MCP process has no stdout")
 
+    if timeout is None:
+        timeout = get_settings().mcp_gateway_stdio_response_timeout_seconds
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:

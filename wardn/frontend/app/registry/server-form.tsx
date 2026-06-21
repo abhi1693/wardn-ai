@@ -35,6 +35,14 @@ type EnvironmentField = HeaderField & {
   defaultValue: string;
 };
 
+type PackageArgumentField = HeaderField & {
+  defaultValue: string;
+  flag: string;
+  format: string;
+  options: string;
+  value: string;
+};
+
 type RemoteTarget = {
   id: string;
   type: string;
@@ -49,6 +57,7 @@ type PackageTarget = {
   version: string;
   transportType: string;
   environmentVariables: EnvironmentField[];
+  packageArguments: PackageArgumentField[];
 };
 
 type SourceMetadata = {
@@ -80,6 +89,13 @@ const REPOSITORY_SOURCE_OPTIONS = [
   { value: "gitlab", label: "GitLab" },
   { value: "bitbucket", label: "Bitbucket" },
   { value: "git", label: "Git" },
+];
+
+const PACKAGE_ARGUMENT_FORMAT_OPTIONS = [
+  { value: "string", label: "Text" },
+  { value: "boolean", label: "Toggle" },
+  { value: "integer", label: "Number" },
+  { value: "select", label: "Select" },
 ];
 
 function createId(prefix: string) {
@@ -122,6 +138,21 @@ function initialEnvironment(value: unknown): EnvironmentField[] {
   }));
 }
 
+function initialPackageArguments(value: unknown): PackageArgumentField[] {
+  return records(value).map((argument) => ({
+    id: createId("arg"),
+    name: stringValue(argument.name),
+    description: stringValue(argument.description),
+    defaultValue: stringValue(argument.default),
+    flag: stringValue(argument.flag),
+    format: stringValue(argument.format) || "string",
+    options: Array.isArray(argument.options) ? argument.options.map(String).join(", ") : "",
+    required: booleanValue(argument.isRequired),
+    secret: booleanValue(argument.isSecret),
+    value: stringValue(argument.value),
+  }));
+}
+
 function initialRemotes(server?: MCPServerDocument): RemoteTarget[] {
   return records(server?.remotes).map((remote) => ({
     id: createId("remote"),
@@ -141,6 +172,7 @@ function initialPackages(server?: MCPServerDocument): PackageTarget[] {
       version: stringValue(packageTarget.version),
       transportType: stringValue(transport?.type) || "stdio",
       environmentVariables: initialEnvironment(packageTarget.environmentVariables),
+      packageArguments: initialPackageArguments(packageTarget.packageArguments),
     };
   });
 }
@@ -168,6 +200,7 @@ function importedPackages(value: unknown): PackageTarget[] {
       version: replaceVersionToken(stringValue(packageTarget.version)),
       transportType: stringValue(transport?.type) || "stdio",
       environmentVariables: initialEnvironment(packageTarget.environmentVariables),
+      packageArguments: initialPackageArguments(packageTarget.packageArguments),
     };
   });
 }
@@ -190,6 +223,18 @@ function emptyEnvironment(): EnvironmentField {
   };
 }
 
+function emptyPackageArgument(): PackageArgumentField {
+  return {
+    ...emptyHeader(),
+    id: createId("arg"),
+    defaultValue: "",
+    flag: "",
+    format: "string",
+    options: "",
+    value: "",
+  };
+}
+
 function emptyRemote(): RemoteTarget {
   return {
     id: createId("remote"),
@@ -207,6 +252,7 @@ function emptyPackage(): PackageTarget {
     version: "",
     transportType: "stdio",
     environmentVariables: [],
+    packageArguments: [],
   };
 }
 
@@ -361,6 +407,39 @@ function publicEnvironment(environmentVariables: EnvironmentField[]) {
     }));
 }
 
+function publicPackageArguments(packageArguments: PackageArgumentField[]): Record<string, unknown>[] {
+  return packageArguments
+    .map((argument): Record<string, unknown> | null => {
+      const name = argument.name.trim();
+      const value = argument.value.trim();
+      const description = argument.description.trim();
+      if (!name && value) {
+        return {
+          value,
+          description,
+        };
+      }
+      if (!name) {
+        return null;
+      }
+      const options = argument.options
+        .split(",")
+        .map((option) => option.trim())
+        .filter(Boolean);
+      return {
+        name,
+        flag: argument.flag.trim(),
+        description,
+        default: argument.defaultValue.trim(),
+        format: argument.format || "string",
+        options,
+        isRequired: argument.required,
+        isSecret: argument.secret,
+      };
+    })
+    .filter((argument): argument is Record<string, unknown> => Boolean(argument));
+}
+
 export function ServerForm({ initialServer, mode }: ServerFormProps) {
   const router = useRouter();
   const initialRepository = initialServer?.repository as Record<string, unknown> | null | undefined;
@@ -427,6 +506,25 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
               ...packageTarget,
               environmentVariables: packageTarget.environmentVariables.map((envVar) =>
                 envVar.id === environmentId ? { ...envVar, ...patch } : envVar
+              ),
+            }
+          : packageTarget
+      )
+    );
+  }
+
+  function updatePackageArgument(
+    packageId: string,
+    argumentId: string,
+    patch: Partial<PackageArgumentField>
+  ) {
+    setPackages((current) =>
+      current.map((packageTarget) =>
+        packageTarget.id === packageId
+          ? {
+              ...packageTarget,
+              packageArguments: packageTarget.packageArguments.map((argument) =>
+                argument.id === argumentId ? { ...argument, ...patch } : argument
               ),
             }
           : packageTarget
@@ -507,6 +605,7 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
           version: packageTarget.version.trim() || version.trim(),
           transport: { type: packageTarget.transportType.trim() || "stdio" },
           environmentVariables: publicEnvironment(packageTarget.environmentVariables),
+          packageArguments: publicPackageArguments(packageTarget.packageArguments),
         }));
 
       if (remotePayload.length === 0 && packagePayload.length === 0) {
@@ -998,6 +1097,156 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
                     >
                       <Trash2 className="size-4" />
                     </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-3 border-t pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">Runtime Arguments</div>
+                    <div className="text-xs text-muted-foreground">
+                      Define static process arguments or user-configurable flags shown during installation.
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() =>
+                      updatePackage(packageTarget.id, {
+                        packageArguments: [
+                          ...packageTarget.packageArguments,
+                          emptyPackageArgument(),
+                        ],
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Plus className="size-4" />
+                    Add argument
+                  </Button>
+                </div>
+                {packageTarget.packageArguments.length === 0 ? (
+                  <div className="rounded-md border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
+                    No runtime arguments.
+                  </div>
+                ) : null}
+                {packageTarget.packageArguments.map((argument) => (
+                  <div className="space-y-3 rounded-md border p-3" key={argument.id}>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_140px_auto]">
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            name: event.target.value,
+                          })
+                        }
+                        placeholder="Config key, e.g. SERVER_LOG_LEVEL"
+                        value={argument.name}
+                      />
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            flag: event.target.value,
+                          })
+                        }
+                        placeholder="Flag, e.g. --log-level"
+                        value={argument.flag}
+                      />
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            value: event.target.value,
+                          })
+                        }
+                        placeholder="Static value, e.g. stdio"
+                        value={argument.value}
+                      />
+                      <Select
+                        onValueChange={(value) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            format: value,
+                          })
+                        }
+                        value={argument.format}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PACKAGE_ARGUMENT_FORMAT_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={() =>
+                          updatePackage(packageTarget.id, {
+                            packageArguments: packageTarget.packageArguments.filter(
+                              (item) => item.id !== argument.id
+                            ),
+                          })
+                        }
+                        size="icon"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            description: event.target.value,
+                          })
+                        }
+                        placeholder="Description"
+                        value={argument.description}
+                      />
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            defaultValue: event.target.value,
+                          })
+                        }
+                        placeholder="Default"
+                        value={argument.defaultValue}
+                      />
+                      <Input
+                        onChange={(event) =>
+                          updatePackageArgument(packageTarget.id, argument.id, {
+                            options: event.target.value,
+                          })
+                        }
+                        placeholder="Options, comma-separated"
+                        value={argument.options}
+                      />
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          checked={argument.required}
+                          onChange={(event) =>
+                            updatePackageArgument(packageTarget.id, argument.id, {
+                              required: event.target.checked,
+                            })
+                          }
+                          type="checkbox"
+                        />
+                        Required
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          checked={argument.secret}
+                          onChange={(event) =>
+                            updatePackageArgument(packageTarget.id, argument.id, {
+                              secret: event.target.checked,
+                            })
+                          }
+                          type="checkbox"
+                        />
+                        Secret
+                      </label>
+                    </div>
                   </div>
                 ))}
               </div>
