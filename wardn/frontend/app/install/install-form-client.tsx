@@ -39,6 +39,7 @@ type CustomHeader = {
 type InstallFormClientProps = {
   initialInstallation?: MCPServerInstallationRead | null;
   initialInstallations: MCPServerInstallationRead[];
+  initialServers?: MCPRegistryServerResponse[];
 };
 
 function installUrl(serverName: string) {
@@ -290,13 +291,17 @@ function InstallFieldControl({
   );
 }
 
-export function InstallFormClient({ initialInstallation = null, initialInstallations }: InstallFormClientProps) {
+export function InstallFormClient({
+  initialInstallation = null,
+  initialInstallations,
+  initialServers = [],
+}: InstallFormClientProps) {
   const router = useRouter();
   const isEdit = Boolean(initialInstallation);
   const [installations, setInstallations] = useState<MCPServerInstallationRead[]>(initialInstallations);
   const [serverQuery, setServerQuery] = useState("");
-  const [serverResults, setServerResults] = useState<MCPRegistryServerResponse[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [serverResults, setServerResults] = useState<MCPRegistryServerResponse[]>(initialServers);
+  const [hasSearched, setHasSearched] = useState(initialServers.length > 0);
   const [isSearching, setIsSearching] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
@@ -496,7 +501,7 @@ export function InstallFormClient({ initialInstallation = null, initialInstallat
             <div className="rounded-md border">
               {serverResults.length === 0 ? (
                 <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-                  {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "Search for a supported server"}
+                  {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
                 </div>
               ) : (
                 serverResults.map((entry) => {

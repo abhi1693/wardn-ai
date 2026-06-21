@@ -1,5 +1,8 @@
 import { AppShell } from "@/app/components/app-shell";
-import type { MCPServerInstallationListResponse } from "@/lib/api/generated/model";
+import type {
+  MCPRegistryServerListResponse,
+  MCPServerInstallationListResponse,
+} from "@/lib/api/generated/model";
 
 import { InstallFormClient } from "../install-form-client";
 
@@ -20,12 +23,31 @@ async function getInitialInstallations() {
   }
 }
 
+async function getInitialServers() {
+  try {
+    const response = await fetch(
+      `${backendUrl}/api/v1/mcp/registry/servers?limit=50&version=latest`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      return [];
+    }
+    const data = (await response.json()) as MCPRegistryServerListResponse;
+    return data.servers;
+  } catch {
+    return [];
+  }
+}
+
 export default async function NewInstallPage() {
-  const installations = await getInitialInstallations();
+  const [installations, servers] = await Promise.all([
+    getInitialInstallations(),
+    getInitialServers(),
+  ]);
 
   return (
     <AppShell active="install" eyebrow="MCP Runtime" title="Add MCP server">
-      <InstallFormClient initialInstallations={installations} />
+      <InstallFormClient initialInstallations={installations} initialServers={servers} />
     </AppShell>
   );
 }
