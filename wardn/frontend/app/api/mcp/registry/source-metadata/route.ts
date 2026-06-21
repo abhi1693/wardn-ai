@@ -148,6 +148,23 @@ function replaceVersionTokens<T>(value: T, version: string): T {
   return value;
 }
 
+function supportedPackages(value: unknown, version: string) {
+  const packages = replaceVersionTokens(value, version);
+  if (!Array.isArray(packages)) {
+    return [];
+  }
+
+  return packages.filter((packageDefinition) => {
+    if (!packageDefinition || typeof packageDefinition !== "object") {
+      return false;
+    }
+    const registryType = String(
+      (packageDefinition as Record<string, unknown>).registryType || ""
+    ).toLowerCase();
+    return registryType !== "mcpb";
+  });
+}
+
 function normalizedVersion(value: unknown, releaseVersion: string) {
   const version = typeof value === "string" ? value.trim() : "";
   if (!version) {
@@ -224,7 +241,7 @@ function normalizeServerJson(
       },
       iconUrl: normalizeIconUrl(document.icon, document.icons, owner, repo, branch),
       remotes: Array.isArray(document.remotes) ? replaceVersionTokens(document.remotes, version) : [],
-      packages: Array.isArray(document.packages) ? replaceVersionTokens(document.packages, version) : [],
+      packages: supportedPackages(document.packages, version),
     };
   } catch {
     return null;

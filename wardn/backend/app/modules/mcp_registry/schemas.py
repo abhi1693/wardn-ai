@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
 MCPServerInstallTarget = Literal["remote", "package"]
@@ -28,6 +28,19 @@ class MCPServerDocument(BaseModel):
     packages: list[dict[str, Any]] = Field(default_factory=list)
     remotes: list[dict[str, Any]] = Field(default_factory=list)
     meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+    @field_validator("packages")
+    @classmethod
+    def reject_unsupported_packages(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unsupported = [
+            str(package.get("registryType") or "")
+            for package in value
+            if isinstance(package, dict)
+            and str(package.get("registryType") or "").casefold() == "mcpb"
+        ]
+        if unsupported:
+            raise ValueError("MCPB package registry is not supported")
+        return value
 
 
 class MCPServerCreate(MCPServerDocument):

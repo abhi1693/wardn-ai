@@ -63,3 +63,28 @@ def test_mcp_server_description_accepts_text_field_length() -> None:
     )
 
     assert payload.description == description
+
+
+def test_mcp_server_document_rejects_mcpb_packages() -> None:
+    error = None
+    try:
+        MCPServerCreate(
+            **{
+                "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+                "name": "io.github.example/bundle",
+                "description": "Unsupported MCPB package server.",
+                "version": "1.0.0",
+                "packages": [
+                    {
+                        "registryType": "mcpb",
+                        "identifier": "example.mcpb",
+                        "version": "1.0.0",
+                    }
+                ],
+            }
+        )
+    except ValueError as exc:
+        error = exc
+
+    assert error is not None
+    assert "MCPB package registry is not supported" in str(error)
