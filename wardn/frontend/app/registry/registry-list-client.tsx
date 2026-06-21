@@ -3,13 +3,11 @@
 import {
   ChevronLeft,
   ChevronRight,
-  KeyRound,
   Network,
   Package,
   Pencil,
   RefreshCw,
   Search,
-  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -104,41 +102,6 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
   };
 }
 
-function schemaInputs(entry: MCPRegistryServerResponse) {
-  const headers = (entry.server.remotes ?? []).flatMap((remote) => {
-    const value = (remote as Record<string, unknown>).headers;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-  const environmentVariables = (entry.server.packages ?? []).flatMap((packageDefinition) => {
-    const value = (packageDefinition as Record<string, unknown>).environmentVariables;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-  const packageArguments = (entry.server.packages ?? []).flatMap((packageDefinition) => {
-    const value = (packageDefinition as Record<string, unknown>).packageArguments;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-
-  return { environmentVariables, headers, packageArguments };
-}
-
-function configurationSummary(entry: MCPRegistryServerResponse) {
-  const { environmentVariables, headers, packageArguments } = schemaInputs(entry);
-  const inputs = [...headers, ...environmentVariables, ...packageArguments];
-  const required = inputs.filter((field) => field.isRequired);
-  const secret = inputs.filter((field) => field.isSecret);
-  const requiredNames = required
-    .map((field) => stringValue(field.name) || stringValue(field.type))
-    .filter(Boolean)
-    .slice(0, 3);
-
-  return {
-    requiredCount: required.length,
-    secretCount: secret.length,
-    requiredNames,
-    totalCount: inputs.length,
-  };
-}
-
 function detailServerUrl(serverName: string, version: string) {
   return `/registry/${serverName
     .split("/")
@@ -166,13 +129,6 @@ async function responseErrorMessage(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
-}
-
-function statusLabel(status: string) {
-  if (status === "enabled") {
-    return "Configured";
-  }
-  return status.replaceAll("_", " ");
 }
 
 type RegistryListClientProps = {
@@ -452,14 +408,13 @@ export function RegistryListClient({
                 <TableHead className="w-[44px]"></TableHead>
                 <TableHead className="min-w-[360px]">Server</TableHead>
                 <TableHead className="w-[230px]">Runtime</TableHead>
-                <TableHead className="w-[150px]">Configuration</TableHead>
                 <TableHead className="w-[170px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {servers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
                     {isLoading
                       ? "Loading registry entries"
                       : "No supported MCP servers are registered yet"}
@@ -468,7 +423,6 @@ export function RegistryListClient({
               ) : (
                 servers.map((entry) => {
                   const serverInstallations = installationsByName.get(entry.server.name) ?? [];
-                  const installation = serverInstallations[0];
                   const isInstalled = serverInstallations.length > 0;
                   const updateAvailable = serverInstallations.some(
                     (currentInstallation) => currentInstallation.updateAvailable
@@ -476,7 +430,6 @@ export function RegistryListClient({
                   const iconUrl = preferredIcon(entry);
                   const distribution = deliveryDetails(entry);
                   const DistributionIcon = distribution.icon;
-                  const config = configurationSummary(entry);
                   return (
                     <TableRow key={`${entry.server.name}:${entry.server.version}`}>
                       <TableCell>
@@ -530,37 +483,16 @@ export function RegistryListClient({
                             <DistributionIcon className="size-3.5" />
                             {distribution.primary}
                           </Badge>
-                          {config.requiredCount > 0 ? (
-                            <Badge variant="outline" className="gap-1.5 font-normal">
-                              <KeyRound className="size-3.5" />
-                              {config.requiredCount} required
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="gap-1.5 font-normal">
-                              <ShieldCheck className="size-3.5" />
-                              No required inputs
-                            </Badge>
-                          )}
-                          {config.secretCount > 0 ? (
+                          {isInstalled ? (
                             <Badge variant="outline" className="font-normal">
-                              {config.secretCount} secret
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1.5">
-                          <Badge variant={isInstalled ? "success" : "outline"} className="font-normal">
-                            {isInstalled ? statusLabel(installation?.status ?? "configured") : "Not configured"}
-                          </Badge>
-                          {installation ? (
-                            <div className="text-xs text-muted-foreground">
                               {serverInstallations.length} config
                               {serverInstallations.length === 1 ? "" : "s"}
-                            </div>
+                            </Badge>
                           ) : null}
                           {updateAvailable ? (
-                            <div className="text-xs text-muted-foreground">Update available</div>
+                            <Badge variant="outline" className="font-normal">
+                              Update available
+                            </Badge>
                           ) : null}
                         </div>
                       </TableCell>
