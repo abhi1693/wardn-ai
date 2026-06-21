@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,8 +41,16 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_installations"
+    __table_args__ = (
+        UniqueConstraint(
+            "server_name",
+            "config_name",
+            name="uq_mcp_server_installations_server_config",
+        ),
+    )
 
-    server_name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False, index=True)
+    server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    config_name: Mapped[str] = mapped_column(String(100), default="default", nullable=False)
     installed_version: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="enabled", nullable=False, index=True)
     install_type: Mapped[str] = mapped_column(String(32), default="metadata", nullable=False)
@@ -51,6 +59,41 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     secret_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     install_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
     installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class MCPServerToolSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "mcp_server_tool_schemas"
+    __table_args__ = (
+        UniqueConstraint(
+            "server_name",
+            "server_version",
+            "tool_name",
+            name="uq_mcp_server_tool_schemas_server_version_tool",
+        ),
+    )
+
+    server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    server_version: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    output_schema: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    annotations: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    source_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=func.now(),

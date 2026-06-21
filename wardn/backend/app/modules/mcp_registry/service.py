@@ -4,6 +4,7 @@ from app.modules.mcp_registry.exceptions import (
     InvalidRegistryCursorError,
     MCPServerInstallationNotFoundError,
     MCPServerNotFoundError,
+    MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.installer import install_server_runtime, remove_installation_artifacts
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
@@ -123,7 +124,9 @@ async def installation_response(
         raise MCPServerNotFoundError("installed server version not found")
 
     return MCPServerInstallationRead(
+        id=installation.id,
         server_name=installation.server_name,
+        config_name=installation.config_name or "default",
         installed_version=installation.installed_version,
         latest_version=latest.version,
         update_available=installation.installed_version != latest.version,
@@ -157,6 +160,61 @@ async def create_server_version(session, payload: MCPServerCreate) -> MCPRegistr
     await session.flush()
     await session.refresh(server)
     return server_response(server)
+
+
+async def update_server_version(
+    session,
+    name: str,
+    version: str,
+    payload: MCPServerCreate,
+) -> MCPRegistryServerResponse:
+    if payload.name != name or payload.version != version:
+        raise MCPServerNotFoundError("server version does not match request path")
+
+    server = await repository.get_server_version(
+        session,
+        name,
+        version,
+        include_deleted=True,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("server version not found")
+
+    was_latest = server.is_latest
+    values = server_values(payload, is_latest=was_latest)
+    for key, value in values.items():
+        setattr(server, key, value)
+
+    await session.flush()
+    await session.refresh(server)
+    return server_response(server)
+
+
+async def delete_server_version(session, name: str, version: str) -> None:
+    server = await repository.get_server_version(
+        session,
+        name,
+        version,
+        include_deleted=True,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("server version not found")
+
+    installations = await repository.list_installations_for_server(session, name)
+    if any(installation.installed_version == version for installation in installations):
+        raise MCPServerVersionInUseError("server version is installed")
+
+    was_latest = server.is_latest
+    server.status = "deleted"
+    server.status_message = "Deleted from Wardn catalog."
+    server.is_latest = False
+
+    if was_latest:
+        replacement = await repository.get_latest_visible_version(session, name)
+        if replacement:
+            replacement.is_latest = True
+
+    await session.flush()
 
 
 async def sync_supported_servers(session, payloads: list[MCPServerCreate]) -> int:
@@ -283,12 +341,18 @@ async def install_server_version(
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
-    runtime_install = install_server_runtime(server, config_values=payload.config_values)
-    installation = await repository.get_installation(session, name)
+    runtime_install = install_server_runtime(
+        server,
+        config_values=payload.config_values,
+        install_target=payload.install_target,
+        config_name=payload.config_name,
+    )
+    installation = await repository.get_installation(session, name, payload.config_name)
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
         installation = MCPServerInstallation(
             server_name=name,
+            config_name=payload.config_name,
             installed_version=server.version,
             status=runtime_install.status,
             install_type=runtime_install.install_type,
@@ -315,10 +379,20 @@ async def install_server_version(
     return await installation_response(session, installation)
 
 
-async def uninstall_server(session, name: str) -> None:
-    installation = await repository.get_installation(session, name)
+async def uninstall_server(session, name: str, config_name: str = "default") -> None:
+    installation = await repository.get_installation(session, name, config_name)
     if installation is None:
         raise MCPServerInstallationNotFoundError("server is not installed")
+
+    remove_installation_artifacts(installation.install_path)
+    await repository.delete_installation(session, installation)
+    await session.flush()
+
+
+async def uninstall_installation(session, installation_id) -> None:
+    installation = await repository.get_installation_by_id(session, installation_id)
+    if installation is None:
+        raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
     remove_installation_artifacts(installation.install_path)
     await repository.delete_installation(session, installation)
@@ -331,8 +405,8 @@ async def update_installed_servers(
 ) -> MCPServerInstallationListResponse:
     updated: list[MCPServerInstallationRead] = []
     for server_name in payload.server_names:
-        installation = await repository.get_installation(session, server_name)
-        if installation is None:
+        installations = await repository.list_installations_for_server(session, server_name)
+        if not installations:
             raise MCPServerInstallationNotFoundError("server is not installed")
         latest = await repository.get_server_version(
             session,
@@ -342,22 +416,26 @@ async def update_installed_servers(
         )
         if latest is None:
             raise MCPServerNotFoundError("latest server version not found")
-        runtime_install = install_server_runtime(
-            latest,
-            config_values=install_config_values_from_secret_config(installation.secret_config),
-        )
-        previous_install_path = installation.install_path
-        installation.installed_version = latest.version
-        installation.status = runtime_install.status
-        installation.install_type = runtime_install.install_type
-        installation.install_path = runtime_install.install_path
-        installation.runtime_config = runtime_install.runtime_config
-        installation.secret_config = runtime_install.secret_config
-        installation.install_error = runtime_install.install_error
-        if previous_install_path and previous_install_path != runtime_install.install_path:
-            remove_installation_artifacts(previous_install_path)
-        await session.flush()
-        await session.refresh(installation)
-        updated.append(await installation_response(session, installation))
+        for installation in installations:
+            install_target = "remote" if installation.install_type == "remote" else "package"
+            runtime_install = install_server_runtime(
+                latest,
+                config_values=install_config_values_from_secret_config(installation.secret_config),
+                install_target=install_target,
+                config_name=installation.config_name,
+            )
+            previous_install_path = installation.install_path
+            installation.installed_version = latest.version
+            installation.status = runtime_install.status
+            installation.install_type = runtime_install.install_type
+            installation.install_path = runtime_install.install_path
+            installation.runtime_config = runtime_install.runtime_config
+            installation.secret_config = runtime_install.secret_config
+            installation.install_error = runtime_install.install_error
+            if previous_install_path and previous_install_path != runtime_install.install_path:
+                remove_installation_artifacts(previous_install_path)
+            await session.flush()
+            await session.refresh(installation)
+            updated.append(await installation_response(session, installation))
 
     return MCPServerInstallationListResponse(installations=updated)

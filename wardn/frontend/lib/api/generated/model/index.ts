@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './_mCPServerCreateMeta';
 export * from './_mCPServerDocumentMeta';
 export * from './bootstrapUserCreate';
 export * from './errorResponse';
@@ -21,6 +22,11 @@ export * from './mCPRegistryResponseMeta';
 export * from './mCPRegistryServerListResponse';
 export * from './mCPRegistryServerResponse';
 export * from './mCPServerBulkUpdateRequest';
+export * from './mCPServerCreate';
+export * from './mCPServerCreateIconsItem';
+export * from './mCPServerCreatePackagesItem';
+export * from './mCPServerCreateRemotesItem';
+export * from './mCPServerCreateRepository';
 export * from './mCPServerDocument';
 export * from './mCPServerDocumentIconsItem';
 export * from './mCPServerDocumentPackagesItem';
@@ -31,6 +37,7 @@ export * from './mCPServerInstallationRead';
 export * from './mCPServerInstallationReadRuntimeConfig';
 export * from './mCPServerInstallRequest';
 export * from './mCPServerInstallRequestConfigValues';
+export * from './mCPServerInstallRequestInstallTarget';
 export * from './userRead';
 export * from './validationError';
 export * from './validationErrorCtx';

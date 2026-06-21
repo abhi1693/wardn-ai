@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const metrics = [
-  { label: "Installed Servers", value: "0", icon: Server },
+  { label: "Configured Servers", value: "0", icon: Server },
   { label: "Active Sessions", value: "0", icon: Waypoints },
   { label: "Tool Calls Today", value: "0", icon: SquareActivity },
 ];

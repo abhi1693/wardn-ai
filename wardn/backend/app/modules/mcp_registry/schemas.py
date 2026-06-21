@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
+MCPServerInstallTarget = Literal["remote", "package"]
 MCPServerStatus = Literal["active", "deprecated", "deleted"]
 
 
@@ -71,7 +73,9 @@ class MCPRegistryServerListResponse(BaseModel):
 
 class MCPServerInstallRequest(BaseModel):
     version: str = Field(default="latest", min_length=1, max_length=255)
+    config_name: str = Field(default="default", alias="configName", min_length=1, max_length=100)
     config_values: dict[str, str] = Field(default_factory=dict, alias="configValues")
+    install_target: MCPServerInstallTarget | None = Field(default=None, alias="installTarget")
 
 
 class MCPServerBulkUpdateRequest(BaseModel):
@@ -81,7 +85,9 @@ class MCPServerBulkUpdateRequest(BaseModel):
 class MCPServerInstallationRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    id: UUID
     server_name: str = Field(alias="serverName")
+    config_name: str = Field(alias="configName")
     installed_version: str = Field(alias="installedVersion")
     latest_version: str = Field(alias="latestVersion")
     update_available: bool = Field(alias="updateAvailable")

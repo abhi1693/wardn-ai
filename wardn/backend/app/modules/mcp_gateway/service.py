@@ -1,15 +1,21 @@
 import json
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.mcp_gateway import client, repository
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_gateway import repository
+from app.modules.mcp_registry import tool_repository
+from app.modules.mcp_registry.models import (
+    MCPServerInstallation,
+    MCPServerToolSchema,
+    MCPServerVersion,
+)
+from app.modules.mcp_registry.tool_service import refresh_tool_schemas
+from app.modules.mcp_runtime.manager import runtime_kind
+from app.modules.mcp_runtime.service import call_tool_with_tracking
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_SEARCH_LIMIT = 25
-MAX_SERVER_SCAN_LIMIT = 5
 
 
 def parse_cursor(cursor: str | None) -> int:
@@ -34,82 +40,6 @@ def bounded_limit(value: Any, *, default: int = 10) -> int:
     if limit < 1:
         raise ValueError("limit must be greater than 0")
     return min(limit, MAX_SEARCH_LIMIT)
-
-
-def runtime_kind(installation: MCPServerInstallation) -> str:
-    runtime_config = installation.runtime_config or {}
-    return str(runtime_config.get("kind") or installation.install_type)
-
-
-def remote_url(installation: MCPServerInstallation) -> str:
-    runtime_config = installation.runtime_config or {}
-    transport = runtime_config.get("transport")
-    if not isinstance(transport, dict):
-        return ""
-    return str(transport.get("url") or "")
-
-
-def secret_headers(installation: MCPServerInstallation) -> dict[str, str]:
-    secret_config = installation.secret_config or {}
-    headers = secret_config.get("headers")
-    if not isinstance(headers, dict):
-        return {}
-    return {str(key): str(value) for key, value in headers.items() if value is not None}
-
-
-def secret_environment(installation: MCPServerInstallation) -> dict[str, str]:
-    secret_config = installation.secret_config or {}
-    environment = secret_config.get("environment")
-    if not isinstance(environment, dict):
-        return {}
-    return {str(key): str(value) for key, value in environment.items() if value is not None}
-
-
-def require_remote_installation(installation: MCPServerInstallation) -> tuple[str, dict[str, str]]:
-    if runtime_kind(installation) != "remote":
-        raise ValueError("only remote MCP server installations can be proxied right now")
-    url = remote_url(installation)
-    if not url:
-        raise ValueError("remote MCP server URL is missing from installation runtime")
-    return url, secret_headers(installation)
-
-
-def normalize_installed_path(value: Any, installation: MCPServerInstallation) -> Any:
-    install_path = installation.install_path or str(
-        (installation.runtime_config or {}).get("installPath") or ""
-    )
-    if not install_path or not isinstance(value, str):
-        return value
-    tmp_path = f"{install_path}.tmp"
-    if value.startswith(tmp_path):
-        return f"{install_path}{value[len(tmp_path):]}"
-    return value
-
-
-def package_runtime(
-    installation: MCPServerInstallation,
-) -> tuple[str, list[str], str, dict[str, str]]:
-    if runtime_kind(installation) != "package":
-        raise ValueError("installation is not a package MCP server")
-
-    runtime_config = installation.runtime_config or {}
-    transport = runtime_config.get("transport")
-    if isinstance(transport, dict) and transport.get("type") not in (None, "stdio"):
-        raise ValueError("only stdio package MCP server transports can be proxied right now")
-
-    command = str(normalize_installed_path(runtime_config.get("command") or "", installation))
-    if not command:
-        raise ValueError("package MCP server command is missing from installation runtime")
-
-    raw_args = runtime_config.get("args")
-    args = [str(normalize_installed_path(arg, installation)) for arg in raw_args or []]
-    raw_cwd = runtime_config.get("cwd") or installation.install_path
-    cwd = str(normalize_installed_path(raw_cwd, installation))
-    if command and not Path(command).exists():
-        raise ValueError(f"package MCP server command does not exist: {command}")
-    if cwd and not Path(cwd).exists():
-        raise ValueError(f"package MCP server working directory does not exist: {cwd}")
-    return command, args, cwd, secret_environment(installation)
 
 
 def input_counts(server: MCPServerVersion) -> dict[str, int]:
@@ -172,23 +102,13 @@ def server_detail(
     }
 
 
-def tool_matches(tool: dict[str, Any], query: str) -> bool:
-    if not query:
-        return True
-    query = query.casefold()
-    return any(
-        query in str(tool.get(key) or "").casefold()
-        for key in ("name", "title", "description")
-    )
-
-
-def gateway_tool_summary(server_name: str, tool: dict[str, Any]) -> dict[str, Any]:
+def cached_tool_summary(tool: MCPServerToolSchema) -> dict[str, Any]:
     return {
-        "serverName": server_name,
-        "toolName": str(tool.get("name") or ""),
-        "title": str(tool.get("title") or tool.get("name") or ""),
-        "description": str(tool.get("description") or ""),
-        "inputSchema": tool.get("inputSchema", {"type": "object"}),
+        "serverName": tool.server_name,
+        "toolName": tool.tool_name,
+        "title": tool.title or tool.tool_name,
+        "description": tool.description,
+        "inputSchema": tool.input_schema,
     }
 
 
@@ -358,65 +278,44 @@ async def get_mcp_server(session: AsyncSession, arguments: dict[str, Any]) -> di
     return text_tool_result({"server": server_detail(installation, server)})
 
 
-async def list_installation_tools(
-    installation: MCPServerInstallation,
-) -> list[dict[str, Any]]:
-    if runtime_kind(installation) == "remote":
-        url, headers = require_remote_installation(installation)
-        return client.list_tools(url, headers)
-    if runtime_kind(installation) == "package":
-        command, args, cwd, environment = package_runtime(installation)
-        return client.list_stdio_tools(command, args, cwd=cwd, environment=environment)
-    raise ValueError(f"MCP server runtime is not supported yet: {runtime_kind(installation)}")
-
-
 async def search_mcp_tools(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+    offset = parse_cursor(arguments.get("cursor"))
     limit = bounded_limit(arguments.get("limit"))
     query = str(arguments.get("query") or "").strip()
     server_name = str(arguments.get("serverName") or "").strip()
-    scanned_servers = 0
-    tools: list[dict[str, Any]] = []
+    refreshed = False
 
     if server_name:
         row = await repository.get_enabled_installation(session, server_name)
         if row is None:
             raise LookupError("enabled MCP server was not found")
-        installation, _ = row
-        scanned_servers = 1
-        tools = [
-            gateway_tool_summary(server_name, tool)
-            for tool in await list_installation_tools(installation)
-            if tool_matches(tool, query)
-        ][:limit]
-    else:
-        rows, _ = await repository.search_enabled_installations(
+        _installation, server = row
+        tool_count = await tool_repository.count_active_tool_schemas(
             session,
-            search=query,
-            offset=0,
-            limit=MAX_SERVER_SCAN_LIMIT,
+            server_name=server.name,
+            server_version=server.version,
         )
-        scanned_servers = len(rows)
-        for installation, server in rows:
-            try:
-                server_tools = await list_installation_tools(installation)
-            except ValueError:
-                continue
-            for tool in server_tools:
-                if tool_matches(tool, query):
-                    tools.append(gateway_tool_summary(server.name, tool))
-                if len(tools) >= limit:
-                    break
-            if len(tools) >= limit:
-                break
+        if tool_count == 0:
+            await refresh_tool_schemas(session, server_name)
+            await session.commit()
+            refreshed = True
+
+    tools, next_cursor = await tool_repository.search_enabled_tool_schemas(
+        session,
+        server_name=server_name,
+        search=query,
+        offset=offset,
+        limit=limit,
+    )
 
     return text_tool_result(
         {
-            "tools": tools,
-            "scannedServers": scanned_servers,
-            "hint": (
-                "For broad environments, search servers first and then pass serverName "
-                "to search_mcp_tools."
-            ),
+            "tools": [cached_tool_summary(tool) for tool in tools],
+            "nextCursor": next_cursor,
+            "cache": {
+                "mode": "cached-with-refresh" if refreshed else "cached",
+                "refreshed": refreshed,
+            },
         }
     )
 
@@ -432,12 +331,32 @@ async def get_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
     row = await repository.get_enabled_installation(session, server_name)
     if row is None:
         raise LookupError("enabled MCP server was not found")
-    installation, _ = row
-    for tool in await list_installation_tools(installation):
-        if tool.get("name") == tool_name:
-            return text_tool_result(
-                {"tool": gateway_tool_summary(server_name, tool)}
-            )
+    _installation, _server = row
+    cached_tool = await tool_repository.get_enabled_tool_schema(
+        session,
+        server_name=server_name,
+        tool_name=tool_name,
+    )
+    refreshed = False
+    if cached_tool is None:
+        await refresh_tool_schemas(session, server_name)
+        await session.commit()
+        refreshed = True
+        cached_tool = await tool_repository.get_enabled_tool_schema(
+            session,
+            server_name=server_name,
+            tool_name=tool_name,
+        )
+    if cached_tool is not None:
+        return text_tool_result(
+            {
+                "tool": cached_tool_summary(cached_tool),
+                "cache": {
+                    "mode": "cached-with-refresh" if refreshed else "cached",
+                    "refreshed": refreshed,
+                },
+            }
+        )
     raise LookupError("MCP tool was not found")
 
 
@@ -457,27 +376,19 @@ async def run_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
     row = await repository.get_enabled_installation(session, server_name)
     if row is None:
         raise LookupError("enabled MCP server was not found")
-    installation, _ = row
-    if runtime_kind(installation) == "remote":
-        url, headers = require_remote_installation(installation)
-        upstream_result = client.call_tool(
-            url,
-            headers,
+    installation, server = row
+    try:
+        upstream_result = await call_tool_with_tracking(
+            session,
+            installation,
+            server,
             tool_name=tool_name,
             arguments=tool_arguments,
         )
-    elif runtime_kind(installation) == "package":
-        command, args, cwd, environment = package_runtime(installation)
-        upstream_result = client.call_stdio_tool(
-            command,
-            args,
-            cwd=cwd,
-            environment=environment,
-            tool_name=tool_name,
-            arguments=tool_arguments,
-        )
-    else:
-        raise ValueError(f"MCP server runtime is not supported yet: {runtime_kind(installation)}")
+        await session.commit()
+    except Exception:
+        await session.commit()
+        raise
     return {
         **upstream_result,
         "structuredContent": {

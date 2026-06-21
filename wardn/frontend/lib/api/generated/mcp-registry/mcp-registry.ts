@@ -10,6 +10,7 @@ import type {
   MCPRegistryServerListResponse,
   MCPRegistryServerResponse,
   MCPServerBulkUpdateRequest,
+  MCPServerCreate,
   MCPServerInstallRequest,
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
@@ -17,6 +18,60 @@ import type {
   McpRegistryListServerVersionsParams,
   McpRegistryListServersParams
 } from '../model';
+
+
+export type mcpRegistryUninstallServerConfigResponse204 = {
+  data: void
+  status: 204
+}
+
+export type mcpRegistryUninstallServerConfigResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRegistryUninstallServerConfigResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryUninstallServerConfigResponseSuccess = (mcpRegistryUninstallServerConfigResponse204) & {
+  headers: Headers;
+};
+export type mcpRegistryUninstallServerConfigResponseError = (mcpRegistryUninstallServerConfigResponse404 | mcpRegistryUninstallServerConfigResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryUninstallServerConfigResponse = (mcpRegistryUninstallServerConfigResponseSuccess | mcpRegistryUninstallServerConfigResponseError)
+
+export const getMcpRegistryUninstallServerConfigUrl = (installationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/installed-server-configs/${installationId}`
+}
+
+/**
+ * @summary Uninstall Mcp Server Config
+ */
+export const mcpRegistryUninstallServerConfig = async (installationId: string, options?: RequestInit): Promise<mcpRegistryUninstallServerConfigResponse> => {
+
+  const res = await fetch(getMcpRegistryUninstallServerConfigUrl(installationId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryUninstallServerConfigResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as mcpRegistryUninstallServerConfigResponse
+}
 
 
 export type mcpRegistryListInstalledServersResponse200 = {
@@ -300,6 +355,60 @@ export const mcpRegistryListServers = async (params?: McpRegistryListServersPara
 }
 
 
+export type mcpRegistryCreateServerVersionResponse201 = {
+  data: MCPRegistryServerResponse
+  status: 201
+}
+
+export type mcpRegistryCreateServerVersionResponse409 = {
+  data: ErrorResponse
+  status: 409
+}
+
+export type mcpRegistryCreateServerVersionResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryCreateServerVersionResponseSuccess = (mcpRegistryCreateServerVersionResponse201) & {
+  headers: Headers;
+};
+export type mcpRegistryCreateServerVersionResponseError = (mcpRegistryCreateServerVersionResponse409 | mcpRegistryCreateServerVersionResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryCreateServerVersionResponse = (mcpRegistryCreateServerVersionResponseSuccess | mcpRegistryCreateServerVersionResponseError)
+
+export const getMcpRegistryCreateServerVersionUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/servers`
+}
+
+/**
+ * @summary Create Mcp Server Version
+ */
+export const mcpRegistryCreateServerVersion = async (mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<mcpRegistryCreateServerVersionResponse> => {
+
+  const res = await fetch(getMcpRegistryCreateServerVersionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mCPServerCreate)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryCreateServerVersionResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as mcpRegistryCreateServerVersionResponse
+}
+
+
 export type mcpRegistryListServerVersionsResponse200 = {
   data: MCPRegistryServerListResponse
   status: 200
@@ -360,6 +469,67 @@ export const mcpRegistryListServerVersions = async (serverName: string,
 
   const data: mcpRegistryListServerVersionsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as mcpRegistryListServerVersionsResponse
+}
+
+
+export type mcpRegistryDeleteServerVersionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type mcpRegistryDeleteServerVersionResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRegistryDeleteServerVersionResponse409 = {
+  data: ErrorResponse
+  status: 409
+}
+
+export type mcpRegistryDeleteServerVersionResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryDeleteServerVersionResponseSuccess = (mcpRegistryDeleteServerVersionResponse204) & {
+  headers: Headers;
+};
+export type mcpRegistryDeleteServerVersionResponseError = (mcpRegistryDeleteServerVersionResponse404 | mcpRegistryDeleteServerVersionResponse409 | mcpRegistryDeleteServerVersionResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryDeleteServerVersionResponse = (mcpRegistryDeleteServerVersionResponseSuccess | mcpRegistryDeleteServerVersionResponseError)
+
+export const getMcpRegistryDeleteServerVersionUrl = (serverName: string,
+    version: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/servers/${serverName}/versions/${version}`
+}
+
+/**
+ * @summary Delete Mcp Server Version
+ */
+export const mcpRegistryDeleteServerVersion = async (serverName: string,
+    version: string, options?: RequestInit): Promise<mcpRegistryDeleteServerVersionResponse> => {
+
+  const res = await fetch(getMcpRegistryDeleteServerVersionUrl(serverName,version),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryDeleteServerVersionResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as mcpRegistryDeleteServerVersionResponse
 }
 
 
@@ -425,6 +595,63 @@ export const mcpRegistryGetServerVersion = async (serverName: string,
 
   const data: mcpRegistryGetServerVersionResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as mcpRegistryGetServerVersionResponse
+}
+
+
+export type mcpRegistryUpdateServerVersionResponse200 = {
+  data: MCPRegistryServerResponse
+  status: 200
+}
+
+export type mcpRegistryUpdateServerVersionResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRegistryUpdateServerVersionResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryUpdateServerVersionResponseSuccess = (mcpRegistryUpdateServerVersionResponse200) & {
+  headers: Headers;
+};
+export type mcpRegistryUpdateServerVersionResponseError = (mcpRegistryUpdateServerVersionResponse404 | mcpRegistryUpdateServerVersionResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryUpdateServerVersionResponse = (mcpRegistryUpdateServerVersionResponseSuccess | mcpRegistryUpdateServerVersionResponseError)
+
+export const getMcpRegistryUpdateServerVersionUrl = (serverName: string,
+    version: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/servers/${serverName}/versions/${version}`
+}
+
+/**
+ * @summary Update Mcp Server Version
+ */
+export const mcpRegistryUpdateServerVersion = async (serverName: string,
+    version: string,
+    mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<mcpRegistryUpdateServerVersionResponse> => {
+
+  const res = await fetch(getMcpRegistryUpdateServerVersionUrl(serverName,version),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mCPServerCreate)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryUpdateServerVersionResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as mcpRegistryUpdateServerVersionResponse
 }
 
 

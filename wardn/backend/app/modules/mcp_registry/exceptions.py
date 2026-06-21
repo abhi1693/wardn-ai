@@ -22,5 +22,9 @@ class MCPServerInstallationUnsupportedError(MCPRegistryError):
     pass
 
 
+class MCPServerVersionInUseError(MCPRegistryError):
+    pass
+
+
 class InvalidRegistryCursorError(MCPRegistryError):
     pass

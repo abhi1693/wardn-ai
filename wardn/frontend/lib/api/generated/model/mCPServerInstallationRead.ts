@@ -8,6 +8,8 @@ import type { MCPServerDocument } from './mCPServerDocument';
 import type { MCPServerInstallationReadRuntimeConfig } from './mCPServerInstallationReadRuntimeConfig';
 
 export interface MCPServerInstallationRead {
+  configName: string;
+  id: string;
   installError?: string | null;
   installPath: string;
   installType: string;

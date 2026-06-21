@@ -230,6 +230,105 @@
         "title": "MCPServerBulkUpdateRequest",
         "type": "object"
       },
+      "MCPServerCreate": {
+        "additionalProperties": true,
+        "properties": {
+          "$schema": {
+            "examples": [
+              "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+            ],
+            "minLength": 1,
+            "title": "$Schema",
+            "type": "string"
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "icons": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Icons",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 3,
+            "pattern": "^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "packages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Packages",
+            "type": "array"
+          },
+          "remotes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Remotes",
+            "type": "array"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "websiteUrl": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Websiteurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "$schema",
+          "name",
+          "description",
+          "version"
+        ],
+        "title": "MCPServerCreate",
+        "type": "object"
+      },
       "MCPServerDocument": {
         "additionalProperties": true,
         "properties": {
@@ -331,12 +430,34 @@
       },
       "MCPServerInstallRequest": {
         "properties": {
+          "configName": {
+            "default": "default",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Configname",
+            "type": "string"
+          },
           "configValues": {
             "additionalProperties": {
               "type": "string"
             },
             "title": "Configvalues",
             "type": "object"
+          },
+          "installTarget": {
+            "anyOf": [
+              {
+                "enum": [
+                  "remote",
+                  "package"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installtarget"
           },
           "version": {
             "default": "latest",
@@ -367,6 +488,15 @@
       },
       "MCPServerInstallationRead": {
         "properties": {
+          "configName": {
+            "title": "Configname",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
           "installError": {
             "anyOf": [
               {
@@ -429,7 +559,9 @@
           }
         },
         "required": [
+          "id",
           "serverName",
+          "configName",
           "installedVersion",
           "latestVersion",
           "updateAvailable",
@@ -686,6 +818,52 @@
         "summary": "Mcp Gateway Rpc",
         "tags": [
           "mcp-gateway"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-server-configs/{installation_id}": {
+      "delete": {
+        "operationId": "mcp_registry_uninstall_server_config",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server configuration is not installed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Mcp Server Config",
+        "tags": [
+          "mcp-registry"
         ]
       }
     },
@@ -1025,6 +1203,55 @@
         "tags": [
           "mcp-registry"
         ]
+      },
+      "post": {
+        "operationId": "mcp_registry_create_server_version",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPServerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRegistryServerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server version already exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Mcp Server Version",
+        "tags": [
+          "mcp-registry"
+        ]
       }
     },
     "/api/v1/mcp/registry/servers/{server_name}/versions": {
@@ -1090,6 +1317,68 @@
       }
     },
     "/api/v1/mcp/registry/servers/{server_name}/versions/{version}": {
+      "delete": {
+        "operationId": "mcp_registry_delete_server_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server version was not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server version is currently installed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Mcp Server Version",
+        "tags": [
+          "mcp-registry"
+        ]
+      },
       "get": {
         "operationId": "mcp_registry_get_server_version",
         "parameters": [
@@ -1155,6 +1444,75 @@
           }
         },
         "summary": "Get Mcp Server Version",
+        "tags": [
+          "mcp-registry"
+        ]
+      },
+      "put": {
+        "operationId": "mcp_registry_update_server_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPServerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRegistryServerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Mcp Server Version",
         "tags": [
           "mcp-registry"
         ]

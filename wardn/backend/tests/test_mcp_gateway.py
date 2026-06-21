@@ -7,11 +7,53 @@ from app.db.session import get_db_session
 from app.main import create_app
 from app.modules.mcp_gateway import client as gateway_client_module
 from app.modules.mcp_gateway import repository
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_gateway import service as gateway_service
+from app.modules.mcp_registry import tool_repository
+from app.modules.mcp_registry.models import (
+    MCPServerInstallation,
+    MCPServerToolSchema,
+    MCPServerVersion,
+)
+
+
+class FakeSession:
+    committed = False
+
+    async def commit(self):
+        self.committed = True
 
 
 async def fake_session():
-    yield object()
+    yield FakeSession()
+
+
+def cached_tool(
+    *,
+    server_name: str = "io.github.example/weather",
+    server_version: str = "1.0.0",
+    tool_name: str = "get_forecast",
+    title: str = "Get forecast",
+    description: str = "Get weather forecast",
+    input_schema: dict | None = None,
+) -> MCPServerToolSchema:
+    now = datetime(2026, 6, 21, tzinfo=UTC)
+    tool = MCPServerToolSchema(
+        server_name=server_name,
+        server_version=server_version,
+        tool_name=tool_name,
+        title=title,
+        description=description,
+        input_schema=input_schema or {"type": "object"},
+        output_schema=None,
+        annotations={},
+        source_hash="hash",
+        is_active=True,
+        discovered_at=now,
+        last_seen_at=now,
+    )
+    tool.created_at = now
+    tool.updated_at = now
+    return tool
 
 
 def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
@@ -68,7 +110,7 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
     now = datetime(2026, 6, 21, tzinfo=UTC)
     install_path = tmp_path / "kubernetes"
     command = install_path / "node_modules" / ".bin" / "kubernetes-mcp-server"
-    command.parent.mkdir(parents=True)
+    command.parent.mkdir(parents=True, exist_ok=True)
     command.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
     command.chmod(0o755)
     installation = MCPServerInstallation(
@@ -237,8 +279,22 @@ def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
             },
         ]
 
+    async def count_active_tool_schemas(*args, **kwargs):
+        return 0
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        return 2
+
+    async def search_enabled_tool_schemas(*args, **kwargs):
+        return [
+            cached_tool(),
+        ], ""
+
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
     monkeypatch.setattr(gateway_client_module, "list_tools", list_tools)
+    monkeypatch.setattr(tool_repository, "count_active_tool_schemas", count_active_tool_schemas)
+    monkeypatch.setattr(tool_repository, "upsert_tool_schemas", upsert_tool_schemas)
+    monkeypatch.setattr(tool_repository, "search_enabled_tool_schemas", search_enabled_tool_schemas)
 
     response = gateway_client().post(
         "/api/v1/mcp/gateway",
@@ -259,6 +315,7 @@ def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
     result = response.json()["result"]["structuredContent"]
     assert result["tools"][0]["toolName"] == "get_forecast"
     assert result["tools"][0]["serverName"] == "io.github.example/weather"
+    assert result["cache"] == {"mode": "cached-with-refresh", "refreshed": True}
     assert seen == {
         "url": "https://example.com/mcp",
         "headers": {"Authorization": "Bearer test"},
@@ -289,8 +346,28 @@ def test_mcp_gateway_search_tools_for_package_server(tmp_path, monkeypatch) -> N
             }
         ]
 
+    async def count_active_tool_schemas(*args, **kwargs):
+        return 0
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        return 1
+
+    async def search_enabled_tool_schemas(*args, **kwargs):
+        return [
+            cached_tool(
+                server_name="io.github.containers/kubernetes-mcp-server",
+                server_version="0.0.62",
+                tool_name="list_pods",
+                title="List pods",
+                description="List Kubernetes pods",
+            )
+        ], ""
+
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
     monkeypatch.setattr(gateway_client_module, "list_stdio_tools", list_stdio_tools)
+    monkeypatch.setattr(tool_repository, "count_active_tool_schemas", count_active_tool_schemas)
+    monkeypatch.setattr(tool_repository, "upsert_tool_schemas", upsert_tool_schemas)
+    monkeypatch.setattr(tool_repository, "search_enabled_tool_schemas", search_enabled_tool_schemas)
 
     response = gateway_client().post(
         "/api/v1/mcp/gateway",
@@ -333,8 +410,27 @@ def test_mcp_gateway_get_tool(monkeypatch) -> None:
             }
         ]
 
+    calls = {"get": 0}
+
+    async def get_enabled_tool_schema(*args, **kwargs):
+        calls["get"] += 1
+        if calls["get"] == 1:
+            return None
+        return cached_tool(
+            input_schema={
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            }
+        )
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        return 1
+
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
     monkeypatch.setattr(gateway_client_module, "list_tools", list_tools)
+    monkeypatch.setattr(tool_repository, "get_enabled_tool_schema", get_enabled_tool_schema)
+    monkeypatch.setattr(tool_repository, "upsert_tool_schemas", upsert_tool_schemas)
 
     response = gateway_client().post(
         "/api/v1/mcp/gateway",
@@ -363,11 +459,11 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
 
     seen = {}
 
-    def call_tool(url, headers, *, tool_name, arguments):
+    async def call_tool_with_tracking(session, installation, server, *, tool_name, arguments):
         seen.update(
             {
-                "url": url,
-                "headers": headers,
+                "server_name": installation.server_name,
+                "server_version": server.version,
                 "tool_name": tool_name,
                 "arguments": arguments,
             }
@@ -378,7 +474,7 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
-    monkeypatch.setattr(gateway_client_module, "call_tool", call_tool)
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
         "/api/v1/mcp/gateway",
@@ -401,8 +497,8 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
     assert result["content"] == [{"type": "text", "text": "Sunny"}]
     assert result["structuredContent"]["serverName"] == "io.github.example/weather"
     assert seen == {
-        "url": "https://example.com/mcp",
-        "headers": {"Authorization": "Bearer test"},
+        "server_name": "io.github.example/weather",
+        "server_version": "1.0.0",
         "tool_name": "get_forecast",
         "arguments": {"location": "Delhi"},
     }
@@ -414,13 +510,11 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
 
     seen = {}
 
-    def call_stdio_tool(command, args, *, cwd, environment, tool_name, arguments):
+    async def call_tool_with_tracking(session, installation, server, *, tool_name, arguments):
         seen.update(
             {
-                "command": command,
-                "args": args,
-                "cwd": cwd,
-                "environment": environment,
+                "server_name": installation.server_name,
+                "server_version": server.version,
                 "tool_name": tool_name,
                 "arguments": arguments,
             }
@@ -431,7 +525,7 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
         }
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
-    monkeypatch.setattr(gateway_client_module, "call_stdio_tool", call_stdio_tool)
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
         "/api/v1/mcp/gateway",
@@ -453,6 +547,7 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
     result = response.json()["result"]
     assert result["content"] == [{"type": "text", "text": "default/pod-a"}]
     assert result["structuredContent"]["serverName"] == "io.github.containers/kubernetes-mcp-server"
+    assert seen["server_name"] == "io.github.containers/kubernetes-mcp-server"
     assert seen["tool_name"] == "list_pods"
     assert seen["arguments"] == {"namespace": "default"}
 

@@ -19,6 +19,48 @@ def test_register_mcp_registry_commands_adds_sync_command() -> None:
     assert args.verbose is False
 
 
+def test_register_mcp_registry_commands_adds_refresh_tools_command() -> None:
+    registry = CommandRegistry()
+    commands.register_mcp_registry_commands(registry)
+
+    parser = registry.build_parser()
+    args = parser.parse_args(
+        ["refreshmcptools", "--server", "io.github.example/weather"]
+    )
+
+    assert args.command == "refreshmcptools"
+    assert args.handler == commands.handle_refreshmcptools
+    assert args.server == "io.github.example/weather"
+    assert args.verbose is False
+
+
+def test_register_mcp_registry_commands_adds_curated_server_command() -> None:
+    registry = CommandRegistry()
+    commands.register_mcp_registry_commands(registry)
+
+    parser = registry.build_parser()
+    args = parser.parse_args(["addmcpserver", "grafana"])
+
+    assert args.command == "addmcpserver"
+    assert args.handler == commands.handle_addmcpserver
+    assert args.server == "grafana"
+    assert args.verbose is False
+
+
+def test_curated_grafana_server_uses_uvx_runtime() -> None:
+    payload = commands.CURATED_SERVERS["grafana"]
+    server = commands.load_supported_servers_from_payload([payload])[0]
+
+    assert server.name == "io.github.grafana/mcp-grafana"
+    assert server.packages[0]["registryType"] == "uvx"
+    assert server.packages[0]["identifier"] == "mcp-grafana"
+    env_names = {
+        variable["name"]
+        for variable in server.packages[0]["environmentVariables"]
+    }
+    assert {"GRAFANA_URL", "GRAFANA_SERVICE_ACCOUNT_TOKEN"} <= env_names
+
+
 def test_load_supported_servers_reads_curated_file(tmp_path) -> None:
     path = tmp_path / "supported_servers.json"
     path.write_text(

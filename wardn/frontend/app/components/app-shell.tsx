@@ -1,6 +1,7 @@
 import {
   BookOpen,
   LayoutDashboard,
+  ServerCog,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -12,10 +13,11 @@ import { LogoutButton } from "./logout-button";
 const navItems = [
   { label: "Dashboard", href: "/", activeKey: "dashboard", icon: LayoutDashboard },
   { label: "MCP Registry", href: "/registry", activeKey: "registry", icon: BookOpen },
+  { label: "Install", href: "/install", activeKey: "install", icon: ServerCog },
 ];
 
 type AppShellProps = {
-  active: "dashboard" | "registry";
+  active: "dashboard" | "registry" | "install";
   eyebrow: string;
   title: string;
   actions?: ReactNode;

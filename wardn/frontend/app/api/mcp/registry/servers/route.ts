@@ -16,3 +16,23 @@ export async function GET(request: Request) {
     },
   });
 }
+
+export async function POST(request: Request) {
+  const payload = await request.json();
+  const response = await fetch(`${backendUrl}/api/v1/mcp/registry/servers`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  const body = await response.text();
+  return new NextResponse(body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") ?? "application/json",
+    },
+  });
+}

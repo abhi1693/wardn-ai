@@ -71,7 +71,7 @@ def test_install_server_runtime_creates_verified_remote_runtime_manifest(
 
     install = install_server_runtime(server, install_root=tmp_path)
 
-    manifest_path = tmp_path / "io.github.example__weather" / "1.0.0" / "runtime.json"
+    manifest_path = tmp_path / "io.github.example__weather" / "default" / "1.0.0" / "runtime.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert install.install_type == "remote"
     assert install.status == "enabled"
@@ -227,22 +227,136 @@ def test_install_server_runtime_fails_when_remote_verification_fails(
     with pytest.raises(MCPServerInstallationFailedError):
         install_server_runtime(server, install_root=tmp_path)
 
-    assert not (tmp_path / "io.github.example__weather" / "1.0.0").exists()
+    assert not (tmp_path / "io.github.example__weather" / "default" / "1.0.0").exists()
 
 
-def test_install_server_runtime_rejects_unsupported_package_registry(tmp_path) -> None:
+def test_install_server_runtime_creates_oci_runtime_manifest(tmp_path, monkeypatch) -> None:
     server = server_version(
         packages=[
             {
                 "registryType": "oci",
                 "identifier": "docker.io/example/weather:1.0.0",
                 "version": "1.0.0",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {"name": "WEATHER_TOKEN", "isRequired": True, "isSecret": True},
+                ],
             }
         ]
     )
+    seen_commands = []
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda command, **kwargs: seen_commands.append(command),
+    )
 
-    with pytest.raises(MCPServerInstallationUnsupportedError):
-        install_server_runtime(server, install_root=tmp_path)
+    install = install_server_runtime(
+        server,
+        config_values={"WEATHER_TOKEN": "secret"},
+        install_root=tmp_path,
+    )
+
+    assert seen_commands == [["/bin/docker", "pull", "docker.io/example/weather:1.0.0"]]
+    assert install.install_type == "oci"
+    assert install.runtime_config["kind"] == "package"
+    assert install.runtime_config["registryType"] == "oci"
+    assert install.runtime_config["command"] == "/bin/docker"
+    assert install.runtime_config["args"] == [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "WEATHER_TOKEN",
+        "docker.io/example/weather:1.0.0",
+    ]
+    assert install.secret_config == {"environment": {"WEATHER_TOKEN": "secret"}}
+
+
+def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        remotes=[
+            {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": [
+                    {
+                        "name": "Authorization",
+                        "isRequired": True,
+                        "isSecret": True,
+                    }
+                ],
+            }
+        ],
+        packages=[
+            {
+                "registryType": "uvx",
+                "identifier": "weather-mcp",
+                "version": "latest",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {"name": "WEATHER_TOKEN", "isRequired": True, "isSecret": True},
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+
+    install = install_server_runtime(
+        server,
+        config_values={"WEATHER_TOKEN": "secret"},
+        install_target="package",
+        install_root=tmp_path,
+    )
+
+    assert install.install_type == "uvx"
+    assert install.secret_config == {"environment": {"WEATHER_TOKEN": "secret"}}
+
+
+def test_install_server_runtime_creates_uvx_runtime_manifest(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "uvx",
+                "identifier": "mcp-grafana",
+                "version": "latest",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {"name": "GRAFANA_URL", "isRequired": True},
+                    {
+                        "name": "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+                        "isRequired": True,
+                        "isSecret": True,
+                    },
+                ],
+            }
+        ]
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+
+    install = install_server_runtime(
+        server,
+        config_values={
+            "GRAFANA_URL": "https://grafana.example.com",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "token",
+        },
+        install_root=tmp_path,
+    )
+
+    assert install.install_type == "uvx"
+    assert install.runtime_config["kind"] == "package"
+    assert install.runtime_config["registryType"] == "uvx"
+    assert install.runtime_config["command"] == "/bin/uvx"
+    assert install.runtime_config["args"] == ["mcp-grafana"]
+    assert install.secret_config == {
+        "environment": {
+            "GRAFANA_URL": "https://grafana.example.com",
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": "token",
+        }
+    }
 
 
 def test_install_server_runtime_rewrites_package_tmp_paths(tmp_path, monkeypatch) -> None:

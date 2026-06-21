@@ -85,6 +85,19 @@ async def count_versions_for_name(session: AsyncSession, name: str) -> int:
     return result.scalar_one()
 
 
+async def get_latest_visible_version(
+    session: AsyncSession,
+    name: str,
+) -> MCPServerVersion | None:
+    result = await session.execute(
+        _visible_query(False)
+        .where(MCPServerVersion.name == name)
+        .order_by(MCPServerVersion.published_at.desc(), MCPServerVersion.version.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def clear_latest_for_name(session: AsyncSession, name: str) -> None:
     await session.execute(
         update(MCPServerVersion)
@@ -96,16 +109,58 @@ async def clear_latest_for_name(session: AsyncSession, name: str) -> None:
 async def get_installation(
     session: AsyncSession,
     server_name: str,
+    config_name: str = "default",
 ) -> MCPServerInstallation | None:
     result = await session.execute(
-        select(MCPServerInstallation).where(MCPServerInstallation.server_name == server_name)
+        select(MCPServerInstallation).where(
+            MCPServerInstallation.server_name == server_name,
+            MCPServerInstallation.config_name == config_name,
+        )
     )
     return result.scalar_one_or_none()
 
 
+async def get_installation_by_id(
+    session: AsyncSession,
+    installation_id,
+) -> MCPServerInstallation | None:
+    result = await session.execute(
+        select(MCPServerInstallation).where(MCPServerInstallation.id == installation_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_first_installation_for_server(
+    session: AsyncSession,
+    server_name: str,
+) -> MCPServerInstallation | None:
+    result = await session.execute(
+        select(MCPServerInstallation)
+        .where(MCPServerInstallation.server_name == server_name)
+        .order_by(MCPServerInstallation.config_name.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_installations_for_server(
+    session: AsyncSession,
+    server_name: str,
+) -> list[MCPServerInstallation]:
+    result = await session.execute(
+        select(MCPServerInstallation)
+        .where(MCPServerInstallation.server_name == server_name)
+        .order_by(MCPServerInstallation.config_name.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def list_installations(session: AsyncSession) -> list[MCPServerInstallation]:
     result = await session.execute(
-        select(MCPServerInstallation).order_by(MCPServerInstallation.server_name.asc())
+        select(MCPServerInstallation).order_by(
+            MCPServerInstallation.server_name.asc(),
+            MCPServerInstallation.config_name.asc(),
+        )
     )
     return list(result.scalars().all())
 

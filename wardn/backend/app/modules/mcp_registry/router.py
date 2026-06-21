@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,28 +8,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.mcp_registry.exceptions import (
+    DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
     MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
     MCPServerInstallationUnsupportedError,
     MCPServerNotFoundError,
+    MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.schemas import (
     MCPRegistryServerListResponse,
     MCPRegistryServerResponse,
     MCPServerBulkUpdateRequest,
+    MCPServerCreate,
     MCPServerInstallationListResponse,
     MCPServerInstallationRead,
     MCPServerInstallRequest,
 )
 from app.modules.mcp_registry.service import (
+    create_server_version,
+    delete_server_version,
     get_version,
     install_server_version,
     list_installations,
     list_servers,
     list_versions,
+    uninstall_installation,
     uninstall_server,
     update_installed_servers,
+    update_server_version,
 )
 
 router = APIRouter(prefix="/mcp/registry", tags=["mcp-registry"])
@@ -126,6 +134,31 @@ async def install_mcp_server_version(
 
 
 @router.delete(
+    "/installed-server-configs/{installation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="mcp_registry_uninstall_server_config",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "The requested server configuration is not installed.",
+        },
+    },
+)
+async def uninstall_mcp_server_config(
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> None:
+    try:
+        await uninstall_installation(session, installation_id)
+    except MCPServerInstallationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="server configuration is not installed",
+        ) from exc
+    await session.commit()
+
+
+@router.delete(
     "/installed-servers/{server_name:path}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="mcp_registry_uninstall_server",
@@ -181,6 +214,33 @@ async def list_mcp_servers(
         ) from exc
 
 
+@router.post(
+    "/servers",
+    response_model=MCPRegistryServerResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="mcp_registry_create_server_version",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "The requested server version already exists.",
+        },
+    },
+)
+async def create_mcp_server_version(
+    payload: MCPServerCreate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MCPRegistryServerResponse:
+    try:
+        response = await create_server_version(session, payload)
+    except DuplicateMCPServerVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="server version already exists",
+        ) from exc
+    await session.commit()
+    return response
+
+
 @router.get(
     "/servers/{server_name:path}/versions",
     response_model=MCPRegistryServerListResponse,
@@ -204,6 +264,66 @@ async def list_mcp_server_versions(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server not found",
         ) from exc
+
+
+@router.put(
+    "/servers/{server_name:path}/versions/{version}",
+    response_model=MCPRegistryServerResponse,
+    operation_id="mcp_registry_update_server_version",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "The server version was not found.",
+        },
+    },
+)
+async def update_mcp_server_version(
+    server_name: str,
+    version: str,
+    payload: MCPServerCreate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MCPRegistryServerResponse:
+    try:
+        response = await update_server_version(session, server_name, version, payload)
+    except MCPServerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    await session.commit()
+    return response
+
+
+@router.delete(
+    "/servers/{server_name:path}/versions/{version}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="mcp_registry_delete_server_version",
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "The server version was not found.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "The server version is currently installed.",
+        },
+    },
+)
+async def delete_mcp_server_version(
+    server_name: str,
+    version: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> None:
+    try:
+        await delete_server_version(session, server_name, version)
+    except MCPServerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="server version not found",
+        ) from exc
+    except MCPServerVersionInUseError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
 
 
 @router.get(

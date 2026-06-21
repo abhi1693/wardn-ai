@@ -1,12 +1,14 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 
-from app.modules.mcp_registry import service
+from app.modules.mcp_registry import service, tool_service
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
     MCPServerInstallationNotFoundError,
+    MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.installer import MCPRuntimeInstall
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
@@ -35,6 +37,8 @@ class FakeSession:
 
     async def refresh(self, instance) -> None:
         now = datetime(2026, 6, 21, tzinfo=UTC)
+        if hasattr(instance, "id") and instance.id is None:
+            instance.id = uuid4()
         instance.created_at = now
         instance.updated_at = now
         if hasattr(instance, "published_at"):
@@ -214,6 +218,96 @@ def runtime_install(version: str = "1.0.0") -> MCPRuntimeInstall:
 
 
 @pytest.mark.asyncio
+async def test_update_server_version_preserves_latest_marker(monkeypatch) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    payload = registry_payload("1.0.0")
+    payload.title = "Updated Weather"
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    session = FakeSession()
+
+    response = await service.update_server_version(
+        session,
+        "io.github.example/weather",
+        "1.0.0",
+        payload,
+    )
+
+    assert response.server.title == "Updated Weather"
+    assert server.title == "Updated Weather"
+    assert server.is_latest is True
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_delete_server_version_rejects_installed_version(monkeypatch) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def list_installations_for_server(*args, **kwargs):
+        return [installation]
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(
+        service.repository,
+        "list_installations_for_server",
+        list_installations_for_server,
+    )
+
+    with pytest.raises(MCPServerVersionInUseError):
+        await service.delete_server_version(
+            FakeSession(),
+            "io.github.example/weather",
+            "1.0.0",
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_server_version_soft_deletes_and_promotes_replacement(monkeypatch) -> None:
+    server = server_version("1.1.0", is_latest=True)
+    replacement = server_version("1.0.0", is_latest=False)
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def list_installations_for_server(*args, **kwargs):
+        return []
+
+    async def get_latest_visible_version(*args, **kwargs):
+        return replacement
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(
+        service.repository,
+        "list_installations_for_server",
+        list_installations_for_server,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_latest_visible_version",
+        get_latest_visible_version,
+    )
+    session = FakeSession()
+
+    await service.delete_server_version(session, "io.github.example/weather", "1.1.0")
+
+    assert server.status == "deleted"
+    assert server.is_latest is False
+    assert replacement.is_latest is True
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
 async def test_install_server_version_pins_requested_version(monkeypatch) -> None:
     async def get_server_version(*args, **kwargs):
         return server_version("1.0.0", is_latest=True)
@@ -237,6 +331,7 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
     )
 
     assert response.server_name == "io.github.example/weather"
+    assert response.config_name == "default"
     assert response.installed_version == "1.0.0"
     assert response.latest_version == "1.0.0"
     assert response.update_available is False
@@ -267,6 +362,29 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="home",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
+    session = FakeSession()
+
+    await service.uninstall_installation(session, installation.id)
+
+    assert session.deleted == [installation]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
 async def test_uninstall_server_rejects_missing_installation(monkeypatch) -> None:
     async def get_installation(*args, **kwargs):
         return None
@@ -286,8 +404,8 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
         status="enabled",
     )
 
-    async def get_installation(*args, **kwargs):
-        return installation
+    async def list_installations_for_server(*args, **kwargs):
+        return [installation]
 
     async def get_server_version(*args, **kwargs):
         version = args[2]
@@ -295,7 +413,11 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
             return server_version("1.1.0", is_latest=True)
         return server_version(version)
 
-    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        service.repository,
+        "list_installations_for_server",
+        list_installations_for_server,
+    )
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(
         service,
@@ -312,3 +434,61 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
     assert installation.installed_version == "1.1.0"
     assert response.installations[0].installed_version == "1.1.0"
     assert response.installations[0].update_available is False
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            seen["installation"] = runtime_installation
+            return [
+                {
+                    "name": "get_forecast",
+                    "title": "Get forecast",
+                    "description": "Get weather forecast",
+                    "inputSchema": {"type": "object"},
+                }
+            ]
+
+        def call_tool(self, *args, **kwargs):
+            raise AssertionError("refresh should not call tools")
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["server"] = kwargs["server"]
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+
+    result = await tool_service.refresh_tool_schemas(
+        FakeSession(),
+        "io.github.example/weather",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.server_name == "io.github.example/weather"
+    assert result.server_version == "1.0.0"
+    assert result.tool_count == 1
+    assert seen["installation"] is installation
+    assert seen["server"] is server
+    assert seen["tools"][0]["name"] == "get_forecast"

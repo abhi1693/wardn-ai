@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     session_secret: str = "dev-session-secret-change-me"
     session_ttl_seconds: int = 60 * 60 * 12
     mcp_install_root: str = "data/mcp-installations"
+    mcp_runtime_provider: str = "local"
+    mcp_runtime_namespace: str = "wardn-runtimes"
+    mcp_runtime_idle_timeout_seconds: int = 60 * 10
+    mcp_runtime_max_age_seconds: int = 60 * 60
     database_url: str = Field(
         default="postgresql+asyncpg://wardn:wardn@localhost:5432/wardn",
         description="Async SQLAlchemy database URL.",

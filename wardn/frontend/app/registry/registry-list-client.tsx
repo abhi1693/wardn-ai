@@ -3,35 +3,22 @@
 import {
   ChevronLeft,
   ChevronRight,
-  Download,
-  ExternalLink,
-  GitBranch,
-  Globe,
-  Info,
   KeyRound,
-  Plus,
   Network,
   Package,
+  Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
   Trash2,
-  X,
 } from "lucide-react";
+import Link from "next/link";
 import type { FormEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -52,28 +39,6 @@ import type {
 
 const PAGE_SIZE = 50;
 
-type InstallField = {
-  name: string;
-  description: string;
-  required: boolean;
-  secret: boolean;
-};
-
-type CustomHeader = {
-  id: string;
-  name: string;
-  value: string;
-};
-
-type LinkTarget = {
-  label: string;
-  url: string;
-};
-
-function getOfficialMeta(entry: MCPRegistryServerResponse) {
-  return entry._meta["io.modelcontextprotocol.registry/official"];
-}
-
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -84,21 +49,6 @@ function displayHost(url: string) {
   } catch {
     return url;
   }
-}
-
-function displayDate(value: string | undefined) {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
 }
 
 function preferredIcon(entry: MCPRegistryServerResponse) {
@@ -112,37 +62,6 @@ function preferredIcon(entry: MCPRegistryServerResponse) {
 
 function repository(entry: MCPRegistryServerResponse) {
   return entry.server.repository as Record<string, unknown> | null | undefined;
-}
-
-function publisherMeta(entry: MCPRegistryServerResponse) {
-  const meta = entry.server._meta as Record<string, unknown> | null | undefined;
-  return meta?.["io.modelcontextprotocol.registry/publisher-provided"] as
-    | Record<string, unknown>
-    | undefined;
-}
-
-function sourceLinks(entry: MCPRegistryServerResponse): LinkTarget[] {
-  const links: LinkTarget[] = [];
-  const websiteUrl = entry.server.websiteUrl;
-  const repoUrl = stringValue(repository(entry)?.url);
-  const publisher = publisherMeta(entry);
-  const docsUrl = stringValue(publisher?.docs);
-  const connectUrl = stringValue(publisher?.connect);
-
-  if (websiteUrl) {
-    links.push({ label: "Website", url: websiteUrl });
-  }
-  if (repoUrl && repoUrl !== websiteUrl) {
-    links.push({ label: "Repository", url: repoUrl });
-  }
-  if (docsUrl && docsUrl !== websiteUrl && docsUrl !== repoUrl) {
-    links.push({ label: "Docs", url: docsUrl });
-  }
-  if (connectUrl && connectUrl !== websiteUrl && connectUrl !== repoUrl && connectUrl !== docsUrl) {
-    links.push({ label: "Connect", url: connectUrl });
-  }
-
-  return links.slice(0, 3);
 }
 
 function deliveryDetails(entry: MCPRegistryServerResponse) {
@@ -220,9 +139,22 @@ function configurationSummary(entry: MCPRegistryServerResponse) {
   };
 }
 
-function installUrl(serverName: string) {
-  return `/api/mcp/registry/installed-servers/${serverName
+function detailServerUrl(serverName: string, version: string) {
+  return `/registry/${serverName
     .split("/")
+    .map(encodeURIComponent)
+    .join("/")}?version=${encodeURIComponent(version)}`;
+}
+
+function editServerUrl(serverName: string, version: string) {
+  return `/registry/edit/${serverName
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}?version=${encodeURIComponent(version)}`;
+}
+
+function serverVersionUrl(serverName: string, version: string) {
+  return `/api/mcp/registry/servers/${[...serverName.split("/"), version]
     .map(encodeURIComponent)
     .join("/")}`;
 }
@@ -237,29 +169,10 @@ async function responseErrorMessage(response: Response, fallback: string) {
 }
 
 function statusLabel(status: string) {
+  if (status === "enabled") {
+    return "Configured";
+  }
   return status.replaceAll("_", " ");
-}
-
-function installFields(entry: MCPRegistryServerResponse): InstallField[] {
-  const remote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
-  const remoteHeaders = Array.isArray(remote?.headers)
-    ? (remote.headers as Record<string, unknown>[])
-    : [];
-  const packageDefinition = entry.server.packages?.[0] as Record<string, unknown> | undefined;
-  const environmentVariables = Array.isArray(packageDefinition?.environmentVariables)
-    ? (packageDefinition.environmentVariables as Record<string, unknown>[])
-    : [];
-
-  const fields = [...remoteHeaders, ...environmentVariables]
-    .map((field) => ({
-      name: String(field.name ?? ""),
-      description: String(field.description ?? ""),
-      required: Boolean(field.isRequired),
-      secret: Boolean(field.isSecret),
-    }))
-    .filter((field) => field.name);
-
-  return fields;
 }
 
 type RegistryListClientProps = {
@@ -286,14 +199,18 @@ export function RegistryListClient({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedUpdates, setSelectedUpdates] = useState<Set<string>>(new Set());
-  const [installTarget, setInstallTarget] = useState<MCPRegistryServerResponse | null>(null);
-  const [detailsTarget, setDetailsTarget] = useState<MCPRegistryServerResponse | null>(null);
-  const [installValues, setInstallValues] = useState<Record<string, string>>({});
-  const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
-  const customHeaderId = useRef(0);
 
   const installationsByName = useMemo(
-    () => new Map(installations.map((installation) => [installation.serverName, installation])),
+    () => {
+      const grouped = new Map<string, MCPServerInstallationRead[]>();
+      for (const installation of installations) {
+        grouped.set(installation.serverName, [
+          ...(grouped.get(installation.serverName) ?? []),
+          installation,
+        ]);
+      }
+      return grouped;
+    },
     [installations]
   );
 
@@ -373,127 +290,6 @@ export function RegistryListClient({
     });
   }
 
-  async function installLatest(serverName: string, configValues: Record<string, string> = {}) {
-    setIsMutating(true);
-    setError("");
-    setNotice("");
-    try {
-      const response = await fetch(installUrl(serverName), {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ version: "latest", configValues }),
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to install server"));
-      }
-      setNotice("Server installed.");
-      setInstallTarget(null);
-      setInstallValues({});
-      await loadServers();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The selected server could not be installed.");
-    } finally {
-      setIsMutating(false);
-    }
-  }
-
-  function beginInstall(entry: MCPRegistryServerResponse) {
-    const fields = installFields(entry);
-    setError("");
-    setNotice("");
-    setInstallValues(
-      Object.fromEntries(fields.map((field) => [field.name, installValues[field.name] ?? ""]))
-    );
-    setCustomHeaders([]);
-    setInstallTarget(entry);
-  }
-
-  function addCustomHeader() {
-    customHeaderId.current += 1;
-    setCustomHeaders((current) => [
-      ...current,
-      {
-        id: `custom-header-${customHeaderId.current}`,
-        name: "",
-        value: "",
-      },
-    ]);
-  }
-
-  function updateCustomHeader(id: string, patch: Partial<CustomHeader>) {
-    setCustomHeaders((current) =>
-      current.map((header) => (header.id === id ? { ...header, ...patch } : header))
-    );
-  }
-
-  function removeCustomHeader(id: string) {
-    setCustomHeaders((current) => current.filter((header) => header.id !== id));
-  }
-
-  function installPayloadValues() {
-    const payload = { ...installValues };
-    for (const header of customHeaders) {
-      const name = header.name.trim();
-      const value = header.value.trim();
-      if (name && value) {
-        payload[`headers.${name}`] = value;
-      }
-    }
-    return payload;
-  }
-
-  async function submitConfiguredInstall(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!installTarget) {
-      return;
-    }
-
-    const missing = installFields(installTarget).filter(
-      (field) => field.required && !installValues[field.name]?.trim()
-    );
-    if (missing.length > 0) {
-      setError(`Missing required connection settings: ${missing.map((field) => field.name).join(", ")}`);
-      return;
-    }
-
-    const incompleteCustomHeaders = customHeaders.filter(
-      (header) => header.name.trim() || header.value.trim()
-    ).filter((header) => !header.name.trim() || !header.value.trim());
-    if (incompleteCustomHeaders.length > 0) {
-      setError("Custom headers require both a key and a value.");
-      return;
-    }
-
-    await installLatest(installTarget.server.name, installPayloadValues());
-  }
-
-  async function uninstallServer(serverName: string) {
-    setIsMutating(true);
-    setError("");
-    setNotice("");
-    try {
-      const response = await fetch(installUrl(serverName), {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to uninstall server"));
-      }
-      setSelectedUpdates((current) => {
-        const next = new Set(current);
-        next.delete(serverName);
-        return next;
-      });
-      setNotice("Server uninstalled.");
-      await loadServers();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The selected server could not be uninstalled.");
-    } finally {
-      setIsMutating(false);
-    }
-  }
-
   async function updateSelected() {
     const serverNames = Array.from(selectedUpdates);
     if (serverNames.length === 0) {
@@ -524,6 +320,31 @@ export function RegistryListClient({
     }
   }
 
+  async function deleteServerVersion(serverName: string, version: string) {
+    setIsMutating(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(serverVersionUrl(serverName, version), {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, "Failed to delete server."));
+      }
+      setSelectedUpdates((current) => {
+        const next = new Set(current);
+        next.delete(serverName);
+        return next;
+      });
+      setNotice("Server deleted.");
+      await loadServers();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The selected server could not be deleted.");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
   function toggleSelected(serverName: string) {
     setSelectedUpdates((current) => {
       const next = new Set(current);
@@ -536,12 +357,6 @@ export function RegistryListClient({
     });
   }
 
-  const installTargetFields = installTarget ? installFields(installTarget) : [];
-  const detailsDistribution = detailsTarget ? deliveryDetails(detailsTarget) : null;
-  const detailsConfig = detailsTarget ? configurationSummary(detailsTarget) : null;
-  const detailsInputs = detailsTarget ? schemaInputs(detailsTarget) : null;
-  const detailsLinks = detailsTarget ? sourceLinks(detailsTarget) : [];
-  const detailsMeta = detailsTarget ? getOfficialMeta(detailsTarget) : null;
   const pageNumber = previousCursors.length + 1;
   const pageStart = servers.length > 0 ? previousCursors.length * PAGE_SIZE + 1 : 0;
   const pageEnd = previousCursors.length * PAGE_SIZE + servers.length;
@@ -629,323 +444,16 @@ export function RegistryListClient({
         </div>
       ) : null}
 
-      <Dialog
-        open={Boolean(detailsTarget)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDetailsTarget(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-3xl">
-          {detailsTarget && detailsDistribution && detailsConfig && detailsInputs && detailsMeta ? (
-            <div className="space-y-5">
-              <DialogHeader>
-                <DialogTitle>{detailsTarget.server.title || detailsTarget.server.name}</DialogTitle>
-                <DialogDescription className="break-all">
-                  {detailsTarget.server.name}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="text-sm leading-6 text-muted-foreground">
-                {detailsTarget.server.description}
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Distribution</div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      <detailsDistribution.icon className="size-4 text-muted-foreground" />
-                      <span className="capitalize">{detailsDistribution.primary}</span>
-                    </div>
-                    {detailsDistribution.secondary ? (
-                      <div className="break-all text-muted-foreground">
-                        {detailsDistribution.secondary}
-                      </div>
-                    ) : null}
-                    {detailsTarget.server.remotes?.length ? (
-                      <div className="space-y-1">
-                        <div className="text-xs font-medium text-muted-foreground">Remote endpoints</div>
-                        {detailsTarget.server.remotes.map((remote, index) => {
-                          const value = remote as Record<string, unknown>;
-                          return (
-                            <div className="break-all text-xs text-muted-foreground" key={`${detailsTarget.server.name}-remote-${index}`}>
-                              {stringValue(value.type) || "remote"} · {stringValue(value.url)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    {detailsTarget.server.packages?.length ? (
-                      <div className="space-y-1">
-                        <div className="text-xs font-medium text-muted-foreground">Packages</div>
-                        {detailsTarget.server.packages.map((packageDefinition, index) => {
-                          const value = packageDefinition as Record<string, unknown>;
-                          return (
-                            <div className="break-all text-xs text-muted-foreground" key={`${detailsTarget.server.name}-package-${index}`}>
-                              {stringValue(value.registryType) || "package"} · {stringValue(value.identifier)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Configuration</div>
-                  <div className="space-y-2 text-sm">
-                    <div>
-                      {detailsConfig.requiredCount > 0
-                        ? `${detailsConfig.requiredCount} required input${detailsConfig.requiredCount === 1 ? "" : "s"}`
-                        : "No required inputs"}
-                    </div>
-                    {detailsConfig.secretCount > 0 ? (
-                      <div className="text-muted-foreground">
-                        {detailsConfig.secretCount} secret value
-                        {detailsConfig.secretCount === 1 ? "" : "s"}
-                      </div>
-                    ) : null}
-                    {[...detailsInputs.headers, ...detailsInputs.environmentVariables, ...detailsInputs.packageArguments].length ? (
-                      <div className="space-y-1">
-                        {[...detailsInputs.headers, ...detailsInputs.environmentVariables, ...detailsInputs.packageArguments]
-                          .slice(0, 8)
-                          .map((field, index) => (
-                            <div
-                              className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
-                              key={`${detailsTarget.server.name}-input-${index}`}
-                            >
-                              <span className="font-medium text-foreground">
-                                {stringValue(field.name) || stringValue(field.type) || "Input"}
-                              </span>
-                              {field.isRequired ? <Badge variant="outline">Required</Badge> : null}
-                              {field.isSecret ? <Badge variant="outline">Secret</Badge> : null}
-                            </div>
-                          ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Source</div>
-                  {detailsLinks.length > 0 ? (
-                    <div className="space-y-2">
-                      {detailsLinks.map((link) => (
-                        <a
-                          className="flex items-center gap-2 text-sm text-primary hover:underline"
-                          href={link.url}
-                          key={`${detailsTarget.server.name}-${link.label}`}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {link.label === "Repository" ? (
-                            <GitBranch className="size-4" />
-                          ) : link.label === "Website" ? (
-                            <Globe className="size-4" />
-                          ) : (
-                            <ExternalLink className="size-4" />
-                          )}
-                          <span>{link.label}</span>
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No source links provided.</div>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-md border p-3">
-                  <div className="text-sm font-medium">Registry</div>
-                  <div className="space-y-1 text-sm">
-                    <div>Version {detailsTarget.server.version}</div>
-                    <div className="capitalize text-muted-foreground">
-                      {detailsMeta.status}
-                    </div>
-                    {displayDate(detailsMeta.publishedAt) ? (
-                      <div className="text-muted-foreground">
-                        Published {displayDate(detailsMeta.publishedAt)}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setDetailsTarget(null)}>
-                  Close
-                </Button>
-                <Button
-                  disabled={isMutating || Boolean(installationsByName.get(detailsTarget.server.name))}
-                  onClick={() => {
-                    setDetailsTarget(null);
-                    beginInstall(detailsTarget);
-                  }}
-                  type="button"
-                >
-                  <Download className="size-4" />
-                  Install
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(installTarget)}
-        onOpenChange={(open) => {
-          if (open || isMutating) {
-            return;
-          }
-          setInstallTarget(null);
-          setInstallValues({});
-          setCustomHeaders([]);
-        }}
-      >
-        <DialogContent>
-          {installTarget ? (
-            <form className="space-y-5" onSubmit={submitConfiguredInstall}>
-              <DialogHeader>
-                <DialogTitle>
-                  Install {installTarget.server.title || installTarget.server.name}
-                </DialogTitle>
-                <DialogDescription className="break-all">
-                  {installTarget.server.name}
-                </DialogDescription>
-              </DialogHeader>
-
-              {installTargetFields.length > 0 ? (
-                <div className="grid max-h-[55vh] gap-4 overflow-y-auto pr-1">
-                  {installTargetFields.map((field) => (
-                    <div className="grid gap-2" key={field.name}>
-                      <Label htmlFor={`install-${field.name}`}>
-                        {field.name}
-                        {field.required ? <span className="text-red-600"> *</span> : null}
-                      </Label>
-                      <Input
-                        autoComplete="off"
-                        id={`install-${field.name}`}
-                        onChange={(event) =>
-                          setInstallValues((current) => ({
-                            ...current,
-                            [field.name]: event.target.value,
-                          }))
-                        }
-                        placeholder={field.secret ? "Secret value" : "Value"}
-                        type={field.secret ? "password" : "text"}
-                        value={installValues[field.name] ?? ""}
-                      />
-                      {field.description ? (
-                        <div className="text-xs leading-5 text-muted-foreground">
-                          {field.description}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                  No connection settings are required for this server.
-                </div>
-              )}
-
-              <div className="space-y-3 rounded-md border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">Custom headers</div>
-                    <div className="text-xs text-muted-foreground">
-                      Add only the headers this server requires.
-                    </div>
-                  </div>
-                  <Button
-                    disabled={isMutating}
-                    onClick={addCustomHeader}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <Plus className="size-4" />
-                    Add header
-                  </Button>
-                </div>
-
-                {customHeaders.length > 0 ? (
-                  <div className="space-y-2">
-                    {customHeaders.map((header) => (
-                      <div
-                        className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-                        key={header.id}
-                      >
-                        <Input
-                          autoComplete="off"
-                          onChange={(event) =>
-                            updateCustomHeader(header.id, { name: event.target.value })
-                          }
-                          placeholder="Header key"
-                          value={header.name}
-                        />
-                        <Input
-                          autoComplete="off"
-                          onChange={(event) =>
-                            updateCustomHeader(header.id, { value: event.target.value })
-                          }
-                          placeholder="Header value"
-                          type="password"
-                          value={header.value}
-                        />
-                        <Button
-                          aria-label="Remove custom header"
-                          disabled={isMutating}
-                          onClick={() => removeCustomHeader(header.id)}
-                          size="icon"
-                          type="button"
-                          variant="outline"
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              <DialogFooter>
-                <Button
-                  disabled={isMutating}
-                  onClick={() => {
-                    setInstallTarget(null);
-                    setInstallValues({});
-                    setCustomHeaders([]);
-                  }}
-                  type="button"
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-                <Button disabled={isMutating} type="submit">
-                  <Download className="size-4" />
-                  {isMutating ? "Installing" : "Install"}
-                </Button>
-              </DialogFooter>
-            </form>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[44px]"></TableHead>
-                <TableHead className="min-w-[420px]">Server</TableHead>
+                <TableHead className="min-w-[360px]">Server</TableHead>
                 <TableHead className="w-[230px]">Runtime</TableHead>
-                <TableHead className="w-[150px]">Installation</TableHead>
-                <TableHead className="w-[220px]"></TableHead>
+                <TableHead className="w-[150px]">Configuration</TableHead>
+                <TableHead className="w-[170px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -959,9 +467,12 @@ export function RegistryListClient({
                 </TableRow>
               ) : (
                 servers.map((entry) => {
-                  const installation = installationsByName.get(entry.server.name);
-                  const isInstalled = Boolean(installation);
-                  const updateAvailable = Boolean(installation?.updateAvailable);
+                  const serverInstallations = installationsByName.get(entry.server.name) ?? [];
+                  const installation = serverInstallations[0];
+                  const isInstalled = serverInstallations.length > 0;
+                  const updateAvailable = serverInstallations.some(
+                    (currentInstallation) => currentInstallation.updateAvailable
+                  );
                   const iconUrl = preferredIcon(entry);
                   const distribution = deliveryDetails(entry);
                   const DistributionIcon = distribution.icon;
@@ -993,9 +504,14 @@ export function RegistryListClient({
                               <Package className="size-4 text-muted-foreground" />
                             )}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 py-0.5">
                             <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-medium">{entry.server.title || entry.server.name}</div>
+                              <Link
+                                className="font-medium text-foreground underline-offset-4 hover:underline"
+                                href={detailServerUrl(entry.server.name, entry.server.version)}
+                              >
+                                {entry.server.title || entry.server.name}
+                              </Link>
                               {entry.server.repository ? (
                                 <Badge variant="outline" className="font-normal">
                                   {stringValue(repository(entry)?.source) || "source"}
@@ -1004,9 +520,6 @@ export function RegistryListClient({
                             </div>
                             <div className="mt-0.5 break-all text-xs text-muted-foreground">
                               {entry.server.name}
-                            </div>
-                            <div className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground line-clamp-2">
-                              {entry.server.description}
                             </div>
                           </div>
                         </div>
@@ -1038,11 +551,12 @@ export function RegistryListClient({
                       <TableCell>
                         <div className="space-y-1.5">
                           <Badge variant={isInstalled ? "success" : "outline"} className="font-normal">
-                            {isInstalled ? statusLabel(installation?.status ?? "installed") : "Not installed"}
+                            {isInstalled ? statusLabel(installation?.status ?? "configured") : "Not configured"}
                           </Badge>
                           {installation ? (
                             <div className="text-xs text-muted-foreground">
-                              {installation.installedVersion}
+                              {serverInstallations.length} config
+                              {serverInstallations.length === 1 ? "" : "s"}
                             </div>
                           ) : null}
                           {updateAvailable ? (
@@ -1052,39 +566,24 @@ export function RegistryListClient({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap justify-end gap-2">
+                          <Button asChild size="icon" variant="outline">
+                            <Link
+                              aria-label={`Edit ${entry.server.name}`}
+                              href={editServerUrl(entry.server.name, entry.server.version)}
+                            >
+                              <Pencil className="size-4" />
+                            </Link>
+                          </Button>
                           <Button
+                            aria-label={`Delete ${entry.server.name}`}
                             disabled={isMutating}
-                            onClick={() => setDetailsTarget(entry)}
-                            size="sm"
+                            onClick={() => deleteServerVersion(entry.server.name, entry.server.version)}
+                            size="icon"
                             type="button"
                             variant="outline"
                           >
-                            <Info className="size-4" />
-                            Details
+                            <Trash2 className="size-4" />
                           </Button>
-                          {isInstalled ? (
-                            <Button
-                              disabled={isMutating}
-                              onClick={() => uninstallServer(entry.server.name)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              <Trash2 className="size-4" />
-                              Uninstall
-                            </Button>
-                          ) : (
-                            <Button
-                              disabled={isMutating}
-                              onClick={() => beginInstall(entry)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              <Download className="size-4" />
-                              Install
-                            </Button>
-                          )}
                         </div>
                       </TableCell>
                     </TableRow>

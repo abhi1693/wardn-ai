@@ -13,12 +13,73 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.commands.registry import CommandRegistry
 from app.db.session import AsyncSessionLocal
+from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry.schemas import MCPServerCreate
 from app.modules.mcp_registry.service import sync_supported_servers
+from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 
 DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
+CURATED_SERVERS = {
+    "grafana": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "io.github.grafana/mcp-grafana",
+        "title": "Grafana",
+        "description": (
+            "MCP server for querying and managing Grafana dashboards, datasources, "
+            "alerts, annotations, incidents, and observability data."
+        ),
+        "version": "latest",
+        "websiteUrl": "https://github.com/grafana/mcp-grafana",
+        "repository": {
+            "source": "github",
+            "url": "https://github.com/grafana/mcp-grafana",
+        },
+        "packages": [
+            {
+                "registryType": "uvx",
+                "identifier": "mcp-grafana",
+                "version": "latest",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {
+                        "name": "GRAFANA_URL",
+                        "format": "string",
+                        "isRequired": True,
+                        "description": "Grafana instance URL, for example https://myinstance.grafana.net.",
+                    },
+                    {
+                        "name": "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+                        "format": "string",
+                        "isRequired": True,
+                        "isSecret": True,
+                        "description": (
+                            "Grafana service account token. Use "
+                            "GRAFANA_SERVICE_ACCOUNT_TOKEN instead of deprecated "
+                            "GRAFANA_API_KEY."
+                        ),
+                    },
+                    {
+                        "name": "GRAFANA_ORG_ID",
+                        "format": "string",
+                        "description": "Optional Grafana organization ID for multi-org instances.",
+                    },
+                    {
+                        "name": "GRAFANA_EXTRA_HEADERS",
+                        "format": "string",
+                        "description": (
+                            "Optional JSON object of extra headers sent to Grafana API "
+                            "requests."
+                        ),
+                    },
+                ],
+            }
+        ],
+        "remotes": [],
+        "icons": [],
+    },
+}
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +115,32 @@ def configure_syncmcpregistry_parser(parser: argparse.ArgumentParser) -> None:
         "--verbose",
         action="store_true",
         help="Show page-level registry sync details.",
+    )
+
+
+def configure_refreshmcptools_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--server",
+        required=True,
+        help="Canonical enabled MCP server name to refresh tools for.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed refresh logs.",
+    )
+
+
+def configure_addmcpserver_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "server",
+        choices=sorted(CURATED_SERVERS),
+        help="Curated supported MCP server to add.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed add logs.",
     )
 
 
@@ -259,10 +346,89 @@ def handle_syncmcpregistry(args: argparse.Namespace) -> int:
         return 1
 
 
+async def refresh_mcp_tools_from_args(args: argparse.Namespace) -> int:
+    server_name = str(args.server or "").strip()
+    if not server_name:
+        raise ValueError("--server is required")
+
+    logger.info("Refreshing MCP tool schemas for %s.", server_name)
+    async with AsyncSessionLocal() as session:
+        result = await refresh_tool_schemas(session, server_name)
+        await session.commit()
+
+    logger.info(
+        "MCP tool schema refresh complete for %s: %s tools.",
+        result.server_name,
+        result.tool_count,
+    )
+    print(
+        f"Refreshed {result.tool_count} tools for "
+        f"{result.server_name}@{result.server_version}."
+    )
+    return 0
+
+
+def handle_refreshmcptools(args: argparse.Namespace) -> int:
+    configure_command_logging(verbose=args.verbose)
+    try:
+        return asyncio.run(refresh_mcp_tools_from_args(args))
+    except (LookupError, MCPGatewayUpstreamError, ValueError) as exc:
+        logger.error("MCP tool refresh failed: %s", exc)
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SQLAlchemyError as exc:
+        logger.error("MCP tool refresh database operation failed: %s", exc)
+        if "relation \"mcp_server_tool_schemas\" does not exist" in str(exc):
+            print("Error: database is not migrated. Run `alembic upgrade head`.", file=sys.stderr)
+        else:
+            print(f"Database error: {exc}", file=sys.stderr)
+        return 1
+
+
+async def add_mcp_server_from_args(args: argparse.Namespace) -> int:
+    payload = MCPServerCreate.model_validate(CURATED_SERVERS[args.server])
+    logger.info("Adding curated MCP server %s.", payload.name)
+    async with AsyncSessionLocal() as session:
+        count = await sync_supported_servers(session, [payload])
+        await session.commit()
+
+    print(f"Added {count} curated MCP server entry: {payload.name}@{payload.version}.")
+    return 0
+
+
+def handle_addmcpserver(args: argparse.Namespace) -> int:
+    configure_command_logging(verbose=args.verbose)
+    try:
+        return asyncio.run(add_mcp_server_from_args(args))
+    except (ValidationError, ValueError) as exc:
+        logger.error("Curated MCP server add failed: %s", exc)
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SQLAlchemyError as exc:
+        logger.error("Curated MCP server database operation failed: %s", exc)
+        if "relation \"mcp_server_versions\" does not exist" in str(exc):
+            print("Error: database is not migrated. Run `alembic upgrade head`.", file=sys.stderr)
+        else:
+            print(f"Database error: {exc}", file=sys.stderr)
+        return 1
+
+
 def register_mcp_registry_commands(registry: CommandRegistry) -> None:
     registry.register(
         "syncmcpregistry",
         "Sync supported MCP servers from the official registry.",
         configure_syncmcpregistry_parser,
         handle_syncmcpregistry,
+    )
+    registry.register(
+        "refreshmcptools",
+        "Refresh cached MCP tool schemas for one enabled server.",
+        configure_refreshmcptools_parser,
+        handle_refreshmcptools,
+    )
+    registry.register(
+        "addmcpserver",
+        "Add one curated supported MCP server to the catalog.",
+        configure_addmcpserver_parser,
+        handle_addmcpserver,
     )

@@ -38,9 +38,18 @@ def default_install_root() -> Path:
     return Path(get_settings().mcp_install_root).expanduser().resolve()
 
 
-def server_install_path(server: MCPServerVersion, install_root: Path | None = None) -> Path:
+def server_install_path(
+    server: MCPServerVersion,
+    install_root: Path | None = None,
+    config_name: str = "default",
+) -> Path:
     root = install_root or default_install_root()
-    return root / safe_path_component(server.name) / safe_path_component(server.version)
+    return (
+        root
+        / safe_path_component(server.name)
+        / safe_path_component(config_name)
+        / safe_path_component(server.version)
+    )
 
 
 def remove_installation_artifacts(path: str) -> None:
@@ -489,6 +498,178 @@ def build_pypi_install(
     )
 
 
+def build_uvx_install(
+    server: MCPServerVersion,
+    package: dict[str, Any],
+    install_path: Path,
+    config_values: dict[str, str],
+) -> MCPRuntimeInstall:
+    identifier = str(package["identifier"])
+    executable = shutil.which("uvx")
+    if not executable:
+        raise MCPServerInstallationUnsupportedError("required installer is not available: uvx")
+
+    install_path.mkdir(parents=True, exist_ok=True)
+    env_vars = (
+        package.get("environmentVariables", [])
+        if isinstance(package.get("environmentVariables"), list)
+        else []
+    )
+    package_args = (
+        package.get("packageArguments", [])
+        if isinstance(package.get("packageArguments"), list)
+        else []
+    )
+    require_config_values(env_vars, config_values, label="environment variables")
+    configured_env = configured_values(env_vars, config_values)
+    configured_args = [
+        str(argument.get("value"))
+        for argument in package_args
+        if isinstance(argument, dict) and argument.get("value")
+    ]
+    public_package = dict(package)
+    if env_vars:
+        public_package["environmentVariables"] = [
+            {
+                **env_var,
+                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
+            }
+            for env_var in env_vars
+        ]
+    secret_config = {"environment": configured_env} if configured_env else {}
+    runtime_config = {
+        "kind": "package",
+        "registryType": "uvx",
+        "serverName": server.name,
+        "version": server.version,
+        "installedAt": datetime.now(UTC).isoformat(),
+        "package": public_package,
+        "transport": package.get("transport", {"type": "stdio"}),
+        "command": executable,
+        "args": [identifier, *configured_args],
+        "cwd": str(install_path),
+        "requiresConfiguration": False,
+    }
+    write_runtime_manifest(install_path, runtime_config)
+    write_secret_manifest(install_path, secret_config)
+    return MCPRuntimeInstall(
+        install_type="uvx",
+        install_path=str(install_path),
+        runtime_config=runtime_config,
+        secret_config=secret_config,
+        status="enabled",
+    )
+
+
+def build_oci_install(
+    server: MCPServerVersion,
+    package: dict[str, Any],
+    install_path: Path,
+    config_values: dict[str, str],
+) -> MCPRuntimeInstall:
+    identifier = str(package["identifier"])
+    executable = shutil.which("docker")
+    if not executable:
+        raise MCPServerInstallationUnsupportedError("required installer is not available: docker")
+
+    install_path.mkdir(parents=True, exist_ok=True)
+    run_install_command([executable, "pull", identifier], cwd=install_path)
+
+    env_vars = (
+        package.get("environmentVariables", [])
+        if isinstance(package.get("environmentVariables"), list)
+        else []
+    )
+    package_args = (
+        package.get("packageArguments", [])
+        if isinstance(package.get("packageArguments"), list)
+        else []
+    )
+    require_config_values(env_vars, config_values, label="environment variables")
+    configured_env = configured_values(env_vars, config_values)
+    configured_args = [
+        str(argument.get("value"))
+        for argument in package_args
+        if isinstance(argument, dict) and argument.get("value")
+    ]
+    public_package = dict(package)
+    if env_vars:
+        public_package["environmentVariables"] = [
+            {
+                **env_var,
+                "configured": bool(config_values.get(str(env_var.get("name") or ""))),
+            }
+            for env_var in env_vars
+        ]
+    secret_config = {"environment": configured_env} if configured_env else {}
+    docker_env_args = [
+        argument
+        for name in configured_env
+        for argument in ("-e", name)
+    ]
+    runtime_config = {
+        "kind": "package",
+        "registryType": "oci",
+        "serverName": server.name,
+        "version": server.version,
+        "installedAt": datetime.now(UTC).isoformat(),
+        "package": public_package,
+        "transport": package.get("transport", {"type": "stdio"}),
+        "command": executable,
+        "args": ["run", "--rm", "-i", *docker_env_args, identifier, *configured_args],
+        "cwd": str(install_path),
+        "requiresConfiguration": False,
+    }
+    write_runtime_manifest(install_path, runtime_config)
+    write_secret_manifest(install_path, secret_config)
+    return MCPRuntimeInstall(
+        install_type="oci",
+        install_path=str(install_path),
+        runtime_config=runtime_config,
+        secret_config=secret_config,
+        status="enabled",
+    )
+
+
+def selected_install_target(server: MCPServerVersion, config_values: dict[str, str]) -> str:
+    remote_headers = [
+        item
+        for remote in server.remotes or []
+        for item in remote.get("headers", [])
+        if isinstance(item, dict)
+    ]
+    package_environment = [
+        item
+        for package in server.packages or []
+        for item in package.get("environmentVariables", [])
+        if isinstance(item, dict)
+    ]
+    package_arguments = [
+        item
+        for package in server.packages or []
+        for item in package.get("packageArguments", [])
+        if isinstance(item, dict)
+    ]
+    config_keys = {key for key, value in config_values.items() if value}
+    package_field_names = set(named_fields([*package_environment, *package_arguments]))
+    remote_field_names = set(named_fields(remote_headers))
+
+    if server.packages and config_keys.intersection(package_field_names):
+        return "package"
+    if server.remotes and (
+        config_keys.intersection(remote_field_names)
+        or any(key.startswith("headers.") for key in config_keys)
+    ):
+        return "remote"
+    if server.packages and not server.remotes:
+        return "package"
+    if server.remotes and not server.packages:
+        return "remote"
+    if server.packages:
+        return "package"
+    return "remote"
+
+
 def build_package_install(
     server: MCPServerVersion,
     install_path: Path,
@@ -500,6 +681,10 @@ def build_package_install(
         return build_npm_install(server, package, install_path, config_values)
     if registry_type == "pypi":
         return build_pypi_install(server, package, install_path, config_values)
+    if registry_type == "uvx":
+        return build_uvx_install(server, package, install_path, config_values)
+    if registry_type == "oci":
+        return build_oci_install(server, package, install_path, config_values)
     raise MCPServerInstallationUnsupportedError(
         f"MCP server package registry is not supported yet: {registry_type or 'unknown'}"
     )
@@ -509,18 +694,21 @@ def install_server_runtime(
     server: MCPServerVersion,
     *,
     config_values: dict[str, str] | None = None,
+    install_target: str | None = None,
     install_root: Path | None = None,
+    config_name: str = "default",
 ) -> MCPRuntimeInstall:
     config_values = config_values or {}
-    install_path = server_install_path(server, install_root)
+    install_path = server_install_path(server, install_root, config_name)
     temporary_path = install_path.with_name(f"{install_path.name}.tmp")
     shutil.rmtree(temporary_path, ignore_errors=True)
     temporary_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        if server.remotes:
+        selected_target = install_target or selected_install_target(server, config_values)
+        if selected_target == "remote" and server.remotes:
             runtime_install = build_remote_install(server, temporary_path, config_values)
-        elif server.packages:
+        elif selected_target == "package" and server.packages:
             runtime_install = build_package_install(server, temporary_path, config_values)
         else:
             raise MCPServerInstallationUnsupportedError(

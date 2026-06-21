@@ -17,6 +17,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/health/live",
         "/api/v1/health/ready",
         "/api/v1/mcp/gateway",
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}",
         "/api/v1/mcp/registry/installed-servers",
         "/api/v1/mcp/registry/installed-servers/updates",
         "/api/v1/mcp/registry/installed-servers/{server_name}",
@@ -80,19 +81,31 @@ def test_auth_openapi_contract() -> None:
 def test_mcp_registry_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     installed = schema["paths"]["/api/v1/mcp/registry/installed-servers"]["get"]
+    installed_config_path = schema["paths"][
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}"
+    ]
     installation_path = schema["paths"]["/api/v1/mcp/registry/installed-servers/{server_name}"]
     install = installation_path["put"]
     uninstall = installation_path["delete"]
     update = schema["paths"]["/api/v1/mcp/registry/installed-servers/updates"]["post"]
-    list_servers = schema["paths"]["/api/v1/mcp/registry/servers"]["get"]
-    get_version = schema["paths"][
+    servers_path = schema["paths"]["/api/v1/mcp/registry/servers"]
+    list_servers = servers_path["get"]
+    create_server = servers_path["post"]
+    version_path = schema["paths"][
         "/api/v1/mcp/registry/servers/{server_name}/versions/{version}"
-    ]["get"]
+    ]
+    get_version = version_path["get"]
+    update_version = version_path["put"]
+    delete_version = version_path["delete"]
 
-    assert set(schema["paths"]["/api/v1/mcp/registry/servers"]) == {"get"}
+    assert set(servers_path) == {"get", "post"}
     assert list_servers["operationId"] == "mcp_registry_list_servers"
     assert list_servers["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPRegistryServerListResponse"
+    }
+    assert create_server["operationId"] == "mcp_registry_create_server_version"
+    assert create_server["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPServerCreate"
     }
     assert installed["operationId"] == "mcp_registry_list_installed_servers"
     assert installed["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -104,11 +117,19 @@ def test_mcp_registry_openapi_contract() -> None:
     }
     assert uninstall["operationId"] == "mcp_registry_uninstall_server"
     assert uninstall["responses"]["204"]["description"] == "Successful Response"
+    assert installed_config_path["delete"]["operationId"] == "mcp_registry_uninstall_server_config"
+    assert installed_config_path["delete"]["responses"]["204"]["description"] == "Successful Response"
     assert update["operationId"] == "mcp_registry_update_installed_servers"
     assert update["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"
     }
     assert get_version["operationId"] == "mcp_registry_get_server_version"
+    assert update_version["operationId"] == "mcp_registry_update_server_version"
+    assert update_version["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPServerCreate"
+    }
+    assert delete_version["operationId"] == "mcp_registry_delete_server_version"
+    assert delete_version["responses"]["204"]["description"] == "Successful Response"
 
 
 def test_mcp_gateway_openapi_contract() -> None:

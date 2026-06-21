@@ -1,4 +1,8 @@
+import { Plus } from "lucide-react";
+import Link from "next/link";
+
 import { AppShell } from "@/app/components/app-shell";
+import { Button } from "@/components/ui/button";
 import type {
   MCPRegistryServerListResponse,
   MCPServerInstallationListResponse,
@@ -47,6 +51,14 @@ export default async function RegistryPage() {
   return (
     <AppShell
       active="registry"
+      actions={
+        <Button asChild size="sm">
+          <Link href="/registry/new">
+            <Plus className="size-4" />
+            Add server
+          </Link>
+        </Button>
+      }
       eyebrow="MCP Registry"
       title="Servers"
     >
