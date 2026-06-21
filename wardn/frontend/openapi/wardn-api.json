@@ -1,0 +1,1215 @@
+{
+  "components": {
+    "schemas": {
+      "BootstrapUserCreate": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "first_name": {
+            "default": "",
+            "maxLength": 150,
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "default": "",
+            "maxLength": 150,
+            "title": "Last Name",
+            "type": "string"
+          },
+          "password": {
+            "format": "password",
+            "minLength": 8,
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "BootstrapUserCreate",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthStatus": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthStatus",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "format": "password",
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MCPRegistryListMetadata": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "nextCursor": {
+            "default": "",
+            "title": "Nextcursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "MCPRegistryListMetadata",
+        "type": "object"
+      },
+      "MCPRegistryOfficialMetadata": {
+        "properties": {
+          "isLatest": {
+            "title": "Islatest",
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "format": "date-time",
+            "title": "Publishedat",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "deprecated",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "statusChangedAt": {
+            "format": "date-time",
+            "title": "Statuschangedat",
+            "type": "string"
+          },
+          "statusMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statusmessage"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "statusChangedAt",
+          "publishedAt",
+          "updatedAt",
+          "isLatest"
+        ],
+        "title": "MCPRegistryOfficialMetadata",
+        "type": "object"
+      },
+      "MCPRegistryResponseMeta": {
+        "properties": {
+          "io.modelcontextprotocol.registry/official": {
+            "$ref": "#/components/schemas/MCPRegistryOfficialMetadata"
+          }
+        },
+        "required": [
+          "io.modelcontextprotocol.registry/official"
+        ],
+        "title": "MCPRegistryResponseMeta",
+        "type": "object"
+      },
+      "MCPRegistryServerListResponse": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/MCPRegistryListMetadata"
+          },
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/MCPRegistryServerResponse"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "servers",
+          "metadata"
+        ],
+        "title": "MCPRegistryServerListResponse",
+        "type": "object"
+      },
+      "MCPRegistryServerResponse": {
+        "properties": {
+          "_meta": {
+            "$ref": "#/components/schemas/MCPRegistryResponseMeta"
+          },
+          "server": {
+            "$ref": "#/components/schemas/MCPServerDocument"
+          }
+        },
+        "required": [
+          "server",
+          "_meta"
+        ],
+        "title": "MCPRegistryServerResponse",
+        "type": "object"
+      },
+      "MCPServerBulkUpdateRequest": {
+        "properties": {
+          "serverNames": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Servernames",
+            "type": "array"
+          }
+        },
+        "required": [
+          "serverNames"
+        ],
+        "title": "MCPServerBulkUpdateRequest",
+        "type": "object"
+      },
+      "MCPServerDocument": {
+        "additionalProperties": true,
+        "properties": {
+          "$schema": {
+            "examples": [
+              "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+            ],
+            "minLength": 1,
+            "title": "$Schema",
+            "type": "string"
+          },
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "icons": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Icons",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 3,
+            "pattern": "^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "packages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Packages",
+            "type": "array"
+          },
+          "remotes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Remotes",
+            "type": "array"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "websiteUrl": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Websiteurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "$schema",
+          "name",
+          "description",
+          "version"
+        ],
+        "title": "MCPServerDocument",
+        "type": "object"
+      },
+      "MCPServerInstallRequest": {
+        "properties": {
+          "configValues": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Configvalues",
+            "type": "object"
+          },
+          "version": {
+            "default": "latest",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "MCPServerInstallRequest",
+        "type": "object"
+      },
+      "MCPServerInstallationListResponse": {
+        "properties": {
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/MCPServerInstallationRead"
+            },
+            "title": "Installations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installations"
+        ],
+        "title": "MCPServerInstallationListResponse",
+        "type": "object"
+      },
+      "MCPServerInstallationRead": {
+        "properties": {
+          "installError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installerror"
+          },
+          "installPath": {
+            "title": "Installpath",
+            "type": "string"
+          },
+          "installType": {
+            "title": "Installtype",
+            "type": "string"
+          },
+          "installedAt": {
+            "format": "date-time",
+            "title": "Installedat",
+            "type": "string"
+          },
+          "installedVersion": {
+            "title": "Installedversion",
+            "type": "string"
+          },
+          "latestServer": {
+            "$ref": "#/components/schemas/MCPServerDocument"
+          },
+          "latestVersion": {
+            "title": "Latestversion",
+            "type": "string"
+          },
+          "runtimeConfig": {
+            "additionalProperties": true,
+            "title": "Runtimeconfig",
+            "type": "object"
+          },
+          "server": {
+            "$ref": "#/components/schemas/MCPServerDocument"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updateAvailable": {
+            "title": "Updateavailable",
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverName",
+          "installedVersion",
+          "latestVersion",
+          "updateAvailable",
+          "status",
+          "installType",
+          "installPath",
+          "runtimeConfig",
+          "installedAt",
+          "updatedAt",
+          "server",
+          "latestServer"
+        ],
+        "title": "MCPServerInstallationRead",
+        "type": "object"
+      },
+      "UserRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "first_name",
+          "last_name",
+          "display_name",
+          "is_active",
+          "is_superuser",
+          "last_login_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "UserRead",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Wardn AI API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "auth_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid email or password."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "auth_logout",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "health_live",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Live",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "health_ready",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/mcp/gateway": {
+      "post": {
+        "operationId": "mcp_gateway_rpc",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mcp Gateway Rpc",
+        "tags": [
+          "mcp-gateway"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-servers": {
+      "get": {
+        "operationId": "mcp_registry_list_installed_servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerInstallationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Installed Mcp Servers",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-servers/updates": {
+      "post": {
+        "operationId": "mcp_registry_update_installed_servers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerInstallationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "One of the selected servers cannot be installed by this Wardn runtime."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "One of the selected servers is not installed or has no latest version."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "One of the selected server installations failed."
+          }
+        },
+        "summary": "Update Installed Mcp Servers",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-servers/{server_name}": {
+      "delete": {
+        "operationId": "mcp_registry_uninstall_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server is not installed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Mcp Server",
+        "tags": [
+          "mcp-registry"
+        ]
+      },
+      "put": {
+        "operationId": "mcp_registry_install_server_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPServerInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerInstallationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server cannot be installed by this Wardn runtime."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server installation failed."
+          }
+        },
+        "summary": "Install Mcp Server Version",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/servers": {
+      "get": {
+        "operationId": "mcp_registry_list_servers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "latest",
+              "title": "Version"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRegistryServerListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Servers",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/servers/{server_name}/versions": {
+      "get": {
+        "operationId": "mcp_registry_list_server_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRegistryServerListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Server Versions",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/servers/{server_name}/versions/{version}": {
+      "get": {
+        "operationId": "mcp_registry_get_server_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_name",
+            "required": true,
+            "schema": {
+              "title": "Server Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRegistryServerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mcp Server Version",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/users/bootstrap": {
+      "post": {
+        "operationId": "users_bootstrap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapUserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A user already exists or the email is already taken."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bootstrap User",
+        "tags": [
+          "users"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "wardn-ai",
+  "private": true,
+  "workspaces": [
+    "wardn/frontend"
+  ],
+  "scripts": {
+    "api:openapi": "cd wardn/backend && python -m app.openapi --output ../frontend/openapi/wardn-api.json",
+    "web:api:generate": "npm run api:openapi && npm --workspace wardn/frontend run api:generate",
+    "web:dev": "npm --workspace wardn/frontend run dev",
+    "web:build": "npm --workspace wardn/frontend run build",
+    "web:lint": "npm --workspace wardn/frontend run lint"
+  }
+}

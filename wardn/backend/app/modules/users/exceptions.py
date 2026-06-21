@@ -1,0 +1,18 @@
+class UserModuleError(Exception):
+    """Base exception for user module failures."""
+
+
+class DuplicateUserError(UserModuleError):
+    pass
+
+
+class BootstrapUserExistsError(UserModuleError):
+    pass
+
+
+class UserNotFoundError(UserModuleError):
+    pass
+
+
+class InvalidLoginError(UserModuleError):
+    pass

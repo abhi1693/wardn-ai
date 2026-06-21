@@ -1,0 +1,100 @@
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
+MCPServerStatus = Literal["active", "deprecated", "deleted"]
+
+
+class MCPServerDocument(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_uri: str = Field(
+        alias="$schema",
+        min_length=1,
+        examples=["https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"],
+    )
+    name: str = Field(min_length=3, max_length=200, pattern=MCP_SERVER_NAME_PATTERN)
+    description: str = Field(min_length=1)
+    title: str = Field(default="", max_length=100)
+    repository: dict[str, Any] | None = None
+    version: str = Field(min_length=1, max_length=255)
+    website_url: str = Field(default="", alias="websiteUrl", max_length=2048)
+    icons: list[dict[str, Any]] = Field(default_factory=list)
+    packages: list[dict[str, Any]] = Field(default_factory=list)
+    remotes: list[dict[str, Any]] = Field(default_factory=list)
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class MCPServerCreate(MCPServerDocument):
+    pass
+
+
+class MCPRegistryOfficialMetadata(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: MCPServerStatus
+    status_changed_at: datetime = Field(alias="statusChangedAt")
+    status_message: str | None = Field(default=None, alias="statusMessage")
+    published_at: datetime = Field(alias="publishedAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    is_latest: bool = Field(alias="isLatest")
+
+
+class MCPRegistryResponseMeta(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    official: MCPRegistryOfficialMetadata = Field(
+        alias="io.modelcontextprotocol.registry/official"
+    )
+
+
+class MCPRegistryServerResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server: MCPServerDocument
+    meta: MCPRegistryResponseMeta = Field(alias="_meta")
+
+
+class MCPRegistryListMetadata(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    count: int
+    next_cursor: str = Field(default="", alias="nextCursor")
+
+
+class MCPRegistryServerListResponse(BaseModel):
+    servers: list[MCPRegistryServerResponse]
+    metadata: MCPRegistryListMetadata
+
+
+class MCPServerInstallRequest(BaseModel):
+    version: str = Field(default="latest", min_length=1, max_length=255)
+    config_values: dict[str, str] = Field(default_factory=dict, alias="configValues")
+
+
+class MCPServerBulkUpdateRequest(BaseModel):
+    server_names: list[str] = Field(alias="serverNames", min_length=1)
+
+
+class MCPServerInstallationRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_name: str = Field(alias="serverName")
+    installed_version: str = Field(alias="installedVersion")
+    latest_version: str = Field(alias="latestVersion")
+    update_available: bool = Field(alias="updateAvailable")
+    status: str
+    install_type: str = Field(alias="installType")
+    install_path: str = Field(alias="installPath")
+    runtime_config: dict[str, Any] = Field(alias="runtimeConfig")
+    install_error: str | None = Field(default=None, alias="installError")
+    installed_at: datetime = Field(alias="installedAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    server: MCPServerDocument
+    latest_server: MCPServerDocument = Field(alias="latestServer")
+
+
+class MCPServerInstallationListResponse(BaseModel):
+    installations: list[MCPServerInstallationRead]

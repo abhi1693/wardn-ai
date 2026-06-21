@@ -1,0 +1,26 @@
+class MCPRegistryError(Exception):
+    pass
+
+
+class DuplicateMCPServerVersionError(MCPRegistryError):
+    pass
+
+
+class MCPServerNotFoundError(MCPRegistryError):
+    pass
+
+
+class MCPServerInstallationNotFoundError(MCPRegistryError):
+    pass
+
+
+class MCPServerInstallationFailedError(MCPRegistryError):
+    pass
+
+
+class MCPServerInstallationUnsupportedError(MCPRegistryError):
+    pass
+
+
+class InvalidRegistryCursorError(MCPRegistryError):
+    pass
