@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import { Save } from "lucide-react";
 
 import { AppShell } from "@/app/components/app-shell";
+import { Button } from "@/components/ui/button";
 
 import { getOrganization, getWorkspaceContext } from "../../data";
 import { OrganizationForm } from "../../organization-form";
@@ -11,8 +13,9 @@ type OrganizationSettingsPageProps = {
 
 export default async function OrganizationSettingsPage({ params }: OrganizationSettingsPageProps) {
   const { organizationId } = await params;
+  const formId = "organization-settings-form";
   const [workspaceContext, organization] = await Promise.all([
-    getWorkspaceContext(),
+    getWorkspaceContext({ organizationId }),
     getOrganization(organizationId),
   ]);
   if (!organization) {
@@ -22,11 +25,17 @@ export default async function OrganizationSettingsPage({ params }: OrganizationS
   return (
     <AppShell
       active="organization-settings"
+      actions={
+        <Button form={formId} size="sm" type="submit">
+          <Save className="size-4" />
+          Save Changes
+        </Button>
+      }
       eyebrow="Organization"
-      title={`${organization.name} settings`}
+      title="Settings"
       workspaceContext={workspaceContext}
     >
-      <OrganizationForm initialOrganization={organization} mode="edit" />
+      <OrganizationForm formId={formId} initialOrganization={organization} mode="edit" />
     </AppShell>
   );
 }

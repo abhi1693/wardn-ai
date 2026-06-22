@@ -1,20 +1,17 @@
 import {
-  Building2,
   BookOpen,
-  Boxes,
   Home,
+  Layers3,
+  Replace,
   Settings,
-  ServerCog,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { workspaceBasePath } from "@/lib/workspace-context";
 import type { WorkspaceContext } from "@/lib/workspace-types";
 
 import { LogoutButton } from "./logout-button";
-import { WorkspaceSelector } from "./workspace-selector";
 
 function organizationNavItems(workspaceContext?: WorkspaceContext) {
   const organizationId = workspaceContext?.selectedOrganization?.id;
@@ -25,7 +22,12 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       activeKey: "dashboard",
       icon: Home,
     },
-    { label: "Registry", href: "/registry", activeKey: "registry", icon: BookOpen },
+    {
+      label: "Registry",
+      href: organizationId ? `/org/${organizationId}/registry` : "/org",
+      activeKey: "registry",
+      icon: BookOpen,
+    },
     ...(organizationId
       ? [
           {
@@ -36,27 +38,6 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
           },
         ]
       : []),
-  ];
-}
-
-function workspaceNavItems(workspaceContext?: WorkspaceContext) {
-  if (!workspaceContext?.selectedWorkspace) {
-    return [];
-  }
-  const basePath = workspaceBasePath(workspaceContext);
-  return [
-    {
-      label: "Overview",
-      href: `${basePath}/dashboard`,
-      activeKey: "workspace-dashboard",
-      icon: Home,
-    },
-    {
-      label: "Installations",
-      href: `${basePath}/install`,
-      activeKey: "install",
-      icon: ServerCog,
-    },
   ];
 }
 
@@ -84,121 +65,107 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const organizationItems = organizationNavItems(workspaceContext);
-  const workspaceItems = workspaceNavItems(workspaceContext);
   const selectedOrganization = workspaceContext?.selectedOrganization;
-  const navGroups = [
-    {
-      label: "Workspace",
-      items: workspaceItems,
-      icon: workspaceContext?.selectedWorkspace ? Boxes : undefined,
-      empty: "Create a workspace to enable MCP navigation.",
-    },
-    {
-      label: "Organization",
-      items: organizationItems,
-    },
-  ];
+  const selectedWorkspace = workspaceContext?.selectedWorkspace;
+  const primaryNavItems = organizationItems.map((item) => ({
+    ...item,
+    active:
+      item.activeKey === active ||
+      (item.activeKey === "dashboard" && (active === "workspace-dashboard" || active === "install")),
+  }));
+  const sectionLabel =
+    active === "dashboard"
+      ? "Workspaces"
+      : active === "registry"
+        ? "Registry"
+        : active === "install"
+          ? "Installations"
+          : active === "workspace-dashboard"
+            ? "Workspace"
+            : active === "organization-settings"
+              ? "Settings"
+              : "Administration";
 
   return (
-    <main className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)] bg-background max-lg:grid-cols-1">
-      <aside className="flex min-h-screen flex-col border-r border-slate-800 bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:min-h-0 max-lg:border-r-0 max-lg:border-b max-lg:border-slate-800">
-        <div className="flex h-10 items-center gap-2 px-2">
-          <div className="flex size-8 items-center justify-center rounded-md bg-white text-xs font-bold text-slate-950">
-            W
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold leading-5 text-white">Wardn AI</div>
-            <div className="text-[11px] font-medium leading-4 text-slate-400">Control plane</div>
+    <main className="min-h-screen bg-[var(--surface)] text-foreground">
+      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[260px] flex-col border-r border-[var(--on-primary-container)]/20 bg-[var(--primary-container)] px-4 py-6 text-[var(--inverse-on-surface)] max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0">
+        <div className="mb-10 px-2">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--primary-fixed-dim)] text-[var(--primary-container)]">
+              <Layers3 className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-xl font-semibold leading-7 text-white">
+                Wardn AI
+              </div>
+            </div>
           </div>
         </div>
 
-        {workspaceContext ? (
-          <div className="mt-4 px-1">
-            <WorkspaceSelector context={workspaceContext} />
-          </div>
-        ) : null}
-
-        <nav className="mt-6 grid gap-6 max-lg:mt-4 max-lg:grid-cols-2 max-md:grid-cols-1" aria-label="Primary">
-          {navGroups.map((group) => {
-            const GroupIcon = group.icon;
+        <nav className="flex-1 space-y-2" aria-label="Primary">
+          {primaryNavItems.map((item) => {
+            const Icon = item.icon;
             return (
-              <div key={group.label}>
-                <div className="mb-2 flex items-center justify-between px-3">
-                  <span className="truncate text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] text-slate-400">
-                    {group.label}
-                  </span>
-                  {GroupIcon ? <GroupIcon className="size-3.5 text-slate-500" /> : null}
-                </div>
-                {group.items.length > 0 ? (
-                  <div className="grid gap-1">
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      const isActive = item.activeKey === active;
-                      const className = cn(
-                        "relative flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-slate-300 transition-colors hover:bg-sidebar-accent hover:text-white",
-                        isActive &&
-                          "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-0 before:top-1.5 before:h-6 before:w-0.5 before:rounded-full before:bg-sky-400"
-                      );
-
-                      return (
-                        <Link className={className} href={item.href} key={item.label}>
-                          <Icon className="size-4" />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-slate-700 px-3 py-3 text-sm text-slate-400">
-                    {group.empty}
-                  </div>
+              <Link
+                className={cn(
+                  "flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white",
+                  item.active &&
+                    "bg-[#d5e3fd] font-semibold text-[#131b2e] hover:bg-[#d5e3fd] hover:text-[#131b2e]"
                 )}
-              </div>
+                href={item.href}
+                key={item.label}
+              >
+                <Icon className="size-4" />
+                <span>{item.label}</span>
+              </Link>
             );
           })}
-
-          <div>
-            <div className="mb-2 px-3 text-[11px] font-semibold uppercase leading-4 tracking-[0.08em] text-slate-400">
-              Admin
-            </div>
-            <Link
-              className={cn(
-                "relative flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-slate-300 transition-colors hover:bg-sidebar-accent hover:text-white",
-                active === "organizations" &&
-                  "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-0 before:top-1.5 before:h-6 before:w-0.5 before:rounded-full before:bg-sky-400"
-              )}
-              href="/organizations"
-            >
-              <Building2 className="size-4" />
-              Manage organizations
-            </Link>
-          </div>
         </nav>
 
-        <div className="mt-auto border-t border-slate-800 pt-4 max-lg:mt-5">
-          <div className="px-3 text-xs leading-5 text-slate-400">
-            {selectedOrganization ? selectedOrganization.name : "No organization selected"}
+        <div className="mt-auto border-t border-[var(--on-primary-container)]/10 pt-6 max-lg:mt-6">
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white"
+            href="/org"
+          >
+            <Replace className="size-4" />
+            Change organization
+          </Link>
+          <div className="mt-4 flex items-center gap-3 px-4">
+            <div className="flex size-8 items-center justify-center rounded-full border border-[var(--on-primary-container)]/20 bg-[var(--tertiary-container)] text-xs font-bold text-[var(--on-tertiary)]">
+              {(selectedOrganization?.name ?? "W").slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-xs font-bold text-[var(--inverse-on-surface)]">
+                {selectedOrganization ? selectedOrganization.name : "No organization"}
+              </div>
+              <div className="truncate text-[10px] text-slate-400">
+                {selectedWorkspace ? selectedWorkspace.name : "Organization context"}
+              </div>
+            </div>
           </div>
         </div>
       </aside>
 
-      <section className="min-w-0 bg-background">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-card/95 px-8 backdrop-blur max-md:h-auto max-md:min-h-16 max-md:flex-col max-md:items-start max-md:px-4 max-md:py-3">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-muted-foreground">
-              {selectedOrganization ? selectedOrganization.name : eyebrow}
-            </p>
-            <h1 className="truncate text-2xl font-semibold leading-8 tracking-normal text-foreground max-md:text-xl">
-              {title}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2 max-md:w-full max-md:flex-wrap">
-            {actions}
-            <LogoutButton />
+      <section className="min-h-screen min-w-0 bg-[var(--surface-bright)] pl-[260px] max-lg:pl-0">
+        <header className="fixed right-0 top-0 z-40 flex h-16 w-[calc(100%-260px)] items-center border-b border-[var(--outline-variant)] bg-[var(--surface)] max-lg:static max-lg:w-full">
+          <div className="flex w-full items-center justify-between gap-4 px-8 max-md:px-4">
+            <div className="flex min-w-0 items-center gap-4">
+              <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)]">
+                {selectedOrganization ? sectionLabel : eyebrow}
+              </span>
+              <span className="text-sm leading-5 text-[var(--on-surface-variant)]">/</span>
+              <h1 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+                {title}
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              {actions}
+              <LogoutButton />
+            </div>
           </div>
         </header>
 
-        <div className="mx-auto w-full max-w-[1440px] px-8 py-7 max-md:px-4 max-md:py-5">
+        <div className="mx-auto min-h-screen w-full max-w-[1440px] px-8 pb-8 pt-24 max-lg:pt-8 max-md:px-4 max-md:pb-4">
           <div className="space-y-6">{children}</div>
         </div>
       </section>

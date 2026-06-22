@@ -55,6 +55,25 @@ function routeWorkspaceContext(request: NextRequest | Request) {
   }
 }
 
+function routeOrganizationContext(request: NextRequest | Request) {
+  const workspaceContext = routeWorkspaceContext(request);
+  if (workspaceContext?.organizationId) {
+    return workspaceContext.organizationId;
+  }
+
+  const referer = request.headers.get("referer");
+  if (!referer) {
+    return "";
+  }
+  try {
+    const pathname = new URL(referer).pathname;
+    const match = pathname.match(/^\/org\/([^/]+)(?:\/|$)/);
+    return decodeURIComponent(match?.[1] ?? "");
+  } catch {
+    return "";
+  }
+}
+
 async function fetchJson<T>(request: Request, path: string): Promise<T | null> {
   try {
     const response = await fetch(`${backendUrl}${path}`, {
@@ -77,13 +96,16 @@ export async function selectedWorkspaceMcpPath(
   suffix: string,
 ) {
   const routeContext = routeWorkspaceContext(request);
+  const routeOrganizationId = routeOrganizationContext(request);
   const organizationsPayload = await fetchJson<{ organizations: Organization[] }>(
     request,
     "/api/v1/organizations"
   );
   const organizations = organizationsPayload?.organizations ?? [];
   const requestedOrganizationId =
-    routeContext?.organizationId || cookieValue(request, selectedOrganizationCookie);
+    routeContext?.organizationId ||
+    routeOrganizationId ||
+    cookieValue(request, selectedOrganizationCookie);
   const organization =
     organizations.find((item) => item.id === requestedOrganizationId) ??
     organizations[0] ??
@@ -116,14 +138,14 @@ export async function selectedOrganizationMcpRegistryPath(
   request: NextRequest | Request,
   suffix: string,
 ) {
-  const routeContext = routeWorkspaceContext(request);
+  const routeOrganizationId = routeOrganizationContext(request);
   const organizationsPayload = await fetchJson<{ organizations: Organization[] }>(
     request,
     "/api/v1/organizations"
   );
   const organizations = organizationsPayload?.organizations ?? [];
   const requestedOrganizationId =
-    routeContext?.organizationId || cookieValue(request, selectedOrganizationCookie);
+    routeOrganizationId || cookieValue(request, selectedOrganizationCookie);
   const organization =
     organizations.find((item) => item.id === requestedOrganizationId) ??
     organizations[0] ??

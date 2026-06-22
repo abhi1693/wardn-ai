@@ -37,6 +37,7 @@ import type {
 type InstalledListClientProps = {
   basePath: string;
   initialInstallations: MCPServerInstallationRead[];
+  organizationId: string;
 };
 
 type ToolInputProperty = {
@@ -68,8 +69,8 @@ type GatewayRpcResponse = {
   };
 };
 
-function detailServerUrl(serverName: string, version: string) {
-  return `/registry/${serverName
+function detailServerUrl(organizationId: string, serverName: string, version: string) {
+  return `/org/${encodeURIComponent(organizationId)}/registry/${serverName
     .split("/")
     .map(encodeURIComponent)
     .join("/")}?version=${encodeURIComponent(version)}`;
@@ -381,7 +382,11 @@ async function loadToolsFromGateway(
   return tools;
 }
 
-export function InstalledListClient({ basePath, initialInstallations }: InstalledListClientProps) {
+export function InstalledListClient({
+  basePath,
+  initialInstallations,
+  organizationId,
+}: InstalledListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
   const [isLoading, setIsLoading] = useState(false);
@@ -649,6 +654,7 @@ export function InstalledListClient({ basePath, initialInstallations }: Installe
                             <Link
                               className="font-medium text-foreground underline-offset-4 hover:underline"
                               href={detailServerUrl(
+                                organizationId,
                                 installation.serverName,
                                 installation.installedVersion
                               )}

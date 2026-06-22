@@ -19,6 +19,8 @@ const SERVER_NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
 let generatedId = 0;
 
 type ServerFormProps = {
+  createSuccessPath?: string;
+  editSuccessPath?: string;
   installBasePath: string;
   initialServer?: MCPServerDocument;
   mode: "create" | "edit";
@@ -458,7 +460,13 @@ function publicPackageArguments(packageArguments: PackageArgumentField[]): Recor
     .filter((argument): argument is Record<string, unknown> => Boolean(argument));
 }
 
-export function ServerForm({ installBasePath, initialServer, mode }: ServerFormProps) {
+export function ServerForm({
+  createSuccessPath,
+  editSuccessPath,
+  installBasePath,
+  initialServer,
+  mode,
+}: ServerFormProps) {
   const router = useRouter();
   const initialRepository = initialServer?.repository as Record<string, unknown> | null | undefined;
   const initialIcon = records(initialServer?.icons)[0];
@@ -682,6 +690,9 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
           response.status === 409 &&
           detail === "server version already exists"
         ) {
+          if (createSuccessPath) {
+            throw new Error("That server version already exists.");
+          }
           router.push(installServerUrl(installBasePath, serverName, version.trim()));
           router.refresh();
           return;
@@ -694,8 +705,8 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
 
       router.push(
         mode === "create"
-          ? installServerUrl(installBasePath, serverName, version.trim())
-          : "/registry"
+          ? createSuccessPath ?? installServerUrl(installBasePath, serverName, version.trim())
+          : editSuccessPath ?? createSuccessPath ?? "/org"
       );
       router.refresh();
     } catch (caught) {
@@ -872,11 +883,6 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {remotes.length === 0 ? (
-            <div className="rounded-md border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
-              No remote endpoints.
-            </div>
-          ) : null}
           {remotes.map((remote, index) => (
             <div className="space-y-4 rounded-md border p-4" key={remote.id}>
               <div className="flex items-center justify-between gap-3">
@@ -981,11 +987,6 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {packages.length === 0 ? (
-            <div className="rounded-md border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
-              No package targets.
-            </div>
-          ) : null}
           {packages.map((packageTarget, index) => (
             <div className="space-y-4 rounded-md border p-4" key={packageTarget.id}>
               <div className="flex items-center justify-between gap-3">
@@ -1159,11 +1160,6 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
                     Add argument
                   </Button>
                 </div>
-                {packageTarget.packageArguments.length === 0 ? (
-                  <div className="rounded-md border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
-                    No runtime arguments.
-                  </div>
-                ) : null}
                 {packageTarget.packageArguments.map((argument) => (
                   <div className="space-y-3 rounded-md border p-3" key={argument.id}>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_140px_auto]">
@@ -1292,7 +1288,7 @@ export function ServerForm({ installBasePath, initialServer, mode }: ServerFormP
       <div className="flex justify-end gap-2">
         <Button
           disabled={isSubmitting}
-          onClick={() => router.push("/registry")}
+          onClick={() => router.push(editSuccessPath ?? createSuccessPath ?? "/org")}
           type="button"
           variant="outline"
         >

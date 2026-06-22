@@ -11,10 +11,11 @@ import {
   workspaceInstallPath,
 } from "@/lib/workspace-context";
 
-import { ServerForm } from "../../server-form";
+import { ServerForm } from "@/app/registry/server-form";
 
 type EditRegistryServerPageProps = {
   params: Promise<{
+    organizationId: string;
     serverName: string[];
   }>;
   searchParams: Promise<{
@@ -49,11 +50,11 @@ export default async function EditRegistryServerPage({
   params,
   searchParams,
 }: EditRegistryServerPageProps) {
-  const { serverName } = await params;
+  const { organizationId, serverName } = await params;
   const { version } = await searchParams;
   const decodedName = serverName.map(decodeURIComponent).join("/");
   const selectedVersion = version || "latest";
-  const workspaceContext = await getWorkspaceContext();
+  const workspaceContext = await getWorkspaceContext({ organizationId });
   const response = await getServer(workspaceContext, decodedName, selectedVersion);
 
   if (!response) {
@@ -70,6 +71,7 @@ export default async function EditRegistryServerPage({
       <ServerForm
         installBasePath={workspaceInstallPath(workspaceContext)}
         initialServer={response.server}
+        editSuccessPath={`/org/${encodeURIComponent(organizationId)}/registry`}
         mode="edit"
       />
     </AppShell>

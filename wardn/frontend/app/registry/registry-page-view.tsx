@@ -10,10 +10,8 @@ import type {
 import {
   backendCookieHeader,
   backendPath,
-  getWorkspaceContext,
   organizationMcpRegistryPath,
   type WorkspaceContext,
-  workspaceInstallPath,
   workspaceMcpRegistryPath,
 } from "@/lib/workspace-context";
 
@@ -60,8 +58,12 @@ async function getInitialInstallations(context: WorkspaceContext) {
   }
 }
 
-export default async function RegistryPage() {
-  const workspaceContext = await getWorkspaceContext();
+type RegistryPageViewProps = {
+  workspaceContext: WorkspaceContext;
+};
+
+export async function RegistryPageView({ workspaceContext }: RegistryPageViewProps) {
+  const organizationId = workspaceContext.selectedOrganization?.id;
   const [serverList, installations] = await Promise.all([
     getInitialServers(workspaceContext),
     getInitialInstallations(workspaceContext),
@@ -72,7 +74,7 @@ export default async function RegistryPage() {
       active="registry"
       actions={
         <Button asChild size="sm">
-          <Link href="/registry/new">
+          <Link href={organizationId ? `/org/${encodeURIComponent(organizationId)}/registry/new` : "/org"}>
             <Plus className="size-4" />
             Add server
           </Link>
@@ -83,10 +85,10 @@ export default async function RegistryPage() {
       workspaceContext={workspaceContext}
     >
       <RegistryListClient
-        installBasePath={workspaceInstallPath(workspaceContext)}
         initialInstallations={installations}
         initialMetadata={serverList.metadata}
         initialServers={serverList.servers}
+        organizationId={organizationId ?? ""}
       />
     </AppShell>
   );

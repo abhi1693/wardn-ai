@@ -32,6 +32,7 @@ import {
 
 type RegistryServerPageProps = {
   params: Promise<{
+    organizationId: string;
     serverName: string[];
   }>;
   searchParams: Promise<{
@@ -144,8 +145,8 @@ function configurationSummary(entry: MCPRegistryServerResponse) {
   };
 }
 
-function editServerUrl(serverName: string, version: string) {
-  return `/registry/edit/${serverName
+function editServerUrl(organizationId: string, serverName: string, version: string) {
+  return `/org/${encodeURIComponent(organizationId)}/registry/edit/${serverName
     .split("/")
     .map(encodeURIComponent)
     .join("/")}?version=${encodeURIComponent(version)}`;
@@ -427,11 +428,11 @@ export default async function RegistryServerPage({
   params,
   searchParams,
 }: RegistryServerPageProps) {
-  const { serverName } = await params;
+  const { organizationId, serverName } = await params;
   const { version } = await searchParams;
   const decodedName = serverName.map(decodeURIComponent).join("/");
   const selectedVersion = version || "latest";
-  const workspaceContext = await getWorkspaceContext();
+  const workspaceContext = await getWorkspaceContext({ organizationId });
   const response = await getServer(workspaceContext, decodedName, selectedVersion);
 
   if (!response) {
@@ -452,7 +453,7 @@ export default async function RegistryServerPage({
       active="registry"
       actions={
         <Button asChild size="sm" variant="outline">
-          <Link href={editServerUrl(response.server.name, response.server.version)}>
+          <Link href={editServerUrl(organizationId, response.server.name, response.server.version)}>
             <Pencil className="size-4" />
             Edit
           </Link>

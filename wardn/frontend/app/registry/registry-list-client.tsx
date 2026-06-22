@@ -7,7 +7,6 @@ import {
   Package,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
 } from "lucide-react";
@@ -59,10 +58,6 @@ function preferredIcon(entry: MCPRegistryServerResponse) {
   return stringValue(icon?.src);
 }
 
-function repository(entry: MCPRegistryServerResponse) {
-  return entry.server.repository as Record<string, unknown> | null | undefined;
-}
-
 function runtimeDisplayName(value: string) {
   const normalized = value.trim().toLowerCase();
   if (normalized === "uvx") {
@@ -86,66 +81,82 @@ function runtimeDisplayName(value: string) {
   return value || "Package";
 }
 
-function deliveryDetails(entry: MCPRegistryServerResponse) {
-  const firstPackage = entry.server.packages?.[0] as Record<string, unknown> | undefined;
-  const firstRemote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
+function deliveryTargets(entry: MCPRegistryServerResponse) {
+  const targets = [
+    ...(entry.server.remotes ?? []).map((remote) => {
+      const remoteTarget = remote as Record<string, unknown>;
+      const type = stringValue(remoteTarget.type) || "remote";
+      const url = stringValue(remoteTarget.url);
+      return {
+        icon: Network,
+        label: runtimeDisplayName(type),
+        detail: url ? displayHost(url) : "",
+      };
+    }),
+    ...(entry.server.packages ?? []).map((packageDefinition) => {
+      const packageTarget = packageDefinition as Record<string, unknown>;
+      const registryType = stringValue(packageTarget.registryType) || "package";
+      return {
+        icon: Package,
+        label: runtimeDisplayName(registryType),
+        detail: stringValue(packageTarget.identifier),
+      };
+    }),
+  ];
 
-  if (firstRemote) {
-    const type = stringValue(firstRemote.type) || "remote";
-    const url = stringValue(firstRemote.url);
-    return {
-      icon: Network,
-      primary: runtimeDisplayName(type),
-      secondary: url ? displayHost(url) : "",
-      count:
-        entry.server.remotes && entry.server.remotes.length > 1
-          ? `${entry.server.remotes.length} endpoints`
-          : "",
-    };
-  }
-
-  if (firstPackage) {
-    const registryType = stringValue(firstPackage.registryType) || "package";
-    const identifier = stringValue(firstPackage.identifier);
-    return {
-      icon: Package,
-      primary: runtimeDisplayName(registryType),
-      secondary: identifier,
-      count:
-        entry.server.packages && entry.server.packages.length > 1
-          ? `${entry.server.packages.length} packages`
-          : "",
-    };
-  }
-
-  return {
-    icon: Package,
-    primary: "Unspecified",
-    secondary: "",
-    count: "",
-  };
-}
-
-function detailServerUrl(serverName: string, version: string) {
-  return `/registry/${serverName
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}?version=${encodeURIComponent(version)}`;
-}
-
-function editServerUrl(serverName: string, version: string) {
-  return `/registry/edit/${serverName
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}?version=${encodeURIComponent(version)}`;
-}
-
-function installServerUrl(basePath: string, serverName: string, version: string) {
-  const params = new URLSearchParams({
-    serverName,
-    version,
+  const seen = new Set<string>();
+  const uniqueTargets = targets.filter((target) => {
+    const key = target.label.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
   });
-  return `${basePath}/new?${params.toString()}`;
+
+  return uniqueTargets.length > 0
+    ? uniqueTargets
+    : [{ icon: Package, label: "Unspecified", detail: "" }];
+}
+
+function runtimeBadgeClass(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.includes("http") || normalized.includes("sse")) {
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  }
+  if (normalized === "uvx" || normalized.includes("pypi")) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (normalized === "npm") {
+    return "border-amber-200 bg-amber-50 text-amber-800";
+  }
+  if (normalized === "oci") {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+  if (normalized.includes("remote")) {
+    return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  }
+  return "border-slate-200 bg-slate-100 text-slate-700";
+}
+
+function detailServerUrl(organizationId: string, serverName: string, version: string) {
+  return `/org/${encodeURIComponent(organizationId)}/registry/${serverName
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}?version=${encodeURIComponent(version)}`;
+}
+
+function editServerUrl(organizationId: string, serverName: string, version: string) {
+  return `/org/${encodeURIComponent(organizationId)}/registry/edit/${serverName
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}?version=${encodeURIComponent(version)}`;
+}
+
+function newServerVersionUrl(organizationId: string, serverName: string, version: string) {
+  const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
+  const basePath = `/org/${encodeURIComponent(organizationId)}/registry/new-version/${encodedName}`;
+  return `${basePath}?version=${encodeURIComponent(version)}`;
 }
 
 function serverVersionUrl(serverName: string, version: string) {
@@ -164,17 +175,17 @@ async function responseErrorMessage(response: Response, fallback: string) {
 }
 
 type RegistryListClientProps = {
-  installBasePath: string;
   initialInstallations: MCPServerInstallationRead[];
   initialMetadata: MCPRegistryListMetadata;
   initialServers: MCPRegistryServerResponse[];
+  organizationId: string;
 };
 
 export function RegistryListClient({
-  installBasePath,
   initialInstallations,
   initialMetadata,
   initialServers,
+  organizationId,
 }: RegistryListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
@@ -188,7 +199,6 @@ export function RegistryListClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [selectedUpdates, setSelectedUpdates] = useState<Set<string>>(new Set());
 
   const installationsByName = useMemo(
     () => {
@@ -280,36 +290,6 @@ export function RegistryListClient({
     });
   }
 
-  async function updateSelected() {
-    const serverNames = Array.from(selectedUpdates);
-    if (serverNames.length === 0) {
-      return;
-    }
-
-    setIsMutating(true);
-    setError("");
-    setNotice("");
-    try {
-      const response = await fetch("/api/mcp/registry/installed-servers/updates", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ serverNames }),
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to update servers"));
-      }
-      setSelectedUpdates(new Set());
-      setNotice(`${serverNames.length} server${serverNames.length === 1 ? "" : "s"} updated.`);
-      await loadServers();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The selected servers could not be updated.");
-    } finally {
-      setIsMutating(false);
-    }
-  }
-
   async function deleteServerVersion(serverName: string, version: string) {
     setIsMutating(true);
     setError("");
@@ -321,11 +301,6 @@ export function RegistryListClient({
       if (!response.ok) {
         throw new Error(await responseErrorMessage(response, "Failed to delete server."));
       }
-      setSelectedUpdates((current) => {
-        const next = new Set(current);
-        next.delete(serverName);
-        return next;
-      });
       setNotice("Server deleted.");
       await loadServers();
     } catch (caught) {
@@ -335,24 +310,12 @@ export function RegistryListClient({
     }
   }
 
-  function toggleSelected(serverName: string) {
-    setSelectedUpdates((current) => {
-      const next = new Set(current);
-      if (next.has(serverName)) {
-        next.delete(serverName);
-      } else {
-        next.add(serverName);
-      }
-      return next;
-    });
-  }
-
   const pageNumber = previousCursors.length + 1;
   const pageStart = servers.length > 0 ? previousCursors.length * PAGE_SIZE + 1 : 0;
   const pageEnd = previousCursors.length * PAGE_SIZE + servers.length;
   const paginationControls = (
-    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-      <div className="text-muted-foreground">
+    <div className="mt-6 flex flex-wrap items-center justify-between gap-3 px-2 text-sm">
+      <div className="text-[var(--on-surface-variant)]">
         {servers.length > 0 ? (
           <>
             Showing {pageStart}-{pageEnd}
@@ -373,7 +336,9 @@ export function RegistryListClient({
           <ChevronLeft className="size-4" />
           Previous
         </Button>
-        <div className="min-w-16 text-center text-muted-foreground">Page {pageNumber}</div>
+        <div className="min-w-16 text-center text-sm font-medium text-[var(--on-surface-variant)]">
+          Page {pageNumber}
+        </div>
         <Button
           disabled={isLoading || !nextCursor}
           onClick={loadNextPage}
@@ -389,66 +354,69 @@ export function RegistryListClient({
   );
 
   return (
-    <div className="space-y-4">
+    <div>
       <form
-        className="flex flex-wrap items-end justify-between gap-3 rounded-md border bg-background p-3"
+        className="mb-6 rounded-lg border border-[var(--outline-variant)] bg-white p-6"
         onSubmit={handleSearch}
       >
-        <div className="grid min-w-72 flex-1 gap-2">
-          <Label htmlFor="registry-search">Search</Label>
-          <Input
-            id="registry-search"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Name, title, or description"
-            type="search"
-            value={search}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={isLoading} type="submit" variant="outline">
-            <Search className="size-4" />
-            {isLoading ? "Searching" : "Search"}
-          </Button>
-          <Button
-            disabled={isMutating || selectedUpdates.size === 0}
-            onClick={updateSelected}
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw className="size-4" />
-            Update selected
-          </Button>
+        <div className="flex flex-col gap-4">
+          <Label className="text-[var(--on-surface-variant)]" htmlFor="registry-search">
+            Search
+          </Label>
+          <div className="flex gap-4 max-md:flex-col">
+            <Input
+              className="h-10 flex-1 rounded border-[var(--outline-variant)] bg-white shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+              id="registry-search"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Name, title, or description"
+              type="search"
+              value={search}
+            />
+            <Button className="h-10 px-6" disabled={isLoading} type="submit" variant="outline">
+              <Search className="size-4" />
+              {isLoading ? "Searching" : "Search"}
+            </Button>
+          </div>
         </div>
       </form>
 
-      {paginationControls}
-
       {error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
           {notice}
         </div>
       ) : null}
 
-      <Card>
+      <Card className="overflow-hidden rounded-b-xl rounded-t-none border-[var(--outline-variant)] border-t-0 bg-white shadow-[var(--shadow-card)]">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-[44px]"></TableHead>
-                <TableHead className="min-w-[360px]">Server</TableHead>
-                <TableHead className="w-[230px]">Runtime</TableHead>
-                <TableHead className="w-[170px]"></TableHead>
+              <TableRow className="border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-low)]">
+                <TableHead className="min-w-[360px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                  Server Name
+                </TableHead>
+                <TableHead className="w-[260px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                  Runtime
+                </TableHead>
+                <TableHead className="w-[150px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                  Version
+                </TableHead>
+                <TableHead className="w-[150px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                  Installations
+                </TableHead>
+                <TableHead className="w-[180px] bg-transparent px-6 py-4 text-right text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {servers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-32 text-center text-[var(--on-surface-variant)]">
                     {isLoading
                       ? "Loading registry entries"
                       : "No supported MCP servers are registered yet"}
@@ -457,28 +425,19 @@ export function RegistryListClient({
               ) : (
                 servers.map((entry) => {
                   const serverInstallations = installationsByName.get(entry.server.name) ?? [];
-                  const isInstalled = serverInstallations.length > 0;
                   const updateAvailable = serverInstallations.some(
                     (currentInstallation) => currentInstallation.updateAvailable
                   );
                   const iconUrl = preferredIcon(entry);
-                  const distribution = deliveryDetails(entry);
-                  const DistributionIcon = distribution.icon;
+                  const runtimes = deliveryTargets(entry);
                   return (
-                    <TableRow key={`${entry.server.name}:${entry.server.version}`}>
-                      <TableCell>
-                        <input
-                          aria-label={`Select ${entry.server.name} for update`}
-                          checked={selectedUpdates.has(entry.server.name)}
-                          className="size-4 rounded border-input"
-                          disabled={!updateAvailable || isMutating}
-                          onChange={() => toggleSelected(entry.server.name)}
-                          type="checkbox"
-                        />
-                      </TableCell>
-                      <TableCell>
+                    <TableRow
+                      className="border-b border-[var(--outline-variant)] transition-colors hover:bg-[var(--surface-container-low)]"
+                      key={`${entry.server.name}:${entry.server.version}`}
+                    >
+                      <TableCell className="px-6 py-4">
                         <div className="flex items-start gap-3">
-                          <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+                          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--primary-container)] text-white">
                             {iconUrl ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
@@ -488,66 +447,83 @@ export function RegistryListClient({
                                 src={iconUrl}
                               />
                             ) : (
-                              <Package className="size-4 text-muted-foreground" />
+                              <Package className="size-4" />
                             )}
                           </div>
-                          <div className="min-w-0 py-0.5">
+                          <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <Link
-                                className="font-medium text-foreground underline-offset-4 hover:underline"
-                                href={detailServerUrl(entry.server.name, entry.server.version)}
+                                className="font-semibold text-primary underline-offset-4 hover:underline"
+                                href={detailServerUrl(
+                                  organizationId,
+                                  entry.server.name,
+                                  entry.server.version
+                                )}
                               >
                                 {entry.server.title || entry.server.name}
                               </Link>
-                              {entry.server.repository ? (
-                                <Badge variant="outline" className="font-normal">
-                                  {stringValue(repository(entry)?.source) || "source"}
-                                </Badge>
-                              ) : null}
                             </div>
-                            <div className="mt-0.5 break-all text-xs text-muted-foreground">
+                            <div className="mt-0.5 break-all text-[11px] text-[var(--on-surface-variant)]">
                               {entry.server.name}
                             </div>
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-6 py-4">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="gap-1.5 font-normal">
-                            <DistributionIcon className="size-3.5" />
-                            {distribution.primary}
-                          </Badge>
-                          {isInstalled ? (
-                            <Badge variant="outline" className="font-normal">
-                              {serverInstallations.length} config
-                              {serverInstallations.length === 1 ? "" : "s"}
-                            </Badge>
-                          ) : null}
+                          {runtimes.map((runtime) => {
+                            const RuntimeIcon = runtime.icon;
+                            return (
+                              <Badge
+                                className={`gap-1.5 rounded px-2 py-1 text-xs font-medium ${runtimeBadgeClass(
+                                  runtime.label
+                                )}`}
+                                key={runtime.label}
+                                title={runtime.detail || runtime.label}
+                                variant="outline"
+                              >
+                                <RuntimeIcon className="size-3.5" />
+                                {runtime.label}
+                              </Badge>
+                            );
+                          })}
                           {updateAvailable ? (
-                            <Badge variant="outline" className="font-normal">
+                            <Badge className="font-normal" variant="outline">
                               Update available
                             </Badge>
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-6 py-4 text-sm font-medium text-[var(--on-surface)]">
+                        {entry.server.version || "-"}
+                      </TableCell>
+                      <TableCell className="px-6 py-4 text-sm font-medium text-[var(--on-surface)]">
+                        {serverInstallations.length > 0 ? serverInstallations.length : "-"}
+                      </TableCell>
+                      <TableCell className="px-6 py-4 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
-                          <Button asChild size="icon" variant="outline">
+                          <Button asChild size="icon" variant="ghost">
                             <Link
-                              aria-label={`Add installation for ${entry.server.name}`}
-                              href={installServerUrl(
-                                installBasePath,
+                              aria-label={`Add version for ${entry.server.name}`}
+                              href={newServerVersionUrl(
+                                organizationId,
                                 entry.server.name,
                                 entry.server.version
                               )}
+                              title="Add new version"
                             >
                               <Plus className="size-4" />
                             </Link>
                           </Button>
-                          <Button asChild size="icon" variant="outline">
+                          <Button asChild size="icon" variant="ghost">
                             <Link
                               aria-label={`Edit ${entry.server.name}`}
-                              href={editServerUrl(entry.server.name, entry.server.version)}
+                              href={editServerUrl(
+                                organizationId,
+                                entry.server.name,
+                                entry.server.version
+                              )}
+                              title="Edit server"
                             >
                               <Pencil className="size-4" />
                             </Link>
@@ -557,8 +533,9 @@ export function RegistryListClient({
                             disabled={isMutating}
                             onClick={() => deleteServerVersion(entry.server.name, entry.server.version)}
                             size="icon"
+                            title="Delete server"
                             type="button"
-                            variant="outline"
+                            variant="ghost"
                           >
                             <Trash2 className="size-4" />
                           </Button>

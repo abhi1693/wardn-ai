@@ -81,18 +81,18 @@ export async function getWorkspaceContext(
   const workspaces = workspacePayloads.flatMap((payload) => payload?.workspaces ?? []);
   const selectedWorkspaceId =
     selection.workspaceId ?? cookieStore.get(selectedWorkspaceCookie)?.value;
+  const requestedOrganization =
+    organizations.find((organization) => organization.id === selectedOrganizationId) ?? null;
+  const workspaceCandidates = requestedOrganization
+    ? workspaces.filter((workspace) => workspace.organizationId === requestedOrganization.id)
+    : workspaces;
   const selectedWorkspace =
-    workspaces.find(
-      (workspace) =>
-        workspace.id === selectedWorkspaceId &&
-        (!selection.organizationId || workspace.organizationId === selection.organizationId)
-    ) ??
-    workspaces.find((workspace) => workspace.organizationId === selectedOrganizationId) ??
-    workspaces[0] ??
+    workspaceCandidates.find((workspace) => workspace.id === selectedWorkspaceId) ??
+    workspaceCandidates[0] ??
     null;
   const selectedOrganization =
+    requestedOrganization ??
     organizations.find((organization) => organization.id === selectedWorkspace?.organizationId) ??
-    organizations.find((organization) => organization.id === selectedOrganizationId) ??
     organizations[0] ??
     null;
 

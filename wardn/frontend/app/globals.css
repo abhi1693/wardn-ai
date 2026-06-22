@@ -74,6 +74,16 @@
   --outline: #76777d;
   --outline-variant: #c6c6cd;
   --surface-tint: #565e74;
+  --primary-container: #131b2e;
+  --on-primary-container: #7c839b;
+  --primary-fixed: #dae2fd;
+  --primary-fixed-dim: #bec6e0;
+  --on-primary-fixed: #131b2e;
+  --on-primary-fixed-variant: #3f465c;
+  --secondary-container: #d5e3fd;
+  --on-secondary-container: #57657b;
+  --tertiary-container: #0b1c30;
+  --on-tertiary: #ffffff;
   --electric-blue: #0284c7;
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04);
   --shadow-float: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
