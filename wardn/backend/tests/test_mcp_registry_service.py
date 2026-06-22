@@ -597,6 +597,63 @@ async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+    cached_tool = MCPServerToolSchema(
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        tool_name="list_servers",
+        title="List servers",
+        description="List compute servers",
+        input_schema={"type": "object"},
+        output_schema=None,
+        annotations={},
+        source_hash="hash",
+        is_active=True,
+    )
+    refreshed = {}
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        refreshed["installation"] = kwargs["installation"]
+        refreshed["server"] = kwargs["server"]
+
+    async def list_active_tool_schemas(*args, **kwargs):
+        return [cached_tool]
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+    monkeypatch.setattr(
+        service.tool_repository,
+        "list_active_tool_schemas",
+        list_active_tool_schemas,
+    )
+
+    response = await service.list_installation_tools(FakeSession(), installation.id)
+
+    assert response.cache == {"mode": "live-refresh", "refreshed": True}
+    assert response.tools[0].tool_name == "list_servers"
+    assert refreshed == {"installation": installation, "server": server}
+
+
+@pytest.mark.asyncio
 async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",

@@ -229,7 +229,7 @@ def open_stdio_session(
         raise
 
 
-def list_tools(url: str, headers: dict[str, str], *, max_pages: int = 5) -> list[dict[str, Any]]:
+def list_tools(url: str, headers: dict[str, str], *, max_pages: int = 100) -> list[dict[str, Any]]:
     session = open_remote_session(url, headers)
     tools: list[dict[str, Any]] = []
     cursor = None
@@ -259,7 +259,7 @@ def list_stdio_tools(
     *,
     cwd: str,
     environment: dict[str, str],
-    max_pages: int = 5,
+    max_pages: int = 100,
 ) -> list[dict[str, Any]]:
     session = open_stdio_session(command, args, cwd=cwd, environment=environment)
     try:

@@ -59,6 +59,7 @@ type GatewayRpcResponse = {
         description?: string;
         inputSchema?: Record<string, unknown>;
       }>;
+      nextCursor?: string;
     };
   };
   error?: {
@@ -268,48 +269,61 @@ async function responseErrorMessage(response: Response, fallback: string) {
 async function loadToolsFromGateway(
   installation: MCPServerInstallationRead
 ): Promise<MCPServerToolRead[]> {
-  const response = await fetch("/api/mcp/gateway", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: {
-        name: "search_mcp_tools",
-        arguments: {
-          serverName: installation.serverName,
-          limit: 25,
-        },
+  const tools: MCPServerToolRead[] = [];
+  let cursor = "";
+  let requestId = 1;
+
+  do {
+    const response = await fetch("/api/mcp/gateway", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
       },
-    }),
-    cache: "no-store",
-  });
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: requestId,
+        method: "tools/call",
+        params: {
+          name: "search_mcp_tools",
+          arguments: {
+            serverName: installation.serverName,
+            limit: 25,
+            ...(cursor ? { cursor } : {}),
+          },
+        },
+      }),
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, "Tools could not be loaded."));
-  }
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, "Tools could not be loaded."));
+    }
 
-  const payload = (await response.json()) as GatewayRpcResponse;
-  if (payload.error?.message) {
-    throw new Error(payload.error.message);
-  }
+    const payload = (await response.json()) as GatewayRpcResponse;
+    if (payload.error?.message) {
+      throw new Error(payload.error.message);
+    }
 
-  const tools = payload.result?.structuredContent?.tools ?? [];
-  return tools
-    .filter((tool) => typeof tool.toolName === "string" && tool.toolName.trim())
-    .map((tool) => ({
-      serverName: tool.serverName || installation.serverName,
-      serverVersion: installation.installedVersion,
-      toolName: tool.toolName || "",
-      title: tool.title || tool.toolName || "",
-      description: tool.description || "",
-      inputSchema: tool.inputSchema || { type: "object" },
-      outputSchema: undefined,
-      annotations: {},
-    }));
+    const pageTools = payload.result?.structuredContent?.tools ?? [];
+    tools.push(
+      ...pageTools
+        .filter((tool) => typeof tool.toolName === "string" && tool.toolName.trim())
+        .map((tool) => ({
+          serverName: tool.serverName || installation.serverName,
+          serverVersion: installation.installedVersion,
+          toolName: tool.toolName || "",
+          title: tool.title || tool.toolName || "",
+          description: tool.description || "",
+          inputSchema: tool.inputSchema || { type: "object" },
+          outputSchema: undefined,
+          annotations: {},
+        }))
+    );
+    cursor = payload.result?.structuredContent?.nextCursor ?? "";
+    requestId += 1;
+  } while (cursor);
+
+  return tools;
 }
 
 export function InstalledListClient({ initialInstallations }: InstalledListClientProps) {
@@ -322,6 +336,7 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [toolLoadError, setToolLoadError] = useState("");
+  const [toolSearch, setToolSearch] = useState("");
   const [validationArgumentError, setValidationArgumentError] = useState("");
   const [validationInstallation, setValidationInstallation] =
     useState<MCPServerInstallationRead | null>(null);
@@ -353,6 +368,17 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
     () => inputProperties(selectedValidationTool?.inputSchema),
     [selectedValidationTool]
   );
+  const filteredValidationTools = useMemo(() => {
+    const query = toolSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return validationTools;
+    }
+    return validationTools.filter((tool) =>
+      [tool.title, tool.toolName, tool.description]
+        .filter(Boolean)
+        .some((value) => value.toLocaleLowerCase().includes(query))
+    );
+  }, [toolSearch, validationTools]);
 
   async function loadInstallations() {
     setIsLoading(true);
@@ -407,6 +433,7 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
     setValidationToolName("");
     setValidationArgumentValues({});
     setValidationTools([]);
+    setToolSearch("");
     setValidationResult(null);
     setValidationArgumentError("");
     setError("");
@@ -651,6 +678,7 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
                   setValidationInstallation(null);
                   setValidationTools([]);
                   setValidationToolName("");
+                  setToolSearch("");
                   setValidationArgumentValues({});
                   setValidationResult(null);
                 }}
@@ -663,7 +691,14 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
 
             <div className="grid gap-4 lg:grid-cols-[minmax(260px,360px)_minmax(0,1fr)]">
               <div className="space-y-2">
-                <div className="text-sm font-medium">Tools</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium">Tools</div>
+                  {validationTools.length > 0 ? (
+                    <div className="text-xs text-muted-foreground">
+                      {filteredValidationTools.length} of {validationTools.length}
+                    </div>
+                  ) : null}
+                </div>
                 {isLoadingTools ? (
                   <div className="rounded-md border p-4 text-sm text-muted-foreground">
                     Loading tools from the installed server...
@@ -677,26 +712,40 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
                     No tools were discovered for this server.
                   </div>
                 ) : (
-                  <div className="max-h-96 overflow-auto rounded-md border">
-                    {validationTools.map((tool) => (
-                      <button
-                        className={
-                          tool.toolName === validationToolName
-                            ? "block w-full border-b bg-accent px-3 py-2 text-left last:border-b-0"
-                            : "block w-full border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted"
-                        }
-                        key={tool.toolName}
-                        onClick={() => selectValidationTool(tool)}
-                        type="button"
-                      >
-                        <div className="text-sm font-medium">
-                          {tool.title || tool.toolName}
+                  <div className="space-y-2">
+                    <Input
+                      aria-label="Search tools"
+                      onChange={(event) => setToolSearch(event.target.value)}
+                      placeholder="Search tools"
+                      value={toolSearch}
+                    />
+                    <div className="max-h-96 overflow-auto rounded-md border">
+                      {filteredValidationTools.length === 0 ? (
+                        <div className="p-4 text-sm text-muted-foreground">
+                          No tools match this search.
                         </div>
-                        <div className="mt-0.5 break-all text-xs text-muted-foreground">
-                          {tool.toolName}
-                        </div>
-                      </button>
-                    ))}
+                      ) : (
+                        filteredValidationTools.map((tool) => (
+                          <button
+                            className={
+                              tool.toolName === validationToolName
+                                ? "block w-full border-b bg-accent px-3 py-2 text-left last:border-b-0"
+                                : "block w-full border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted"
+                            }
+                            key={tool.toolName}
+                            onClick={() => selectValidationTool(tool)}
+                            type="button"
+                          >
+                            <div className="text-sm font-medium">
+                              {tool.title || tool.toolName}
+                            </div>
+                            <div className="mt-0.5 break-all text-xs text-muted-foreground">
+                              {tool.toolName}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

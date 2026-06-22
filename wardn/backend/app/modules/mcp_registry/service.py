@@ -442,19 +442,11 @@ async def list_installation_tools(
     if server is None:
         raise MCPServerNotFoundError("installed server version not found")
 
-    refreshed = False
-    tool_count = await tool_repository.count_active_tool_schemas(
+    await refresh_tool_schemas_for_installation(
         session,
-        server_name=server.name,
-        server_version=server.version,
+        installation=installation,
+        server=server,
     )
-    if tool_count == 0:
-        await refresh_tool_schemas_for_installation(
-            session,
-            installation=installation,
-            server=server,
-        )
-        refreshed = True
 
     tools = await tool_repository.list_active_tool_schemas(
         session,
@@ -467,8 +459,8 @@ async def list_installation_tools(
         server_version=server.version,
         tools=[tool_schema_response(tool) for tool in tools],
         cache={
-            "mode": "cached-with-refresh" if refreshed else "cached",
-            "refreshed": refreshed,
+            "mode": "live-refresh",
+            "refreshed": True,
         },
     )
 
