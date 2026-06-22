@@ -30,7 +30,7 @@ export function OrganizationSelectClient({ organizations }: OrganizationSelectCl
   function selectOrganization(organizationId: string) {
     setSelectionCookie(selectedOrganizationCookie, organizationId);
     setSelectionCookie(selectedWorkspaceCookie, "", 0);
-    router.push(`/org/${encodeURIComponent(organizationId)}/workspaces`);
+    router.push(`/org/${encodeURIComponent(organizationId)}/dashboard`);
     router.refresh();
   }
 

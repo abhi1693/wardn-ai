@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Boxes,
   Home,
   Layers3,
   Replace,
@@ -17,10 +18,16 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
   const organizationId = workspaceContext?.selectedOrganization?.id;
   return [
     {
+      label: "Dashboard",
+      href: organizationId ? `/org/${organizationId}/dashboard` : "/org",
+      activeKey: "org-dashboard",
+      icon: Home,
+    },
+    {
       label: "Workspaces",
       href: organizationId ? `/org/${organizationId}/workspaces` : "/org",
-      activeKey: "dashboard",
-      icon: Home,
+      activeKey: "workspaces",
+      icon: Boxes,
     },
     {
       label: "Registry",
@@ -44,6 +51,8 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
 type AppShellProps = {
   active:
     | "dashboard"
+    | "org-dashboard"
+    | "workspaces"
     | "organizations"
     | "organization-settings"
     | "workspace-dashboard"
@@ -71,10 +80,12 @@ export function AppShell({
     ...item,
     active:
       item.activeKey === active ||
-      (item.activeKey === "dashboard" && (active === "workspace-dashboard" || active === "install")),
+      (item.activeKey === "workspaces" && (active === "workspace-dashboard" || active === "install")),
   }));
   const sectionLabel =
-    active === "dashboard"
+    active === "org-dashboard"
+      ? "Dashboard"
+      : active === "dashboard" || active === "workspaces"
       ? "Workspaces"
       : active === "registry"
         ? "Registry"

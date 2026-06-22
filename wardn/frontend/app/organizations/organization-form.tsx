@@ -75,7 +75,7 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
     const organization = (await response.json()) as OrganizationRead;
     setSelectionCookie(selectedOrganizationCookie, organization.id);
     setSelectionCookie(selectedWorkspaceCookie, "", 0);
-    router.push(`/org/${encodeURIComponent(organization.id)}/workspaces`);
+    router.push(`/org/${encodeURIComponent(organization.id)}/dashboard`);
     router.refresh();
   }
 

@@ -37,18 +37,7 @@ export function WorkspacesOverviewClient({
   }
 
   return (
-    <div className="space-y-10">
-      <section>
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-[0.18em] text-[var(--on-surface-variant)]">
-            Infrastructure Management
-          </p>
-          <h2 className="text-4xl font-bold leading-[44px] tracking-normal text-primary">
-            Overview
-          </h2>
-        </div>
-      </section>
-
+    <div className="space-y-6">
       <section className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5">
         {workspaces.map((workspace, index) => (
           <button
