@@ -567,7 +567,11 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
       setPackages(metadataPackages);
       setRemotes(metadataRemotes);
       setSourceImportMessage(
-        metadata.source === "server.json" ? "Registry document loaded." : "Repository metadata loaded."
+        metadata.source === "server.json"
+          ? "Registry document loaded."
+          : metadata.source === "mcp.json"
+            ? "MCP client configuration loaded."
+            : "Repository metadata loaded."
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Source metadata could not be loaded.");

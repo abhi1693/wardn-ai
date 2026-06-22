@@ -37,6 +37,16 @@ type ServerDocument = {
   remotes?: unknown[];
 };
 
+type MCPClientServerConfig = {
+  command?: unknown;
+  args?: unknown;
+  env?: unknown;
+};
+
+type MCPClientConfig = {
+  mcpServers?: unknown;
+};
+
 function parseGitHubRepositoryUrl(value: string) {
   try {
     const url = new URL(value.includes("://") ? value : `https://${value}`);
@@ -248,6 +258,138 @@ function normalizeServerJson(
   }
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function commandName(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().split(/[\\/]/).pop()?.toLowerCase() || "";
+}
+
+function secretEnvironmentName(name: string) {
+  return /(secret|token|password|credential|credentials|key|private)/i.test(name);
+}
+
+function environmentVariablesFromMcpEnv(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  return Object.entries(value).map(([name, rawValue]) => {
+    const defaultValue = typeof rawValue === "string" ? rawValue : "";
+    return {
+      name,
+      description: `Environment variable from mcp.json: ${name}`,
+      default: defaultValue,
+      isRequired: defaultValue.trim() === "",
+      isSecret: secretEnvironmentName(name),
+      format: "string",
+    };
+  });
+}
+
+function packageTargetFromMcpServer(
+  serverConfig: MCPClientServerConfig,
+  releaseVersion: string
+) {
+  const command = commandName(serverConfig.command);
+  const args = stringArray(serverConfig.args);
+
+  if (command === "uvx") {
+    const identifierIndex = args.findIndex((arg) => arg && !arg.startsWith("-"));
+    const identifier = identifierIndex >= 0 ? args[identifierIndex] : "";
+    if (!identifier) {
+      return null;
+    }
+
+    return {
+      registryType: "uvx",
+      identifier,
+      version: releaseVersion || "latest",
+      transport: { type: "stdio" },
+      environmentVariables: environmentVariablesFromMcpEnv(serverConfig.env),
+      packageArguments: args
+        .filter((_, index) => index !== identifierIndex)
+        .map((arg) => ({ value: arg })),
+    };
+  }
+
+  if (command === "npx") {
+    const identifierIndex = args.findIndex((arg) => arg && arg !== "-y" && !arg.startsWith("-"));
+    const identifier = identifierIndex >= 0 ? args[identifierIndex] : "";
+    if (!identifier) {
+      return null;
+    }
+
+    return {
+      registryType: "npm",
+      identifier,
+      version: releaseVersion || "latest",
+      transport: { type: "stdio" },
+      environmentVariables: environmentVariablesFromMcpEnv(serverConfig.env),
+      packageArguments: args
+        .filter((_, index) => index !== identifierIndex && args[index] !== "-y")
+        .map((arg) => ({ value: arg })),
+    };
+  }
+
+  return null;
+}
+
+function normalizeMcpJson(
+  rawMcpJson: string,
+  readme: string,
+  descriptionFallback: string,
+  releaseVersion: string,
+  repo: string,
+  canonicalRepositoryUrl: string
+) {
+  if (!rawMcpJson) {
+    return null;
+  }
+
+  try {
+    const document = JSON.parse(rawMcpJson) as MCPClientConfig;
+    const servers =
+      document.mcpServers && typeof document.mcpServers === "object" && !Array.isArray(document.mcpServers)
+        ? Object.entries(document.mcpServers)
+        : [];
+    const serverEntry = servers.find(([, value]) => Boolean(value) && typeof value === "object");
+    if (!serverEntry) {
+      return null;
+    }
+
+    const [serverKey, rawServerConfig] = serverEntry;
+    const packageTarget = packageTargetFromMcpServer(
+      rawServerConfig as MCPClientServerConfig,
+      releaseVersion
+    );
+    if (!packageTarget) {
+      return null;
+    }
+
+    return {
+      source: "mcp.json",
+      title: titleFromRepositoryName(serverKey || repo),
+      description: readme || descriptionFallback || titleFromRepositoryName(serverKey || repo),
+      version: releaseVersion || "latest",
+      websiteUrl: canonicalRepositoryUrl,
+      repository: {
+        source: "github",
+        url: canonicalRepositoryUrl,
+        subfolder: "",
+      },
+      remotes: [],
+      packages: [packageTarget],
+    };
+  } catch {
+    return null;
+  }
+}
+
 function packageFromPackageJson(rawPackageJson: string, releaseVersion: string) {
   if (!rawPackageJson) {
     return null;
@@ -328,8 +470,9 @@ export async function POST(request: NextRequest) {
   }
 
   const branch = githubRepository.default_branch || "main";
-  const [serverJson, readme, packageJson, pyproject, releaseVersion] = await Promise.all([
+  const [serverJson, mcpJson, readme, packageJson, pyproject, releaseVersion] = await Promise.all([
     fetchRepositoryFile(repository.owner, repository.repo, "server.json", branch),
+    fetchRepositoryFile(repository.owner, repository.repo, "mcp.json", branch),
     fetchRepositoryReadme(repository.owner, repository.repo, branch),
     fetchRepositoryFile(repository.owner, repository.repo, "package.json", branch),
     fetchRepositoryFile(repository.owner, repository.repo, "pyproject.toml", branch),
@@ -350,6 +493,19 @@ export async function POST(request: NextRequest) {
 
   if (serverDocument) {
     return NextResponse.json(serverDocument);
+  }
+
+  const mcpDocument = normalizeMcpJson(
+    mcpJson,
+    readme,
+    githubRepository.description || "",
+    releaseVersion,
+    repository.repo,
+    canonicalRepositoryUrl
+  );
+
+  if (mcpDocument) {
+    return NextResponse.json(mcpDocument);
   }
 
   const packages = [
