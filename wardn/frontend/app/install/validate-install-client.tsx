@@ -564,7 +564,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
               />
             </div>
           </CardHeader>
-          <CardContent className="max-h-[508px] overflow-y-auto p-0">
+          <CardContent className="max-h-[508px] overflow-y-auto px-0 pb-4 pt-0">
             {isLoadingTools ? (
               <div className="p-4 text-sm text-[var(--on-surface-variant)]">
                 Loading tools from the installed server...
