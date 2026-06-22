@@ -624,13 +624,13 @@ export default async function RegistryServerPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Source</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {links.length > 0 ? (
-                links.map((link) => (
+          {links.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Source</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {links.map((link) => (
                   <a
                     className="flex items-center gap-2 text-primary hover:underline"
                     href={link.url}
@@ -647,12 +647,10 @@ export default async function RegistryServerPage({
                     )}
                     <span>{link.label}</span>
                   </a>
-                ))
-              ) : (
-                <div className="text-muted-foreground">No source links provided.</div>
-              )}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

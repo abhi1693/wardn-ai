@@ -20,6 +20,7 @@ def test_register_mcp_registry_commands_adds_sync_command() -> None:
     assert args.api_key is None
     assert args.tenant_id is None
     assert args.latest_only is False
+    assert args.readme_descriptions is False
     assert args.verbose is False
 
 
@@ -38,6 +39,9 @@ def test_register_mcp_registry_commands_adds_pulsemcp_sync_options() -> None:
             "--tenant-id",
             "tenant-1",
             "--latest-only",
+            "--readme-descriptions",
+            "--github-token",
+            "github-secret",
             "--updated-since",
             "2026-06-22T00:00:00Z",
         ]
@@ -47,6 +51,8 @@ def test_register_mcp_registry_commands_adds_pulsemcp_sync_options() -> None:
     assert args.api_key == "secret-key"
     assert args.tenant_id == "tenant-1"
     assert args.latest_only is True
+    assert args.readme_descriptions is True
+    assert args.github_token == "github-secret"
     assert args.updated_since == "2026-06-22T00:00:00Z"
 
 
@@ -245,6 +251,195 @@ def test_registry_url_loader_strips_unsupported_mcpb_packages(monkeypatch) -> No
             "transport": {"type": "stdio"},
         }
     ]
+
+
+def test_registry_url_loader_sanitizes_invalid_source_urls(monkeypatch) -> None:
+    payload = {
+        "servers": [
+            {
+                "server": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": "io.github.example/links",
+                    "description": "Server with mixed link quality",
+                    "title": "Links",
+                    "version": "1.0.0",
+                    "websiteUrl": "not-a-url",
+                    "repository": {
+                        "source": "github",
+                        "url": "https://github.com/example/links",
+                    },
+                    "icons": [
+                        {"src": "https://example.com/icon.png"},
+                        {"src": "https://bad url/icon.png"},
+                    ],
+                    "remotes": [
+                        {"type": "streamable-http", "url": "https://example.com/mcp"},
+                        {"type": "sse", "url": "not-a-url"},
+                    ],
+                    "_meta": {
+                        "io.modelcontextprotocol.registry/publisher-provided": {
+                            "docs": "https://example.com/docs",
+                            "connect": "javascript:alert(1)",
+                        }
+                    },
+                },
+            }
+        ],
+        "metadata": {"count": 1},
+    }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", lambda url: payload)
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://registry.modelcontextprotocol.io/v0/servers",
+        limit=100,
+        max_pages=1,
+    )
+
+    assert len(servers) == 1
+    assert servers[0].website_url == ""
+    assert servers[0].repository == {
+        "source": "github",
+        "url": "https://github.com/example/links",
+    }
+    assert servers[0].icons == [{"src": "https://example.com/icon.png"}]
+    assert servers[0].remotes == [
+        {"type": "streamable-http", "url": "https://example.com/mcp"}
+    ]
+    assert servers[0].meta["io.modelcontextprotocol.registry/publisher-provided"] == {
+        "docs": "https://example.com/docs",
+    }
+
+
+def test_registry_url_loader_removes_invalid_repository_url(monkeypatch) -> None:
+    payload = {
+        "servers": [
+            {
+                "server": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": "io.github.example/bad-repo",
+                    "description": "Server with an invalid repository URL",
+                    "title": "Bad Repo",
+                    "version": "1.0.0",
+                    "repository": {
+                        "source": "github",
+                        "url": "https://bad repo.example.com/project",
+                    },
+                },
+            }
+        ],
+        "metadata": {"count": 1},
+    }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", lambda url: payload)
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://registry.modelcontextprotocol.io/v0/servers",
+        limit=100,
+        max_pages=1,
+    )
+
+    assert len(servers) == 1
+    assert servers[0].repository == {"source": "github"}
+
+
+def test_github_repo_from_url_parses_repository_urls() -> None:
+    assert commands.github_repo_from_url("https://github.com/example/weather") == (
+        "example",
+        "weather",
+    )
+    assert commands.github_repo_from_url("https://github.com/example/weather.git") == (
+        "example",
+        "weather",
+    )
+    assert commands.github_repo_from_url(
+        "https://github.com/example/weather/tree/main/packages/server"
+    ) == ("example", "weather")
+    assert commands.github_repo_from_url("https://gitlab.com/example/weather") is None
+    assert commands.github_repo_from_url("https://github.com/example/bad repo") is None
+
+
+def test_enrich_server_description_from_readme_uses_github_readme(monkeypatch) -> None:
+    calls = []
+
+    def fetch_readme(owner: str, repo: str, **kwargs):
+        calls.append((owner, repo, kwargs["github_token"]))
+        return "# Weather MCP\n\nDetailed README content."
+
+    monkeypatch.setattr(commands, "fetch_github_readme", fetch_readme)
+    server = {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "io.github.example/weather",
+        "description": "Short description",
+        "version": "1.0.0",
+        "repository": {
+            "source": "github",
+            "url": "https://github.com/example/weather",
+        },
+    }
+    cache = {}
+
+    enriched = commands.enrich_server_description_from_readme(
+        server,
+        readme_cache=cache,
+        github_token="token",
+    )
+    enriched_again = commands.enrich_server_description_from_readme(
+        server,
+        readme_cache=cache,
+        github_token="token",
+    )
+
+    assert enriched["description"] == "# Weather MCP\n\nDetailed README content."
+    assert enriched_again["description"] == "# Weather MCP\n\nDetailed README content."
+    assert calls == [("example", "weather", "token")]
+
+
+def test_registry_url_loader_can_use_readmes_as_descriptions(monkeypatch) -> None:
+    payload = {
+        "servers": [
+            {
+                "server": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": "io.github.example/weather",
+                    "description": "Short weather description",
+                    "title": "Weather",
+                    "version": "1.0.0",
+                    "repository": {
+                        "source": "github",
+                        "url": "https://github.com/example/weather",
+                    },
+                },
+            }
+        ],
+        "metadata": {"count": 1},
+    }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", lambda url: payload)
+    monkeypatch.setattr(
+        commands,
+        "fetch_github_readme",
+        lambda owner, repo, **kwargs: "README description",
+    )
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://registry.modelcontextprotocol.io/v0/servers",
+        limit=100,
+        max_pages=1,
+        readme_descriptions=True,
+    )
+
+    assert len(servers) == 1
+    assert servers[0].description == "README description"
 
 
 def test_url_with_query_params_preserves_existing_query() -> None:

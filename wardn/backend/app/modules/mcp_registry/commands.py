@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import UUID
@@ -132,6 +132,19 @@ def configure_syncmcpregistry_parser(parser: argparse.ArgumentParser) -> None:
         help="Request only each server's latest version with version=latest.",
     )
     parser.add_argument(
+        "--readme-descriptions",
+        action="store_true",
+        help="Use GitHub repository README content as synced server descriptions.",
+    )
+    parser.add_argument(
+        "--github-token",
+        default=None,
+        help=(
+            "GitHub token for README enrichment. "
+            "Defaults to WARDN_GITHUB_TOKEN or GITHUB_TOKEN."
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_REGISTRY_LIMIT,
@@ -237,14 +250,211 @@ def strip_unsupported_package_targets(server: dict) -> dict:
     return sanitized
 
 
+def is_valid_http_url(value: str) -> bool:
+    if not value or value.strip() != value or any(character.isspace() for character in value):
+        return False
+    split_url = urlsplit(value)
+    return split_url.scheme in {"http", "https"} and bool(split_url.netloc)
+
+
+def sanitized_url_value(value) -> str:
+    return value if isinstance(value, str) and is_valid_http_url(value) else ""
+
+
+def sanitize_publisher_links(meta) -> dict | None:
+    if not isinstance(meta, dict):
+        return meta
+
+    sanitized = dict(meta)
+    publisher = sanitized.get("io.modelcontextprotocol.registry/publisher-provided")
+    if isinstance(publisher, dict):
+        sanitized_publisher = dict(publisher)
+        for key in ("docs", "connect"):
+            value = sanitized_publisher.get(key)
+            if isinstance(value, str) and not is_valid_http_url(value):
+                sanitized_publisher.pop(key, None)
+        sanitized["io.modelcontextprotocol.registry/publisher-provided"] = sanitized_publisher
+    return sanitized
+
+
+def sanitize_source_urls(server: dict) -> dict:
+    sanitized = dict(server)
+
+    website_url = sanitized.get("websiteUrl")
+    if isinstance(website_url, str):
+        sanitized["websiteUrl"] = sanitized_url_value(website_url)
+
+    repository = sanitized.get("repository")
+    if isinstance(repository, dict):
+        sanitized_repository = dict(repository)
+        url = sanitized_repository.get("url")
+        if isinstance(url, str) and not is_valid_http_url(url):
+            sanitized_repository.pop("url", None)
+        sanitized["repository"] = sanitized_repository
+
+    icons = sanitized.get("icons")
+    if isinstance(icons, list):
+        sanitized["icons"] = [
+            icon
+            for icon in icons
+            if not (
+                isinstance(icon, dict)
+                and isinstance(icon.get("src"), str)
+                and not is_valid_http_url(icon["src"])
+            )
+        ]
+
+    remotes = sanitized.get("remotes")
+    if isinstance(remotes, list):
+        sanitized["remotes"] = [
+            remote
+            for remote in remotes
+            if not (
+                isinstance(remote, dict)
+                and isinstance(remote.get("url"), str)
+                and not is_valid_http_url(remote["url"])
+            )
+        ]
+
+    packages = sanitized.get("packages")
+    if isinstance(packages, list):
+        sanitized_packages = []
+        for package in packages:
+            if not isinstance(package, dict):
+                sanitized_packages.append(package)
+                continue
+            sanitized_package = dict(package)
+            transport = sanitized_package.get("transport")
+            if isinstance(transport, dict):
+                sanitized_transport = dict(transport)
+                url = sanitized_transport.get("url")
+                if isinstance(url, str) and not is_valid_http_url(url):
+                    sanitized_transport.pop("url", None)
+                sanitized_package["transport"] = sanitized_transport
+            sanitized_packages.append(sanitized_package)
+        sanitized["packages"] = sanitized_packages
+
+    sanitized["_meta"] = sanitize_publisher_links(sanitized.get("_meta"))
+    return sanitized
+
+
+def github_repo_from_url(url: str) -> tuple[str, str] | None:
+    if not is_valid_http_url(url):
+        return None
+    split_url = urlsplit(url.strip())
+    if split_url.netloc.casefold() not in {"github.com", "www.github.com"}:
+        return None
+
+    parts = [part for part in split_url.path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+
+    owner = parts[0]
+    repo = parts[1].removesuffix(".git")
+    if not owner or not repo:
+        return None
+    return owner, repo
+
+
+def github_repo_from_server(server: dict) -> tuple[str, str] | None:
+    repository = server.get("repository")
+    if isinstance(repository, dict):
+        url = repository.get("url")
+        if isinstance(url, str):
+            repo = github_repo_from_url(url)
+            if repo:
+                return repo
+
+    website_url = server.get("websiteUrl")
+    if isinstance(website_url, str):
+        return github_repo_from_url(website_url)
+    return None
+
+
+def fetch_github_readme(
+    owner: str,
+    repo: str,
+    *,
+    github_token: str | None = None,
+    timeout: int = 20,
+) -> str:
+    url = f"https://api.github.com/repos/{owner}/{repo}/readme"
+    headers = {
+        "Accept": "application/vnd.github.raw",
+        "User-Agent": "wardn-mcp-registry-sync",
+    }
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+
+    request = Request(url, headers=headers)
+    with urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="replace").strip()
+
+
+def enrich_server_description_from_readme(
+    server: dict,
+    *,
+    readme_cache: dict[tuple[str, str], str | None],
+    github_token: str | None = None,
+) -> dict:
+    repo = github_repo_from_server(server)
+    if not repo:
+        return server
+
+    if repo not in readme_cache:
+        try:
+            readme_cache[repo] = fetch_github_readme(
+                repo[0],
+                repo[1],
+                github_token=github_token,
+            )
+        except HTTPError as exc:
+            if exc.code != 404:
+                logger.debug("Could not fetch README for %s/%s: %s", repo[0], repo[1], exc)
+            readme_cache[repo] = None
+        except URLError as exc:
+            logger.debug("Could not fetch README for %s/%s: %s", repo[0], repo[1], exc)
+            readme_cache[repo] = None
+
+    readme = readme_cache[repo]
+    if not readme:
+        return server
+
+    enriched = dict(server)
+    enriched["description"] = readme
+    return enriched
+
+
+def enrich_descriptions_from_readmes(
+    servers: list[MCPServerCreate],
+    *,
+    readme_cache: dict[tuple[str, str], str | None] | None = None,
+    github_token: str | None = None,
+) -> list[MCPServerCreate]:
+    readme_cache = readme_cache if readme_cache is not None else {}
+    enriched_servers = []
+    for server in servers:
+        document = server.model_dump(by_alias=True, exclude_none=True)
+        enriched_document = enrich_server_description_from_readme(
+            document,
+            readme_cache=readme_cache,
+            github_token=github_token,
+        )
+        enriched_servers.append(MCPServerCreate.model_validate(enriched_document))
+    return enriched_servers
+
+
 def load_supported_servers_from_payload(
     payload,
     *,
     strip_unsupported_packages: bool = False,
+    sanitize_urls: bool = False,
 ) -> list[MCPServerCreate]:
     documents = _server_documents_from_payload(payload)
     if strip_unsupported_packages:
         documents = [strip_unsupported_package_targets(server) for server in documents]
+    if sanitize_urls:
+        documents = [sanitize_source_urls(server) for server in documents]
     return [MCPServerCreate.model_validate(server) for server in documents]
 
 
@@ -327,6 +537,8 @@ def load_supported_servers_from_registry_url(
     headers: dict[str, str] | None = None,
     updated_since: str | None = None,
     version: str | None = None,
+    readme_descriptions: bool = False,
+    github_token: str | None = None,
 ) -> list[MCPServerCreate]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
@@ -335,6 +547,7 @@ def load_supported_servers_from_registry_url(
 
     servers = []
     seen_server_versions: set[tuple[str, str]] = set()
+    readme_cache: dict[tuple[str, str], str | None] = {}
     cursor = None
     pages_fetched = 0
 
@@ -357,7 +570,14 @@ def load_supported_servers_from_registry_url(
         page_servers = load_supported_servers_from_payload(
             payload,
             strip_unsupported_packages=True,
+            sanitize_urls=True,
         )
+        if readme_descriptions:
+            page_servers = enrich_descriptions_from_readmes(
+                page_servers,
+                readme_cache=readme_cache,
+                github_token=github_token,
+            )
         new_servers = []
         for server in page_servers:
             key = (server.name, server.version)
@@ -428,6 +648,12 @@ async def sync_mcp_registry_from_args(args: argparse.Namespace) -> int:
             headers=headers,
             updated_since=getattr(args, "updated_since", None),
             version=version,
+            readme_descriptions=getattr(args, "readme_descriptions", False),
+            github_token=(
+                getattr(args, "github_token", None)
+                or os.getenv("WARDN_GITHUB_TOKEN")
+                or os.getenv("GITHUB_TOKEN")
+            ),
         )
 
     if args.dry_run:

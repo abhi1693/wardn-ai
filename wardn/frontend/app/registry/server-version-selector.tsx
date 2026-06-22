@@ -1,10 +1,9 @@
 "use client";
 
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -99,16 +98,12 @@ export function ServerVersionSelector({
           </SelectContent>
         </Select>
 
-        <div className="flex items-center justify-between gap-3">
-          {current?.isDefault ? (
-            <Badge variant="outline" className="gap-1.5 font-normal">
-              <CheckCircle2 className="size-3.5" />
-              Org default
-            </Badge>
-          ) : (
+        <div className="flex items-center gap-3">
+          {!current?.isDefault ? (
             <span className="text-muted-foreground">Not the org default</span>
-          )}
+          ) : null}
           <Button
+            className="ml-auto"
             disabled={Boolean(current?.isDefault) || isSaving}
             onClick={makeDefault}
             size="sm"
