@@ -2,34 +2,34 @@ import hashlib
 import importlib
 import json
 import re
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from http.client import HTTPException as HTTPClientException
+from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from uuid import UUID
 
 from app.core.config import get_settings
+from app.modules.mcp_gateway import client as mcp_client
 from app.modules.mcp_registry.models import MCPServerInstallation
-from app.modules.mcp_runtime import adapter_client
-from app.modules.mcp_runtime.adapter_contract import (
-    WARDN_RUNTIME_ARGS_JSON_ENV,
-    WARDN_RUNTIME_COMMAND_ENV,
-    WARDN_RUNTIME_CWD_ENV,
-    WARDN_RUNTIME_REQUEST_TIMEOUT_SECONDS_ENV,
-    WARDN_RUNTIME_STARTUP_TIMEOUT_SECONDS_ENV,
-)
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
     RUNTIME_HEALTH_NOT_READY,
+    RUNTIME_HEALTH_READY,
     RUNTIME_HEALTH_STOPPED,
     RUNTIME_KIND_PACKAGE,
     RUNTIME_PROVIDER_KUBERNETES,
     RUNTIME_TRANSPORT_STREAMABLE_HTTP,
     RuntimeHealth,
     RuntimeSpec,
-    base_runtime_spec,
+    fingerprint_payload,
     package_runtime,
     runtime_kind,
+    secret_fingerprint_payload,
 )
 
 KUBERNETES_LABEL_APP_NAME = "app.kubernetes.io/name"
@@ -37,14 +37,32 @@ KUBERNETES_LABEL_PART_OF = "app.kubernetes.io/part-of"
 WARDN_LABEL_ORGANIZATION_ID = "wardn.ai/organization-id"
 WARDN_LABEL_WORKSPACE_ID = "wardn.ai/workspace-id"
 WARDN_LABEL_INSTALLATION_ID = "wardn.ai/installation-id"
+WARDN_LABEL_RUNTIME_ID = "wardn.ai/runtime-id"
 WARDN_LABEL_RUNTIME_SESSION_ID = "wardn.ai/runtime-session-id"
 WARDN_LABEL_SERVER_NAME = "wardn.ai/server-name"
 WARDN_LABEL_SERVER_VERSION = "wardn.ai/server-version"
 WARDN_RUNTIME_APP_NAME = "wardn-mcp-runtime"
 KUBERNETES_NAME_MAX_LENGTH = 63
 KUBERNETES_LABEL_VALUE_MAX_LENGTH = 63
-KUBERNETES_ADAPTER_CONTAINER_NAME = "wardn-runtime-adapter"
-KUBERNETES_ADAPTER_PORT_NAME = "http"
+KUBERNETES_GATEWAY_CONTAINER_NAME = "supergateway"
+KUBERNETES_GATEWAY_PORT_NAME = "http"
+KUBERNETES_SUPERGATEWAY_MCP_PATH = "/mcp"
+KUBERNETES_SUPERGATEWAY_HEALTH_PATH = "/healthz"
+KUBERNETES_API_CONNECT_TIMEOUT_SECONDS = 5
+KUBERNETES_API_READ_TIMEOUT_SECONDS = 10
+KUBERNETES_METADATA_KEY_NAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?$"
+)
+KUBERNETES_DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+KUBERNETES_RESERVED_METADATA_KEYS = {
+    KUBERNETES_LABEL_APP_NAME,
+    KUBERNETES_LABEL_PART_OF,
+}
+KUBERNETES_RESERVED_METADATA_PREFIXES = (
+    "wardn.ai/",
+    "kubernetes.io/",
+    "k8s.io/",
+)
 
 
 class KubernetesRuntimeProviderError(RuntimeError):
@@ -63,9 +81,18 @@ class KubernetesRuntimeNotReadyError(KubernetesRuntimeProviderError):
     pass
 
 
+class KubernetesMetadataError(KubernetesRuntimeProviderError):
+    pass
+
+
+class KubernetesImagePullSecretError(KubernetesRuntimeProviderError):
+    pass
+
+
 @dataclass(frozen=True)
 class KubernetesClientSet:
     core_v1: Any
+    apps_v1: Any
     loaded_config: str
 
 
@@ -85,6 +112,7 @@ class KubernetesRuntimeManifest:
     namespace: Any
     secret: Any
     pod: Any
+    deployment: Any
     service: Any
 
 
@@ -92,7 +120,7 @@ class KubernetesRuntimeManifest:
 class KubernetesReconcileResult:
     endpoint_url: str
     pod: Any | None = None
-    adapter_status: dict[str, Any] | None = None
+    gateway_status: dict[str, Any] | None = None
 
 
 class KubernetesClientFactory:
@@ -116,6 +144,7 @@ class KubernetesClientFactory:
         client_module = self._client_module or importlib.import_module("kubernetes.client")
         return KubernetesClientSet(
             core_v1=client_module.CoreV1Api(),
+            apps_v1=client_module.AppsV1Api(),
             loaded_config=loaded_config,
         )
 
@@ -179,6 +208,109 @@ def hashed_label_value(prefix: str, value: str) -> str:
     return safe_label_value(f"{prefix}-{short_hash(value, length=12)}")
 
 
+def metadata_key_is_reserved(key: str) -> bool:
+    return key in KUBERNETES_RESERVED_METADATA_KEYS or key.startswith(
+        KUBERNETES_RESERVED_METADATA_PREFIXES
+    )
+
+
+def validate_metadata_key(key: str, *, field_name: str) -> None:
+    if not key or len(key) > 253:
+        raise KubernetesMetadataError(f"{field_name} key must be 1-253 characters")
+    if "/" in key:
+        prefix, name = key.split("/", 1)
+        if not prefix or not name or len(prefix) > 253:
+            raise KubernetesMetadataError(f"{field_name} key has invalid DNS prefix")
+        if any(
+            len(part) > 63 or KUBERNETES_DNS_LABEL_PATTERN.fullmatch(part) is None
+            for part in prefix.split(".")
+        ):
+            raise KubernetesMetadataError(f"{field_name} key has invalid DNS prefix")
+    else:
+        name = key
+
+    if len(name) > 63 or KUBERNETES_METADATA_KEY_NAME_PATTERN.fullmatch(name) is None:
+        raise KubernetesMetadataError(f"{field_name} key has invalid name")
+    if metadata_key_is_reserved(key):
+        raise KubernetesMetadataError(f"{field_name} key is reserved: {key}")
+
+
+def validate_dns_subdomain_name(value: str, *, field_name: str) -> None:
+    if not value or len(value) > 253:
+        raise KubernetesImagePullSecretError(f"{field_name} must be 1-253 characters")
+    if any(
+        len(part) > 63 or KUBERNETES_DNS_LABEL_PATTERN.fullmatch(part) is None
+        for part in value.split(".")
+    ):
+        raise KubernetesImagePullSecretError(
+            f"{field_name} must be a valid Kubernetes DNS subdomain name"
+        )
+
+
+def validate_label_value(value: str, *, field_name: str) -> None:
+    if len(value) > KUBERNETES_LABEL_VALUE_MAX_LENGTH:
+        raise KubernetesMetadataError(f"{field_name} value must be 63 characters or fewer")
+    if value and KUBERNETES_METADATA_KEY_NAME_PATTERN.fullmatch(value) is None:
+        raise KubernetesMetadataError(f"{field_name} value is not a valid Kubernetes label")
+
+
+def parse_metadata_json(raw_value: str | dict[str, str], *, field_name: str) -> dict[str, str]:
+    if isinstance(raw_value, dict):
+        raw_metadata = raw_value
+    else:
+        if not raw_value.strip():
+            return {}
+        try:
+            raw_metadata = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            raise KubernetesMetadataError(f"{field_name} must be valid JSON") from exc
+
+    if not isinstance(raw_metadata, dict):
+        raise KubernetesMetadataError(f"{field_name} must be a JSON object")
+
+    metadata: dict[str, str] = {}
+    for key, value in raw_metadata.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise KubernetesMetadataError(f"{field_name} keys and values must be strings")
+        validate_metadata_key(key, field_name=field_name)
+        metadata[key] = value
+    return metadata
+
+
+def custom_namespace_labels(settings=None) -> dict[str, str]:
+    runtime_settings = settings or get_settings()
+    labels = parse_metadata_json(
+        runtime_settings.mcp_runtime_kubernetes_namespace_labels_json,
+        field_name="Kubernetes namespace label",
+    )
+    for value in labels.values():
+        validate_label_value(value, field_name="Kubernetes namespace label")
+    return labels
+
+
+def custom_namespace_annotations(settings=None) -> dict[str, str]:
+    runtime_settings = settings or get_settings()
+    annotations = parse_metadata_json(
+        runtime_settings.mcp_runtime_kubernetes_namespace_annotations_json,
+        field_name="Kubernetes namespace annotation",
+    )
+    for value in annotations.values():
+        if len(value) > 262_144:
+            raise KubernetesMetadataError(
+                "Kubernetes namespace annotation value must be 262144 characters or fewer"
+            )
+    return annotations
+
+
+def image_pull_secret_names(settings=None) -> list[str]:
+    runtime_settings = settings or get_settings()
+    name = runtime_settings.mcp_runtime_kubernetes_image_pull_secret_name.strip()
+    if not name:
+        return []
+    validate_dns_subdomain_name(name, field_name="Kubernetes image pull secret name")
+    return [name]
+
+
 def kubernetes_client_module(client_module: Any | None = None) -> Any:
     return client_module or importlib.import_module("kubernetes.client")
 
@@ -207,22 +339,75 @@ def runtime_namespace_name(
 
 def runtime_object_names(
     *,
-    runtime_session_id: UUID | str,
+    server_name: str = "",
+    config_name: str = "",
+    runtime_id: UUID | str | None = None,
+    runtime_session_id: UUID | str | None = None,
     organization_id: UUID | str | None,
     workspace_id: UUID | str | None,
     prefix: str | None = None,
 ) -> KubernetesRuntimeNames:
-    session_hash = short_hash(str(runtime_session_id), length=12)
-    base_name = safe_kubernetes_name(f"mcp-{session_hash}")
+    if server_name:
+        base_name = runtime_object_base_name(
+            server_name=server_name,
+            config_name=config_name,
+        )
+    else:
+        object_id = runtime_id or runtime_session_id
+        if object_id is None:
+            raise KubernetesReconcileError("Kubernetes runtime object identity is missing")
+        runtime_hash = short_hash(str(object_id), length=12)
+        base_name = safe_kubernetes_name(f"mcp-{runtime_hash}")
     return KubernetesRuntimeNames(
         namespace=runtime_namespace_name(
             organization_id=organization_id,
             workspace_id=workspace_id,
             prefix=prefix,
         ),
-        pod_name=safe_kubernetes_name(f"{base_name}-pod"),
+        pod_name=base_name,
         service_name=safe_kubernetes_name(f"{base_name}-svc"),
         secret_name=safe_kubernetes_name(f"{base_name}-secret"),
+    )
+
+
+def runtime_object_base_name(*, server_name: str, config_name: str) -> str:
+    instance_name = config_name or "default"
+    return safe_kubernetes_name(f"{server_name}-{instance_name}")
+
+
+def runtime_installation_identity(installation: MCPServerInstallation) -> str:
+    return f"{installation.server_name}:{installation.config_name or 'default'}"
+
+
+def runtime_object_identity(runtime_session: MCPRuntimeSession) -> str:
+    return runtime_session.config_fingerprint or str(runtime_session.id)
+
+
+def runtime_object_names_for_session(
+    runtime_session: MCPRuntimeSession,
+    *,
+    prefer_stored_names: bool = False,
+    settings=None,
+) -> KubernetesRuntimeNames:
+    runtime_settings = settings or get_settings()
+    names = runtime_object_names(
+        runtime_id=runtime_object_identity(runtime_session),
+        server_name=runtime_session.server_name,
+        config_name="",
+        organization_id=runtime_session.organization_id,
+        workspace_id=runtime_session.workspace_id,
+        prefix=runtime_settings.mcp_runtime_kubernetes_namespace_prefix,
+    )
+    pod_name = (
+        runtime_session.pod_name
+        if prefer_stored_names and runtime_session.pod_name
+        else names.pod_name
+    )
+    return KubernetesRuntimeNames(
+        namespace=runtime_session.namespace or names.namespace,
+        pod_name=pod_name,
+        service_name=names.service_name,
+        secret_name=names.secret_name,
     )
 
 
@@ -231,6 +416,7 @@ def runtime_labels(
     organization_id: UUID | str | None,
     workspace_id: UUID | str | None,
     installation_id: UUID | str,
+    runtime_id: UUID | str,
     runtime_session_id: UUID | str,
     server_name: str,
     server_version: str,
@@ -239,6 +425,7 @@ def runtime_labels(
         KUBERNETES_LABEL_APP_NAME: WARDN_RUNTIME_APP_NAME,
         KUBERNETES_LABEL_PART_OF: "wardn",
         WARDN_LABEL_INSTALLATION_ID: str(installation_id),
+        WARDN_LABEL_RUNTIME_ID: hashed_label_value("runtime", str(runtime_id)),
         WARDN_LABEL_RUNTIME_SESSION_ID: str(runtime_session_id),
         WARDN_LABEL_SERVER_NAME: hashed_label_value("server", server_name),
         WARDN_LABEL_SERVER_VERSION: hashed_label_value("version", server_version),
@@ -255,37 +442,124 @@ def runtime_secret_data(
     *,
     settings=None,
 ) -> dict[str, str]:
+    return package_runtime(installation).environment
+
+
+def supergateway_stdio_command(installation: MCPServerInstallation) -> str:
     runtime = package_runtime(installation)
-    runtime_settings = settings or get_settings()
-    data = {
-        WARDN_RUNTIME_COMMAND_ENV: runtime.command,
-        WARDN_RUNTIME_ARGS_JSON_ENV: json.dumps(runtime.args, separators=(",", ":")),
-        WARDN_RUNTIME_CWD_ENV: runtime.cwd,
-        WARDN_RUNTIME_STARTUP_TIMEOUT_SECONDS_ENV: str(
-            runtime_settings.mcp_runtime_adapter_startup_timeout_seconds
-        ),
-        WARDN_RUNTIME_REQUEST_TIMEOUT_SECONDS_ENV: str(
-            runtime_settings.mcp_runtime_adapter_request_timeout_seconds
-        ),
-    }
-    data.update(runtime.environment)
-    return data
+    command, args, cwd = kubernetes_runtime_process(runtime, installation.runtime_config or {})
+    command_parts = [command, *args]
+    if cwd:
+        command_parts = ["sh", "-lc", f"cd {shlex.quote(cwd)} && {shlex.join(command_parts)}"]
+    return shlex.join(command_parts)
+
+
+def supergateway_container_args(
+    installation: MCPServerInstallation,
+    *,
+    gateway_port: int,
+) -> list[str]:
+    return [
+        "--stdio",
+        supergateway_stdio_command(installation),
+        "--outputTransport",
+        "streamableHttp",
+        "--port",
+        str(gateway_port),
+        "--streamableHttpPath",
+        KUBERNETES_SUPERGATEWAY_MCP_PATH,
+        "--healthEndpoint",
+        KUBERNETES_SUPERGATEWAY_HEALTH_PATH,
+    ]
+
+
+def normalized_runtime_package_version(value: Any) -> str:
+    version = str(value or "").strip()
+    if not version or version == "0.0.0":
+        return "latest"
+    return version
+
+
+def runtime_package_identifier(runtime_config: dict[str, Any]) -> str:
+    package = runtime_config.get("package")
+    if not isinstance(package, dict):
+        return ""
+    return str(package.get("identifier") or "").strip()
+
+
+def runtime_package_version(runtime_config: dict[str, Any]) -> str:
+    package = runtime_config.get("package")
+    package_version = package.get("version") if isinstance(package, dict) else ""
+    return normalized_runtime_package_version(package_version or runtime_config.get("version"))
+
+
+def strip_npm_launcher_args(args: list[str], identifier: str) -> list[str]:
+    remaining = list(args)
+    if remaining and remaining[0] in {"--offline", "--yes", "-y"}:
+        remaining = remaining[1:]
+    if remaining and remaining[0] == identifier:
+        remaining = remaining[1:]
+    return remaining
+
+
+def kubernetes_runtime_process(
+    runtime,
+    runtime_config: dict[str, Any],
+) -> tuple[str, list[str], str]:
+    registry_type = runtime_config.get("registryType")
+    identifier = runtime_package_identifier(runtime_config)
+    version = runtime_package_version(runtime_config)
+
+    if registry_type == "uvx":
+        return Path(runtime.command).name, runtime.args, ""
+
+    if registry_type == "npm" and identifier:
+        package_spec = identifier if version == "latest" else f"{identifier}@{version}"
+        command_name = Path(runtime.command).name
+        if command_name == "node" and runtime.args:
+            configured_args = runtime.args[1:]
+        elif command_name == "npx":
+            configured_args = strip_npm_launcher_args(runtime.args, identifier)
+        else:
+            configured_args = runtime.args
+        return "npx", ["--yes", package_spec, *configured_args], ""
+
+    if registry_type == "pypi" and identifier:
+        package_spec = identifier if version == "latest" else f"{identifier}=={version}"
+        module_name = identifier.replace("-", "_")
+        configured_args = runtime.args
+        if len(configured_args) >= 2 and configured_args[:2] == ["-m", module_name]:
+            configured_args = configured_args[2:]
+        return "uvx", ["--from", package_spec, "python", "-m", module_name, *configured_args], ""
+
+    return runtime.command, runtime.args, runtime.cwd
 
 
 def build_namespace_manifest(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
+    custom_labels: dict[str, str] | None = None,
+    custom_annotations: dict[str, str] | None = None,
     client_module: Any | None = None,
 ) -> Any:
     client = kubernetes_client_module(client_module)
+    namespace_labels = {
+        KUBERNETES_LABEL_PART_OF: "wardn",
+        **labels,
+    }
+    metadata_labels = custom_labels or {}
+    collisions = set(namespace_labels) & set(metadata_labels)
+    if collisions:
+        raise KubernetesMetadataError(
+            f"Kubernetes namespace labels cannot override generated keys: {sorted(collisions)}"
+        )
+    namespace_labels.update(metadata_labels)
     return client.V1Namespace(
         metadata=client.V1ObjectMeta(
             name=names.namespace,
-            labels={
-                KUBERNETES_LABEL_PART_OF: "wardn",
-                **labels,
-            },
+            labels=namespace_labels,
+            annotations=custom_annotations or {},
         )
     )
 
@@ -330,17 +604,23 @@ def secret_env_vars(
     ]
 
 
-def build_pod_manifest(
+def build_pod_template_manifest(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     secret_keys: list[str],
-    adapter_image: str,
-    adapter_port: int,
+    gateway_image: str,
+    gateway_port: int,
+    container_args: list[str],
+    image_pull_secret_names: list[str] | None = None,
     client_module: Any | None = None,
 ) -> Any:
     client = kubernetes_client_module(client_module)
-    return client.V1Pod(
+    image_pull_secrets = [
+        client.V1LocalObjectReference(name=name)
+        for name in (image_pull_secret_names or [])
+    ]
+    return client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(
             name=names.pod_name,
             namespace=names.namespace,
@@ -348,22 +628,26 @@ def build_pod_manifest(
         ),
         spec=client.V1PodSpec(
             automount_service_account_token=False,
-            restart_policy="Never",
+            image_pull_secrets=image_pull_secrets or None,
+            restart_policy="Always",
             containers=[
                 client.V1Container(
-                    name=KUBERNETES_ADAPTER_CONTAINER_NAME,
-                    image=adapter_image,
+                    name=KUBERNETES_GATEWAY_CONTAINER_NAME,
+                    image=gateway_image,
+                    args=container_args,
                     ports=[
                         client.V1ContainerPort(
-                            container_port=adapter_port,
-                            name=KUBERNETES_ADAPTER_PORT_NAME,
+                            container_port=gateway_port,
+                            name=KUBERNETES_GATEWAY_PORT_NAME,
                         )
                     ],
-                    env=secret_env_vars(
-                        names=names,
-                        keys=secret_keys,
-                        client_module=client,
-                    ),
+                    env=[
+                        *secret_env_vars(
+                            names=names,
+                            keys=secret_keys,
+                            client_module=client,
+                        ),
+                    ],
                 )
             ],
         ),
@@ -373,15 +657,46 @@ def build_pod_manifest(
 def service_selector(labels: dict[str, str]) -> dict[str, str]:
     return {
         KUBERNETES_LABEL_APP_NAME: labels[KUBERNETES_LABEL_APP_NAME],
-        WARDN_LABEL_RUNTIME_SESSION_ID: labels[WARDN_LABEL_RUNTIME_SESSION_ID],
+        WARDN_LABEL_RUNTIME_ID: labels[WARDN_LABEL_RUNTIME_ID],
     }
+
+
+def runtime_workload_labels(labels: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in labels.items()
+        if key != WARDN_LABEL_RUNTIME_SESSION_ID
+    }
+
+
+def build_deployment_manifest(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    pod_template: Any,
+    replicas: int = 1,
+    client_module: Any | None = None,
+) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(
+            name=names.pod_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1DeploymentSpec(
+            replicas=replicas,
+            selector=client.V1LabelSelector(match_labels=service_selector(labels)),
+            template=pod_template,
+        ),
+    )
 
 
 def build_service_manifest(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
-    adapter_port: int,
+    gateway_port: int,
     client_module: Any | None = None,
 ) -> Any:
     client = kubernetes_client_module(client_module)
@@ -396,9 +711,9 @@ def build_service_manifest(
             selector=service_selector(labels),
             ports=[
                 client.V1ServicePort(
-                    name=KUBERNETES_ADAPTER_PORT_NAME,
-                    port=adapter_port,
-                    target_port=adapter_port,
+                    name=KUBERNETES_GATEWAY_PORT_NAME,
+                    port=gateway_port,
+                    target_port=gateway_port,
                 )
             ],
         ),
@@ -413,8 +728,11 @@ def build_runtime_manifests(
     client_module: Any | None = None,
 ) -> KubernetesRuntimeManifest:
     runtime_settings = settings or get_settings()
+    runtime_id = runtime_installation_identity(installation)
     names = runtime_object_names(
-        runtime_session_id=runtime_session.id,
+        runtime_id=runtime_id,
+        server_name=installation.server_name,
+        config_name=installation.config_name,
         organization_id=runtime_session.organization_id,
         workspace_id=runtime_session.workspace_id,
         prefix=runtime_settings.mcp_runtime_kubernetes_namespace_prefix,
@@ -423,35 +741,59 @@ def build_runtime_manifests(
         organization_id=runtime_session.organization_id,
         workspace_id=runtime_session.workspace_id,
         installation_id=runtime_session.installation_id,
+        runtime_id=runtime_id,
         runtime_session_id=runtime_session.id,
         server_name=runtime_session.server_name,
         server_version=runtime_session.server_version,
     )
     secret_data = runtime_secret_data(installation, settings=runtime_settings)
     client = kubernetes_client_module(client_module)
+    namespace_labels = custom_namespace_labels(runtime_settings)
+    namespace_annotations = custom_namespace_annotations(runtime_settings)
+    pull_secret_names = image_pull_secret_names(runtime_settings)
+    workload_labels = runtime_workload_labels(labels)
+    pod_template = build_pod_template_manifest(
+        names=names,
+        labels=workload_labels,
+        secret_keys=list(secret_data),
+        gateway_image=runtime_settings.mcp_runtime_kubernetes_gateway_image,
+        gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        container_args=supergateway_container_args(
+            installation,
+            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        ),
+        image_pull_secret_names=pull_secret_names,
+        client_module=client,
+    )
     return KubernetesRuntimeManifest(
         names=names,
         labels=labels,
         secret_data=secret_data,
-        namespace=build_namespace_manifest(names=names, labels=labels, client_module=client),
+        namespace=build_namespace_manifest(
+            names=names,
+            labels=labels,
+            custom_labels=namespace_labels,
+            custom_annotations=namespace_annotations,
+            client_module=client,
+        ),
         secret=build_secret_manifest(
             names=names,
             labels=labels,
             string_data=secret_data,
             client_module=client,
         ),
-        pod=build_pod_manifest(
+        pod=pod_template,
+        deployment=build_deployment_manifest(
             names=names,
             labels=labels,
-            secret_keys=list(secret_data),
-            adapter_image=runtime_settings.mcp_runtime_kubernetes_adapter_image,
-            adapter_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            pod_template=pod_template,
+            replicas=1,
             client_module=client,
         ),
         service=build_service_manifest(
             names=names,
             labels=labels,
-            adapter_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
             client_module=client,
         ),
     )
@@ -460,9 +802,37 @@ def build_runtime_manifests(
 def runtime_service_endpoint_url(
     *,
     names: KubernetesRuntimeNames,
-    adapter_port: int,
+    gateway_port: int,
 ) -> str:
-    return f"http://{names.service_name}.{names.namespace}.svc.cluster.local:{adapter_port}"
+    return (
+        f"http://{names.service_name}.{names.namespace}.svc.cluster.local:"
+        f"{gateway_port}{KUBERNETES_SUPERGATEWAY_MCP_PATH}"
+    )
+
+
+def runtime_health_endpoint_url(endpoint_url: str) -> str:
+    return endpoint_url.removesuffix(KUBERNETES_SUPERGATEWAY_MCP_PATH) + (
+        KUBERNETES_SUPERGATEWAY_HEALTH_PATH
+    )
+
+
+def get_gateway_health(endpoint_url: str, *, timeout: float = 5) -> dict[str, Any]:
+    request = Request(
+        runtime_health_endpoint_url(endpoint_url),
+        headers={"Accept": "text/plain", "User-Agent": "Wardn/0.1 Kubernetes MCP Runtime"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", "replace").strip()
+            return {"ready": response.status == 200, "status": response.status, "body": body}
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace").strip()
+        return {"ready": False, "status": exc.code, "body": detail or exc.reason}
+    except (HTTPClientException, TimeoutError, URLError) as exc:
+        raise KubernetesRuntimeNotReadyError(
+            f"Kubernetes runtime gateway is not reachable: {exc}"
+        ) from exc
 
 
 def pod_condition_is_true(condition: Any, condition_type: str) -> bool:
@@ -511,12 +881,14 @@ class KubernetesRuntimeReconciler:
         self,
         *,
         core_v1: Any,
+        apps_v1: Any | None = None,
         api_exception_class: type[Exception],
         settings=None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.core_v1 = core_v1
+        self.apps_v1 = apps_v1 or core_v1
         self.api_exception_class = api_exception_class
         self.settings = settings or get_settings()
         self.sleep = sleep
@@ -525,18 +897,18 @@ class KubernetesRuntimeReconciler:
     def reconcile(self, manifest: KubernetesRuntimeManifest) -> KubernetesReconcileResult:
         self.create_namespace(manifest)
         self.create_or_replace_secret(manifest)
-        self.create_pod(manifest)
+        self.create_or_replace_deployment(manifest)
         self.create_or_replace_service(manifest)
         return KubernetesReconcileResult(
             endpoint_url=runtime_service_endpoint_url(
                 names=manifest.names,
-                adapter_port=self.settings.mcp_runtime_kubernetes_service_port,
+                gateway_port=self.settings.mcp_runtime_kubernetes_service_port,
             )
         )
 
     def create_namespace(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
-            self.core_v1.create_namespace(body=manifest.namespace)
+            self._call_api(self.core_v1.create_namespace, body=manifest.namespace)
         except self.api_exception_class as exc:
             if self._is_status(exc, 409):
                 return
@@ -546,7 +918,8 @@ class KubernetesRuntimeReconciler:
 
     def create_or_replace_secret(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
-            self.core_v1.create_namespaced_secret(
+            self._call_api(
+                self.core_v1.create_namespaced_secret,
                 namespace=manifest.names.namespace,
                 body=manifest.secret,
             )
@@ -556,7 +929,8 @@ class KubernetesRuntimeReconciler:
                     f"Kubernetes secret reconcile failed: {self._api_error_detail(exc)}"
                 ) from exc
             try:
-                self.core_v1.replace_namespaced_secret(
+                self._call_api(
+                    self.core_v1.replace_namespaced_secret,
                     name=manifest.names.secret_name,
                     namespace=manifest.names.namespace,
                     body=manifest.secret,
@@ -566,22 +940,35 @@ class KubernetesRuntimeReconciler:
                     f"Kubernetes secret replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
 
-    def create_pod(self, manifest: KubernetesRuntimeManifest) -> None:
+    def create_or_replace_deployment(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
-            self.core_v1.create_namespaced_pod(
+            self._call_api(
+                self.apps_v1.create_namespaced_deployment,
                 namespace=manifest.names.namespace,
-                body=manifest.pod,
+                body=manifest.deployment,
             )
         except self.api_exception_class as exc:
-            if self._is_status(exc, 409):
-                return
-            raise KubernetesReconcileError(
-                f"Kubernetes pod reconcile failed: {self._api_error_detail(exc)}"
-            ) from exc
+            if not self._is_status(exc, 409):
+                raise KubernetesReconcileError(
+                    f"Kubernetes deployment reconcile failed: {self._api_error_detail(exc)}"
+                ) from exc
+            try:
+                self._call_api(
+                    self.apps_v1.replace_namespaced_deployment,
+                    name=manifest.names.pod_name,
+                    namespace=manifest.names.namespace,
+                    body=manifest.deployment,
+                )
+            except self.api_exception_class as replace_exc:
+                raise KubernetesReconcileError(
+                    "Kubernetes deployment replace failed: "
+                    f"{self._api_error_detail(replace_exc)}"
+                ) from replace_exc
 
     def create_or_replace_service(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
-            self.core_v1.create_namespaced_service(
+            self._call_api(
+                self.core_v1.create_namespaced_service,
                 namespace=manifest.names.namespace,
                 body=manifest.service,
             )
@@ -591,7 +978,8 @@ class KubernetesRuntimeReconciler:
                     f"Kubernetes service reconcile failed: {self._api_error_detail(exc)}"
                 ) from exc
             try:
-                self.core_v1.replace_namespaced_service(
+                self._call_api(
+                    self.core_v1.replace_namespaced_service,
                     name=manifest.names.service_name,
                     namespace=manifest.names.namespace,
                     body=manifest.service,
@@ -601,18 +989,85 @@ class KubernetesRuntimeReconciler:
                     f"Kubernetes service replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
 
-    def read_pod(self, names: KubernetesRuntimeNames) -> Any:
+    def delete_runtime_objects(
+        self,
+        names: KubernetesRuntimeNames,
+        *,
+        delete_resources: bool = False,
+    ) -> None:
+        if not delete_resources:
+            self.scale_deployment(names, replicas=0)
+            return
+        self.delete_service(names)
+        self.delete_deployment(names)
+        self.delete_secret(names)
+
+    def delete_service(self, names: KubernetesRuntimeNames) -> None:
         try:
-            return self.core_v1.read_namespaced_pod(
+            self._call_api(
+                self.core_v1.delete_namespaced_service,
+                name=names.service_name,
+                namespace=names.namespace,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes service delete failed: {self._api_error_detail(exc)}"
+                ) from exc
+
+    def scale_deployment(self, names: KubernetesRuntimeNames, *, replicas: int) -> None:
+        try:
+            self._call_api(
+                self.apps_v1.patch_namespaced_deployment_scale,
+                name=names.pod_name,
+                namespace=names.namespace,
+                body={"spec": {"replicas": replicas}},
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes deployment scale failed: {self._api_error_detail(exc)}"
+                ) from exc
+
+    def delete_deployment(self, names: KubernetesRuntimeNames) -> None:
+        try:
+            self._call_api(
+                self.apps_v1.delete_namespaced_deployment,
+                name=names.pod_name,
+                namespace=names.namespace,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes deployment delete failed: {self._api_error_detail(exc)}"
+                ) from exc
+
+    def delete_secret(self, names: KubernetesRuntimeNames) -> None:
+        try:
+            self._call_api(
+                self.core_v1.delete_namespaced_secret,
+                name=names.secret_name,
+                namespace=names.namespace,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes secret delete failed: {self._api_error_detail(exc)}"
+                ) from exc
+
+    def read_deployment(self, names: KubernetesRuntimeNames) -> Any:
+        try:
+            return self._call_api(
+                self.apps_v1.read_namespaced_deployment,
                 name=names.pod_name,
                 namespace=names.namespace,
             )
         except self.api_exception_class as exc:
             raise KubernetesReconcileError(
-                f"Kubernetes pod read failed: {self._api_error_detail(exc)}"
+                f"Kubernetes deployment read failed: {self._api_error_detail(exc)}"
             ) from exc
 
-    def wait_for_pod_ready(
+    def wait_for_deployment_ready(
         self,
         names: KubernetesRuntimeNames,
         *,
@@ -620,27 +1075,29 @@ class KubernetesRuntimeReconciler:
         poll_interval_seconds: float = 1,
     ) -> Any:
         deadline = self.monotonic() + (
-            timeout_seconds or self.settings.mcp_runtime_adapter_startup_timeout_seconds
+            timeout_seconds or self.settings.mcp_runtime_kubernetes_startup_timeout_seconds
         )
-        last_phase = ""
+        last_ready = 0
+        last_desired = 0
         while self.monotonic() < deadline:
-            pod = self.read_pod(names)
-            status = getattr(pod, "status", None)
-            last_phase = str(getattr(status, "phase", "") if status is not None else "")
-            if pod_is_ready(pod):
-                return pod
-            if last_phase in {"Failed", "Succeeded"}:
-                suffix = pod_failure_message(pod)
-                detail = f": {suffix}" if suffix else ""
-                raise KubernetesRuntimeNotReadyError(
-                    f"Kubernetes runtime pod reached terminal phase {last_phase}{detail}"
-                )
+            deployment = self.read_deployment(names)
+            spec = getattr(deployment, "spec", None)
+            status = getattr(deployment, "status", None)
+            last_desired = int(getattr(spec, "replicas", 1) or 1)
+            last_ready = int(
+                getattr(status, "ready_replicas", 0)
+                or getattr(status, "available_replicas", 0)
+                or 0
+            )
+            if last_ready >= last_desired:
+                return deployment
             self.sleep(poll_interval_seconds)
         raise KubernetesRuntimeNotReadyError(
-            f"Kubernetes runtime pod did not become ready; last phase={last_phase or 'unknown'}"
+            "Kubernetes runtime deployment did not become ready; "
+            f"ready={last_ready}, desired={last_desired or 1}"
         )
 
-    def wait_for_adapter_ready(
+    def wait_for_gateway_ready(
         self,
         endpoint_url: str,
         *,
@@ -648,20 +1105,20 @@ class KubernetesRuntimeReconciler:
         poll_interval_seconds: float = 1,
     ) -> dict[str, Any]:
         deadline = self.monotonic() + (
-            timeout_seconds or self.settings.mcp_runtime_adapter_startup_timeout_seconds
+            timeout_seconds or self.settings.mcp_runtime_kubernetes_startup_timeout_seconds
         )
         last_error = ""
         while self.monotonic() < deadline:
             try:
-                status_payload = adapter_client.get_adapter_status(endpoint_url)
+                status_payload = get_gateway_health(endpoint_url)
                 if status_payload.get("ready") is True:
                     return status_payload
                 last_error = str(status_payload)
-            except adapter_client.MCPRuntimeAdapterError as exc:
+            except KubernetesRuntimeNotReadyError as exc:
                 last_error = str(exc)
             self.sleep(poll_interval_seconds)
         raise KubernetesRuntimeNotReadyError(
-            f"Kubernetes runtime adapter did not become ready: {last_error}"
+            f"Kubernetes runtime gateway did not become ready: {last_error}"
         )
 
     def wait_until_ready(
@@ -670,12 +1127,12 @@ class KubernetesRuntimeReconciler:
         *,
         endpoint_url: str,
     ) -> KubernetesReconcileResult:
-        pod = self.wait_for_pod_ready(manifest.names)
-        adapter_status = self.wait_for_adapter_ready(endpoint_url)
+        deployment = self.wait_for_deployment_ready(manifest.names)
+        gateway_status = self.wait_for_gateway_ready(endpoint_url)
         return KubernetesReconcileResult(
             endpoint_url=endpoint_url,
-            pod=pod,
-            adapter_status=adapter_status,
+            pod=deployment,
+            gateway_status=gateway_status,
         )
 
     def _is_status(self, exc: Exception, status_code: int) -> bool:
@@ -687,6 +1144,27 @@ class KubernetesRuntimeReconciler:
         body = getattr(exc, "body", "")
         parts = [str(item) for item in (status, reason, body) if item]
         return " ".join(parts) or str(exc)
+
+    def _api_request_timeout(self) -> tuple[float, float]:
+        read_timeout = float(
+            getattr(
+                self.settings,
+                "mcp_runtime_kubernetes_api_timeout_seconds",
+                KUBERNETES_API_READ_TIMEOUT_SECONDS,
+            )
+            or KUBERNETES_API_READ_TIMEOUT_SECONDS
+        )
+        read_timeout = max(1.0, read_timeout)
+        connect_timeout = min(KUBERNETES_API_CONNECT_TIMEOUT_SECONDS, read_timeout)
+        return (connect_timeout, read_timeout)
+
+    def _call_api(self, method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(*args, **kwargs, _request_timeout=self._api_request_timeout())
+        except TypeError as exc:
+            if "_request_timeout" not in str(exc):
+                raise
+            return method(*args, **kwargs)
 
 
 class KubernetesRuntimeProvider:
@@ -705,19 +1183,42 @@ class KubernetesRuntimeProvider:
 
     def runtime_spec(self, installation: MCPServerInstallation) -> RuntimeSpec:
         runtime = package_runtime(installation)
-        return base_runtime_spec(
-            installation,
+        runtime_config = installation.runtime_config or {}
+        command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
+        settings = get_settings()
+        provider_config = {
+            "installationRuntimeConfig": runtime_config,
+            "workloadKind": "deployment",
+            "objectIdentity": "runtime_config_fingerprint",
+            "gatewayImage": settings.mcp_runtime_kubernetes_gateway_image,
+            "servicePort": settings.mcp_runtime_kubernetes_service_port,
+            "namespacePrefix": settings.mcp_runtime_kubernetes_namespace_prefix,
+            "namespaceLabels": settings.mcp_runtime_kubernetes_namespace_labels_json,
+            "namespaceAnnotations": settings.mcp_runtime_kubernetes_namespace_annotations_json,
+            "imagePullSecretName": settings.mcp_runtime_kubernetes_image_pull_secret_name,
+            "startupTimeoutSeconds": settings.mcp_runtime_kubernetes_startup_timeout_seconds,
+        }
+        return RuntimeSpec(
+            installation_id=str(getattr(installation, "id", "")),
+            server_name=installation.server_name,
+            server_version=installation.installed_version,
             provider_name=self.name,
+            runtime_kind=runtime_kind(installation),
             transport=RUNTIME_TRANSPORT_STREAMABLE_HTTP,
-            command=runtime.command,
-            args=runtime.args,
-            cwd=runtime.cwd,
+            runtime_config_fingerprint=fingerprint_payload(provider_config),
+            secret_config_fingerprint=secret_fingerprint_payload(
+                installation.secret_config or {}
+            ),
+            command=command,
+            args=tuple(args),
+            cwd=cwd,
+            workspace_id=str(installation.workspace_id or ""),
         )
 
     def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
         raise NotImplementedError(
             "kubernetes MCP runtime tool discovery requires a runtime session; "
-            "use a tracked runtime call path before adapter invocation is wired"
+            "use a tracked runtime call path before invocation"
         )
 
     def call_tool(
@@ -742,12 +1243,61 @@ class KubernetesRuntimeProvider:
             manifest,
             endpoint_url=runtime_session.endpoint_url,
         )
-        raise NotImplementedError(
-            "kubernetes MCP runtime adapter HTTP invocation is not wired yet"
+        return mcp_client.call_tool(
+            runtime_session.endpoint_url,
+            {},
+            tool_name=tool_name,
+            arguments=arguments,
         )
 
-    def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
-        return None
+    def ensure_runtime(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+        wait_ready: bool = True,
+    ) -> RuntimeHealth:
+        if runtime_session is None:
+            raise NotImplementedError(
+                "kubernetes MCP runtime reconciliation requires a runtime session"
+            )
+        manifest = build_runtime_manifests(installation, runtime_session)
+        reconciler = self._new_reconciler()
+        reconcile_result = reconciler.reconcile(manifest)
+        runtime_session.namespace = manifest.names.namespace
+        runtime_session.pod_name = manifest.names.pod_name
+        runtime_session.endpoint_url = reconcile_result.endpoint_url
+        if not wait_ready:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_NOT_READY,
+                healthy=True,
+                ready=False,
+                message="Kubernetes runtime was reconciled; readiness was not waited.",
+                details={"endpointUrl": runtime_session.endpoint_url},
+            )
+        ready_result = reconciler.wait_until_ready(
+            manifest,
+            endpoint_url=runtime_session.endpoint_url,
+        )
+        return RuntimeHealth(
+            status=RUNTIME_HEALTH_READY,
+            healthy=True,
+            ready=True,
+            message="Kubernetes runtime is ready.",
+            details=ready_result.gateway_status,
+        )
+
+    def stop_runtime(
+        self,
+        runtime_session: MCPRuntimeSession,
+        *,
+        delete_resources: bool = False,
+    ) -> None:
+        names = runtime_object_names_for_session(runtime_session, prefer_stored_names=True)
+        self._new_reconciler().delete_runtime_objects(
+            names,
+            delete_resources=delete_resources,
+        )
 
     def health(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
         if runtime_session.status in {"stopped", "failed", "expired"}:
@@ -768,5 +1318,6 @@ class KubernetesRuntimeProvider:
         client_set = self._client_factory.load()
         return self._reconciler_factory(
             core_v1=client_set.core_v1,
+            apps_v1=client_set.apps_v1,
             api_exception_class=self._client_factory.api_exception_class(),
         )

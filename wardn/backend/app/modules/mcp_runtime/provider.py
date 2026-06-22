@@ -61,7 +61,21 @@ class MCPRuntimeProvider(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def stop_runtime(self, runtime_session: "MCPRuntimeSession") -> None:
+    def ensure_runtime(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: "MCPRuntimeSession | None" = None,
+        wait_ready: bool = True,
+    ) -> RuntimeHealth:
+        ...
+
+    def stop_runtime(
+        self,
+        runtime_session: "MCPRuntimeSession",
+        *,
+        delete_resources: bool = False,
+    ) -> None:
         ...
 
     def health(self, runtime_session: "MCPRuntimeSession") -> RuntimeHealth:

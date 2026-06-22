@@ -66,6 +66,20 @@ async def list_runtime_sessions(
     return list(result.scalars().all())
 
 
+async def list_active_runtime_sessions(
+    session: AsyncSession,
+    *,
+    limit: int = 1000,
+) -> list[MCPRuntimeSession]:
+    result = await session.execute(
+        select(MCPRuntimeSession)
+        .where(MCPRuntimeSession.status.in_(ACTIVE_RUNTIME_STATUSES))
+        .order_by(MCPRuntimeSession.updated_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def count_runtime_sessions_by_status(
     session: AsyncSession,
     *,

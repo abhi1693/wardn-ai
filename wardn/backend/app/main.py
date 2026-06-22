@@ -8,6 +8,8 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.modules.mcp_runtime.reaper import start_runtime_reaper, stop_runtime_reaper
+from app.modules.mcp_runtime.shutdown import teardown_runtime_sessions
+from app.modules.mcp_runtime.warmup import start_runtime_warmup, stop_runtime_warmup
 
 
 @asynccontextmanager
@@ -20,11 +22,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         event_retention_days=settings.mcp_runtime_event_retention_days,
         invocation_retention_days=settings.mcp_runtime_invocation_retention_days,
     )
+    warmup_task = start_runtime_warmup(
+        concurrency=settings.mcp_runtime_warm_startup_concurrency,
+    )
     app.state.mcp_runtime_reaper_task = reaper_task
+    app.state.mcp_runtime_warmup_task = warmup_task
     try:
         yield
     finally:
+        await stop_runtime_warmup(warmup_task)
         await stop_runtime_reaper(reaper_task)
+        await teardown_runtime_sessions(limit=settings.mcp_runtime_reaper_batch_size)
 
 
 def create_app() -> FastAPI:

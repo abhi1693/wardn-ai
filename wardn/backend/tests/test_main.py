@@ -9,6 +9,7 @@ from app import main
 @pytest.mark.asyncio
 async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
     task = object()
+    warmup_task = object()
     seen = {}
 
     def get_settings():
@@ -17,6 +18,7 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
             mcp_runtime_reaper_batch_size=17,
             mcp_runtime_event_retention_days=21,
             mcp_runtime_invocation_retention_days=31,
+            mcp_runtime_warm_startup_concurrency=4,
         )
 
     def start_runtime_reaper(
@@ -37,14 +39,28 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
     async def stop_runtime_reaper(seen_task):
         seen["stop"] = seen_task
 
+    def start_runtime_warmup(*, concurrency):
+        seen["warmup_start"] = {"concurrency": concurrency}
+        return warmup_task
+
+    async def stop_runtime_warmup(seen_task):
+        seen["warmup_stop"] = seen_task
+
+    async def teardown_runtime_sessions(*, limit):
+        seen["teardown"] = {"limit": limit}
+
     monkeypatch.setattr(main, "configure_logging", lambda: None)
     monkeypatch.setattr(main, "get_settings", get_settings)
     monkeypatch.setattr(main, "start_runtime_reaper", start_runtime_reaper)
     monkeypatch.setattr(main, "stop_runtime_reaper", stop_runtime_reaper)
+    monkeypatch.setattr(main, "start_runtime_warmup", start_runtime_warmup)
+    monkeypatch.setattr(main, "stop_runtime_warmup", stop_runtime_warmup)
+    monkeypatch.setattr(main, "teardown_runtime_sessions", teardown_runtime_sessions)
 
     app = FastAPI()
     async with main.lifespan(app):
         assert app.state.mcp_runtime_reaper_task is task
+        assert app.state.mcp_runtime_warmup_task is warmup_task
 
     assert seen == {
         "start": {
@@ -53,5 +69,8 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
             "event_retention_days": 21,
             "invocation_retention_days": 31,
         },
+        "warmup_start": {"concurrency": 4},
+        "warmup_stop": warmup_task,
         "stop": task,
+        "teardown": {"limit": 17},
     }

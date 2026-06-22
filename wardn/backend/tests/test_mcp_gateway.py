@@ -1,6 +1,6 @@
 import json
-from io import BytesIO
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -17,6 +17,7 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesMetadataError
 
 
 class FakeSession:
@@ -587,6 +588,54 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatc
         "serverName": "io.github.example/weather",
         "toolName": "get_forecast",
         "error": "upstream tools/call returned no result",
+    }
+
+
+def test_mcp_gateway_run_tool_returns_tool_error_for_kubernetes_runtime_failure(
+    monkeypatch,
+) -> None:
+    async def get_enabled_installation(*args, **kwargs):
+        return installed_server()
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise KubernetesMetadataError(
+            "Kubernetes namespace label value is not a valid Kubernetes label"
+        )
+
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = gateway_client().post(
+        "/api/v1/mcp/gateway",
+        json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_mcp_tool",
+                "arguments": {
+                    "serverName": "io.github.example/weather",
+                    "toolName": "get_forecast",
+                    "arguments": {"location": "Delhi"},
+                },
+            },
+        },
+    )
+
+    payload = response.json()
+    assert "error" not in payload
+    result = payload["result"]
+    assert result["isError"] is True
+    assert result["content"] == [
+        {
+            "type": "text",
+            "text": "Kubernetes namespace label value is not a valid Kubernetes label",
+        }
+    ]
+    assert result["structuredContent"] == {
+        "serverName": "io.github.example/weather",
+        "toolName": "get_forecast",
+        "error": "Kubernetes namespace label value is not a valid Kubernetes label",
     }
 
 

@@ -14,6 +14,7 @@ from app.modules.mcp_registry.models import (
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 from app.modules.mcp_runtime.manager import runtime_kind
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -431,7 +432,7 @@ async def run_mcp_tool(
             arguments=tool_arguments,
         )
         await session.commit()
-    except MCPGatewayUpstreamError as exc:
+    except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
         await session.commit()
         return error_tool_result(
             str(exc),

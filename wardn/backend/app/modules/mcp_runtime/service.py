@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
@@ -28,11 +29,15 @@ from app.modules.mcp_runtime.schemas import (
 RUNTIME_EVENT_SESSION_CREATED = "runtime_session_created"
 RUNTIME_EVENT_SESSION_REUSED = "runtime_session_reused"
 RUNTIME_EVENT_SESSION_REPLACED = "runtime_session_replaced"
+RUNTIME_EVENT_WARMUP_STARTED = "runtime_warmup_started"
+RUNTIME_EVENT_WARMUP_SUCCEEDED = "runtime_warmup_succeeded"
+RUNTIME_EVENT_WARMUP_FAILED = "runtime_warmup_failed"
 RUNTIME_EVENT_TOOL_CALL_STARTED = "tool_call_started"
 RUNTIME_EVENT_TOOL_CALL_SUCCEEDED = "tool_call_succeeded"
 RUNTIME_EVENT_TOOL_CALL_FAILED = "tool_call_failed"
 RUNTIME_EVENT_SESSION_STOPPED = "runtime_session_stopped"
 RUNTIME_EVENT_REAPER_STOPPED = "runtime_reaper_stopped"
+RUNTIME_EVENT_SHUTDOWN_STOP_FAILED = "runtime_shutdown_stop_failed"
 RUNTIME_SUMMARY_RECENT_WINDOW = timedelta(hours=24)
 
 
@@ -41,6 +46,19 @@ class MCPRuntimeReapResult:
     stopped_count: int
     deleted_event_count: int = 0
     deleted_invocation_count: int = 0
+
+
+@dataclass(frozen=True)
+class MCPRuntimeWarmupResult:
+    warmed_count: int = 0
+    skipped_count: int = 0
+    failed_count: int = 0
+
+
+@dataclass(frozen=True)
+class MCPRuntimeShutdownResult:
+    stopped_count: int = 0
+    failed_count: int = 0
 
 
 def runtime_session_read(runtime_session: MCPRuntimeSession) -> MCPRuntimeSessionRead:
@@ -224,6 +242,87 @@ async def ensure_runtime_session(
     return runtime_session
 
 
+async def warm_runtime_session(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+    *,
+    manager: MCPRuntimeManager | None = None,
+    now: datetime | None = None,
+    wait_ready: bool = True,
+) -> MCPRuntimeSession:
+    manager = manager or get_runtime_manager()
+    now = now or datetime.now(UTC)
+    server = MCPServerVersion(
+        name=installation.server_name,
+        version=installation.installed_version,
+    )
+    runtime_session = await ensure_runtime_session(
+        session,
+        installation,
+        server,
+        manager=manager,
+        now=now,
+    )
+    runtime_session.status = "running"
+    runtime_session.last_error = ""
+    add_runtime_event(
+        session,
+        runtime_session,
+        RUNTIME_EVENT_WARMUP_STARTED,
+        message="Runtime warmup started.",
+        metadata={"runtimeProvider": runtime_session.runtime_provider},
+        now=now,
+    )
+    await session.flush()
+
+    try:
+        health = await run_in_threadpool(
+            manager.ensure_runtime,
+            installation,
+            runtime_session=runtime_session,
+            wait_ready=wait_ready,
+        )
+    except Exception as exc:
+        failed_at = datetime.now(UTC)
+        runtime_session.status = "failed"
+        runtime_session.failure_count += 1
+        runtime_session.last_error = str(exc)
+        runtime_session.last_used_at = failed_at
+        add_runtime_event(
+            session,
+            runtime_session,
+            RUNTIME_EVENT_WARMUP_FAILED,
+            message="Runtime warmup failed.",
+            metadata={"errorType": exc.__class__.__name__},
+            now=failed_at,
+        )
+        await session.flush()
+        raise
+
+    ready_at = datetime.now(UTC)
+    runtime_session.status = "idle"
+    if health.ready:
+        runtime_session.ready_at = ready_at
+    elif runtime_session.ready_at == now:
+        runtime_session.ready_at = None
+    runtime_session.last_used_at = ready_at
+    runtime_session.expires_at = runtime_expires_at(ready_at)
+    runtime_session.last_error = ""
+    add_runtime_event(
+        session,
+        runtime_session,
+        RUNTIME_EVENT_WARMUP_SUCCEEDED,
+        message="Runtime warmup succeeded.",
+        metadata={
+            "healthStatus": health.status,
+            "ready": health.ready,
+        },
+        now=ready_at,
+    )
+    await session.flush()
+    return runtime_session
+
+
 def mark_invocation_success(
     runtime_session: MCPRuntimeSession,
     invocation,
@@ -306,7 +405,8 @@ async def call_tool_with_tracking(
     await session.flush()
 
     try:
-        result = manager.call_tool(
+        result = await run_in_threadpool(
+            manager.call_tool,
             installation,
             tool_name=tool_name,
             arguments=arguments,
@@ -383,6 +483,76 @@ async def reap_expired_runtime_sessions(
         )
     await session.flush()
     return MCPRuntimeReapResult(stopped_count=len(expired_sessions))
+
+
+async def shutdown_active_runtime_sessions(
+    session: AsyncSession,
+    *,
+    manager: MCPRuntimeManager | None = None,
+    limit: int = 1000,
+) -> MCPRuntimeShutdownResult:
+    manager = manager or get_runtime_manager()
+    stopped_count = 0
+    failed_count = 0
+    batch_limit = max(1, limit)
+
+    while True:
+        runtime_sessions = await repository.list_active_runtime_sessions(
+            session,
+            limit=batch_limit,
+        )
+        if not runtime_sessions:
+            break
+
+        now = datetime.now(UTC)
+        for runtime_session in runtime_sessions:
+            try:
+                await run_in_threadpool(
+                    manager.stop_runtime,
+                    runtime_session,
+                    delete_resources=True,
+                )
+            except Exception as exc:
+                failed_count += 1
+                runtime_session.status = "failed"
+                runtime_session.expires_at = now
+                runtime_session.failure_count += 1
+                runtime_session.last_error = str(exc)
+                add_runtime_event(
+                    session,
+                    runtime_session,
+                    RUNTIME_EVENT_SHUTDOWN_STOP_FAILED,
+                    message="Runtime session shutdown teardown failed.",
+                    metadata={
+                        "reason": "server_shutdown",
+                        "errorType": exc.__class__.__name__,
+                    },
+                    now=now,
+                )
+                continue
+
+            stopped_count += 1
+            runtime_session.status = "stopped"
+            runtime_session.stopped_at = now
+            runtime_session.expires_at = now
+            runtime_session.last_error = ""
+            add_runtime_event(
+                session,
+                runtime_session,
+                RUNTIME_EVENT_SESSION_STOPPED,
+                message="Runtime session stopped during server shutdown.",
+                metadata={"reason": "server_shutdown"},
+                now=now,
+            )
+
+        await session.flush()
+        if len(runtime_sessions) < batch_limit:
+            break
+
+    return MCPRuntimeShutdownResult(
+        stopped_count=stopped_count,
+        failed_count=failed_count,
+    )
 
 
 async def prune_runtime_events(

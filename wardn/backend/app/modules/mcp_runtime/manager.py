@@ -55,7 +55,21 @@ class MCPRuntimeManager(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
+    def ensure_runtime(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+        wait_ready: bool = True,
+    ) -> RuntimeHealth:
+        ...
+
+    def stop_runtime(
+        self,
+        runtime_session: MCPRuntimeSession,
+        *,
+        delete_resources: bool = False,
+    ) -> None:
         ...
 
     def health_runtime(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
@@ -138,9 +152,28 @@ class DefaultMCPRuntimeManager:
             runtime_session=runtime_session,
         )
 
-    def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
+    def ensure_runtime(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+        wait_ready: bool = True,
+    ) -> RuntimeHealth:
+        return self._registry.select_provider(installation).ensure_runtime(
+            installation,
+            runtime_session=runtime_session,
+            wait_ready=wait_ready,
+        )
+
+    def stop_runtime(
+        self,
+        runtime_session: MCPRuntimeSession,
+        *,
+        delete_resources: bool = False,
+    ) -> None:
         self._registry.provider_by_name(runtime_session.runtime_provider).stop_runtime(
-            runtime_session
+            runtime_session,
+            delete_resources=delete_resources,
         )
 
     def health_runtime(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:

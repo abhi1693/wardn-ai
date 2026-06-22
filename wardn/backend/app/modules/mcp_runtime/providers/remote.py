@@ -50,7 +50,26 @@ class RemoteRuntimeProvider:
             arguments=arguments,
         )
 
-    def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
+    def ensure_runtime(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+        wait_ready: bool = True,
+    ) -> RuntimeHealth:
+        return self.health(runtime_session) if runtime_session is not None else RuntimeHealth(
+            status=RUNTIME_HEALTH_UNKNOWN,
+            healthy=True,
+            ready=True,
+            message="Remote runtime is externally hosted.",
+        )
+
+    def stop_runtime(
+        self,
+        runtime_session: MCPRuntimeSession,
+        *,
+        delete_resources: bool = False,
+    ) -> None:
         return None
 
     def health(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:

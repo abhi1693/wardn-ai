@@ -1,7 +1,4 @@
-import json
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -19,7 +16,6 @@ from app.modules.mcp_runtime.manager import (
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.providers.local_process import (
-    RUNTIME_TRANSPORT_ADAPTER,
     LocalProcessRuntimeProvider,
     ManagedStdioSession,
 )
@@ -231,82 +227,3 @@ def test_local_process_provider_health_reports_missing_process() -> None:
     assert health.ready is False
     assert health.message == "Local runtime process is not present in this backend process."
 
-
-def test_local_process_provider_can_call_tool_through_runtime_adapter(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.local_process.get_settings",
-        lambda: type(
-            "Settings",
-            (),
-            {
-                "mcp_runtime_local_transport": "adapter",
-                "mcp_runtime_adapter_startup_timeout_seconds": 5,
-                "mcp_runtime_adapter_request_timeout_seconds": 5,
-            },
-        )(),
-    )
-    repo_root = Path(__file__).resolve().parents[3]
-    fake_server = (
-        repo_root
-        / "wardn"
-        / "runtime-adapter"
-        / "tests"
-        / "fixtures"
-        / "fake_mcp_server.py"
-    )
-    installation = MCPServerInstallation(
-        server_name="io.github.example/weather",
-        installed_version="1.0.0",
-        status="enabled",
-        install_type="npm",
-        runtime_config={
-            "kind": RUNTIME_KIND_PACKAGE,
-            "command": sys.executable,
-            "args": [str(fake_server)],
-            "cwd": str(repo_root),
-            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
-        },
-    )
-    installation.id = uuid.uuid4()
-    provider = LocalProcessRuntimeProvider()
-    runtime_spec = provider.runtime_spec(installation)
-    runtime_session = MCPRuntimeSession(
-        installation_id=installation.id,
-        server_name=installation.server_name,
-        server_version=installation.installed_version,
-        runtime_provider="local",
-        runtime_kind=RUNTIME_KIND_PACKAGE,
-        config_fingerprint=runtime_spec.fingerprint(),
-        status="idle",
-        pod_name="",
-        namespace="wardn-runtimes",
-        endpoint_url="",
-        failure_count=0,
-        last_error="",
-    )
-
-    try:
-        tools = provider.list_tools(installation)
-        result = provider.call_tool(
-            installation,
-            tool_name="echo",
-            arguments={"value": "ok"},
-            runtime_session=runtime_session,
-        )
-        health = provider.health(runtime_session)
-    finally:
-        provider.stop_all()
-
-    assert runtime_spec.transport == RUNTIME_TRANSPORT_ADAPTER
-    assert tools[0]["name"] == "echo"
-    assert runtime_session.endpoint_url.startswith("http://127.0.0.1:")
-    assert health.status == "ready"
-    assert health.healthy is True
-    assert health.ready is True
-    assert health.details["transport"] == RUNTIME_TRANSPORT_ADAPTER
-    payload = json.loads(result["content"][0]["text"])
-    assert payload == {
-        "arguments": {"value": "ok"},
-        "initialized": True,
-        "name": "echo",
-    }
