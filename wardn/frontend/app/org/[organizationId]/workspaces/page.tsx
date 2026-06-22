@@ -29,7 +29,7 @@ export default async function OrganizationWorkspacesPage({
 
   return (
     <AppShell
-      active="dashboard"
+      active="workspaces"
       actions={
         <>
           <Button asChild size="sm" variant="outline">
@@ -44,7 +44,7 @@ export default async function OrganizationWorkspacesPage({
         </>
       }
       eyebrow="Organization"
-      title={organization.name}
+      title="Workspaces"
       workspaceContext={workspaceContext}
     >
       <WorkspacesOverviewClient organization={organization} workspaces={workspaces} />

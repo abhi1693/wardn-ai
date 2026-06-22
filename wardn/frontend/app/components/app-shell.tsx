@@ -82,20 +82,8 @@ export function AppShell({
       item.activeKey === active ||
       (item.activeKey === "workspaces" && (active === "workspace-dashboard" || active === "install")),
   }));
-  const sectionLabel =
-    active === "org-dashboard"
-      ? "Dashboard"
-      : active === "dashboard" || active === "workspaces"
-      ? "Workspaces"
-      : active === "registry"
-        ? "Registry"
-        : active === "install"
-          ? "Installations"
-          : active === "workspace-dashboard"
-            ? "Workspace"
-            : active === "organization-settings"
-              ? "Settings"
-              : "Administration";
+  const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
+  const showBreadcrumbParent = breadcrumbLabel !== title;
 
   return (
     <main className="min-h-screen bg-[var(--surface)] text-foreground">
@@ -161,10 +149,14 @@ export function AppShell({
         <header className="fixed right-0 top-0 z-40 flex h-16 w-[calc(100%-260px)] items-center border-b border-[var(--outline-variant)] bg-[var(--surface)] max-lg:static max-lg:w-full">
           <div className="flex w-full items-center justify-between gap-4 px-8 max-md:px-4">
             <div className="flex min-w-0 items-center gap-4">
-              <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)]">
-                {selectedOrganization ? sectionLabel : eyebrow}
-              </span>
-              <span className="text-sm leading-5 text-[var(--on-surface-variant)]">/</span>
+              {showBreadcrumbParent ? (
+                <>
+                  <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)]">
+                    {breadcrumbLabel}
+                  </span>
+                  <span className="text-sm leading-5 text-[var(--on-surface-variant)]">/</span>
+                </>
+              ) : null}
               <h1 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
                 {title}
               </h1>
