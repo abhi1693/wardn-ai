@@ -1,9 +1,13 @@
-import { Plus } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
-import type { MCPServerInstallationListResponse } from "@/lib/api/generated/model";
+import type {
+  MCPServerInstallationListResponse,
+  MCPServerInstallationRead,
+} from "@/lib/api/generated/model";
 import {
   backendCookieHeader,
   backendPath,
@@ -12,7 +16,7 @@ import {
   workspaceMcpRegistryPath,
 } from "@/lib/workspace-context";
 
-import { InstalledListClient } from "./installed-list-client";
+import { ValidateInstallClient } from "./validate-install-client";
 
 async function getInitialInstallations(context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");
@@ -35,34 +39,41 @@ async function getInitialInstallations(context: WorkspaceContext) {
   }
 }
 
-type InstallListViewProps = {
+type ValidateInstallViewProps = {
+  installationId: string;
   workspaceContext: WorkspaceContext;
 };
 
-export async function InstallListView({ workspaceContext }: InstallListViewProps) {
+export async function ValidateInstallView({
+  installationId,
+  workspaceContext,
+}: ValidateInstallViewProps) {
   const installations = await getInitialInstallations(workspaceContext);
-  const basePath = workspaceInstallPath(workspaceContext);
+  const installation: MCPServerInstallationRead | undefined = installations.find(
+    (item) => item.id === installationId
+  );
+  const installPath = workspaceInstallPath(workspaceContext);
+
+  if (!installation) {
+    notFound();
+  }
 
   return (
     <AppShell
       active="install"
       actions={
-        <Button asChild size="sm">
-          <Link href={`${basePath}/new`}>
-            <Plus className="size-4" />
-            Add
+        <Button asChild size="sm" variant="outline">
+          <Link href={installPath}>
+            <ArrowLeft className="size-4" />
+            Installations
           </Link>
         </Button>
       }
       eyebrow="MCP Runtime"
-      title="Install"
+      title="Validate tool"
       workspaceContext={workspaceContext}
     >
-      <InstalledListClient
-        basePath={basePath}
-        initialInstallations={installations}
-        organizationId={workspaceContext.selectedOrganization?.id ?? ""}
-      />
+      <ValidateInstallClient installation={installation} />
     </AppShell>
   );
 }

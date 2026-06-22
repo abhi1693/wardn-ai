@@ -14,9 +14,18 @@ import Link from "next/link";
 import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import {
+  FeedbackMessages,
+  McpTableCard,
+  RuntimeBadge,
+  ServerIdentityCell,
+  mcpServerDetailUrl,
+  responseErrorMessage,
+  runtimeDisplayName,
+  serverIconUrlFromIcons,
+} from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -47,38 +56,6 @@ function displayHost(url: string) {
   } catch {
     return url;
   }
-}
-
-function preferredIcon(entry: MCPRegistryServerResponse) {
-  const icon = entry.server.icons?.find((candidate) => {
-    const src = (candidate as Record<string, unknown>).src;
-    return typeof src === "string" && src.startsWith("https://");
-  }) as Record<string, unknown> | undefined;
-
-  return stringValue(icon?.src);
-}
-
-function runtimeDisplayName(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "uvx") {
-    return "UVX";
-  }
-  if (normalized === "npm") {
-    return "NPM";
-  }
-  if (normalized === "pypi") {
-    return "PyPI";
-  }
-  if (normalized === "oci") {
-    return "OCI";
-  }
-  if (normalized === "streamable-http") {
-    return "Streamable HTTP";
-  }
-  if (normalized === "sse") {
-    return "SSE";
-  }
-  return value || "Package";
 }
 
 function deliveryTargets(entry: MCPRegistryServerResponse) {
@@ -119,33 +96,6 @@ function deliveryTargets(entry: MCPRegistryServerResponse) {
     : [{ icon: Package, label: "Unspecified", detail: "" }];
 }
 
-function runtimeBadgeClass(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.includes("http") || normalized.includes("sse")) {
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  }
-  if (normalized === "uvx" || normalized.includes("pypi")) {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-  if (normalized === "npm") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
-  }
-  if (normalized === "oci") {
-    return "border-violet-200 bg-violet-50 text-violet-700";
-  }
-  if (normalized.includes("remote")) {
-    return "border-cyan-200 bg-cyan-50 text-cyan-700";
-  }
-  return "border-slate-200 bg-slate-100 text-slate-700";
-}
-
-function detailServerUrl(organizationId: string, serverName: string, version: string) {
-  return `/org/${encodeURIComponent(organizationId)}/registry/${serverName
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}?version=${encodeURIComponent(version)}`;
-}
-
 function editServerUrl(organizationId: string, serverName: string, version: string) {
   return `/org/${encodeURIComponent(organizationId)}/registry/edit/${serverName
     .split("/")
@@ -163,15 +113,6 @@ function serverVersionUrl(serverName: string, version: string) {
   return `/api/mcp/registry/servers/${[...serverName.split("/"), version]
     .map(encodeURIComponent)
     .join("/")}`;
-}
-
-async function responseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 type RegistryListClientProps = {
@@ -380,19 +321,9 @@ export function RegistryListClient({
         </div>
       </form>
 
-      {error ? (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {notice}
-        </div>
-      ) : null}
+      <FeedbackMessages error={error} notice={notice} />
 
-      <Card className="overflow-hidden rounded-b-xl rounded-t-none border-[var(--outline-variant)] border-t-0 bg-white shadow-[var(--shadow-card)]">
-        <CardContent className="p-0">
+      <McpTableCard className="rounded-t-none border-t-0">
           <Table>
             <TableHeader>
               <TableRow className="border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-low)]">
@@ -428,7 +359,7 @@ export function RegistryListClient({
                   const updateAvailable = serverInstallations.some(
                     (currentInstallation) => currentInstallation.updateAvailable
                   );
-                  const iconUrl = preferredIcon(entry);
+                  const iconUrl = serverIconUrlFromIcons(entry.server.icons);
                   const runtimes = deliveryTargets(entry);
                   return (
                     <TableRow
@@ -436,55 +367,27 @@ export function RegistryListClient({
                       key={`${entry.server.name}:${entry.server.version}`}
                     >
                       <TableCell className="px-6 py-4">
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--primary-container)] text-white">
-                            {iconUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                alt=""
-                                className="size-full object-contain"
-                                referrerPolicy="no-referrer"
-                                src={iconUrl}
-                              />
-                            ) : (
-                              <Package className="size-4" />
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link
-                                className="font-semibold text-primary underline-offset-4 hover:underline"
-                                href={detailServerUrl(
-                                  organizationId,
-                                  entry.server.name,
-                                  entry.server.version
-                                )}
-                              >
-                                {entry.server.title || entry.server.name}
-                              </Link>
-                            </div>
-                            <div className="mt-0.5 break-all text-[11px] text-[var(--on-surface-variant)]">
-                              {entry.server.name}
-                            </div>
-                          </div>
-                        </div>
+                        <ServerIdentityCell
+                          href={mcpServerDetailUrl(
+                            organizationId,
+                            entry.server.name,
+                            entry.server.version
+                          )}
+                          iconUrl={iconUrl}
+                          name={entry.server.name}
+                          title={entry.server.title || entry.server.name}
+                        />
                       </TableCell>
                       <TableCell className="px-6 py-4">
                         <div className="flex flex-wrap items-center gap-2">
                           {runtimes.map((runtime) => {
-                            const RuntimeIcon = runtime.icon;
                             return (
-                              <Badge
-                                className={`gap-1.5 rounded px-2 py-1 text-xs font-medium ${runtimeBadgeClass(
-                                  runtime.label
-                                )}`}
+                              <RuntimeBadge
+                                detail={runtime.detail}
+                                icon={runtime.icon}
                                 key={runtime.label}
-                                title={runtime.detail || runtime.label}
-                                variant="outline"
-                              >
-                                <RuntimeIcon className="size-3.5" />
-                                {runtime.label}
-                              </Badge>
+                                label={runtime.label}
+                              />
                             );
                           })}
                           {updateAvailable ? (
@@ -547,8 +450,7 @@ export function RegistryListClient({
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+      </McpTableCard>
 
       {paginationControls}
     </div>
