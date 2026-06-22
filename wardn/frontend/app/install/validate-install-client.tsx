@@ -5,12 +5,12 @@ import {
   CircleHelp,
   Play,
   Search,
+  Terminal,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { FeedbackMessages, responseErrorMessage } from "@/app/mcp/mcp-list-ui";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -454,42 +454,51 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
   }
 
   return (
-    <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-          <CardContent className="p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
+          <CardContent className="flex h-full flex-col justify-between p-5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
               Server
-            </div>
-            <div className="mt-2 truncate text-lg font-semibold">
-              {installation.server.title || installation.serverName}
-            </div>
-            <div className="mt-1 break-all text-xs text-[var(--on-surface-variant)]">
-              {installation.serverName}
+            </span>
+            <div>
+              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+                {installation.server.title || installation.serverName}
+              </h3>
+              <p className="mt-1 break-all text-sm leading-5 text-[var(--on-surface-variant)]">
+                {installation.serverName}
+              </p>
             </div>
           </CardContent>
         </Card>
-        <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-          <CardContent className="p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
+          <CardContent className="flex h-full flex-col justify-between p-5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
               Instance
-            </div>
-            <div className="mt-2 truncate text-lg font-semibold">{installation.configName}</div>
-            <div className="mt-1 text-xs text-[var(--on-surface-variant)]">
-              {installation.status}
+            </span>
+            <div>
+              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+                {installation.configName}
+              </h3>
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--on-secondary-container)]">
+                <div className="size-2 rounded-full bg-emerald-500" />
+                {installation.status}
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-          <CardContent className="p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
+          <CardContent className="flex h-full flex-col justify-between p-5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
               Version
-            </div>
-            <div className="mt-2 truncate text-lg font-semibold">
-              {installation.installedVersion}
-            </div>
-            <div className="mt-1 text-xs text-[var(--on-surface-variant)]">
-              {installation.installType}
+            </span>
+            <div>
+              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+                {installation.installedVersion}
+              </h3>
+              <p className="mt-1 text-sm leading-5 text-[var(--on-surface-variant)]">
+                {installation.installType}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -497,241 +506,266 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
 
       <FeedbackMessages error={error} />
 
-      <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-          <CardHeader>
-            <CardTitle>Tools</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--on-surface-variant)]" />
+      <div className="grid grid-cols-12 items-start gap-6">
+        <Card className="col-span-12 max-h-[600px] overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none lg:col-span-3">
+          <CardHeader className="border-b border-[var(--outline-variant)] p-4">
+            <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+              Tools
+            </CardTitle>
+            <div className="relative mt-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--outline)]" />
               <Input
-                className="pl-9"
+                className="h-10 rounded-lg border-[var(--outline-variant)] bg-[var(--surface)] pl-10 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
                 onChange={(event) => setToolSearch(event.target.value)}
                 placeholder="Search tools"
                 value={toolSearch}
               />
             </div>
-            <div className="max-h-[520px] overflow-auto rounded-lg border border-[var(--outline-variant)]">
-              {isLoadingTools ? (
-                <div className="p-4 text-sm text-[var(--on-surface-variant)]">
-                  Loading tools from the installed server...
-                </div>
-              ) : tools.length === 0 ? (
-                <div className="p-4 text-sm text-[var(--on-surface-variant)]">
-                  No tools were discovered for this server.
-                </div>
-              ) : filteredTools.length === 0 ? (
-                <div className="p-4 text-sm text-[var(--on-surface-variant)]">
-                  No tools match this search.
-                </div>
-              ) : (
-                filteredTools.map((tool) => (
+          </CardHeader>
+          <CardContent className="max-h-[508px] overflow-y-auto p-0">
+            {isLoadingTools ? (
+              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
+                Loading tools from the installed server...
+              </div>
+            ) : tools.length === 0 ? (
+              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
+                No tools were discovered for this server.
+              </div>
+            ) : filteredTools.length === 0 ? (
+              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
+                No tools match this search.
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--outline-variant)]/30">
+                {filteredTools.map((tool) => (
                   <button
                     className={
                       tool.toolName === selectedToolName
-                        ? "block w-full border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-3 py-3 text-left last:border-b-0"
-                        : "block w-full border-b border-[var(--outline-variant)] px-3 py-3 text-left transition-colors last:border-b-0 hover:bg-[var(--surface-container-low)]"
+                        ? "block w-full border-l-4 border-primary bg-[var(--secondary-container)]/50 px-4 py-4 text-left"
+                        : "block w-full border-l-4 border-transparent px-4 py-4 text-left transition-colors hover:bg-[var(--surface-container)]"
                     }
                     key={tool.toolName}
                     onClick={() => selectTool(tool)}
                     type="button"
                   >
-                    <div className="text-sm font-semibold">{tool.title || tool.toolName}</div>
-                    <div className="mt-0.5 break-all text-xs text-[var(--on-surface-variant)]">
+                    <span className="block truncate text-sm font-semibold leading-5 text-[var(--on-surface)]">
+                      {tool.title || tool.toolName}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] leading-4 text-[var(--on-surface-variant)]">
                       {tool.toolName}
-                    </div>
+                    </span>
                   </button>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <div className="space-y-5">
-          <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-            <CardHeader>
+        <div className="col-span-12 space-y-6 lg:col-span-9">
+          <Card className="overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
+            <CardHeader className="border-b border-[var(--outline-variant)] p-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <CardTitle>{selectedTool?.title || selectedTool?.toolName || "Select a tool"}</CardTitle>
+                  <CardTitle className="text-2xl font-bold leading-8 tracking-normal text-[var(--on-surface)]">
+                    {selectedTool?.title || selectedTool?.toolName || "Select a tool"}
+                  </CardTitle>
                   {selectedTool ? (
-                    <div className="mt-1 break-all text-xs text-[var(--on-surface-variant)]">
+                    <p className="mt-1 break-all text-sm leading-5 text-[var(--on-surface-variant)]">
                       {selectedTool.toolName}
-                    </div>
+                    </p>
                   ) : null}
                 </div>
                 {selectedTool ? (
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{selectedInputs.length} inputs</Badge>
-                    <Badge variant="outline">
+                    <span className="rounded border border-[var(--outline-variant)]/30 bg-[var(--surface-container)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-surface-variant)]">
+                      {selectedInputs.length} inputs
+                    </span>
+                    <span className="rounded border border-[var(--outline-variant)]/30 bg-[var(--surface-container)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-surface-variant)]">
                       {selectedInputs.filter((input) => input.required).length} required
-                    </Badge>
+                    </span>
                   </div>
                 ) : null}
               </div>
-              {selectedTool?.description ? (
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-[var(--on-surface-variant)]">
-                  {selectedTool.description}
-                </p>
-              ) : null}
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6 p-6">
               {!selectedTool ? (
                 <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] text-sm text-[var(--on-surface-variant)]">
                   Select a tool to configure validation arguments.
                 </div>
-              ) : selectedInputs.length === 0 ? (
-                <div className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4 text-sm text-[var(--on-surface-variant)]">
-                  This tool does not declare input fields.
-                </div>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {selectedInputs.map((input) => {
-                    const inputId = `validation-argument-${input.name}`;
-                    const value = argumentValues[input.name];
+                <>
+                  {selectedTool.description ? (
+                    <div className="space-y-3">
+                      <p className="whitespace-pre-wrap text-sm leading-5 text-[var(--on-surface)]/80">
+                        {selectedTool.description}
+                      </p>
+                    </div>
+                  ) : null}
 
-                    return (
-                      <div className="space-y-2" key={input.name}>
-                        <div className="flex min-h-6 items-center gap-2">
-                          <label className="text-sm font-medium" htmlFor={inputId}>
-                            {input.name}
-                            {input.required ? <span className="text-red-600"> *</span> : null}
-                          </label>
-                          {input.description ? (
-                            <span className="group relative inline-flex">
-                              <button
-                                aria-label={`${input.name} help`}
-                                className="inline-flex text-[var(--on-surface-variant)] outline-none hover:text-[var(--on-surface)] focus-visible:text-[var(--on-surface)]"
-                                type="button"
-                              >
-                                <CircleHelp className="size-4" />
-                              </button>
-                              <span className="pointer-events-none absolute left-1/2 top-6 z-50 hidden w-80 -translate-x-1/2 rounded-md border bg-popover px-3 py-2 text-xs font-normal leading-5 text-popover-foreground shadow-md group-hover:block group-focus-within:block">
-                                {input.description}
+                  {selectedInputs.length === 0 ? (
+                    <div className="rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] p-4 text-sm text-[var(--on-surface-variant)]">
+                      This tool does not declare input fields.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {selectedInputs.map((input) => {
+                        const inputId = `validation-argument-${input.name}`;
+                        const value = argumentValues[input.name];
+
+                        return (
+                          <div className="space-y-3" key={input.name}>
+                            <div className="flex items-end justify-between gap-3">
+                              <div className="flex min-h-6 items-center gap-2">
+                                <label
+                                  className="text-xs font-semibold leading-4 text-[var(--on-surface)]"
+                                  htmlFor={inputId}
+                                >
+                                  {input.name}
+                                  {input.required ? <span className="text-[var(--error)]"> *</span> : null}
+                                </label>
+                                {input.description ? (
+                                  <CircleHelp
+                                    aria-hidden="true"
+                                    className="size-4 text-[var(--on-surface-variant)]"
+                                  />
+                                ) : null}
+                              </div>
+                              <span className="rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--on-surface-variant)]">
+                                {input.type}
                               </span>
-                            </span>
-                          ) : null}
-                          <Badge className="ml-auto" variant="outline">
-                            {input.type}
-                          </Badge>
-                        </div>
+                            </div>
 
-                        {input.type === "boolean" ? (
-                          <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm">
-                            <input
-                              checked={value === true}
-                              id={inputId}
-                              onChange={(event) => {
-                                setArgumentValues((current) => ({
-                                  ...current,
-                                  [input.name]: event.target.checked,
-                                }));
-                                setArgumentError("");
-                              }}
-                              type="checkbox"
-                            />
-                            Enabled
-                          </label>
-                        ) : input.enumValues.length > 0 ? (
-                          <Select
-                            onValueChange={(value) => {
-                              setArgumentValues((current) => ({
-                                ...current,
-                                [input.name]: value,
-                              }));
-                              setArgumentError("");
-                            }}
-                            value={typeof value === "string" ? value : ""}
-                          >
-                            <SelectTrigger
-                              className="h-9 rounded-lg border-[var(--outline-variant)] bg-white shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
-                              id={inputId}
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {input.enumValues.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                  {option}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : input.type === "object" || input.type === "array" ? (
-                          <textarea
-                            className="min-h-28 w-full rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            id={inputId}
-                            onChange={(event) => {
-                              setArgumentValues((current) => ({
-                                ...current,
-                                [input.name]: event.target.value,
-                              }));
-                              setArgumentError("");
-                            }}
-                            value={typeof value === "string" ? value : ""}
-                          />
-                        ) : (
-                          <Input
-                            id={inputId}
-                            onChange={(event) => {
-                              setArgumentValues((current) => ({
-                                ...current,
-                                [input.name]: event.target.value,
-                              }));
-                              setArgumentError("");
-                            }}
-                            type={
-                              input.type === "integer" || input.type === "number"
-                                ? "number"
-                                : "text"
-                            }
-                            value={typeof value === "string" ? value : ""}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                            {input.description ? (
+                              <div className="rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] p-4 font-mono text-[13px] leading-5 text-[var(--on-surface-variant)]">
+                                <span className="font-bold text-primary">Arg:</span>
+                                <br />
+                                <span className="ml-4">{input.description}</span>
+                              </div>
+                            ) : null}
+
+                            {input.type === "boolean" ? (
+                              <label className="flex h-11 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-4 text-sm">
+                                <input
+                                  checked={value === true}
+                                  id={inputId}
+                                  onChange={(event) => {
+                                    setArgumentValues((current) => ({
+                                      ...current,
+                                      [input.name]: event.target.checked,
+                                    }));
+                                    setArgumentError("");
+                                  }}
+                                  type="checkbox"
+                                />
+                                Enabled
+                              </label>
+                            ) : input.enumValues.length > 0 ? (
+                              <Select
+                                onValueChange={(value) => {
+                                  setArgumentValues((current) => ({
+                                    ...current,
+                                    [input.name]: value,
+                                  }));
+                                  setArgumentError("");
+                                }}
+                                value={typeof value === "string" ? value : ""}
+                              >
+                                <SelectTrigger
+                                  className="h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                                  id={inputId}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {input.enumValues.map((option) => (
+                                    <SelectItem key={option} value={option}>
+                                      {option}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : input.type === "object" || input.type === "array" ? (
+                              <textarea
+                                className="min-h-32 w-full rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                id={inputId}
+                                onChange={(event) => {
+                                  setArgumentValues((current) => ({
+                                    ...current,
+                                    [input.name]: event.target.value,
+                                  }));
+                                  setArgumentError("");
+                                }}
+                                value={typeof value === "string" ? value : ""}
+                              />
+                            ) : (
+                              <Input
+                                className="h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                                id={inputId}
+                                onChange={(event) => {
+                                  setArgumentValues((current) => ({
+                                    ...current,
+                                    [input.name]: event.target.value,
+                                  }));
+                                  setArgumentError("");
+                                }}
+                                type={
+                                  input.type === "integer" || input.type === "number"
+                                    ? "number"
+                                    : "text"
+                                }
+                                value={typeof value === "string" ? value : ""}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {argumentError ? (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {argumentError}
+                    </div>
+                  ) : null}
+
+                  <details className="group rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface)]">
+                    <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)]">
+                      Input schema reference
+                    </summary>
+                    <pre className="max-h-72 overflow-auto border-t border-[var(--outline-variant)]/30 bg-white p-4 text-xs">
+                      {JSON.stringify(selectedTool.inputSchema ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                </>
               )}
-
-              {argumentError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {argumentError}
-                </div>
-              ) : null}
-
-              {selectedTool ? (
-                <details className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
-                  <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-                    Input schema reference
-                  </summary>
-                  <pre className="max-h-72 overflow-auto border-t bg-background p-3 text-xs">
-                    {JSON.stringify(selectedTool.inputSchema ?? {}, null, 2)}
-                  </pre>
-                </details>
-              ) : null}
-
-              <div className="flex justify-end">
-                <Button
-                  disabled={isValidating || isLoadingTools || !selectedToolName}
-                  onClick={validateTool}
-                  type="button"
-                >
-                  <Play className="size-4" />
-                  {isValidating ? "Validating" : "Validate"}
-                </Button>
-              </div>
             </CardContent>
+            <div className="flex justify-end border-t border-[var(--outline-variant)] bg-[var(--surface)] px-6 py-4">
+              <Button
+                disabled={isValidating || isLoadingTools || !selectedToolName}
+                onClick={validateTool}
+                type="button"
+              >
+                <Play className="size-4" />
+                {isValidating ? "Validating" : "Validate"}
+              </Button>
+            </div>
           </Card>
 
-          <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-            <CardHeader>
-              <CardTitle>Result</CardTitle>
+          <Card className="overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
+            <CardHeader className="border-b border-[var(--outline-variant)] px-6 py-4">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                Result
+              </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={result ? "p-6" : "p-10"}>
               {!result ? (
-                <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] text-sm text-[var(--on-surface-variant)]">
-                  Run validation to inspect the tool response.
+                <div className="flex min-h-40 flex-col items-center justify-center space-y-4 text-center">
+                  <div className="flex size-16 items-center justify-center rounded-full border-2 border-dashed border-[var(--outline-variant)] bg-[var(--surface-container)] text-[var(--outline)]">
+                    <Terminal className="size-8" />
+                  </div>
+                  <p className="text-sm leading-5 text-[var(--on-surface-variant)]">
+                    Run validation to inspect the tool response.
+                  </p>
                 </div>
               ) : (
                 <div
