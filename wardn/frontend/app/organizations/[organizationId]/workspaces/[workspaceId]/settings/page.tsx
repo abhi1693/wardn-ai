@@ -12,7 +12,7 @@ type WorkspaceSettingsPageProps = {
 export default async function WorkspaceSettingsPage({ params }: WorkspaceSettingsPageProps) {
   const { organizationId, workspaceId } = await params;
   const [workspaceContext, organization, workspace] = await Promise.all([
-    getWorkspaceContext(),
+    getWorkspaceContext({ organizationId, workspaceId }),
     getOrganization(organizationId),
     getWorkspace(organizationId, workspaceId),
   ]);
@@ -22,7 +22,7 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
 
   return (
     <AppShell
-      active="organization-settings"
+      active="workspace-settings"
       eyebrow="Workspace"
       title={`${workspace.name} settings`}
       workspaceContext={workspaceContext}

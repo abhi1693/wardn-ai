@@ -4,6 +4,7 @@ import {
   Home,
   Layers3,
   Replace,
+  ServerCog,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -48,6 +49,41 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
   ];
 }
 
+function workspaceNavItems(workspaceContext?: WorkspaceContext) {
+  const organizationId = workspaceContext?.selectedOrganization?.id;
+  const workspaceId = workspaceContext?.selectedWorkspace?.id;
+  if (!organizationId || !workspaceId) {
+    return organizationNavItems(workspaceContext);
+  }
+
+  const workspaceBasePath = `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+    workspaceId
+  )}`;
+
+  return [
+    {
+      label: "Dashboard",
+      href: `${workspaceBasePath}/dashboard`,
+      activeKey: "workspace-dashboard",
+      icon: Home,
+    },
+    {
+      label: "Installations",
+      href: `${workspaceBasePath}/install`,
+      activeKey: "install",
+      icon: ServerCog,
+    },
+    {
+      label: "Settings",
+      href: `/organizations/${encodeURIComponent(
+        organizationId
+      )}/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      activeKey: "workspace-settings",
+      icon: Settings,
+    },
+  ];
+}
+
 type AppShellProps = {
   active:
     | "dashboard"
@@ -55,6 +91,7 @@ type AppShellProps = {
     | "workspaces"
     | "organizations"
     | "organization-settings"
+    | "workspace-settings"
     | "workspace-dashboard"
     | "registry"
     | "install";
@@ -73,17 +110,32 @@ export function AppShell({
   workspaceContext,
   children,
 }: AppShellProps) {
-  const organizationItems = organizationNavItems(workspaceContext);
+  const isWorkspaceScope =
+    active === "workspace-dashboard" || active === "install" || active === "workspace-settings";
+  const navigationItems = isWorkspaceScope
+    ? workspaceNavItems(workspaceContext)
+    : organizationNavItems(workspaceContext);
   const selectedOrganization = workspaceContext?.selectedOrganization;
   const selectedWorkspace = workspaceContext?.selectedWorkspace;
-  const primaryNavItems = organizationItems.map((item) => ({
+  const primaryNavItems = navigationItems.map((item) => ({
     ...item,
-    active:
-      item.activeKey === active ||
-      (item.activeKey === "workspaces" && (active === "workspace-dashboard" || active === "install")),
+    active: item.activeKey === active,
   }));
   const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
   const showBreadcrumbParent = breadcrumbLabel !== title;
+  const contextSwitchHref =
+    isWorkspaceScope && selectedOrganization
+      ? `/org/${encodeURIComponent(selectedOrganization.id)}/workspaces`
+      : "/org";
+  const contextSwitchLabel = isWorkspaceScope ? "Change workspace" : "Change organization";
+  const contextTitle =
+    isWorkspaceScope
+      ? selectedWorkspace?.name ?? selectedOrganization?.name ?? "No workspace"
+      : selectedOrganization?.name ?? "No organization";
+  const contextSubtitle =
+    isWorkspaceScope
+      ? selectedOrganization?.name ?? "Workspace context"
+      : selectedWorkspace?.name ?? "Organization context";
 
   return (
     <main className="min-h-screen bg-[var(--surface)] text-foreground">
@@ -124,21 +176,21 @@ export function AppShell({
         <div className="mt-auto border-t border-[var(--on-primary-container)]/10 pt-6 max-lg:mt-6">
           <Link
             className="flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white"
-            href="/org"
+            href={contextSwitchHref}
           >
             <Replace className="size-4" />
-            Change organization
+            {contextSwitchLabel}
           </Link>
           <div className="mt-4 flex items-center gap-3 px-4">
             <div className="flex size-8 items-center justify-center rounded-full border border-[var(--on-primary-container)]/20 bg-[var(--tertiary-container)] text-xs font-bold text-[var(--on-tertiary)]">
-              {(selectedOrganization?.name ?? "W").slice(0, 1).toUpperCase()}
+              {contextTitle.slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0">
               <div className="truncate text-xs font-bold text-[var(--inverse-on-surface)]">
-                {selectedOrganization ? selectedOrganization.name : "No organization"}
+                {contextTitle}
               </div>
               <div className="truncate text-[10px] text-slate-400">
-                {selectedWorkspace ? selectedWorkspace.name : "Organization context"}
+                {contextSubtitle}
               </div>
             </div>
           </div>
