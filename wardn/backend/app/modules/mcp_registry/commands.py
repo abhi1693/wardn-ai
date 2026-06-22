@@ -2,11 +2,13 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,6 +21,7 @@ from app.modules.mcp_registry.service import sync_supported_servers
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 
 DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"
+PULSE_REGISTRY_URL = "https://api.pulsemcp.com/v0.1/servers"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
 CURATED_SERVERS = {
@@ -93,6 +96,40 @@ def configure_syncmcpregistry_parser(parser: argparse.ArgumentParser) -> None:
         "--source-url",
         default=DEFAULT_REGISTRY_URL,
         help="MCP registry servers endpoint to sync from.",
+    )
+    parser.add_argument(
+        "--source",
+        choices=("official", "pulsemcp", "custom"),
+        default="official",
+        help="Registry source type. Use pulsemcp to apply PulseMCP defaults and auth headers.",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help=(
+            "API key for authenticated registry sources such as PulseMCP. "
+            "Defaults to WARDN_PULSEMCP_API_KEY."
+        ),
+    )
+    parser.add_argument(
+        "--tenant-id",
+        default=None,
+        help="Tenant ID for PulseMCP. Defaults to WARDN_PULSEMCP_TENANT_ID.",
+    )
+    parser.add_argument(
+        "--organization-id",
+        default=None,
+        help="Organization UUID to sync into. Defaults to Wardn's default organization.",
+    )
+    parser.add_argument(
+        "--updated-since",
+        default=None,
+        help="RFC3339 timestamp for incremental registry sync.",
+    )
+    parser.add_argument(
+        "--latest-only",
+        action="store_true",
+        help="Request only each server's latest version with version=latest.",
     )
     parser.add_argument(
         "--limit",
@@ -179,8 +216,35 @@ def _server_documents_from_payload(payload) -> list[dict]:
     return documents
 
 
-def load_supported_servers_from_payload(payload) -> list[MCPServerCreate]:
+def strip_unsupported_package_targets(server: dict) -> dict:
+    packages = server.get("packages")
+    if not isinstance(packages, list):
+        return server
+
+    supported_packages = [
+        package
+        for package in packages
+        if not (
+            isinstance(package, dict)
+            and str(package.get("registryType") or "").casefold() == "mcpb"
+        )
+    ]
+    if len(supported_packages) == len(packages):
+        return server
+
+    sanitized = dict(server)
+    sanitized["packages"] = supported_packages
+    return sanitized
+
+
+def load_supported_servers_from_payload(
+    payload,
+    *,
+    strip_unsupported_packages: bool = False,
+) -> list[MCPServerCreate]:
     documents = _server_documents_from_payload(payload)
+    if strip_unsupported_packages:
+        documents = [strip_unsupported_package_targets(server) for server in documents]
     return [MCPServerCreate.model_validate(server) for server in documents]
 
 
@@ -199,11 +263,17 @@ def url_with_query_params(
     *,
     cursor: str | None = None,
     limit: int | None = None,
+    updated_since: str | None = None,
+    version: str | None = None,
 ) -> str:
     split_url = urlsplit(url)
     query = dict(parse_qsl(split_url.query, keep_blank_values=True))
     if limit is not None and "limit" not in query:
         query["limit"] = str(limit)
+    if updated_since and "updated_since" not in query:
+        query["updated_since"] = updated_since
+    if version and "version" not in query:
+        query["version"] = version
     if cursor:
         query["cursor"] = cursor
     elif "cursor" in query:
@@ -219,10 +289,34 @@ def url_with_query_params(
     )
 
 
-def fetch_registry_payload(url: str):
-    request = Request(url, headers={"Accept": "application/json"})
+def fetch_registry_payload(url: str, headers: dict[str, str] | None = None):
+    request_headers = {"Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
+    request = Request(url, headers=request_headers)
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def registry_headers(source: str, *, api_key: str | None, tenant_id: str | None) -> dict[str, str]:
+    if source != "pulsemcp":
+        return {}
+    api_key = api_key or os.getenv("WARDN_PULSEMCP_API_KEY")
+    tenant_id = tenant_id or os.getenv("WARDN_PULSEMCP_TENANT_ID")
+    if not api_key:
+        raise ValueError("--api-key is required for PulseMCP sync")
+    if not tenant_id:
+        raise ValueError("--tenant-id is required for PulseMCP sync")
+    return {
+        "X-API-Key": api_key,
+        "X-Tenant-ID": tenant_id,
+    }
+
+
+def registry_source_url(source: str, source_url: str) -> str:
+    if source == "pulsemcp" and source_url == DEFAULT_REGISTRY_URL:
+        return PULSE_REGISTRY_URL
+    return source_url
 
 
 def load_supported_servers_from_registry_url(
@@ -230,6 +324,9 @@ def load_supported_servers_from_registry_url(
     *,
     limit: int,
     max_pages: int | None,
+    headers: dict[str, str] | None = None,
+    updated_since: str | None = None,
+    version: str | None = None,
 ) -> list[MCPServerCreate]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
@@ -245,10 +342,22 @@ def load_supported_servers_from_registry_url(
 
     while True:
         previous_cursor = cursor
-        page_url = url_with_query_params(source_url, cursor=cursor, limit=limit)
+        page_url = url_with_query_params(
+            source_url,
+            cursor=cursor,
+            limit=limit,
+            updated_since=updated_since,
+            version=version,
+        )
         logger.debug("Fetching registry page %s, cursor=%s", pages_fetched + 1, cursor)
-        payload = fetch_registry_payload(page_url)
-        page_servers = load_supported_servers_from_payload(payload)
+        if headers:
+            payload = fetch_registry_payload(page_url, headers=headers)
+        else:
+            payload = fetch_registry_payload(page_url)
+        page_servers = load_supported_servers_from_payload(
+            payload,
+            strip_unsupported_packages=True,
+        )
         new_servers = []
         for server in page_servers:
             key = (server.name, server.version)
@@ -298,15 +407,27 @@ async def sync_mcp_registry_from_args(args: argparse.Namespace) -> int:
         logger.info("Starting MCP registry sync from file.")
         servers = load_supported_servers(Path(args.file))
     else:
-        source = args.source_url
+        source_type = getattr(args, "source", "official")
+        source_url = registry_source_url(source_type, args.source_url)
+        source = source_url
+        headers = registry_headers(
+            source_type,
+            api_key=getattr(args, "api_key", None),
+            tenant_id=getattr(args, "tenant_id", None),
+        )
+        version = "latest" if getattr(args, "latest_only", False) else None
         logger.info(
-            "Starting MCP registry sync from official registry, page size %s.",
+            "Starting MCP registry sync from %s registry, page size %s.",
+            source_type,
             args.limit,
         )
         servers = load_supported_servers_from_registry_url(
-            args.source_url,
+            source_url,
             limit=args.limit,
             max_pages=args.max_pages,
+            headers=headers,
+            updated_since=getattr(args, "updated_since", None),
+            version=version,
         )
 
     if args.dry_run:
@@ -315,8 +436,13 @@ async def sync_mcp_registry_from_args(args: argparse.Namespace) -> int:
         return 0
 
     logger.info("Writing %s server versions to database.", len(servers))
+    organization_id = (
+        UUID(args.organization_id)
+        if getattr(args, "organization_id", None)
+        else None
+    )
     async with AsyncSessionLocal() as session:
-        count = await sync_supported_servers(session, servers)
+        count = await sync_supported_servers(session, servers, organization_id=organization_id)
         await session.commit()
     logger.info("MCP registry sync complete: %s server versions synced.", count)
     print(f"Synced {count} supported MCP server entries from {source}.")

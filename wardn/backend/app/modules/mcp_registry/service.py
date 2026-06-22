@@ -13,6 +13,7 @@ from app.modules.mcp_registry.exceptions import (
 from app.modules.mcp_registry.installer import install_server_runtime, remove_installation_artifacts
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_registry.schemas import (
+    MCPPulseServerVersionMetadata,
     MCPRegistryListMetadata,
     MCPRegistryOfficialMetadata,
     MCPRegistryResponseMeta,
@@ -32,6 +33,9 @@ from app.modules.mcp_registry.schemas import (
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations import repository as organization_repository
+
+OFFICIAL_REGISTRY_META_KEY = "io.modelcontextprotocol.registry/official"
+PULSE_SERVER_VERSION_META_KEY = "com.pulsemcp/server-version"
 
 
 async def default_workspace_id(session) -> uuid.UUID:
@@ -69,15 +73,39 @@ def official_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata |
     if not payload.meta:
         return None
 
-    raw_metadata = payload.meta.get("io.modelcontextprotocol.registry/official")
+    raw_metadata = payload.meta.get(OFFICIAL_REGISTRY_META_KEY)
     if not isinstance(raw_metadata, dict):
         return None
 
     return MCPRegistryOfficialMetadata.model_validate(raw_metadata)
 
 
+def pulse_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
+    if not payload.meta:
+        return None
+
+    raw_metadata = payload.meta.get(PULSE_SERVER_VERSION_META_KEY)
+    if not isinstance(raw_metadata, dict):
+        return None
+
+    metadata = MCPPulseServerVersionMetadata.model_validate(raw_metadata)
+    published_at = metadata.published_at or metadata.updated_at
+    return MCPRegistryOfficialMetadata(
+        status=metadata.status,
+        statusChangedAt=metadata.status_changed_at or metadata.updated_at,
+        statusMessage=metadata.status_message,
+        publishedAt=published_at,
+        updatedAt=metadata.updated_at,
+        isLatest=metadata.is_latest,
+    )
+
+
+def registry_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
+    return official_metadata(payload) or pulse_metadata(payload)
+
+
 def server_values(payload: MCPServerCreate, *, is_latest: bool) -> dict:
-    metadata = official_metadata(payload)
+    metadata = registry_metadata(payload)
     server_json = payload.model_dump(by_alias=True, exclude_none=True)
     values = {
         "name": payload.name,
@@ -368,13 +396,13 @@ async def sync_supported_servers(
     organization_id: uuid.UUID | None = None,
 ) -> int:
     organization_id = await catalog_organization_id(session, organization_id)
-    official_latest_by_name = {
+    upstream_latest_by_name = {
         payload.name: payload.version
         for payload in payloads
-        if (metadata := official_metadata(payload)) and metadata.is_latest
+        if (metadata := registry_metadata(payload)) and metadata.is_latest
     }
     latest_by_name = {
-        payload.name: official_latest_by_name.get(payload.name, payload.version)
+        payload.name: upstream_latest_by_name.get(payload.name, payload.version)
         for payload in payloads
     }
     cleared_names: set[str] = set()

@@ -54,6 +54,37 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
 
+class MCPCatalogSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "mcp_catalog_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "name",
+            name="uq_mcp_catalog_sources_org_name",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    sync_mode: Mapped[str] = mapped_column(String(50), default="latest_only", nullable=False)
+    secret_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_synced_updated_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+
 class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_installations"
     __table_args__ = (

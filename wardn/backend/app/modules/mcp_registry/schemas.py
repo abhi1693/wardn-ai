@@ -58,6 +58,17 @@ class MCPRegistryOfficialMetadata(BaseModel):
     is_latest: bool = Field(alias="isLatest")
 
 
+class MCPPulseServerVersionMetadata(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: MCPServerStatus = "active"
+    status_changed_at: datetime | None = Field(default=None, alias="statusChangedAt")
+    status_message: str | None = Field(default=None, alias="statusMessage")
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    is_latest: bool = Field(default=False, alias="isLatest")
+
+
 class MCPRegistryResponseMeta(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

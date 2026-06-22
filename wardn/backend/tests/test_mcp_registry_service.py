@@ -19,8 +19,8 @@ from app.modules.mcp_registry.models import (
 from app.modules.mcp_registry.schemas import (
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
-    MCPServerInstallRequest,
     MCPServerInstallationToolValidationRequest,
+    MCPServerInstallRequest,
 )
 
 WORKSPACE_ID = uuid4()
@@ -93,6 +93,31 @@ def official_registry_payload(version: str, *, is_latest: bool) -> MCPServerCrea
                     "updatedAt": "2026-06-21T00:00:00Z",
                     "isLatest": is_latest,
                 }
+            },
+        }
+    )
+
+
+def pulsemcp_registry_payload(version: str, *, is_latest: bool) -> MCPServerCreate:
+    return MCPServerCreate(
+        **{
+            "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+            "name": "io.github.example/weather",
+            "title": "Weather",
+            "description": "Weather tools for forecasts",
+            "version": version,
+            "_meta": {
+                "com.pulsemcp/server": {
+                    "visitorsEstimateMostRecentWeek": 1250,
+                    "isOfficial": True,
+                },
+                "com.pulsemcp/server-version": {
+                    "source": "registry.modelcontextprotocol.io",
+                    "status": "active",
+                    "publishedAt": "2026-06-21T00:00:00Z",
+                    "updatedAt": "2026-06-22T00:00:00Z",
+                    "isLatest": is_latest,
+                },
             },
         }
     )
@@ -224,6 +249,36 @@ async def test_sync_supported_servers_uses_official_latest_metadata(monkeypatch)
     assert count == 2
     assert [server.version for server in session.added] == ["1.1.0", "1.0.0"]
     assert [server.is_latest for server in session.added] == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_sync_supported_servers_uses_pulsemcp_latest_metadata(monkeypatch) -> None:
+    async def missing_server(*args, **kwargs):
+        return None
+
+    async def clear_latest(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_server_version", missing_server)
+    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    session = FakeSession()
+
+    count = await service.sync_supported_servers(
+        session,
+        [
+            pulsemcp_registry_payload("1.1.0", is_latest=True),
+            pulsemcp_registry_payload("1.0.0", is_latest=False),
+        ],
+    )
+
+    assert count == 2
+    assert [server.version for server in session.added] == ["1.1.0", "1.0.0"]
+    assert [server.is_latest for server in session.added] == [True, False]
+    assert session.added[0].published_at == datetime(2026, 6, 21, tzinfo=UTC)
+    assert session.added[0].status_changed_at == datetime(2026, 6, 22, tzinfo=UTC)
+    assert (
+        session.added[0].server_json["_meta"]["com.pulsemcp/server"]["isOfficial"] is True
+    )
 
 
 def server_version(version: str, *, is_latest: bool = False) -> MCPServerVersion:
