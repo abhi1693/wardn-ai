@@ -3,6 +3,7 @@ import importlib
 import json
 import re
 import shlex
+import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -89,10 +90,15 @@ class KubernetesImagePullSecretError(KubernetesRuntimeProviderError):
     pass
 
 
+class KubernetesIngressError(KubernetesRuntimeProviderError):
+    pass
+
+
 @dataclass(frozen=True)
 class KubernetesClientSet:
     core_v1: Any
     apps_v1: Any
+    networking_v1: Any
     loaded_config: str
 
 
@@ -102,6 +108,7 @@ class KubernetesRuntimeNames:
     pod_name: str
     service_name: str
     secret_name: str
+    ingress_name: str
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,7 @@ class KubernetesRuntimeManifest:
     pod: Any
     deployment: Any
     service: Any
+    ingress: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +153,7 @@ class KubernetesClientFactory:
         return KubernetesClientSet(
             core_v1=client_module.CoreV1Api(),
             apps_v1=client_module.AppsV1Api(),
+            networking_v1=client_module.NetworkingV1Api(),
             loaded_config=loaded_config,
         )
 
@@ -311,6 +320,83 @@ def image_pull_secret_names(settings=None) -> list[str]:
     return [name]
 
 
+def validate_ingress_scheme(value: str) -> str:
+    scheme = value.strip().lower()
+    if scheme not in {"http", "https"}:
+        raise KubernetesIngressError("Kubernetes runtime ingress scheme must be http or https")
+    return scheme
+
+
+def validate_ingress_base_domain(value: str) -> str:
+    base_domain = value.strip().lower().strip(".")
+    if not base_domain:
+        raise KubernetesIngressError(
+            "Kubernetes runtime ingress base domain is required when ingress is enabled"
+        )
+    try:
+        validate_dns_subdomain_name(
+            base_domain,
+            field_name="Kubernetes runtime ingress base domain",
+        )
+    except KubernetesImagePullSecretError as exc:
+        raise KubernetesIngressError(str(exc)) from exc
+    return base_domain
+
+
+def custom_ingress_annotations(settings=None) -> dict[str, str]:
+    runtime_settings = settings or get_settings()
+    annotations = parse_metadata_json(
+        runtime_settings.mcp_runtime_kubernetes_ingress_annotations_json,
+        field_name="Kubernetes ingress annotation",
+    )
+    for value in annotations.values():
+        if len(value) > 262_144:
+            raise KubernetesMetadataError(
+                "Kubernetes ingress annotation value must be 262144 characters or fewer"
+            )
+    return annotations
+
+
+def runtime_ingress_host(names: KubernetesRuntimeNames, settings=None) -> str:
+    runtime_settings = settings or get_settings()
+    base_domain = validate_ingress_base_domain(
+        runtime_settings.mcp_runtime_kubernetes_ingress_base_domain
+    )
+    return f"{names.pod_name}.{base_domain}"
+
+
+def runtime_ingress_endpoint_url(
+    *,
+    names: KubernetesRuntimeNames,
+    settings=None,
+) -> str:
+    runtime_settings = settings or get_settings()
+    scheme = validate_ingress_scheme(runtime_settings.mcp_runtime_kubernetes_ingress_scheme)
+    host = runtime_ingress_host(names, runtime_settings)
+    return f"{scheme}://{host}{KUBERNETES_SUPERGATEWAY_MCP_PATH}"
+
+
+def ingress_annotations(
+    *,
+    host: str,
+    settings=None,
+) -> dict[str, str]:
+    runtime_settings = settings or get_settings()
+    annotations: dict[str, str] = {}
+    ingress_class_name = runtime_settings.mcp_runtime_kubernetes_ingress_class_name.strip()
+    if ingress_class_name:
+        annotations["kubernetes.io/ingress.class"] = ingress_class_name
+    entrypoints = runtime_settings.mcp_runtime_kubernetes_ingress_traefik_entrypoints.strip()
+    if entrypoints:
+        annotations["traefik.ingress.kubernetes.io/router.entrypoints"] = entrypoints
+    if validate_ingress_scheme(runtime_settings.mcp_runtime_kubernetes_ingress_scheme) == "https":
+        annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
+    if runtime_settings.mcp_runtime_kubernetes_ingress_external_dns_enabled:
+        annotations["external-dns.alpha.kubernetes.io/hostname"] = host
+    annotations.update(custom_ingress_annotations(runtime_settings))
+    return annotations
+
+
 def kubernetes_client_module(client_module: Any | None = None) -> Any:
     return client_module or importlib.import_module("kubernetes.client")
 
@@ -367,6 +453,7 @@ def runtime_object_names(
         pod_name=base_name,
         service_name=safe_kubernetes_name(f"{base_name}-svc"),
         secret_name=safe_kubernetes_name(f"{base_name}-secret"),
+        ingress_name=safe_kubernetes_name(f"{base_name}-ing"),
     )
 
 
@@ -398,16 +485,22 @@ def runtime_object_names_for_session(
         workspace_id=runtime_session.workspace_id,
         prefix=runtime_settings.mcp_runtime_kubernetes_namespace_prefix,
     )
-    pod_name = (
-        runtime_session.pod_name
-        if prefer_stored_names and runtime_session.pod_name
-        else names.pod_name
-    )
+    if prefer_stored_names and runtime_session.pod_name:
+        pod_name = runtime_session.pod_name
+        service_name = safe_kubernetes_name(f"{pod_name}-svc")
+        secret_name = safe_kubernetes_name(f"{pod_name}-secret")
+        ingress_name = safe_kubernetes_name(f"{pod_name}-ing")
+    else:
+        pod_name = names.pod_name
+        service_name = names.service_name
+        secret_name = names.secret_name
+        ingress_name = names.ingress_name
     return KubernetesRuntimeNames(
         namespace=runtime_session.namespace or names.namespace,
         pod_name=pod_name,
-        service_name=names.service_name,
-        secret_name=names.secret_name,
+        service_name=service_name,
+        secret_name=secret_name,
+        ingress_name=ingress_name,
     )
 
 
@@ -471,6 +564,18 @@ def supergateway_container_args(
         "--healthEndpoint",
         KUBERNETES_SUPERGATEWAY_HEALTH_PATH,
     ]
+
+
+def supergateway_image(installation: MCPServerInstallation, *, settings=None) -> str:
+    runtime_settings = settings or get_settings()
+    runtime_config = installation.runtime_config or {}
+    registry_type = str(runtime_config.get("registryType") or "").strip().lower()
+    command_name = Path(package_runtime(installation).command).name
+    if registry_type in {"uvx", "pypi"} or command_name == "uvx":
+        return runtime_settings.mcp_runtime_kubernetes_gateway_uvx_image
+    if registry_type == "deno" or command_name == "deno":
+        return runtime_settings.mcp_runtime_kubernetes_gateway_deno_image
+    return runtime_settings.mcp_runtime_kubernetes_gateway_image
 
 
 def normalized_runtime_package_version(value: Any) -> str:
@@ -604,6 +709,62 @@ def secret_env_vars(
     ]
 
 
+def gateway_health_probe(
+    *,
+    gateway_port_name: str,
+    initial_delay_seconds: int = 0,
+    failure_threshold: int = 3,
+    settings=None,
+    client_module: Any | None = None,
+) -> Any:
+    runtime_settings = settings or get_settings()
+    client = kubernetes_client_module(client_module)
+    return client.V1Probe(
+        http_get=client.V1HTTPGetAction(
+            path=KUBERNETES_SUPERGATEWAY_HEALTH_PATH,
+            port=gateway_port_name,
+        ),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+        period_seconds=max(1, runtime_settings.mcp_runtime_kubernetes_probe_period_seconds),
+        timeout_seconds=max(1, runtime_settings.mcp_runtime_kubernetes_probe_timeout_seconds),
+        failure_threshold=max(1, failure_threshold),
+    )
+
+
+def gateway_container_probes(settings=None, client_module: Any | None = None) -> dict[str, Any]:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_probe_enabled:
+        return {}
+    client = kubernetes_client_module(client_module)
+    return {
+        "readiness_probe": gateway_health_probe(
+            gateway_port_name=KUBERNETES_GATEWAY_PORT_NAME,
+            initial_delay_seconds=(
+                runtime_settings.mcp_runtime_kubernetes_readiness_initial_delay_seconds
+            ),
+            failure_threshold=3,
+            settings=runtime_settings,
+            client_module=client,
+        ),
+        "liveness_probe": gateway_health_probe(
+            gateway_port_name=KUBERNETES_GATEWAY_PORT_NAME,
+            initial_delay_seconds=(
+                runtime_settings.mcp_runtime_kubernetes_liveness_initial_delay_seconds
+            ),
+            failure_threshold=3,
+            settings=runtime_settings,
+            client_module=client,
+        ),
+        "startup_probe": gateway_health_probe(
+            gateway_port_name=KUBERNETES_GATEWAY_PORT_NAME,
+            initial_delay_seconds=0,
+            failure_threshold=runtime_settings.mcp_runtime_kubernetes_startup_failure_threshold,
+            settings=runtime_settings,
+            client_module=client,
+        ),
+    }
+
+
 def build_pod_template_manifest(
     *,
     names: KubernetesRuntimeNames,
@@ -613,8 +774,10 @@ def build_pod_template_manifest(
     gateway_port: int,
     container_args: list[str],
     image_pull_secret_names: list[str] | None = None,
+    settings=None,
     client_module: Any | None = None,
 ) -> Any:
+    runtime_settings = settings or get_settings()
     client = kubernetes_client_module(client_module)
     image_pull_secrets = [
         client.V1LocalObjectReference(name=name)
@@ -648,6 +811,7 @@ def build_pod_template_manifest(
                             client_module=client,
                         ),
                     ],
+                    **gateway_container_probes(runtime_settings, client_module=client),
                 )
             ],
         ),
@@ -720,6 +884,65 @@ def build_service_manifest(
     )
 
 
+def build_ingress_manifest(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    gateway_port: int,
+    settings=None,
+    client_module: Any | None = None,
+) -> Any | None:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_ingress_enabled:
+        return None
+
+    client = kubernetes_client_module(client_module)
+    host = runtime_ingress_host(names, runtime_settings)
+    tls_secret_name = runtime_settings.mcp_runtime_kubernetes_ingress_tls_secret_name.strip()
+    tls = [
+        client.V1IngressTLS(
+            hosts=[host],
+            secret_name=tls_secret_name,
+        )
+    ] if tls_secret_name else None
+    ingress_class_name = (
+        runtime_settings.mcp_runtime_kubernetes_ingress_class_name.strip() or None
+    )
+    return client.V1Ingress(
+        metadata=client.V1ObjectMeta(
+            name=names.ingress_name,
+            namespace=names.namespace,
+            labels=labels,
+            annotations=ingress_annotations(host=host, settings=runtime_settings),
+        ),
+        spec=client.V1IngressSpec(
+            ingress_class_name=ingress_class_name,
+            tls=tls,
+            rules=[
+                client.V1IngressRule(
+                    host=host,
+                    http=client.V1HTTPIngressRuleValue(
+                        paths=[
+                            client.V1HTTPIngressPath(
+                                path="/",
+                                path_type="Prefix",
+                                backend=client.V1IngressBackend(
+                                    service=client.V1IngressServiceBackend(
+                                        name=names.service_name,
+                                        port=client.V1ServiceBackendPort(
+                                            number=gateway_port,
+                                        ),
+                                    ),
+                                ),
+                            )
+                        ],
+                    ),
+                )
+            ],
+        ),
+    )
+
+
 def build_runtime_manifests(
     installation: MCPServerInstallation,
     runtime_session: MCPRuntimeSession,
@@ -756,13 +979,14 @@ def build_runtime_manifests(
         names=names,
         labels=workload_labels,
         secret_keys=list(secret_data),
-        gateway_image=runtime_settings.mcp_runtime_kubernetes_gateway_image,
+        gateway_image=supergateway_image(installation, settings=runtime_settings),
         gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
         container_args=supergateway_container_args(
             installation,
             gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
         ),
         image_pull_secret_names=pull_secret_names,
+        settings=runtime_settings,
         client_module=client,
     )
     return KubernetesRuntimeManifest(
@@ -796,6 +1020,13 @@ def build_runtime_manifests(
             gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
             client_module=client,
         ),
+        ingress=build_ingress_manifest(
+            names=names,
+            labels=labels,
+            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            settings=runtime_settings,
+            client_module=client,
+        ),
     )
 
 
@@ -816,14 +1047,20 @@ def runtime_health_endpoint_url(endpoint_url: str) -> str:
     )
 
 
-def get_gateway_health(endpoint_url: str, *, timeout: float = 5) -> dict[str, Any]:
+def get_gateway_health(
+    endpoint_url: str,
+    *,
+    timeout: float = 5,
+    verify_tls: bool = True,
+) -> dict[str, Any]:
     request = Request(
         runtime_health_endpoint_url(endpoint_url),
         headers={"Accept": "text/plain", "User-Agent": "Wardn/0.1 Kubernetes MCP Runtime"},
         method="GET",
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        context = None if verify_tls else ssl._create_unverified_context()
+        with urlopen(request, timeout=timeout, context=context) as response:
             body = response.read().decode("utf-8", "replace").strip()
             return {"ready": response.status == 200, "status": response.status, "body": body}
     except HTTPError as exc:
@@ -882,6 +1119,7 @@ class KubernetesRuntimeReconciler:
         *,
         core_v1: Any,
         apps_v1: Any | None = None,
+        networking_v1: Any | None = None,
         api_exception_class: type[Exception],
         settings=None,
         sleep: Callable[[float], None] = time.sleep,
@@ -889,6 +1127,7 @@ class KubernetesRuntimeReconciler:
     ) -> None:
         self.core_v1 = core_v1
         self.apps_v1 = apps_v1 or core_v1
+        self.networking_v1 = networking_v1 or core_v1
         self.api_exception_class = api_exception_class
         self.settings = settings or get_settings()
         self.sleep = sleep
@@ -899,11 +1138,17 @@ class KubernetesRuntimeReconciler:
         self.create_or_replace_secret(manifest)
         self.create_or_replace_deployment(manifest)
         self.create_or_replace_service(manifest)
-        return KubernetesReconcileResult(
-            endpoint_url=runtime_service_endpoint_url(
+        self.create_or_replace_ingress(manifest)
+        endpoint_url = (
+            runtime_ingress_endpoint_url(names=manifest.names, settings=self.settings)
+            if manifest.ingress is not None
+            else runtime_service_endpoint_url(
                 names=manifest.names,
                 gateway_port=self.settings.mcp_runtime_kubernetes_service_port,
             )
+        )
+        return KubernetesReconcileResult(
+            endpoint_url=endpoint_url,
         )
 
     def create_namespace(self, manifest: KubernetesRuntimeManifest) -> None:
@@ -989,6 +1234,32 @@ class KubernetesRuntimeReconciler:
                     f"Kubernetes service replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
 
+    def create_or_replace_ingress(self, manifest: KubernetesRuntimeManifest) -> None:
+        if manifest.ingress is None:
+            return
+        try:
+            self._call_api(
+                self.networking_v1.create_namespaced_ingress,
+                namespace=manifest.names.namespace,
+                body=manifest.ingress,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 409):
+                raise KubernetesReconcileError(
+                    f"Kubernetes ingress reconcile failed: {self._api_error_detail(exc)}"
+                ) from exc
+            try:
+                self._call_api(
+                    self.networking_v1.replace_namespaced_ingress,
+                    name=manifest.names.ingress_name,
+                    namespace=manifest.names.namespace,
+                    body=manifest.ingress,
+                )
+            except self.api_exception_class as replace_exc:
+                raise KubernetesReconcileError(
+                    f"Kubernetes ingress replace failed: {self._api_error_detail(replace_exc)}"
+                ) from replace_exc
+
     def delete_runtime_objects(
         self,
         names: KubernetesRuntimeNames,
@@ -998,9 +1269,23 @@ class KubernetesRuntimeReconciler:
         if not delete_resources:
             self.scale_deployment(names, replicas=0)
             return
+        self.delete_ingress(names)
         self.delete_service(names)
         self.delete_deployment(names)
         self.delete_secret(names)
+
+    def delete_ingress(self, names: KubernetesRuntimeNames) -> None:
+        try:
+            self._call_api(
+                self.networking_v1.delete_namespaced_ingress,
+                name=names.ingress_name,
+                namespace=names.namespace,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes ingress delete failed: {self._api_error_detail(exc)}"
+                ) from exc
 
     def delete_service(self, names: KubernetesRuntimeNames) -> None:
         try:
@@ -1110,7 +1395,10 @@ class KubernetesRuntimeReconciler:
         last_error = ""
         while self.monotonic() < deadline:
             try:
-                status_payload = get_gateway_health(endpoint_url)
+                status_payload = get_gateway_health(
+                    endpoint_url,
+                    verify_tls=self.settings.mcp_runtime_kubernetes_ingress_tls_verify,
+                )
                 if status_payload.get("ready") is True:
                     return status_payload
                 last_error = str(status_payload)
@@ -1190,12 +1478,28 @@ class KubernetesRuntimeProvider:
             "installationRuntimeConfig": runtime_config,
             "workloadKind": "deployment",
             "objectIdentity": "runtime_config_fingerprint",
-            "gatewayImage": settings.mcp_runtime_kubernetes_gateway_image,
+            "gatewayImage": supergateway_image(installation, settings=settings),
+            "gatewayBaseImage": settings.mcp_runtime_kubernetes_gateway_image,
+            "gatewayUvxImage": settings.mcp_runtime_kubernetes_gateway_uvx_image,
+            "gatewayDenoImage": settings.mcp_runtime_kubernetes_gateway_deno_image,
             "servicePort": settings.mcp_runtime_kubernetes_service_port,
             "namespacePrefix": settings.mcp_runtime_kubernetes_namespace_prefix,
             "namespaceLabels": settings.mcp_runtime_kubernetes_namespace_labels_json,
             "namespaceAnnotations": settings.mcp_runtime_kubernetes_namespace_annotations_json,
             "imagePullSecretName": settings.mcp_runtime_kubernetes_image_pull_secret_name,
+            "ingressEnabled": settings.mcp_runtime_kubernetes_ingress_enabled,
+            "ingressBaseDomain": settings.mcp_runtime_kubernetes_ingress_base_domain,
+            "ingressClassName": settings.mcp_runtime_kubernetes_ingress_class_name,
+            "ingressScheme": settings.mcp_runtime_kubernetes_ingress_scheme,
+            "ingressTlsVerify": settings.mcp_runtime_kubernetes_ingress_tls_verify,
+            "ingressTlsSecretName": settings.mcp_runtime_kubernetes_ingress_tls_secret_name,
+            "ingressTraefikEntrypoints": (
+                settings.mcp_runtime_kubernetes_ingress_traefik_entrypoints
+            ),
+            "ingressExternalDnsEnabled": (
+                settings.mcp_runtime_kubernetes_ingress_external_dns_enabled
+            ),
+            "ingressAnnotations": settings.mcp_runtime_kubernetes_ingress_annotations_json,
             "startupTimeoutSeconds": settings.mcp_runtime_kubernetes_startup_timeout_seconds,
         }
         return RuntimeSpec(
@@ -1248,6 +1552,7 @@ class KubernetesRuntimeProvider:
             {},
             tool_name=tool_name,
             arguments=arguments,
+            verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
         )
 
     def ensure_runtime(
@@ -1319,5 +1624,6 @@ class KubernetesRuntimeProvider:
         return self._reconciler_factory(
             core_v1=client_set.core_v1,
             apps_v1=client_set.apps_v1,
+            networking_v1=client_set.networking_v1,
             api_exception_class=self._client_factory.api_exception_class(),
         )

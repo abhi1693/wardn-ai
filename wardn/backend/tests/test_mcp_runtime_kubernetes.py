@@ -22,6 +22,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     KubernetesClientFactory,
     KubernetesConfigError,
     KubernetesImagePullSecretError,
+    KubernetesIngressError,
     KubernetesMetadataError,
     KubernetesReconcileError,
     KubernetesReconcileResult,
@@ -60,10 +61,27 @@ class FakeSettings:
     mcp_runtime_kubernetes_context = "local"
     mcp_runtime_kubernetes_namespace_prefix = "wardn"
     mcp_runtime_kubernetes_gateway_image = "registry.example/supergateway:test"
+    mcp_runtime_kubernetes_gateway_uvx_image = "registry.example/supergateway:uvx"
+    mcp_runtime_kubernetes_gateway_deno_image = "registry.example/supergateway:deno"
     mcp_runtime_kubernetes_service_port = 8000
     mcp_runtime_kubernetes_image_pull_secret_name = ""
     mcp_runtime_kubernetes_namespace_labels_json = "{}"
     mcp_runtime_kubernetes_namespace_annotations_json = "{}"
+    mcp_runtime_kubernetes_ingress_enabled = False
+    mcp_runtime_kubernetes_ingress_base_domain = ""
+    mcp_runtime_kubernetes_ingress_class_name = "traefik"
+    mcp_runtime_kubernetes_ingress_scheme = "https"
+    mcp_runtime_kubernetes_ingress_tls_verify = True
+    mcp_runtime_kubernetes_ingress_tls_secret_name = ""
+    mcp_runtime_kubernetes_ingress_traefik_entrypoints = "websecure"
+    mcp_runtime_kubernetes_ingress_external_dns_enabled = True
+    mcp_runtime_kubernetes_ingress_annotations_json = "{}"
+    mcp_runtime_kubernetes_probe_enabled = True
+    mcp_runtime_kubernetes_probe_period_seconds = 10
+    mcp_runtime_kubernetes_probe_timeout_seconds = 3
+    mcp_runtime_kubernetes_readiness_initial_delay_seconds = 2
+    mcp_runtime_kubernetes_liveness_initial_delay_seconds = 30
+    mcp_runtime_kubernetes_startup_failure_threshold = 180
     mcp_runtime_kubernetes_startup_timeout_seconds = 7
     mcp_runtime_kubernetes_api_timeout_seconds = 10
 
@@ -81,6 +99,21 @@ class ImagePullSecretSettings(FakeSettings):
     mcp_runtime_kubernetes_image_pull_secret_name = "registry-credentials"
 
 
+class IngressSettings(FakeSettings):
+    mcp_runtime_kubernetes_ingress_enabled = True
+    mcp_runtime_kubernetes_ingress_base_domain = "mcp.example.com"
+    mcp_runtime_kubernetes_ingress_tls_secret_name = "mcp-tls"
+    mcp_runtime_kubernetes_ingress_annotations_json = '{"example.com/owner":"wardn"}'
+
+
+class IngressUnverifiedTlsSettings(IngressSettings):
+    mcp_runtime_kubernetes_ingress_tls_verify = False
+
+
+class DisabledProbeSettings(FakeSettings):
+    mcp_runtime_kubernetes_probe_enabled = False
+
+
 class FakeKubernetesModel:
     def __init__(self, **kwargs) -> None:
         self.__dict__.update(kwargs)
@@ -93,16 +126,27 @@ class FakeKubernetesClient:
     V1DeploymentSpec = FakeKubernetesModel
     V1EnvVar = FakeKubernetesModel
     V1EnvVarSource = FakeKubernetesModel
+    V1HTTPIngressRuleValue = FakeKubernetesModel
+    V1HTTPIngressPath = FakeKubernetesModel
+    V1HTTPGetAction = FakeKubernetesModel
     V1LabelSelector = FakeKubernetesModel
     V1LocalObjectReference = FakeKubernetesModel
+    V1Ingress = FakeKubernetesModel
+    V1IngressBackend = FakeKubernetesModel
+    V1IngressRule = FakeKubernetesModel
+    V1IngressServiceBackend = FakeKubernetesModel
+    V1IngressSpec = FakeKubernetesModel
+    V1IngressTLS = FakeKubernetesModel
     V1Namespace = FakeKubernetesModel
     V1ObjectMeta = FakeKubernetesModel
     V1Pod = FakeKubernetesModel
     V1PodSpec = FakeKubernetesModel
     V1PodTemplateSpec = FakeKubernetesModel
+    V1Probe = FakeKubernetesModel
     V1Secret = FakeKubernetesModel
     V1SecretKeySelector = FakeKubernetesModel
     V1Service = FakeKubernetesModel
+    V1ServiceBackendPort = FakeKubernetesModel
     V1ServicePort = FakeKubernetesModel
     V1ServiceSpec = FakeKubernetesModel
     V1Volume = FakeKubernetesModel
@@ -173,11 +217,21 @@ class FakeCoreV1Api:
         self._call("read_namespaced_deployment", name, namespace)
         return self.deployments.popleft()
 
+    def create_namespaced_ingress(self, *, namespace, body):
+        self._call("create_namespaced_ingress", body.metadata.name, namespace)
+
+    def replace_namespaced_ingress(self, *, name, namespace, body):
+        self._call("replace_namespaced_ingress", name, namespace)
+
+    def delete_namespaced_ingress(self, *, name, namespace):
+        self._call("delete_namespaced_ingress", name, namespace)
+
 
 class FakeClientSet:
     def __init__(self, core_v1) -> None:
         self.core_v1 = core_v1
         self.apps_v1 = core_v1
+        self.networking_v1 = core_v1
         self.loaded_config = "in_cluster"
 
 
@@ -195,9 +249,17 @@ class FakeClientFactory:
 
 
 class FakeReconciler:
-    def __init__(self, *, core_v1, api_exception_class, apps_v1=None) -> None:
+    def __init__(
+        self,
+        *,
+        core_v1,
+        api_exception_class,
+        apps_v1=None,
+        networking_v1=None,
+    ) -> None:
         self.core_v1 = core_v1
         self.apps_v1 = apps_v1
+        self.networking_v1 = networking_v1
         self.api_exception_class = api_exception_class
         self.reconciled_manifest = None
         self.ready_endpoint_url = ""
@@ -478,6 +540,178 @@ def test_runtime_manifest_uses_config_instance_for_deployment_name(
     assert manifest.deployment.metadata.name == "io-github-example-weather-prod"
 
 
+def test_runtime_manifest_does_not_create_ingress_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert manifest.ingress is None
+
+
+def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        config_name="prod",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=IngressSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    host = "io-github-example-weather-prod.mcp.example.com"
+    ingress = manifest.ingress
+    assert ingress is not None
+    assert ingress.metadata.name == manifest.names.ingress_name
+    assert ingress.metadata.annotations == {
+        "kubernetes.io/ingress.class": "traefik",
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+        "traefik.ingress.kubernetes.io/router.tls": "true",
+        "external-dns.alpha.kubernetes.io/hostname": host,
+        "example.com/owner": "wardn",
+    }
+    assert ingress.spec.ingress_class_name == "traefik"
+    assert ingress.spec.tls[0].hosts == [host]
+    assert ingress.spec.tls[0].secret_name == "mcp-tls"
+    assert ingress.spec.rules[0].host == host
+    path = ingress.spec.rules[0].http.paths[0]
+    assert path.path == "/"
+    assert path.backend.service.name == manifest.names.service_name
+    assert path.backend.service.port.number == 8000
+
+
+def test_runtime_manifest_requires_base_domain_when_ingress_enabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+
+    class MissingDomainIngressSettings(FakeSettings):
+        mcp_runtime_kubernetes_ingress_enabled = True
+
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    with pytest.raises(KubernetesIngressError, match="base domain is required"):
+        build_runtime_manifests(
+            installation,
+            runtime_session,
+            settings=MissingDomainIngressSettings(),
+            client_module=FakeKubernetesClient,
+        )
+
+
 def test_kubernetes_provider_runtime_spec_uses_streamable_http_transport(
     tmp_path,
     monkeypatch,
@@ -651,6 +885,123 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
         assert env.value_from.secret_key_ref.key == env.name
 
 
+def test_kubernetes_runtime_manifest_adds_gateway_health_probes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    container = manifest.pod.spec.containers[0]
+
+    assert container.readiness_probe.http_get.path == "/healthz"
+    assert container.readiness_probe.http_get.port == "http"
+    assert container.readiness_probe.initial_delay_seconds == 2
+    assert container.readiness_probe.period_seconds == 10
+    assert container.readiness_probe.timeout_seconds == 3
+    assert container.readiness_probe.failure_threshold == 3
+    assert container.liveness_probe.http_get.path == "/healthz"
+    assert container.liveness_probe.initial_delay_seconds == 30
+    assert container.startup_probe.http_get.path == "/healthz"
+    assert container.startup_probe.failure_threshold == 180
+
+
+def test_kubernetes_runtime_manifest_can_disable_gateway_health_probes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=DisabledProbeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    container = manifest.pod.spec.containers[0]
+
+    assert not hasattr(container, "readiness_probe")
+    assert not hasattr(container, "liveness_probe")
+    assert not hasattr(container, "startup_probe")
+
+
 def test_kubernetes_runtime_manifest_rewrites_uvx_host_paths(
     tmp_path,
     monkeypatch,
@@ -704,6 +1055,7 @@ def test_kubernetes_runtime_manifest_rewrites_uvx_host_paths(
     )
 
     assert supergateway_stdio_arg(manifest) == "uvx mcp-grafana"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
 
 
 def test_kubernetes_runtime_manifest_rewrites_npm_host_paths_to_npx(
@@ -763,6 +1115,7 @@ def test_kubernetes_runtime_manifest_rewrites_npm_host_paths_to_npx(
     )
 
     assert supergateway_stdio_arg(manifest) == "npx --yes weather-mcp@1.2.3 --stdio"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
 def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(
@@ -822,6 +1175,61 @@ def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(
     assert supergateway_stdio_arg(manifest) == (
         "uvx --from openstackmcp-server python -m openstackmcp_server --stdio"
     )
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+
+
+def test_kubernetes_runtime_manifest_uses_deno_gateway_image(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/deno" if command == "deno" else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/deno",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="deno",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "deno",
+            "command": "deno",
+            "args": ["run", "-A", "jsr:@example/mcp-server"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert "deno run -A jsr:@example/mcp-server" in supergateway_stdio_arg(manifest)
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:deno"
 
 
 def test_kubernetes_runtime_manifest_service_selects_pod_labels(
@@ -882,7 +1290,7 @@ def test_kubernetes_runtime_manifest_service_selects_pod_labels(
     )
     assert WARDN_LABEL_RUNTIME_SESSION_ID not in manifest.pod.metadata.labels
     assert WARDN_LABEL_RUNTIME_SESSION_ID in manifest.deployment.metadata.labels
-    assert not hasattr(manifest, "ingress")
+    assert manifest.ingress is None
 
 
 def test_kubernetes_runtime_manifest_binds_existing_image_pull_secret(
@@ -1235,6 +1643,71 @@ def test_kubernetes_reconciler_creates_runtime_objects(tmp_path, monkeypatch) ->
     ]
 
 
+def test_kubernetes_reconciler_creates_ingress_when_enabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        config_name="prod",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    settings = IngressSettings()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=settings,
+        client_module=FakeKubernetesClient,
+    )
+    core_v1 = FakeCoreV1Api()
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=core_v1,
+        api_exception_class=FakeApiException,
+        settings=settings,
+    )
+
+    result = reconciler.reconcile(manifest)
+
+    assert result.endpoint_url == "https://io-github-example-weather-prod.mcp.example.com/mcp"
+    assert core_v1.calls == [
+        ("create_namespace", manifest.names.namespace, ""),
+        ("create_namespaced_secret", manifest.names.secret_name, manifest.names.namespace),
+        ("create_namespaced_deployment", manifest.names.pod_name, manifest.names.namespace),
+        ("create_namespaced_service", manifest.names.service_name, manifest.names.namespace),
+        ("create_namespaced_ingress", manifest.names.ingress_name, manifest.names.namespace),
+    ]
+
+
 def test_kubernetes_reconciler_replaces_secret_and_service_on_conflict(
     tmp_path,
     monkeypatch,
@@ -1459,8 +1932,8 @@ def test_kubernetes_reconciler_waits_for_gateway_ready(monkeypatch) -> None:
         ]
     )
 
-    def get_gateway_health(endpoint_url):
-        seen.append(endpoint_url)
+    def get_gateway_health(endpoint_url, *, verify_tls=True):
+        seen.append((endpoint_url, verify_tls))
         return next(statuses)
 
     monkeypatch.setattr(
@@ -1482,7 +1955,39 @@ def test_kubernetes_reconciler_waits_for_gateway_ready(monkeypatch) -> None:
     )
 
     assert status == {"ready": True, "status": 200, "body": "ok"}
-    assert seen == ["http://runtime.test:8000/mcp", "http://runtime.test:8000/mcp"]
+    assert seen == [
+        ("http://runtime.test:8000/mcp", True),
+        ("http://runtime.test:8000/mcp", True),
+    ]
+
+
+def test_kubernetes_reconciler_can_skip_ingress_tls_verification(monkeypatch) -> None:
+    seen = []
+
+    def get_gateway_health(endpoint_url, *, verify_tls=True):
+        seen.append((endpoint_url, verify_tls))
+        return {"ready": True, "status": 200, "body": "ok"}
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes.get_gateway_health",
+        get_gateway_health,
+    )
+    ticks = iter([0, 1])
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=FakeCoreV1Api(),
+        api_exception_class=FakeApiException,
+        settings=IngressUnverifiedTlsSettings(),
+        sleep=lambda seconds: None,
+        monotonic=lambda: next(ticks),
+    )
+
+    status = reconciler.wait_for_gateway_ready(
+        "https://runtime.example.test/mcp",
+        timeout_seconds=5,
+    )
+
+    assert status == {"ready": True, "status": 200, "body": "ok"}
+    assert seen == [("https://runtime.example.test/mcp", False)]
 
 
 def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
@@ -1542,11 +2047,12 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
     )
     seen = {}
 
-    def call_tool(endpoint_url, headers, *, tool_name, arguments):
+    def call_tool(endpoint_url, headers, *, tool_name, arguments, verify_tls=True):
         seen["endpoint_url"] = endpoint_url
         seen["headers"] = headers
         seen["tool_name"] = tool_name
         seen["arguments"] = arguments
+        seen["verify_tls"] = verify_tls
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     monkeypatch.setattr(
@@ -1567,6 +2073,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         "headers": {},
         "tool_name": "echo",
         "arguments": {"value": "ok"},
+        "verify_tls": True,
     }
     assert fake_reconciler.reconciled_manifest is not None
     assert client_factory.load_count == 1
@@ -1584,6 +2091,81 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
 
     assert second_result["content"][0]["text"] == "ok"
     assert seen["arguments"] == {"value": "again"}
+
+
+def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        lambda: IngressUnverifiedTlsSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    core_v1 = FakeCoreV1Api()
+    fake_reconciler = FakeReconciler(
+        core_v1=core_v1,
+        api_exception_class=FakeApiException,
+    )
+    provider = KubernetesRuntimeProvider(
+        client_factory=FakeClientFactory(core_v1),
+        reconciler_factory=lambda **kwargs: fake_reconciler,
+    )
+    seen = {}
+
+    def call_tool(endpoint_url, headers, *, tool_name, arguments, verify_tls=True):
+        seen["verify_tls"] = verify_tls
+        return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes.mcp_client.call_tool",
+        call_tool,
+    )
+
+    provider.call_tool(
+        installation,
+        tool_name="echo",
+        arguments={"value": "ok"},
+        runtime_session=runtime_session,
+    )
+
+    assert seen["verify_tls"] is False
 
 
 def test_kubernetes_provider_bubbles_supergateway_call_errors(
@@ -1754,6 +2336,7 @@ def test_kubernetes_provider_stop_runtime_can_delete_session_resources(monkeypat
     provider.stop_runtime(runtime_session, delete_resources=True)
 
     assert core_v1.calls == [
+        ("delete_namespaced_ingress", names.ingress_name, names.namespace),
         ("delete_namespaced_service", names.service_name, names.namespace),
         ("delete_namespaced_deployment", names.pod_name, names.namespace),
         ("delete_namespaced_secret", names.secret_name, names.namespace),

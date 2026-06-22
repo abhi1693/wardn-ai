@@ -1,6 +1,7 @@
 import json
 import os
 import select
+import ssl
 import subprocess
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ def send_remote_request(
     *,
     session_id: str | None = None,
     headers: dict[str, str] | None = None,
+    verify_tls: bool = True,
 ) -> tuple[dict[str, Any], str | None]:
     request_headers = {
         "Accept": "application/json, text/event-stream",
@@ -54,7 +56,8 @@ def send_remote_request(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=30) as response:
+        context = None if verify_tls else ssl._create_unverified_context()
+        with urlopen(request, timeout=30, context=context) as response:
             body = response.read().decode("utf-8", "replace")
             return parse_mcp_response_body(body), response.headers.get("Mcp-Session-Id")
     except HTTPError as exc:
@@ -77,7 +80,12 @@ def send_remote_request(
         raise MCPGatewayUpstreamError("upstream MCP server returned invalid JSON-RPC") from exc
 
 
-def open_remote_session(url: str, headers: dict[str, str]) -> MCPRemoteSession:
+def open_remote_session(
+    url: str,
+    headers: dict[str, str],
+    *,
+    verify_tls: bool = True,
+) -> MCPRemoteSession:
     response, session_id = send_remote_request(
         url,
         {
@@ -91,6 +99,7 @@ def open_remote_session(url: str, headers: dict[str, str]) -> MCPRemoteSession:
             },
         },
         headers=headers,
+        verify_tls=verify_tls,
     )
     if "error" in response:
         raise MCPGatewayUpstreamError(f"upstream initialize failed: {response['error']}")
@@ -103,6 +112,7 @@ def open_remote_session(url: str, headers: dict[str, str]) -> MCPRemoteSession:
             {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
             session_id=session_id,
             headers=headers,
+            verify_tls=verify_tls,
         )
     except MCPGatewayUpstreamError:
         pass
@@ -241,8 +251,14 @@ def open_stdio_session(
         raise
 
 
-def list_tools(url: str, headers: dict[str, str], *, max_pages: int = 100) -> list[dict[str, Any]]:
-    session = open_remote_session(url, headers)
+def list_tools(
+    url: str,
+    headers: dict[str, str],
+    *,
+    max_pages: int = 100,
+    verify_tls: bool = True,
+) -> list[dict[str, Any]]:
+    session = open_remote_session(url, headers, verify_tls=verify_tls)
     tools: list[dict[str, Any]] = []
     cursor = None
     for request_id in range(2, max_pages + 2):
@@ -252,6 +268,7 @@ def list_tools(url: str, headers: dict[str, str], *, max_pages: int = 100) -> li
             {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": params},
             session_id=session.session_id,
             headers=session.headers,
+            verify_tls=verify_tls,
         )
         if "error" in response:
             raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
@@ -343,8 +360,9 @@ def call_tool(
     *,
     tool_name: str,
     arguments: dict[str, Any],
+    verify_tls: bool = True,
 ) -> dict[str, Any]:
-    session = open_remote_session(url, headers)
+    session = open_remote_session(url, headers, verify_tls=verify_tls)
     response, _ = send_remote_request(
         session.url,
         {
@@ -355,6 +373,7 @@ def call_tool(
         },
         session_id=session.session_id,
         headers=session.headers,
+        verify_tls=verify_tls,
     )
     if "error" in response:
         raise MCPGatewayUpstreamError(f"upstream tools/call failed: {response['error']}")
