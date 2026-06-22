@@ -35,6 +35,7 @@ import type {
 } from "@/lib/api/generated/model";
 
 type InstalledListClientProps = {
+  basePath: string;
   initialInstallations: MCPServerInstallationRead[];
 };
 
@@ -74,8 +75,8 @@ function detailServerUrl(serverName: string, version: string) {
     .join("/")}?version=${encodeURIComponent(version)}`;
 }
 
-function editInstallUrl(installationId: string) {
-  return `/install/${encodeURIComponent(installationId)}/edit`;
+function editInstallUrl(basePath: string, installationId: string) {
+  return `${basePath}/${encodeURIComponent(installationId)}/edit`;
 }
 
 function runtimeLabel(installation: MCPServerInstallationRead) {
@@ -380,7 +381,7 @@ async function loadToolsFromGateway(
   return tools;
 }
 
-export function InstalledListClient({ initialInstallations }: InstalledListClientProps) {
+export function InstalledListClient({ basePath, initialInstallations }: InstalledListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
   const [isLoading, setIsLoading] = useState(false);
@@ -597,7 +598,7 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
             </div>
             <div className="flex flex-wrap gap-2">
               <Button asChild disabled={isMutating}>
-                <Link href="/install/new">
+                <Link href={`${basePath}/new`}>
                   <Plus className="size-4" />
                   Add
                 </Link>
@@ -681,7 +682,10 @@ export function InstalledListClient({ initialInstallations }: InstalledListClien
                       <TableCell>
                         <div className="flex justify-end gap-2">
                           <Button asChild disabled={isMutating} size="icon" type="button" variant="outline">
-                            <Link aria-label={`Edit ${installation.configName}`} href={editInstallUrl(installation.id)}>
+                            <Link
+                              aria-label={`Edit ${installation.configName}`}
+                              href={editInstallUrl(basePath, installation.id)}
+                            >
                               <Edit2 className="size-4" />
                             </Link>
                           </Button>

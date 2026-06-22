@@ -46,6 +46,7 @@ type CustomHeader = {
 };
 
 type InstallFormClientProps = {
+  basePath: string;
   initialInstallation?: MCPServerInstallationRead | null;
   initialInstallations: MCPServerInstallationRead[];
   initialSelectedServer?: MCPRegistryServerResponse | null;
@@ -449,6 +450,7 @@ function InstallFieldControl({
 }
 
 export function InstallFormClient({
+  basePath,
   initialInstallation = null,
   initialInstallations,
   initialSelectedServer = null,
@@ -642,7 +644,7 @@ export function InstallFormClient({
       }
       const installation = (await response.json()) as MCPServerInstallationRead;
       setInstallations((current) => [...current.filter((item) => item.id !== installation.id), installation]);
-      router.push("/install");
+      router.push(basePath);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Server instance could not be saved.");
@@ -882,7 +884,7 @@ export function InstallFormClient({
       ) : null}
 
       <div className="flex justify-end gap-2">
-        <Button disabled={isMutating} onClick={() => router.push("/install")} type="button" variant="outline">Cancel</Button>
+        <Button disabled={isMutating} onClick={() => router.push(basePath)} type="button" variant="outline">Cancel</Button>
         <Button disabled={isMutating || !selectedServer} type="submit">
           <Download className="size-4" />
           {isMutating ? "Saving" : isEdit ? "Save" : "Add"}

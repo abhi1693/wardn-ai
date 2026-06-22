@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,7 @@ def tool_source_hash(tool: dict[str, Any]) -> str:
 async def search_enabled_tool_schemas(
     session: AsyncSession,
     *,
+    workspace_id: uuid.UUID | None = None,
     server_name: str,
     search: str,
     offset: int,
@@ -44,6 +46,8 @@ async def search_enabled_tool_schemas(
             MCPServerToolSchema.tool_name.asc(),
         )
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
 
     if server_name:
         statement = statement.where(MCPServerToolSchema.server_name == server_name)
@@ -68,10 +72,11 @@ async def search_enabled_tool_schemas(
 async def get_enabled_tool_schema(
     session: AsyncSession,
     *,
+    workspace_id: uuid.UUID | None = None,
     server_name: str,
     tool_name: str,
 ) -> MCPServerToolSchema | None:
-    result = await session.execute(
+    statement = (
         select(MCPServerToolSchema)
         .join(
             MCPServerInstallation,
@@ -87,6 +92,9 @@ async def get_enabled_tool_schema(
             MCPServerToolSchema.is_active.is_(True),
         )
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 

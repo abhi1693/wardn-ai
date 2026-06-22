@@ -26,6 +26,44 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/mcp/registry/servers",
         "/api/v1/mcp/registry/servers/{server_name}/versions",
         "/api/v1/mcp/registry/servers/{server_name}/versions/{version}",
+        "/api/v1/organizations",
+        "/api/v1/organizations/{organization_id}",
+        "/api/v1/organizations/{organization_id}/mcp/registry/servers",
+        (
+            "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+            "/{server_name}/versions"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+            "/{server_name}/versions/{version}"
+        ),
+        "/api/v1/organizations/{organization_id}/workspaces",
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-server-configs/{installation_id}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-server-configs/{installation_id}/tools"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-server-configs/{installation_id}/validate-tool"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-servers"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-servers/updates"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/installed-servers/{server_name}"
+        ),
         "/api/v1/users/bootstrap",
     }
 
@@ -99,6 +137,15 @@ def test_mcp_registry_openapi_contract() -> None:
     servers_path = schema["paths"]["/api/v1/mcp/registry/servers"]
     list_servers = servers_path["get"]
     create_server = servers_path["post"]
+    organization_servers_path = schema["paths"][
+        "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+    ]
+    organization_version_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+            "/{server_name}/versions/{version}"
+        )
+    ]
     version_path = schema["paths"][
         "/api/v1/mcp/registry/servers/{server_name}/versions/{version}"
     ]
@@ -115,6 +162,26 @@ def test_mcp_registry_openapi_contract() -> None:
     assert create_server["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerCreate"
     }
+    assert (
+        organization_servers_path["get"]["operationId"]
+        == "organization_mcp_registry_list_servers"
+    )
+    assert (
+        organization_servers_path["post"]["operationId"]
+        == "organization_mcp_registry_create_server_version"
+    )
+    assert (
+        organization_version_path["get"]["operationId"]
+        == "organization_mcp_registry_get_server_version"
+    )
+    assert (
+        organization_version_path["put"]["operationId"]
+        == "organization_mcp_registry_update_server_version"
+    )
+    assert (
+        organization_version_path["delete"]["operationId"]
+        == "organization_mcp_registry_delete_server_version"
+    )
     assert installed["operationId"] == "mcp_registry_list_installed_servers"
     assert installed["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallationListResponse"
@@ -126,7 +193,10 @@ def test_mcp_registry_openapi_contract() -> None:
     assert uninstall["operationId"] == "mcp_registry_uninstall_server"
     assert uninstall["responses"]["204"]["description"] == "Successful Response"
     assert installed_config_path["delete"]["operationId"] == "mcp_registry_uninstall_server_config"
-    assert installed_config_path["delete"]["responses"]["204"]["description"] == "Successful Response"
+    assert (
+        installed_config_path["delete"]["responses"]["204"]["description"]
+        == "Successful Response"
+    )
     assert (
         installed_config_validation["operationId"]
         == "mcp_registry_validate_installed_server_tool"
@@ -134,9 +204,10 @@ def test_mcp_registry_openapi_contract() -> None:
     assert installed_config_validation["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallationToolValidationRequest"
     }
-    assert installed_config_validation["responses"]["200"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/MCPServerInstallationToolValidationResponse"
-    }
+    assert (
+        installed_config_validation["responses"]["200"]["content"]["application/json"]["schema"]
+        == {"$ref": "#/components/schemas/MCPServerInstallationToolValidationResponse"}
+    )
     assert installed_config_tools["operationId"] == "mcp_registry_list_installed_server_tools"
     assert installed_config_tools["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallationToolsResponse"

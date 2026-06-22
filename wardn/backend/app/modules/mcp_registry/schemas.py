@@ -105,6 +105,7 @@ class MCPServerInstallationRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: UUID
+    workspace_id: UUID = Field(alias="workspaceId")
     server_name: str = Field(alias="serverName")
     config_name: str = Field(alias="configName")
     installed_version: str = Field(alias="installedVersion")

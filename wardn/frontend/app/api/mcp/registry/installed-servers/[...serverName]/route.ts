@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import { backendContentHeaders, selectedWorkspaceMcpPath } from "@/app/api/_lib/workspace";
 
 type RouteContext = {
   params: Promise<{
@@ -12,12 +12,20 @@ export async function PUT(request: Request, context: RouteContext) {
   const payload = await request.json();
   const { serverName } = await context.params;
   const encodedServerName = serverName.map(encodeURIComponent).join("/");
+  const path = await selectedWorkspaceMcpPath(
+    request,
+    `/registry/installed-servers/${encodedServerName}`
+  );
+  if (!path) {
+    return NextResponse.json({ detail: "workspace is not selected" }, { status: 400 });
+  }
   const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/installed-servers/${encodedServerName}`,
+    path,
     {
       method: "PUT",
       headers: {
         "content-type": "application/json",
+        cookie: request.headers.get("cookie") ?? "",
       },
       body: JSON.stringify(payload),
       cache: "no-store",
@@ -27,20 +35,26 @@ export async function PUT(request: Request, context: RouteContext) {
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }
 
 
-export async function DELETE(_: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const { serverName } = await context.params;
   const encodedServerName = serverName.map(encodeURIComponent).join("/");
+  const path = await selectedWorkspaceMcpPath(
+    request,
+    `/registry/installed-servers/${encodedServerName}`
+  );
+  if (!path) {
+    return NextResponse.json({ detail: "workspace is not selected" }, { status: 400 });
+  }
   const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/installed-servers/${encodedServerName}`,
+    path,
     {
       method: "DELETE",
+      headers: { cookie: request.headers.get("cookie") ?? "" },
       cache: "no-store",
     }
   );
@@ -52,8 +66,6 @@ export async function DELETE(_: Request, context: RouteContext) {
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }

@@ -1,4 +1,5 @@
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -7,8 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db_session
 from app.modules.mcp_gateway import service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.organizations.exceptions import (
+    OrganizationAccessDeniedError,
+    OrganizationNotFoundError,
+    WorkspaceAccessDeniedError,
+    WorkspaceNotFoundError,
+)
+from app.modules.organizations.service import require_workspace_admin
+from app.modules.users.dependencies import get_current_user
+from app.modules.users.models import User
 
 router = APIRouter(prefix="/mcp/gateway", tags=["mcp-gateway"])
+workspace_router = APIRouter(
+    prefix="/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
+    tags=["workspace-mcp-gateway"],
+)
 
 
 def jsonrpc_result(request_id: Any, result: dict[str, Any]) -> JSONResponse:
@@ -22,10 +36,11 @@ def jsonrpc_error(request_id: Any, code: int, message: str) -> JSONResponse:
     )
 
 
-@router.post("", operation_id="mcp_gateway_rpc")
-async def mcp_gateway_rpc(
+async def handle_mcp_gateway_rpc(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
+    session: AsyncSession,
+    *,
+    workspace_id: UUID | None = None,
 ) -> Response:
     try:
         payload = await request.json()
@@ -52,7 +67,12 @@ async def mcp_gateway_rpc(
         try:
             return jsonrpc_result(
                 request_id,
-                await service.call_tool(session, tool_name, arguments),
+                await service.call_tool(
+                    session,
+                    tool_name,
+                    arguments,
+                    workspace_id=workspace_id,
+                ),
             )
         except ValueError as exc:
             return jsonrpc_error(request_id, -32602, str(exc))
@@ -62,3 +82,28 @@ async def mcp_gateway_rpc(
             return jsonrpc_error(request_id, -32000, str(exc))
 
     return jsonrpc_error(request_id, -32601, f"Method not found: {method}")
+
+
+@router.post("", operation_id="mcp_gateway_rpc")
+async def mcp_gateway_rpc(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    return await handle_mcp_gateway_rpc(request, session)
+
+
+@workspace_router.post("", operation_id="workspace_mcp_gateway_rpc")
+async def workspace_mcp_gateway_rpc(
+    organization_id: UUID,
+    workspace_id: UUID,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    try:
+        await require_workspace_admin(session, current_user, organization_id, workspace_id)
+    except (OrganizationNotFoundError, WorkspaceNotFoundError) as exc:
+        return jsonrpc_error(None, -32602, str(exc))
+    except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
+        return jsonrpc_error(None, -32603, str(exc))
+    return await handle_mcp_gateway_rpc(request, session, workspace_id=workspace_id)

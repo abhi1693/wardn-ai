@@ -21,8 +21,14 @@ import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
-
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import {
+  backendCookieHeader,
+  backendPath,
+  getWorkspaceContext,
+  organizationMcpRegistryPath,
+  type WorkspaceContext,
+  workspaceMcpRegistryPath,
+} from "@/lib/workspace-context";
 
 type RegistryServerPageProps = {
   params: Promise<{
@@ -363,12 +369,20 @@ function MarkdownDescription({ content }: { content: string }) {
   );
 }
 
-async function getServer(serverName: string, version: string) {
+async function getServer(context: WorkspaceContext, serverName: string, version: string) {
   const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
-  const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/servers/${encodedName}/versions/${encodeURIComponent(version)}`,
-    { cache: "no-store" }
+  const path = organizationMcpRegistryPath(
+    context,
+    `/servers/${encodedName}/versions/${encodeURIComponent(version)}`
   );
+  if (!path) {
+    return null;
+  }
+  const cookie = await backendCookieHeader();
+  const response = await fetch(backendPath(path), {
+    cache: "no-store",
+    headers: cookie ? { cookie } : {},
+  });
   if (response.status === 404) {
     notFound();
   }
@@ -378,10 +392,16 @@ async function getServer(serverName: string, version: string) {
   return (await response.json()) as MCPRegistryServerResponse;
 }
 
-async function getInstallation(serverName: string) {
+async function getInstallation(serverName: string, context: WorkspaceContext) {
+  const path = workspaceMcpRegistryPath(context, "/installed-servers");
+  if (!path) {
+    return null;
+  }
   try {
-    const response = await fetch(`${backendUrl}/api/v1/mcp/registry/installed-servers`, {
+    const cookie = await backendCookieHeader();
+    const response = await fetch(backendPath(path), {
       cache: "no-store",
+      headers: cookie ? { cookie } : {},
     });
     if (!response.ok) {
       return null;
@@ -411,13 +431,14 @@ export default async function RegistryServerPage({
   const { version } = await searchParams;
   const decodedName = serverName.map(decodeURIComponent).join("/");
   const selectedVersion = version || "latest";
-  const response = await getServer(decodedName, selectedVersion);
+  const workspaceContext = await getWorkspaceContext();
+  const response = await getServer(workspaceContext, decodedName, selectedVersion);
 
   if (!response) {
     notFound();
   }
 
-  const [installation] = await Promise.all([getInstallation(response.server.name)]);
+  const [installation] = await Promise.all([getInstallation(response.server.name, workspaceContext)]);
   const officialMeta = response._meta["io.modelcontextprotocol.registry/official"];
   const links = sourceLinks(response);
   const config = configurationSummary(response);
@@ -439,6 +460,7 @@ export default async function RegistryServerPage({
       }
       eyebrow="MCP Registry"
       title={response.server.title || response.server.name}
+      workspaceContext={workspaceContext}
     >
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">

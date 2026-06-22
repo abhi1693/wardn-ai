@@ -7,17 +7,29 @@ import type {
   MCPRegistryServerListResponse,
   MCPServerInstallationListResponse,
 } from "@/lib/api/generated/model";
+import {
+  backendCookieHeader,
+  backendPath,
+  getWorkspaceContext,
+  organizationMcpRegistryPath,
+  type WorkspaceContext,
+  workspaceInstallPath,
+  workspaceMcpRegistryPath,
+} from "@/lib/workspace-context";
 
 import { RegistryListClient } from "./registry-list-client";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
-
-async function getInitialServers() {
+async function getInitialServers(context: WorkspaceContext) {
+  const path = organizationMcpRegistryPath(context, "/servers?limit=50&version=latest");
+  if (!path) {
+    return { servers: [], metadata: { count: 0, nextCursor: "" } };
+  }
   try {
-    const response = await fetch(
-      `${backendUrl}/api/v1/mcp/registry/servers?limit=50&version=latest`,
-      { cache: "no-store" }
-    );
+    const cookie = await backendCookieHeader();
+    const response = await fetch(backendPath(path), {
+      cache: "no-store",
+      headers: cookie ? { cookie } : {},
+    });
     if (!response.ok) {
       return { servers: [], metadata: { count: 0, nextCursor: "" } };
     }
@@ -27,10 +39,16 @@ async function getInitialServers() {
   }
 }
 
-async function getInitialInstallations() {
+async function getInitialInstallations(context: WorkspaceContext) {
+  const path = workspaceMcpRegistryPath(context, "/installed-servers");
+  if (!path) {
+    return [];
+  }
   try {
-    const response = await fetch(`${backendUrl}/api/v1/mcp/registry/installed-servers`, {
+    const cookie = await backendCookieHeader();
+    const response = await fetch(backendPath(path), {
       cache: "no-store",
+      headers: cookie ? { cookie } : {},
     });
     if (!response.ok) {
       return [];
@@ -43,9 +61,10 @@ async function getInitialInstallations() {
 }
 
 export default async function RegistryPage() {
+  const workspaceContext = await getWorkspaceContext();
   const [serverList, installations] = await Promise.all([
-    getInitialServers(),
-    getInitialInstallations(),
+    getInitialServers(workspaceContext),
+    getInitialInstallations(workspaceContext),
   ]);
 
   return (
@@ -61,8 +80,10 @@ export default async function RegistryPage() {
       }
       eyebrow="MCP Registry"
       title="Servers"
+      workspaceContext={workspaceContext}
     >
       <RegistryListClient
+        installBasePath={workspaceInstallPath(workspaceContext)}
         initialInstallations={installations}
         initialMetadata={serverList.metadata}
         initialServers={serverList.servers}

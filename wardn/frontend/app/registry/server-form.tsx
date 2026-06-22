@@ -19,6 +19,7 @@ const SERVER_NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
 let generatedId = 0;
 
 type ServerFormProps = {
+  installBasePath: string;
   initialServer?: MCPServerDocument;
   mode: "create" | "edit";
 };
@@ -392,12 +393,12 @@ function serverVersionUrl(serverName: string, version: string) {
     .join("/")}/${encodeURIComponent(version)}`;
 }
 
-function installServerUrl(serverName: string, version: string) {
+function installServerUrl(basePath: string, serverName: string, version: string) {
   const params = new URLSearchParams({
     serverName,
     version,
   });
-  return `/install/new?${params.toString()}`;
+  return `${basePath}/new?${params.toString()}`;
 }
 
 function publicHeaders(headers: HeaderField[]) {
@@ -457,7 +458,7 @@ function publicPackageArguments(packageArguments: PackageArgumentField[]): Recor
     .filter((argument): argument is Record<string, unknown> => Boolean(argument));
 }
 
-export function ServerForm({ initialServer, mode }: ServerFormProps) {
+export function ServerForm({ installBasePath, initialServer, mode }: ServerFormProps) {
   const router = useRouter();
   const initialRepository = initialServer?.repository as Record<string, unknown> | null | undefined;
   const initialIcon = records(initialServer?.icons)[0];
@@ -681,7 +682,7 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
           response.status === 409 &&
           detail === "server version already exists"
         ) {
-          router.push(installServerUrl(serverName, version.trim()));
+          router.push(installServerUrl(installBasePath, serverName, version.trim()));
           router.refresh();
           return;
         }
@@ -691,7 +692,11 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
         );
       }
 
-      router.push(mode === "create" ? installServerUrl(serverName, version.trim()) : "/registry");
+      router.push(
+        mode === "create"
+          ? installServerUrl(installBasePath, serverName, version.trim())
+          : "/registry"
+      );
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The server could not be saved.");

@@ -1,9 +1,11 @@
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.organizations.models import Workspace
 
 
 def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
@@ -19,8 +21,11 @@ async def get_server_version(
     version: str,
     *,
     include_deleted: bool = False,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPServerVersion | None:
     statement = _visible_query(include_deleted).where(MCPServerVersion.name == name)
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
     if version == "latest":
         statement = statement.where(MCPServerVersion.is_latest.is_(True))
     else:
@@ -34,12 +39,15 @@ async def list_server_versions(
     name: str,
     *,
     include_deleted: bool = False,
+    organization_id: uuid.UUID | None = None,
 ) -> list[MCPServerVersion]:
     statement = (
         _visible_query(include_deleted)
         .where(MCPServerVersion.name == name)
         .order_by(MCPServerVersion.published_at.desc(), MCPServerVersion.version.desc())
     )
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
     result = await session.execute(statement)
     return list(result.scalars().all())
 
@@ -53,8 +61,11 @@ async def list_servers(
     search: str | None = None,
     updated_since: datetime | None = None,
     version: str | None = None,
+    organization_id: uuid.UUID | None = None,
 ) -> tuple[list[MCPServerVersion], str]:
     statement = _visible_query(include_deleted or updated_since is not None)
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
@@ -78,90 +89,132 @@ async def list_servers(
     return rows[:limit], next_cursor
 
 
-async def count_versions_for_name(session: AsyncSession, name: str) -> int:
-    result = await session.execute(
-        select(func.count()).select_from(MCPServerVersion).where(MCPServerVersion.name == name)
+async def count_versions_for_name(
+    session: AsyncSession,
+    name: str,
+    organization_id: uuid.UUID | None = None,
+) -> int:
+    statement = (
+        select(func.count())
+        .select_from(MCPServerVersion)
+        .where(MCPServerVersion.name == name)
     )
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
+    result = await session.execute(statement)
     return result.scalar_one()
 
 
 async def get_latest_visible_version(
     session: AsyncSession,
     name: str,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPServerVersion | None:
-    result = await session.execute(
+    statement = (
         _visible_query(False)
         .where(MCPServerVersion.name == name)
         .order_by(MCPServerVersion.published_at.desc(), MCPServerVersion.version.desc())
         .limit(1)
     )
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
-async def clear_latest_for_name(session: AsyncSession, name: str) -> None:
-    await session.execute(
-        update(MCPServerVersion)
-        .where(MCPServerVersion.name == name)
-        .values(is_latest=False)
-    )
+async def clear_latest_for_name(
+    session: AsyncSession,
+    name: str,
+    organization_id: uuid.UUID | None = None,
+) -> None:
+    statement = update(MCPServerVersion).where(MCPServerVersion.name == name)
+    if organization_id is not None:
+        statement = statement.where(MCPServerVersion.organization_id == organization_id)
+    await session.execute(statement.values(is_latest=False))
 
 
 async def get_installation(
     session: AsyncSession,
     server_name: str,
     config_name: str = "default",
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallation | None:
-    result = await session.execute(
-        select(MCPServerInstallation).where(
-            MCPServerInstallation.server_name == server_name,
-            MCPServerInstallation.config_name == config_name,
-        )
+    statement = select(MCPServerInstallation).where(
+        MCPServerInstallation.server_name == server_name,
+        MCPServerInstallation.config_name == config_name,
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
 async def get_installation_by_id(
     session: AsyncSession,
     installation_id,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallation | None:
-    result = await session.execute(
-        select(MCPServerInstallation).where(MCPServerInstallation.id == installation_id)
-    )
+    statement = select(MCPServerInstallation).where(MCPServerInstallation.id == installation_id)
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
 async def get_first_installation_for_server(
     session: AsyncSession,
     server_name: str,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallation | None:
-    result = await session.execute(
+    statement = (
         select(MCPServerInstallation)
         .where(MCPServerInstallation.server_name == server_name)
         .order_by(MCPServerInstallation.config_name.asc())
         .limit(1)
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
 async def list_installations_for_server(
     session: AsyncSession,
     server_name: str,
+    workspace_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = None,
 ) -> list[MCPServerInstallation]:
-    result = await session.execute(
+    statement = (
         select(MCPServerInstallation)
         .where(MCPServerInstallation.server_name == server_name)
         .order_by(MCPServerInstallation.config_name.asc())
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    if organization_id is not None:
+        statement = statement.join(
+            Workspace,
+            Workspace.id == MCPServerInstallation.workspace_id,
+        ).where(
+            Workspace.organization_id == organization_id,
+        )
+    result = await session.execute(statement)
     return list(result.scalars().all())
 
 
-async def list_installations(session: AsyncSession) -> list[MCPServerInstallation]:
-    result = await session.execute(
+async def list_installations(
+    session: AsyncSession,
+    workspace_id: uuid.UUID | None = None,
+) -> list[MCPServerInstallation]:
+    statement = (
         select(MCPServerInstallation).order_by(
             MCPServerInstallation.server_name.asc(),
             MCPServerInstallation.config_name.asc(),
         )
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return list(result.scalars().all())
 
 

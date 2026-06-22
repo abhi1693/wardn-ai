@@ -25,4 +25,5 @@ export interface MCPServerInstallationRead {
   status: string;
   updateAvailable: boolean;
   updatedAt: string;
+  workspaceId: string;
 }

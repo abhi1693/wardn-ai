@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -23,13 +24,45 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallationListResponse,
     MCPServerInstallationRead,
     MCPServerInstallationToolsResponse,
-    MCPServerInstallRequest,
     MCPServerInstallationToolValidationRequest,
     MCPServerInstallationToolValidationResponse,
+    MCPServerInstallRequest,
     MCPServerToolRead,
 )
-from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
+from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.organizations import repository as organization_repository
+
+
+async def default_workspace_id(session) -> uuid.UUID:
+    workspace = await organization_repository.get_default_workspace(session)
+    if workspace is None:
+        raise MCPServerInstallationNotFoundError("default workspace is not configured")
+    return workspace.id
+
+
+async def default_organization_id(session) -> uuid.UUID | None:
+    if not hasattr(session, "get"):
+        return None
+    workspace = await organization_repository.get_default_workspace(session)
+    return workspace.organization_id if workspace else None
+
+
+async def catalog_organization_id(
+    session,
+    organization_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    return organization_id or await default_organization_id(session)
+
+
+async def organization_id_for_workspace(
+    session,
+    workspace_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    if workspace_id is None or not hasattr(session, "get"):
+        return None
+    workspace = await organization_repository.get_workspace_by_id(session, workspace_id)
+    return workspace.organization_id if workspace else None
 
 
 def official_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
@@ -84,7 +117,10 @@ def install_config_values_from_secret_config(secret_config: dict | None) -> dict
     return values
 
 
-def visible_config_field_names(server: MCPServerVersion, installation: MCPServerInstallation) -> set[str]:
+def visible_config_field_names(
+    server: MCPServerVersion,
+    installation: MCPServerInstallation,
+) -> set[str]:
     runtime_config = installation.runtime_config or {}
     package = runtime_config.get("package")
     transport = runtime_config.get("transport")
@@ -167,24 +203,32 @@ def server_response(server: MCPServerVersion) -> MCPRegistryServerResponse:
 async def installation_response(
     session,
     installation: MCPServerInstallation,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationRead:
+    organization_id = organization_id or await organization_id_for_workspace(
+        session,
+        installation.workspace_id,
+    )
     installed = await repository.get_server_version(
         session,
         installation.server_name,
         installation.installed_version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     latest = await repository.get_server_version(
         session,
         installation.server_name,
         "latest",
         include_deleted=False,
+        organization_id=organization_id,
     )
     if installed is None or latest is None:
         raise MCPServerNotFoundError("installed server version not found")
 
     return MCPServerInstallationRead(
         id=installation.id,
+        workspace_id=installation.workspace_id,
         server_name=installation.server_name,
         config_name=installation.config_name or "default",
         installed_version=installation.installed_version,
@@ -203,16 +247,26 @@ async def installation_response(
     )
 
 
-async def create_server_version(session, payload: MCPServerCreate) -> MCPRegistryServerResponse:
+async def create_server_version(
+    session,
+    payload: MCPServerCreate,
+    organization_id: uuid.UUID | None = None,
+) -> MCPRegistryServerResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
     existing = await repository.get_server_version(
         session,
         payload.name,
         payload.version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     if existing is not None:
         if existing.status == "deleted":
-            await repository.clear_latest_for_name(session, payload.name)
+            await repository.clear_latest_for_name(
+                session,
+                payload.name,
+                organization_id=organization_id,
+            )
             values = server_values(payload, is_latest=True)
             for key, value in values.items():
                 setattr(existing, key, value)
@@ -221,8 +275,9 @@ async def create_server_version(session, payload: MCPServerCreate) -> MCPRegistr
             return server_response(existing)
         raise DuplicateMCPServerVersionError("server version already exists")
 
-    await repository.clear_latest_for_name(session, payload.name)
+    await repository.clear_latest_for_name(session, payload.name, organization_id=organization_id)
     server = MCPServerVersion(
+        organization_id=organization_id,
         **server_values(payload, is_latest=True),
     )
     session.add(server)
@@ -236,7 +291,9 @@ async def update_server_version(
     name: str,
     version: str,
     payload: MCPServerCreate,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPRegistryServerResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
     if payload.name != name or payload.version != version:
         raise MCPServerNotFoundError("server version does not match request path")
 
@@ -245,6 +302,7 @@ async def update_server_version(
         name,
         version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("server version not found")
@@ -252,7 +310,7 @@ async def update_server_version(
     was_deleted = server.status == "deleted"
     was_latest = server.is_latest
     if was_deleted:
-        await repository.clear_latest_for_name(session, name)
+        await repository.clear_latest_for_name(session, name, organization_id=organization_id)
     values = server_values(payload, is_latest=was_latest or was_deleted)
     for key, value in values.items():
         setattr(server, key, value)
@@ -262,17 +320,28 @@ async def update_server_version(
     return server_response(server)
 
 
-async def delete_server_version(session, name: str, version: str) -> None:
+async def delete_server_version(
+    session,
+    name: str,
+    version: str,
+    organization_id: uuid.UUID | None = None,
+) -> None:
+    organization_id = await catalog_organization_id(session, organization_id)
     server = await repository.get_server_version(
         session,
         name,
         version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
-    installations = await repository.list_installations_for_server(session, name)
+    installations = await repository.list_installations_for_server(
+        session,
+        name,
+        organization_id=organization_id,
+    )
     if any(installation.installed_version == version for installation in installations):
         raise MCPServerVersionInUseError("server version is installed")
 
@@ -282,14 +351,23 @@ async def delete_server_version(session, name: str, version: str) -> None:
     server.is_latest = False
 
     if was_latest:
-        replacement = await repository.get_latest_visible_version(session, name)
+        replacement = await repository.get_latest_visible_version(
+            session,
+            name,
+            organization_id=organization_id,
+        )
         if replacement:
             replacement.is_latest = True
 
     await session.flush()
 
 
-async def sync_supported_servers(session, payloads: list[MCPServerCreate]) -> int:
+async def sync_supported_servers(
+    session,
+    payloads: list[MCPServerCreate],
+    organization_id: uuid.UUID | None = None,
+) -> int:
+    organization_id = await catalog_organization_id(session, organization_id)
     official_latest_by_name = {
         payload.name: payload.version
         for payload in payloads
@@ -303,7 +381,11 @@ async def sync_supported_servers(session, payloads: list[MCPServerCreate]) -> in
 
     for payload in payloads:
         if payload.name not in cleared_names:
-            await repository.clear_latest_for_name(session, payload.name)
+            await repository.clear_latest_for_name(
+                session,
+                payload.name,
+                organization_id=organization_id,
+            )
             cleared_names.add(payload.name)
 
         existing = await repository.get_server_version(
@@ -311,13 +393,14 @@ async def sync_supported_servers(session, payloads: list[MCPServerCreate]) -> in
             payload.name,
             payload.version,
             include_deleted=True,
+            organization_id=organization_id,
         )
         values = server_values(
             payload,
             is_latest=latest_by_name[payload.name] == payload.version,
         )
         if existing is None:
-            session.add(MCPServerVersion(**values))
+            session.add(MCPServerVersion(organization_id=organization_id, **values))
         else:
             for key, value in values.items():
                 setattr(existing, key, value)
@@ -335,7 +418,9 @@ async def list_servers(
     search: str | None = None,
     updated_since=None,
     version: str | None = None,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPRegistryServerListResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
     offset = parse_cursor(cursor)
     servers, next_cursor = await repository.list_servers(
         session,
@@ -345,6 +430,7 @@ async def list_servers(
         search=search,
         updated_since=updated_since,
         version=version,
+        organization_id=organization_id,
     )
     return MCPRegistryServerListResponse(
         servers=[server_response(server) for server in servers],
@@ -357,13 +443,19 @@ async def list_versions(
     name: str,
     *,
     include_deleted: bool,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPRegistryServerListResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
     servers = await repository.list_server_versions(
         session,
         name,
         include_deleted=include_deleted,
+        organization_id=organization_id,
     )
-    if not servers and await repository.count_versions_for_name(session, name) == 0:
+    if (
+        not servers
+        and await repository.count_versions_for_name(session, name, organization_id) == 0
+    ):
         raise MCPServerNotFoundError("server not found")
     return MCPRegistryServerListResponse(
         servers=[server_response(server) for server in servers],
@@ -377,20 +469,26 @@ async def get_version(
     version: str,
     *,
     include_deleted: bool,
+    organization_id: uuid.UUID | None = None,
 ) -> MCPRegistryServerResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
     server = await repository.get_server_version(
         session,
         name,
         version,
         include_deleted=include_deleted,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("server version not found")
     return server_response(server)
 
 
-async def list_installations(session) -> MCPServerInstallationListResponse:
-    installations = await repository.list_installations(session)
+async def list_installations(
+    session,
+    workspace_id: uuid.UUID | None = None,
+) -> MCPServerInstallationListResponse:
+    installations = await repository.list_installations(session, workspace_id)
     return MCPServerInstallationListResponse(
         installations=[
             await installation_response(session, installation)
@@ -439,16 +537,23 @@ def validation_error_from_result(result: dict | None) -> str:
 async def list_installation_tools(
     session,
     installation_id,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationToolsResponse:
-    installation = await repository.get_installation_by_id(session, installation_id)
+    installation = await repository.get_installation_by_id(
+        session,
+        installation_id,
+        workspace_id,
+    )
     if installation is None:
         raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
+    organization_id = await organization_id_for_workspace(session, installation.workspace_id)
     server = await repository.get_server_version(
         session,
         installation.server_name,
         installation.installed_version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("installed server version not found")
@@ -480,16 +585,23 @@ async def validate_installation_tool(
     session,
     installation_id,
     payload: MCPServerInstallationToolValidationRequest,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationToolValidationResponse:
-    installation = await repository.get_installation_by_id(session, installation_id)
+    installation = await repository.get_installation_by_id(
+        session,
+        installation_id,
+        workspace_id,
+    )
     if installation is None:
         raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
+    organization_id = await organization_id_for_workspace(session, installation.workspace_id)
     server = await repository.get_server_version(
         session,
         installation.server_name,
         installation.installed_version,
         include_deleted=True,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("installed server version not found")
@@ -526,27 +638,38 @@ async def install_server_version(
     session,
     name: str,
     payload: MCPServerInstallRequest,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationRead:
+    workspace_id = workspace_id or await default_workspace_id(session)
+    organization_id = await organization_id_for_workspace(session, workspace_id)
     server = await repository.get_server_version(
         session,
         name,
         payload.version,
         include_deleted=False,
+        organization_id=organization_id,
     )
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
-    installation = await repository.get_installation(session, name, payload.config_name)
+    installation = await repository.get_installation(
+        session,
+        name,
+        payload.config_name,
+        workspace_id,
+    )
     config_values = merged_install_config_values(installation, payload.config_values)
     runtime_install = install_server_runtime(
         server,
         config_values=config_values,
         install_target=payload.install_target,
         config_name=payload.config_name,
+        workspace_id=str(workspace_id),
     )
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
         installation = MCPServerInstallation(
+            workspace_id=workspace_id,
             server_name=name,
             config_name=payload.config_name,
             installed_version=server.version,
@@ -572,11 +695,17 @@ async def install_server_version(
 
     await session.flush()
     await session.refresh(installation)
-    return await installation_response(session, installation)
+    return await installation_response(session, installation, organization_id=organization_id)
 
 
-async def uninstall_server(session, name: str, config_name: str = "default") -> None:
-    installation = await repository.get_installation(session, name, config_name)
+async def uninstall_server(
+    session,
+    name: str,
+    config_name: str = "default",
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    workspace_id = workspace_id or await default_workspace_id(session)
+    installation = await repository.get_installation(session, name, config_name, workspace_id)
     if installation is None:
         raise MCPServerInstallationNotFoundError("server is not installed")
 
@@ -585,8 +714,12 @@ async def uninstall_server(session, name: str, config_name: str = "default") -> 
     await session.flush()
 
 
-async def uninstall_installation(session, installation_id) -> None:
-    installation = await repository.get_installation_by_id(session, installation_id)
+async def uninstall_installation(
+    session,
+    installation_id,
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    installation = await repository.get_installation_by_id(session, installation_id, workspace_id)
     if installation is None:
         raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
@@ -598,10 +731,17 @@ async def uninstall_installation(session, installation_id) -> None:
 async def update_installed_servers(
     session,
     payload: MCPServerBulkUpdateRequest,
+    workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationListResponse:
+    workspace_id = workspace_id or await default_workspace_id(session)
+    organization_id = await organization_id_for_workspace(session, workspace_id)
     updated: list[MCPServerInstallationRead] = []
     for server_name in payload.server_names:
-        installations = await repository.list_installations_for_server(session, server_name)
+        installations = await repository.list_installations_for_server(
+            session,
+            server_name,
+            workspace_id,
+        )
         if not installations:
             raise MCPServerInstallationNotFoundError("server is not installed")
         latest = await repository.get_server_version(
@@ -609,6 +749,7 @@ async def update_installed_servers(
             server_name,
             "latest",
             include_deleted=False,
+            organization_id=organization_id,
         )
         if latest is None:
             raise MCPServerNotFoundError("latest server version not found")
@@ -619,6 +760,7 @@ async def update_installed_servers(
                 config_values=install_config_values_from_secret_config(installation.secret_config),
                 install_target=install_target,
                 config_name=installation.config_name,
+                workspace_id=str(workspace_id),
             )
             previous_install_path = installation.install_path
             installation.installed_version = latest.version
@@ -632,6 +774,12 @@ async def update_installed_servers(
                 remove_installation_artifacts(previous_install_path)
             await session.flush()
             await session.refresh(installation)
-            updated.append(await installation_response(session, installation))
+            updated.append(
+                await installation_response(
+                    session,
+                    installation,
+                    organization_id=organization_id,
+                )
+            )
 
     return MCPServerInstallationListResponse(installations=updated)

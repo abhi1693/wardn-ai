@@ -140,12 +140,12 @@ function editServerUrl(serverName: string, version: string) {
     .join("/")}?version=${encodeURIComponent(version)}`;
 }
 
-function installServerUrl(serverName: string, version: string) {
+function installServerUrl(basePath: string, serverName: string, version: string) {
   const params = new URLSearchParams({
     serverName,
     version,
   });
-  return `/install/new?${params.toString()}`;
+  return `${basePath}/new?${params.toString()}`;
 }
 
 function serverVersionUrl(serverName: string, version: string) {
@@ -164,12 +164,14 @@ async function responseErrorMessage(response: Response, fallback: string) {
 }
 
 type RegistryListClientProps = {
+  installBasePath: string;
   initialInstallations: MCPServerInstallationRead[];
   initialMetadata: MCPRegistryListMetadata;
   initialServers: MCPRegistryServerResponse[];
 };
 
 export function RegistryListClient({
+  installBasePath,
   initialInstallations,
   initialMetadata,
   initialServers,
@@ -533,7 +535,11 @@ export function RegistryListClient({
                           <Button asChild size="icon" variant="outline">
                             <Link
                               aria-label={`Add installation for ${entry.server.name}`}
-                              href={installServerUrl(entry.server.name, entry.server.version)}
+                              href={installServerUrl(
+                                installBasePath,
+                                entry.server.name,
+                                entry.server.version
+                              )}
                             >
                               <Plus className="size-4" />
                             </Link>

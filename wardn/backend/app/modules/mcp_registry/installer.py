@@ -42,10 +42,14 @@ def server_install_path(
     server: MCPServerVersion,
     install_root: Path | None = None,
     config_name: str = "default",
+    workspace_id: str | None = None,
 ) -> Path:
     root = install_root or default_install_root()
+    path = root
+    if workspace_id:
+        path = path / safe_path_component(workspace_id)
     return (
-        root
+        path
         / safe_path_component(server.name)
         / safe_path_component(config_name)
         / safe_path_component(server.version)
@@ -565,7 +569,6 @@ def build_npm_install(
     )
     require_config_values(env_vars, config_values, label="environment variables")
     require_config_values(package_args, config_values, label="package arguments")
-    configured_env = configured_values(env_vars, config_values)
     configured_args = configured_package_arguments(package_args, config_values)
     public_package = public_package_config(package, env_vars, package_args, config_values)
     if executable and npm_bin_requires_node(executable):
@@ -628,7 +631,6 @@ def build_pypi_install(
     )
     require_config_values(env_vars, config_values, label="environment variables")
     require_config_values(package_args, config_values, label="package arguments")
-    configured_env = configured_values(env_vars, config_values)
     configured_args = configured_package_arguments(package_args, config_values)
     public_package = public_package_config(package, env_vars, package_args, config_values)
     secret_config = package_secret_config(env_vars, package_args, config_values)
@@ -680,9 +682,10 @@ def build_uvx_install(
     )
     require_config_values(env_vars, config_values, label="environment variables")
     require_config_values(package_args, config_values, label="package arguments")
-    configured_env = configured_values(env_vars, config_values)
     configured_args = configured_package_arguments(package_args, config_values)
-    if identifier.startswith(("git+", "http://", "https://", "file:")) or identifier.startswith((".", "/")):
+    if identifier.startswith(("git+", "http://", "https://", "file:")) or identifier.startswith(
+        (".", "/")
+    ):
         if not configured_args:
             raise MCPServerInstallationUnsupportedError(
                 "uvx source installs require a package argument with the command to run"
@@ -846,9 +849,10 @@ def install_server_runtime(
     install_target: str | None = None,
     install_root: Path | None = None,
     config_name: str = "default",
+    workspace_id: str | None = None,
 ) -> MCPRuntimeInstall:
     config_values = config_values or {}
-    install_path = server_install_path(server, install_root, config_name)
+    install_path = server_install_path(server, install_root, config_name, workspace_id)
     temporary_path = install_path.with_name(f"{install_path.name}.tmp")
     shutil.rmtree(temporary_path, ignore_errors=True)
     temporary_path.mkdir(parents=True, exist_ok=True)

@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import { backendContentHeaders, selectedWorkspaceMcpPath } from "@/app/api/_lib/workspace";
 
-export async function GET() {
-  const response = await fetch(`${backendUrl}/api/v1/mcp/registry/installed-servers`, {
+export async function GET(request: Request) {
+  const path = await selectedWorkspaceMcpPath(request, "/registry/installed-servers");
+  if (!path) {
+    return NextResponse.json({ installations: [] });
+  }
+  const response = await fetch(path, {
     cache: "no-store",
+    headers: { cookie: request.headers.get("cookie") ?? "" },
   });
 
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }

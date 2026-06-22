@@ -2,10 +2,16 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import type { MCPRegistryServerResponse } from "@/lib/api/generated/model";
+import {
+  backendCookieHeader,
+  backendPath,
+  getWorkspaceContext,
+  organizationMcpRegistryPath,
+  type WorkspaceContext,
+  workspaceInstallPath,
+} from "@/lib/workspace-context";
 
 import { ServerForm } from "../../server-form";
-
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
 
 type EditRegistryServerPageProps = {
   params: Promise<{
@@ -16,12 +22,20 @@ type EditRegistryServerPageProps = {
   }>;
 };
 
-async function getServer(serverName: string, version: string) {
+async function getServer(context: WorkspaceContext, serverName: string, version: string) {
   const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
-  const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/servers/${encodedName}/versions/${encodeURIComponent(version)}`,
-    { cache: "no-store" }
+  const path = organizationMcpRegistryPath(
+    context,
+    `/servers/${encodedName}/versions/${encodeURIComponent(version)}`
   );
+  if (!path) {
+    return null;
+  }
+  const cookie = await backendCookieHeader();
+  const response = await fetch(backendPath(path), {
+    cache: "no-store",
+    headers: cookie ? { cookie } : {},
+  });
   if (response.status === 404) {
     notFound();
   }
@@ -39,15 +53,25 @@ export default async function EditRegistryServerPage({
   const { version } = await searchParams;
   const decodedName = serverName.map(decodeURIComponent).join("/");
   const selectedVersion = version || "latest";
-  const response = await getServer(decodedName, selectedVersion);
+  const workspaceContext = await getWorkspaceContext();
+  const response = await getServer(workspaceContext, decodedName, selectedVersion);
 
   if (!response) {
     notFound();
   }
 
   return (
-    <AppShell active="registry" eyebrow="MCP Registry" title="Edit server">
-      <ServerForm initialServer={response.server} mode="edit" />
+    <AppShell
+      active="registry"
+      eyebrow="MCP Registry"
+      title="Edit server"
+      workspaceContext={workspaceContext}
+    >
+      <ServerForm
+        installBasePath={workspaceInstallPath(workspaceContext)}
+        initialServer={response.server}
+        mode="edit"
+      />
     </AppShell>
   );
 }

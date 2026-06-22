@@ -1,4 +1,5 @@
 import json
+import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -261,12 +262,18 @@ def gateway_tools() -> list[dict[str, Any]]:
     ]
 
 
-async def search_mcp_servers(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+async def search_mcp_servers(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     offset = parse_cursor(arguments.get("cursor"))
     limit = bounded_limit(arguments.get("limit"))
     query = str(arguments.get("query") or "").strip()
     rows, next_cursor = await repository.search_enabled_installations(
         session,
+        workspace_id=workspace_id,
         search=query,
         offset=offset,
         limit=limit,
@@ -282,18 +289,28 @@ async def search_mcp_servers(session: AsyncSession, arguments: dict[str, Any]) -
     )
 
 
-async def get_mcp_server(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+async def get_mcp_server(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     server_name = str(arguments.get("serverName") or "").strip()
     if not server_name:
         raise ValueError("serverName is required")
-    row = await repository.get_enabled_installation(session, server_name)
+    row = await repository.get_enabled_installation(session, server_name, workspace_id)
     if row is None:
         raise LookupError("enabled MCP server was not found")
     installation, server = row
     return text_tool_result({"server": server_detail(installation, server)})
 
 
-async def search_mcp_tools(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+async def search_mcp_tools(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     offset = parse_cursor(arguments.get("cursor"))
     limit = bounded_limit(arguments.get("limit"))
     query = str(arguments.get("query") or "").strip()
@@ -301,7 +318,7 @@ async def search_mcp_tools(session: AsyncSession, arguments: dict[str, Any]) -> 
     refreshed = False
 
     if server_name:
-        row = await repository.get_enabled_installation(session, server_name)
+        row = await repository.get_enabled_installation(session, server_name, workspace_id)
         if row is None:
             raise LookupError("enabled MCP server was not found")
         _installation, server = row
@@ -311,12 +328,13 @@ async def search_mcp_tools(session: AsyncSession, arguments: dict[str, Any]) -> 
             server_version=server.version,
         )
         if tool_count == 0:
-            await refresh_tool_schemas(session, server_name)
+            await refresh_tool_schemas(session, server_name, workspace_id=workspace_id)
             await session.commit()
             refreshed = True
 
     tools, next_cursor = await tool_repository.search_enabled_tool_schemas(
         session,
+        workspace_id=workspace_id,
         server_name=server_name,
         search=query,
         offset=offset,
@@ -335,7 +353,12 @@ async def search_mcp_tools(session: AsyncSession, arguments: dict[str, Any]) -> 
     )
 
 
-async def get_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+async def get_mcp_tool(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     server_name = str(arguments.get("serverName") or "").strip()
     tool_name = str(arguments.get("toolName") or "").strip()
     if not server_name:
@@ -343,22 +366,24 @@ async def get_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
     if not tool_name:
         raise ValueError("toolName is required")
 
-    row = await repository.get_enabled_installation(session, server_name)
+    row = await repository.get_enabled_installation(session, server_name, workspace_id)
     if row is None:
         raise LookupError("enabled MCP server was not found")
     _installation, _server = row
     cached_tool = await tool_repository.get_enabled_tool_schema(
         session,
+        workspace_id=workspace_id,
         server_name=server_name,
         tool_name=tool_name,
     )
     refreshed = False
     if cached_tool is None:
-        await refresh_tool_schemas(session, server_name)
+        await refresh_tool_schemas(session, server_name, workspace_id=workspace_id)
         await session.commit()
         refreshed = True
         cached_tool = await tool_repository.get_enabled_tool_schema(
             session,
+            workspace_id=workspace_id,
             server_name=server_name,
             tool_name=tool_name,
         )
@@ -375,7 +400,12 @@ async def get_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
     raise LookupError("MCP tool was not found")
 
 
-async def run_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict[str, Any]:
+async def run_mcp_tool(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     server_name = str(arguments.get("serverName") or "").strip()
     tool_name = str(arguments.get("toolName") or "").strip()
     tool_arguments = arguments.get("arguments")
@@ -388,7 +418,7 @@ async def run_mcp_tool(session: AsyncSession, arguments: dict[str, Any]) -> dict
     if not isinstance(tool_arguments, dict):
         raise ValueError("arguments must be an object")
 
-    row = await repository.get_enabled_installation(session, server_name)
+    row = await repository.get_enabled_installation(session, server_name, workspace_id)
     if row is None:
         raise LookupError("enabled MCP server was not found")
     installation, server = row
@@ -436,15 +466,17 @@ async def call_tool(
     session: AsyncSession,
     name: str,
     arguments: dict[str, Any],
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     if name == "search_mcp_servers":
-        return await search_mcp_servers(session, arguments)
+        return await search_mcp_servers(session, arguments, workspace_id=workspace_id)
     if name == "get_mcp_server":
-        return await get_mcp_server(session, arguments)
+        return await get_mcp_server(session, arguments, workspace_id=workspace_id)
     if name == "search_mcp_tools":
-        return await search_mcp_tools(session, arguments)
+        return await search_mcp_tools(session, arguments, workspace_id=workspace_id)
     if name == "get_mcp_tool":
-        return await get_mcp_tool(session, arguments)
+        return await get_mcp_tool(session, arguments, workspace_id=workspace_id)
     if name == "run_mcp_tool":
-        return await run_mcp_tool(session, arguments)
+        return await run_mcp_tool(session, arguments, workspace_id=workspace_id)
     raise LookupError(f"unknown gateway tool: {name}")

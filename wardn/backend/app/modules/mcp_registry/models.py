@@ -1,8 +1,9 @@
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -11,7 +12,21 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "name",
+            "version",
+            name="uq_mcp_server_versions_org_name_version",
+        ),
+    )
 
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -43,12 +58,19 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_installations"
     __table_args__ = (
         UniqueConstraint(
+            "workspace_id",
             "server_name",
             "config_name",
-            name="uq_mcp_server_installations_server_config",
+            name="uq_mcp_server_installations_workspace_server_config",
         ),
     )
 
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     config_name: Mapped[str] = mapped_column(String(100), default="default", nullable=False)
     installed_version: Mapped[str] = mapped_column(String(255), nullable=False)

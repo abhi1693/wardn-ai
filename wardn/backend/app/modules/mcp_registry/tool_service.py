@@ -18,9 +18,14 @@ async def refresh_tool_schemas(
     session: AsyncSession,
     server_name: str,
     *,
+    workspace_id=None,
     runtime_manager: MCPRuntimeManager | None = None,
 ) -> MCPToolRefreshResult:
-    row = await gateway_repository.get_enabled_installation(session, server_name)
+    row = await gateway_repository.get_enabled_installation(
+        session,
+        server_name,
+        workspace_id,
+    )
     if row is None:
         raise LookupError("enabled MCP server was not found")
 

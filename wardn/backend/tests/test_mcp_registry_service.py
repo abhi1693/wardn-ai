@@ -23,6 +23,8 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallationToolValidationRequest,
 )
 
+WORKSPACE_ID = uuid4()
+
 
 class FakeSession:
     def __init__(self) -> None:
@@ -444,10 +446,12 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
         session,
         "io.github.example/weather",
         MCPServerInstallRequest(version="latest"),
+        workspace_id=WORKSPACE_ID,
     )
 
     assert response.server_name == "io.github.example/weather"
     assert response.config_name == "default"
+    assert response.workspace_id == WORKSPACE_ID
     assert response.installed_version == "1.0.0"
     assert response.latest_version == "1.0.0"
     assert response.update_available is False
@@ -460,6 +464,7 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
 async def test_install_server_version_preserves_existing_config_values(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
@@ -496,6 +501,7 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
                 "LOG_LEVEL": "debug",
             },
         ),
+        workspace_id=WORKSPACE_ID,
     )
 
     assert seen["config_values"] == {
@@ -510,6 +516,7 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
 async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         installed_version="1.0.0",
         status="enabled",
     )
@@ -521,7 +528,7 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
     monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
     session = FakeSession()
 
-    await service.uninstall_server(session, "io.github.example/weather")
+    await service.uninstall_server(session, "io.github.example/weather", workspace_id=WORKSPACE_ID)
 
     assert session.deleted == [installation]
     assert session.flushed is True
@@ -531,6 +538,7 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
 async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="home",
         installed_version="1.0.0",
         status="enabled",
@@ -544,7 +552,7 @@ async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> No
     monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
     session = FakeSession()
 
-    await service.uninstall_installation(session, installation.id)
+    await service.uninstall_installation(session, installation.id, workspace_id=WORKSPACE_ID)
 
     assert session.deleted == [installation]
     assert session.flushed is True
@@ -554,6 +562,7 @@ async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> No
 async def test_validate_installation_tool_reports_passed_result(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
@@ -593,6 +602,7 @@ async def test_validate_installation_tool_reports_passed_result(monkeypatch) -> 
 async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
@@ -666,6 +676,7 @@ async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> Non
 async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
@@ -723,6 +734,7 @@ async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> 
 async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
@@ -808,13 +820,18 @@ async def test_uninstall_server_rejects_missing_installation(monkeypatch) -> Non
     monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
 
     with pytest.raises(MCPServerInstallationNotFoundError):
-        await service.uninstall_server(FakeSession(), "io.github.example/weather")
+        await service.uninstall_server(
+            FakeSession(),
+            "io.github.example/weather",
+            workspace_id=WORKSPACE_ID,
+        )
 
 
 @pytest.mark.asyncio
 async def test_update_installed_servers_moves_selected_servers_to_latest(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
         installed_version="1.0.0",
         status="enabled",
     )
@@ -844,6 +861,7 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
     response = await service.update_installed_servers(
         session,
         MCPServerBulkUpdateRequest(serverNames=["io.github.example/weather"]),
+        workspace_id=WORKSPACE_ID,
     )
 
     assert installation.installed_version == "1.1.0"

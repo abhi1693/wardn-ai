@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import { backendContentHeaders, selectedWorkspaceMcpPath } from "@/app/api/_lib/workspace";
 
 type RouteContext = {
   params: Promise<{
@@ -8,12 +8,20 @@ type RouteContext = {
   }>;
 };
 
-export async function DELETE(_: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const { installationId } = await context.params;
+  const path = await selectedWorkspaceMcpPath(
+    request,
+    `/registry/installed-server-configs/${encodeURIComponent(installationId)}`
+  );
+  if (!path) {
+    return NextResponse.json({ detail: "workspace is not selected" }, { status: 400 });
+  }
   const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/installed-server-configs/${encodeURIComponent(installationId)}`,
+    path,
     {
       method: "DELETE",
+      headers: { cookie: request.headers.get("cookie") ?? "" },
       cache: "no-store",
     }
   );
@@ -25,8 +33,6 @@ export async function DELETE(_: Request, context: RouteContext) {
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }

@@ -12,6 +12,18 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 class MCPRuntimeSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_runtime_sessions"
 
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     installation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("mcp_server_installations.id", ondelete="CASCADE"),
@@ -38,6 +50,18 @@ class MCPRuntimeSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class MCPToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_tool_invocations"
 
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     runtime_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("mcp_runtime_sessions.id", ondelete="SET NULL"),

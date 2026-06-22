@@ -64,6 +64,7 @@ async def ensure_runtime_session(
 
     runtime_session = repository.create_runtime_session(
         installation_id=installation.id,
+        workspace_id=installation.workspace_id,
         server_name=server.name,
         server_version=server.version,
         runtime_provider=manager.provider_name(installation),

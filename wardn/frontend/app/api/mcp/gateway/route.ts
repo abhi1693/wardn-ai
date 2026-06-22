@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import { backendContentHeaders, selectedWorkspaceMcpPath } from "@/app/api/_lib/workspace";
 
 export async function POST(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${backendUrl}/api/v1/mcp/gateway`, {
+  const path = await selectedWorkspaceMcpPath(request, "/gateway");
+  if (!path) {
+    return NextResponse.json({
+      jsonrpc: "2.0",
+      id: typeof payload === "object" && payload && "id" in payload ? payload.id : null,
+      error: { code: -32602, message: "workspace is not selected" },
+    });
+  }
+  const response = await fetch(path, {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      cookie: request.headers.get("cookie") ?? "",
     },
     body: JSON.stringify(payload),
     cache: "no-store",
@@ -16,8 +25,6 @@ export async function POST(request: Request) {
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }

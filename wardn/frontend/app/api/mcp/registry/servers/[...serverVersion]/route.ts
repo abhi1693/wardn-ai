@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
+import {
+  backendContentHeaders,
+  selectedOrganizationMcpRegistryPath,
+} from "@/app/api/_lib/workspace";
 
 type RouteContext = {
   params: Promise<{
@@ -20,17 +23,24 @@ function parsedPath(segments: string[]) {
 export async function GET(_: Request, context: RouteContext) {
   const { serverVersion } = await context.params;
   const { encodedServerName, version } = parsedPath(serverVersion);
-  const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/servers/${encodedServerName}/versions/${version}`,
-    { cache: "no-store" }
+  const path = await selectedOrganizationMcpRegistryPath(
+    _,
+    `/servers/${encodedServerName}/versions/${version}`
   );
+  if (!path) {
+    return NextResponse.json({ detail: "organization is not selected" }, { status: 404 });
+  }
+  const response = await fetch(path, {
+    cache: "no-store",
+    headers: {
+      cookie: _.headers.get("cookie") ?? "",
+    },
+  });
 
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }
 
@@ -38,37 +48,47 @@ export async function PUT(request: Request, context: RouteContext) {
   const payload = await request.json();
   const { serverVersion } = await context.params;
   const { encodedServerName, version } = parsedPath(serverVersion);
-  const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/servers/${encodedServerName}/versions/${version}`,
-    {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    }
+  const path = await selectedOrganizationMcpRegistryPath(
+    request,
+    `/servers/${encodedServerName}/versions/${version}`
   );
+  if (!path) {
+    return NextResponse.json({ detail: "organization is not selected" }, { status: 404 });
+  }
+  const response = await fetch(path, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      cookie: request.headers.get("cookie") ?? "",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
 
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }
 
-export async function DELETE(_: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const { serverVersion } = await context.params;
   const { encodedServerName, version } = parsedPath(serverVersion);
-  const response = await fetch(
-    `${backendUrl}/api/v1/mcp/registry/servers/${encodedServerName}/versions/${version}`,
-    {
-      method: "DELETE",
-      cache: "no-store",
-    }
+  const path = await selectedOrganizationMcpRegistryPath(
+    request,
+    `/servers/${encodedServerName}/versions/${version}`
   );
+  if (!path) {
+    return NextResponse.json({ detail: "organization is not selected" }, { status: 404 });
+  }
+  const response = await fetch(path, {
+    method: "DELETE",
+    cache: "no-store",
+    headers: {
+      cookie: request.headers.get("cookie") ?? "",
+    },
+  });
 
   if (response.status === 204) {
     return new NextResponse(null, { status: 204 });
@@ -77,8 +97,6 @@ export async function DELETE(_: Request, context: RouteContext) {
   const body = await response.text();
   return new NextResponse(body, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: backendContentHeaders(response),
   });
 }

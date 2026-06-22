@@ -30,6 +30,8 @@ async def get_active_runtime_session(
 def create_runtime_session(
     *,
     installation_id: Any,
+    workspace_id: Any | None = None,
+    organization_id: Any | None = None,
     server_name: str,
     server_version: str,
     runtime_provider: str,
@@ -42,6 +44,8 @@ def create_runtime_session(
 ) -> MCPRuntimeSession:
     now = now or datetime.now(UTC)
     return MCPRuntimeSession(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
         installation_id=installation_id,
         server_name=server_name,
         server_version=server_version,
@@ -73,6 +77,8 @@ def create_tool_invocation(
 ) -> MCPToolInvocation:
     now = now or datetime.now(UTC)
     return MCPToolInvocation(
+        organization_id=runtime_session.organization_id,
+        workspace_id=runtime_session.workspace_id,
         runtime_session_id=runtime_session.id,
         installation_id=installation_id,
         server_name=server_name,

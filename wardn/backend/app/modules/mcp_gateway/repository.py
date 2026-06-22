@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +9,7 @@ from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVers
 async def search_enabled_installations(
     session: AsyncSession,
     *,
+    workspace_id: uuid.UUID | None = None,
     search: str,
     offset: int,
     limit: int,
@@ -23,6 +26,8 @@ async def search_enabled_installations(
         .where(MCPServerInstallation.status == "enabled")
         .order_by(MCPServerInstallation.server_name.asc())
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -43,8 +48,9 @@ async def search_enabled_installations(
 async def get_enabled_installation(
     session: AsyncSession,
     server_name: str,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[MCPServerInstallation, MCPServerVersion] | None:
-    result = await session.execute(
+    statement = (
         select(MCPServerInstallation, MCPServerVersion)
         .join(
             MCPServerVersion,
@@ -58,5 +64,7 @@ async def get_enabled_installation(
             MCPServerInstallation.status == "enabled",
         )
     )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
     return result.one_or_none()
-
