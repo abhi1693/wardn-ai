@@ -578,25 +578,25 @@ def load_supported_servers_from_registry_url(
                 readme_cache=readme_cache,
                 github_token=github_token,
             )
-        new_servers = []
+        unique_page_servers = []
         for server in page_servers:
             key = (server.name, server.version)
             if key in seen_server_versions:
                 continue
             seen_server_versions.add(key)
-            new_servers.append(server)
-        servers.extend(new_servers)
+            unique_page_servers.append(server)
+        servers.extend(unique_page_servers)
         pages_fetched += 1
-        duplicate_count = len(page_servers) - len(new_servers)
+        repeated_count = len(page_servers) - len(unique_page_servers)
 
         metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
         cursor = metadata.get("nextCursor")
         logger.debug(
-            "Fetched registry page %s: %s entries, %s new, %s duplicates.",
+            "Fetched registry page %s: %s entries, %s unique in fetch, %s repeated in fetch.",
             pages_fetched,
             len(page_servers),
-            len(new_servers),
-            duplicate_count,
+            len(unique_page_servers),
+            repeated_count,
         )
         if pages_fetched % PROGRESS_PAGE_INTERVAL == 0:
             logger.info(
@@ -614,8 +614,8 @@ def load_supported_servers_from_registry_url(
         if cursor == previous_cursor:
             logger.warning("Stopped registry fetch because cursor did not advance: %s", cursor)
             break
-        if page_servers and not new_servers:
-            logger.warning("Stopped registry fetch because page only contained duplicates.")
+        if page_servers and not unique_page_servers:
+            logger.warning("Stopped registry fetch because page only repeated earlier entries.")
             break
 
     return servers

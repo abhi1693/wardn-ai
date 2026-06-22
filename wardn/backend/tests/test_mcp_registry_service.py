@@ -309,6 +309,24 @@ def runtime_install(version: str = "1.0.0") -> MCPRuntimeInstall:
     )
 
 
+@pytest.mark.parametrize(
+    ("installed_version", "latest_version", "expected"),
+    [
+        ("1.3.1", "1.3.0", False),
+        ("2.0.0", "1.0.31", False),
+        ("0.16.0", "v0.16.0", False),
+        ("1.0.0", "1.0.1", True),
+        ("1.0", "1.0.0", False),
+    ],
+)
+def test_server_update_available_compares_version_numbers(
+    installed_version: str,
+    latest_version: str,
+    expected: bool,
+) -> None:
+    assert service.server_update_available(installed_version, latest_version) is expected
+
+
 def test_public_configured_values_omits_secret_fields() -> None:
     server = MCPServerVersion(
         name="io.github.example/weather",

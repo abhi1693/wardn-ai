@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -36,6 +37,7 @@ from app.modules.organizations import repository as organization_repository
 
 OFFICIAL_REGISTRY_META_KEY = "io.modelcontextprotocol.registry/official"
 PULSE_SERVER_VERSION_META_KEY = "com.pulsemcp/server-version"
+VERSION_PREFIX_PATTERN = re.compile(r"^\s*v?(\d+(?:[._-]\d+)*)", re.IGNORECASE)
 
 
 async def default_workspace_id(session) -> uuid.UUID:
@@ -102,6 +104,37 @@ def pulse_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | No
 
 def registry_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
     return official_metadata(payload) or pulse_metadata(payload)
+
+
+def comparable_version_parts(version: str) -> tuple[int, ...] | None:
+    match = VERSION_PREFIX_PATTERN.match(version)
+    if match is None:
+        return None
+    return tuple(int(part) for part in re.findall(r"\d+", match.group(1)))
+
+
+def compare_version_numbers(left: str, right: str) -> int | None:
+    left_parts = comparable_version_parts(left)
+    right_parts = comparable_version_parts(right)
+    if left_parts is None or right_parts is None:
+        return None
+
+    length = max(len(left_parts), len(right_parts))
+    normalized_left = left_parts + (0,) * (length - len(left_parts))
+    normalized_right = right_parts + (0,) * (length - len(right_parts))
+    if normalized_left < normalized_right:
+        return -1
+    if normalized_left > normalized_right:
+        return 1
+    return 0
+
+
+def server_update_available(installed_version: str, latest_version: str) -> bool:
+    comparison = compare_version_numbers(installed_version, latest_version)
+    if comparison is not None:
+        return comparison < 0
+
+    return installed_version.strip().casefold() != latest_version.strip().casefold()
 
 
 def server_values(payload: MCPServerCreate, *, is_latest: bool) -> dict:
@@ -261,7 +294,7 @@ async def installation_response(
         config_name=installation.config_name or "default",
         installed_version=installation.installed_version,
         latest_version=latest.version,
-        update_available=installation.installed_version != latest.version,
+        update_available=server_update_available(installation.installed_version, latest.version),
         status=installation.status,
         install_type=installation.install_type,
         install_path=installation.install_path,

@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 
 from app.commands.registry import CommandRegistry
 from app.modules.mcp_registry import commands
@@ -484,7 +485,7 @@ def test_pulsemcp_registry_source_uses_default_url_and_auth_headers() -> None:
     }
 
 
-def test_load_supported_servers_from_registry_url_follows_cursor(monkeypatch) -> None:
+def test_load_supported_servers_from_registry_url_follows_cursor(monkeypatch, caplog) -> None:
     calls = []
     timestamps = {
         "statusChangedAt": "2026-06-21T00:00:00Z",
@@ -528,6 +529,7 @@ def test_load_supported_servers_from_registry_url_follows_cursor(monkeypatch) ->
         return payloads.pop(0)
 
     monkeypatch.setattr(commands, "fetch_registry_payload", fetch)
+    caplog.set_level(logging.DEBUG, logger=commands.logger.name)
 
     servers = commands.load_supported_servers_from_registry_url(
         "https://registry.modelcontextprotocol.io/v0/servers",
@@ -540,6 +542,8 @@ def test_load_supported_servers_from_registry_url_follows_cursor(monkeypatch) ->
         "https://registry.modelcontextprotocol.io/v0/servers?limit=1",
         "https://registry.modelcontextprotocol.io/v0/servers?limit=1&cursor=next",
     ]
+    assert "1 unique in fetch, 0 repeated in fetch" in caplog.text
+    assert " new, " not in caplog.text
 
 
 def test_handle_syncmcpregistry_reports_missing_file(capsys) -> None:
