@@ -26,6 +26,11 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/mcp/registry/servers",
         "/api/v1/mcp/registry/servers/{server_name}/versions",
         "/api/v1/mcp/registry/servers/{server_name}/versions/{version}",
+        "/api/v1/mcp/runtime/sessions",
+        "/api/v1/mcp/runtime/sessions/{runtime_session_id}",
+        "/api/v1/mcp/runtime/sessions/{runtime_session_id}/events",
+        "/api/v1/mcp/runtime/sessions/{runtime_session_id}/stop",
+        "/api/v1/mcp/runtime/summary",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
@@ -44,6 +49,26 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/workspaces",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}/events"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}/stop"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/summary"
+        ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/mcp/registry/installed-server-configs/{installation_id}"
@@ -247,6 +272,76 @@ def test_mcp_gateway_openapi_contract() -> None:
     gateway = schema["paths"]["/api/v1/mcp/gateway"]["post"]
 
     assert gateway["operationId"] == "mcp_gateway_rpc"
+
+
+def test_mcp_runtime_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    sessions_path = schema["paths"]["/api/v1/mcp/runtime/sessions"]
+    session_path = schema["paths"]["/api/v1/mcp/runtime/sessions/{runtime_session_id}"]
+    stop_path = schema["paths"]["/api/v1/mcp/runtime/sessions/{runtime_session_id}/stop"]
+    events_path = schema["paths"]["/api/v1/mcp/runtime/sessions/{runtime_session_id}/events"]
+    summary_path = schema["paths"]["/api/v1/mcp/runtime/summary"]
+    workspace_sessions_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions"
+        )
+    ]
+    workspace_stop_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}/stop"
+        )
+    ]
+    workspace_events_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}/events"
+        )
+    ]
+    workspace_summary_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/summary"
+        )
+    ]
+
+    assert sessions_path["get"]["operationId"] == "mcp_runtime_list_sessions"
+    assert sessions_path["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPRuntimeSessionListResponse"
+    }
+    assert session_path["get"]["operationId"] == "mcp_runtime_get_session"
+    assert session_path["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+    }
+    assert session_path["get"]["responses"]["404"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorResponse"
+    }
+    assert stop_path["post"]["operationId"] == "mcp_runtime_stop_session"
+    assert stop_path["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+    }
+    assert events_path["get"]["operationId"] == "mcp_runtime_list_session_events"
+    assert events_path["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPRuntimeEventListResponse"
+    }
+    assert summary_path["get"]["operationId"] == "mcp_runtime_get_summary"
+    assert summary_path["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPRuntimeSummaryResponse"
+    }
+    assert (
+        workspace_sessions_path["get"]["operationId"]
+        == "workspace_mcp_runtime_list_sessions"
+    )
+    assert workspace_stop_path["post"]["operationId"] == "workspace_mcp_runtime_stop_session"
+    assert (
+        workspace_events_path["get"]["operationId"]
+        == "workspace_mcp_runtime_list_session_events"
+    )
+    assert (
+        workspace_summary_path["get"]["operationId"]
+        == "workspace_mcp_runtime_get_summary"
+    )
 
 
 def test_user_openapi_schemas_do_not_expose_password_hashes() -> None:

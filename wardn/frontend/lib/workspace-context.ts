@@ -123,6 +123,11 @@ export function workspaceInstallPath(context: WorkspaceContext) {
   return basePath ? `${basePath}/install` : "";
 }
 
+export function workspaceRuntimePath(context: WorkspaceContext) {
+  const basePath = workspaceBasePath(context);
+  return basePath ? `${basePath}/runtime` : "";
+}
+
 export function workspaceMcpRegistryPath(
   context: WorkspaceContext,
   suffix: string,
@@ -133,6 +138,18 @@ export function workspaceMcpRegistryPath(
   return `/api/v1/organizations/${encodeURIComponent(
     context.selectedOrganization.id
   )}/workspaces/${encodeURIComponent(context.selectedWorkspace.id)}/mcp/registry${suffix}`;
+}
+
+export function workspaceMcpRuntimePath(
+  context: WorkspaceContext,
+  suffix: string,
+) {
+  if (!context.selectedOrganization || !context.selectedWorkspace) {
+    return "";
+  }
+  return `/api/v1/organizations/${encodeURIComponent(
+    context.selectedOrganization.id
+  )}/workspaces/${encodeURIComponent(context.selectedWorkspace.id)}/mcp/runtime${suffix}`;
 }
 
 export function organizationMcpRegistryPath(

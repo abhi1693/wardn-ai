@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,6 +34,7 @@ class MCPRuntimeSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     server_version: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     runtime_provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     runtime_kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    config_fingerprint: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     pod_name: Mapped[str] = mapped_column(String(253), default="", nullable=False)
     namespace: Mapped[str] = mapped_column(String(253), default="", nullable=False)
@@ -90,3 +91,17 @@ class MCPToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     output_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_error: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class MCPRuntimeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "mcp_runtime_events"
+
+    runtime_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_runtime_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    event_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

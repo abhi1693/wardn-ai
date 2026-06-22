@@ -213,6 +213,374 @@
         "title": "MCPRegistryServerResponse",
         "type": "object"
       },
+      "MCPRuntimeEventListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/MCPRuntimeEventRead"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "MCPRuntimeEventListResponse",
+        "type": "object"
+      },
+      "MCPRuntimeEventRead": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "eventType": {
+            "title": "Eventtype",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "runtimeSessionId": {
+            "format": "uuid",
+            "title": "Runtimesessionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "runtimeSessionId",
+          "eventType",
+          "message",
+          "createdAt"
+        ],
+        "title": "MCPRuntimeEventRead",
+        "type": "object"
+      },
+      "MCPRuntimeServerError": {
+        "properties": {
+          "failureCount": {
+            "title": "Failurecount",
+            "type": "integer"
+          },
+          "lastError": {
+            "title": "Lasterror",
+            "type": "string"
+          },
+          "lastErrorAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasterrorat"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "serverVersion": {
+            "title": "Serverversion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverName",
+          "serverVersion",
+          "lastError",
+          "failureCount"
+        ],
+        "title": "MCPRuntimeServerError",
+        "type": "object"
+      },
+      "MCPRuntimeSessionListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "MCPRuntimeSessionListResponse",
+        "type": "object"
+      },
+      "MCPRuntimeSessionRead": {
+        "properties": {
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
+          "failureCount": {
+            "title": "Failurecount",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "lastError": {
+            "title": "Lasterror",
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastusedat"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "organizationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organizationid"
+          },
+          "podName": {
+            "title": "Podname",
+            "type": "string"
+          },
+          "readyAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyat"
+          },
+          "runtimeKind": {
+            "title": "Runtimekind",
+            "type": "string"
+          },
+          "runtimeProvider": {
+            "title": "Runtimeprovider",
+            "type": "string"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "serverVersion": {
+            "title": "Serverversion",
+            "type": "string"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stoppedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stoppedat"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceid"
+          }
+        },
+        "required": [
+          "id",
+          "installationId",
+          "serverName",
+          "serverVersion",
+          "runtimeProvider",
+          "runtimeKind",
+          "status",
+          "podName",
+          "namespace",
+          "failureCount",
+          "lastError"
+        ],
+        "title": "MCPRuntimeSessionRead",
+        "type": "object"
+      },
+      "MCPRuntimeSummaryResponse": {
+        "properties": {
+          "activeSessions": {
+            "title": "Activesessions",
+            "type": "integer"
+          },
+          "expiredSessions": {
+            "title": "Expiredsessions",
+            "type": "integer"
+          },
+          "failedSessions": {
+            "title": "Failedsessions",
+            "type": "integer"
+          },
+          "idleSessions": {
+            "title": "Idlesessions",
+            "type": "integer"
+          },
+          "recentServerErrors": {
+            "items": {
+              "$ref": "#/components/schemas/MCPRuntimeServerError"
+            },
+            "title": "Recentservererrors",
+            "type": "array"
+          },
+          "sessionStatusCounts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Sessionstatuscounts",
+            "type": "object"
+          },
+          "staleActiveSessions": {
+            "title": "Staleactivesessions",
+            "type": "integer"
+          },
+          "stoppedSessions": {
+            "title": "Stoppedsessions",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "$ref": "#/components/schemas/MCPRuntimeToolCallSummary"
+          },
+          "totalSessions": {
+            "title": "Totalsessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "totalSessions",
+          "activeSessions",
+          "idleSessions",
+          "failedSessions",
+          "stoppedSessions",
+          "expiredSessions",
+          "staleActiveSessions",
+          "sessionStatusCounts",
+          "toolCalls",
+          "recentServerErrors"
+        ],
+        "title": "MCPRuntimeSummaryResponse",
+        "type": "object"
+      },
+      "MCPRuntimeToolCallSummary": {
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "recentFailed": {
+            "title": "Recentfailed",
+            "type": "integer"
+          },
+          "recentFailureRate": {
+            "title": "Recentfailurerate",
+            "type": "number"
+          },
+          "recentTotal": {
+            "title": "Recenttotal",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "running",
+          "recentTotal",
+          "recentFailed",
+          "recentFailureRate"
+        ],
+        "title": "MCPRuntimeToolCallSummary",
+        "type": "object"
+      },
       "MCPServerBulkUpdateRequest": {
         "properties": {
           "serverNames": {
@@ -2066,6 +2434,259 @@
         "summary": "Update Mcp Server Version",
         "tags": [
           "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/sessions": {
+      "get": {
+        "operationId": "mcp_runtime_list_sessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Runtime Sessions",
+        "tags": [
+          "mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/sessions/{runtime_session_id}": {
+      "get": {
+        "operationId": "mcp_runtime_get_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mcp Runtime Session",
+        "tags": [
+          "mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/sessions/{runtime_session_id}/events": {
+      "get": {
+        "operationId": "mcp_runtime_list_session_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeEventListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Runtime Session Events",
+        "tags": [
+          "mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/sessions/{runtime_session_id}/stop": {
+      "post": {
+        "operationId": "mcp_runtime_stop_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Mcp Runtime Session",
+        "tags": [
+          "mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/summary": {
+      "get": {
+        "operationId": "mcp_runtime_get_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Mcp Runtime Summary",
+        "tags": [
+          "mcp-runtime"
         ]
       }
     },
@@ -4121,6 +4742,451 @@
         "summary": "Install Workspace Mcp Server Version",
         "tags": [
           "workspace-mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/sessions": {
+      "get": {
+        "operationId": "workspace_mcp_runtime_list_sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Mcp Runtime Sessions",
+        "tags": [
+          "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/sessions/{runtime_session_id}": {
+      "get": {
+        "operationId": "workspace_mcp_runtime_get_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Mcp Runtime Session",
+        "tags": [
+          "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/sessions/{runtime_session_id}/events": {
+      "get": {
+        "operationId": "workspace_mcp_runtime_list_session_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeEventListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Mcp Runtime Session Events",
+        "tags": [
+          "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/sessions/{runtime_session_id}/stop": {
+      "post": {
+        "operationId": "workspace_mcp_runtime_stop_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Workspace Mcp Runtime Session",
+        "tags": [
+          "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/summary": {
+      "get": {
+        "operationId": "workspace_mcp_runtime_get_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Mcp Runtime Summary",
+        "tags": [
+          "workspace-mcp-runtime"
         ]
       }
     },

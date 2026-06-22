@@ -1,0 +1,51 @@
+from typing import Any
+
+from app.modules.mcp_gateway import client
+from app.modules.mcp_registry.models import MCPServerInstallation
+from app.modules.mcp_runtime.models import MCPRuntimeSession
+from app.modules.mcp_runtime.provider import (
+    RUNTIME_KIND_REMOTE,
+    RUNTIME_PROVIDER_REMOTE,
+    RuntimeSpec,
+    base_runtime_spec,
+    require_remote_installation,
+    runtime_kind,
+)
+
+
+class RemoteRuntimeProvider:
+    name = RUNTIME_PROVIDER_REMOTE
+
+    def supports(self, installation: MCPServerInstallation) -> bool:
+        return runtime_kind(installation) == RUNTIME_KIND_REMOTE
+
+    def runtime_spec(self, installation: MCPServerInstallation) -> RuntimeSpec:
+        runtime = require_remote_installation(installation)
+        return base_runtime_spec(
+            installation,
+            provider_name=self.name,
+            transport=RUNTIME_KIND_REMOTE,
+            endpoint_url=runtime.url,
+        )
+
+    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
+        runtime = require_remote_installation(installation)
+        return client.list_tools(runtime.url, runtime.headers)
+
+    def call_tool(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        runtime = require_remote_installation(installation)
+        return client.call_tool(
+            runtime.url,
+            runtime.headers,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+
+    def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
+        return None

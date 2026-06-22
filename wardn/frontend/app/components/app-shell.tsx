@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Boxes,
+  Activity,
   Home,
   Layers3,
   Replace,
@@ -74,6 +75,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: ServerCog,
     },
     {
+      label: "Runtime",
+      href: `${workspaceBasePath}/runtime`,
+      activeKey: "runtime",
+      icon: Activity,
+    },
+    {
       label: "Settings",
       href: `/organizations/${encodeURIComponent(
         organizationId
@@ -94,6 +101,7 @@ type AppShellProps = {
     | "workspace-settings"
     | "workspace-dashboard"
     | "registry"
+    | "runtime"
     | "install";
   eyebrow: string;
   title: string;
@@ -111,7 +119,10 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const isWorkspaceScope =
-    active === "workspace-dashboard" || active === "install" || active === "workspace-settings";
+    active === "workspace-dashboard" ||
+    active === "install" ||
+    active === "runtime" ||
+    active === "workspace-settings";
   const navigationItems = isWorkspaceScope
     ? workspaceNavItems(workspaceContext)
     : organizationNavItems(workspaceContext);
