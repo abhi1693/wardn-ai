@@ -1,9 +1,19 @@
 "use client";
 
-import { Download, KeyRound, Network, Package, Search, ShieldCheck, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  KeyRound,
+  Network,
+  Package,
+  Search,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,8 +60,11 @@ type InstallFormClientProps = {
   initialInstallation?: MCPServerInstallationRead | null;
   initialInstallations: MCPServerInstallationRead[];
   initialSelectedServer?: MCPRegistryServerResponse | null;
+  initialServerNextCursor?: string;
   initialServers?: MCPRegistryServerResponse[];
 };
+
+const SERVER_PICKER_PAGE_SIZE = 10;
 
 function installUrl(serverName: string) {
   return `/api/mcp/registry/installed-servers/${serverName
@@ -204,6 +217,14 @@ function serverResponseFromInstallation(installation: MCPServerInstallationRead)
       },
     },
   } as MCPRegistryServerResponse;
+}
+
+function uniqueServerResponses(servers: MCPRegistryServerResponse[]) {
+  const byVersion = new Map<string, MCPRegistryServerResponse>();
+  for (const server of servers) {
+    byVersion.set(`${server.server.name}:${server.server.version}`, server);
+  }
+  return Array.from(byVersion.values());
 }
 
 function schemaInputs(entry: MCPRegistryServerResponse) {
@@ -472,13 +493,20 @@ export function InstallFormClient({
   initialInstallation = null,
   initialInstallations,
   initialSelectedServer = null,
+  initialServerNextCursor = "",
   initialServers = [],
 }: InstallFormClientProps) {
   const router = useRouter();
   const isEdit = Boolean(initialInstallation);
   const [installations, setInstallations] = useState<MCPServerInstallationRead[]>(initialInstallations);
   const [serverQuery, setServerQuery] = useState("");
-  const [serverResults, setServerResults] = useState<MCPRegistryServerResponse[]>(initialServers);
+  const [appliedServerQuery, setAppliedServerQuery] = useState("");
+  const [serverResults, setServerResults] = useState<MCPRegistryServerResponse[]>(() =>
+    uniqueServerResponses(initialServers)
+  );
+  const [serverCurrentCursor, setServerCurrentCursor] = useState("");
+  const [serverNextCursor, setServerNextCursor] = useState(initialServerNextCursor);
+  const [serverPreviousCursors, setServerPreviousCursors] = useState<string[]>([]);
   const [hasSearched, setHasSearched] = useState(initialServers.length > 0);
   const [isSearching, setIsSearching] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
@@ -532,6 +560,8 @@ export function InstallFormClient({
   );
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
   const customHeaderId = useRef(0);
+  const hasInitializedServerSearch = useRef(false);
+  const serverSearchRequestId = useRef(0);
 
   const availableInstallTargets = selectedServer ? installTargetOptions(selectedServer) : [];
   const selectedInstallTargetDetails = selectedServer
@@ -586,27 +616,94 @@ export function InstallFormClient({
     };
   }, [selectedServerName]);
 
-  async function loadServerOptions(query: string) {
+  const loadServerOptions = useCallback(async ({
+    query,
+    cursor,
+    previous,
+  }: {
+    query: string;
+    cursor: string;
+    previous: string[];
+  }) => {
+    const requestId = serverSearchRequestId.current + 1;
+    serverSearchRequestId.current = requestId;
     setError("");
     setHasSearched(true);
     setIsSearching(true);
     try {
-      const params = new URLSearchParams({ limit: "50", version: "latest" });
+      const params = new URLSearchParams({
+        limit: String(SERVER_PICKER_PAGE_SIZE),
+        version: "latest",
+      });
       if (query.trim()) {
         params.set("search", query.trim());
+      }
+      if (cursor) {
+        params.set("cursor", cursor);
       }
       const response = await fetch(`/api/mcp/registry/servers?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) {
         throw new Error("Server search failed.");
       }
       const data = (await response.json()) as MCPRegistryServerListResponse;
-      setServerResults(data.servers);
+      if (serverSearchRequestId.current !== requestId) {
+        return;
+      }
+      setServerResults(uniqueServerResponses(data.servers));
+      setAppliedServerQuery(query);
+      setServerCurrentCursor(cursor);
+      setServerNextCursor(data.metadata.nextCursor ?? "");
+      setServerPreviousCursors(previous);
     } catch (caught) {
+      if (serverSearchRequestId.current !== requestId) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "Server search failed.");
     } finally {
-      setIsSearching(false);
+      if (serverSearchRequestId.current === requestId) {
+        setIsSearching(false);
+      }
     }
+  }, []);
+
+  async function loadNextServerPage() {
+    if (!serverNextCursor) {
+      return;
+    }
+    await loadServerOptions({
+      query: appliedServerQuery,
+      cursor: serverNextCursor,
+      previous: [...serverPreviousCursors, serverCurrentCursor],
+    });
   }
+
+  async function loadPreviousServerPage() {
+    if (serverPreviousCursors.length === 0) {
+      return;
+    }
+    const previousCursor = serverPreviousCursors.at(-1) ?? "";
+    await loadServerOptions({
+      query: appliedServerQuery,
+      cursor: previousCursor,
+      previous: serverPreviousCursors.slice(0, -1),
+    });
+  }
+
+  useEffect(() => {
+    if (selectedServer) {
+      return;
+    }
+    if (!hasInitializedServerSearch.current) {
+      hasInitializedServerSearch.current = true;
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void loadServerOptions({ query: serverQuery, cursor: "", previous: [] });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadServerOptions, serverQuery, selectedServer]);
 
   function selectServerForInstall(server: MCPRegistryServerResponse) {
     const target = defaultInstallTarget(server);
@@ -756,6 +853,11 @@ export function InstallFormClient({
     }
   }
 
+  const serverPageNumber = serverPreviousCursors.length + 1;
+  const serverPageStart =
+    serverResults.length > 0 ? serverPreviousCursors.length * SERVER_PICKER_PAGE_SIZE + 1 : 0;
+  const serverPageEnd = serverPreviousCursors.length * SERVER_PICKER_PAGE_SIZE + serverResults.length;
+
   return (
     <form className="space-y-5" onSubmit={submitConfiguration}>
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
@@ -766,7 +868,7 @@ export function InstallFormClient({
           <CardContent className="space-y-3">
             <div className="grid gap-2">
               <Label htmlFor="install-server-search">Server</Label>
-              <div className="flex gap-2">
+              <div>
                 <div className="relative min-w-0 flex-1">
                   <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
                   <Input
@@ -776,7 +878,6 @@ export function InstallFormClient({
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        void loadServerOptions(serverQuery);
                       }
                     }}
                     placeholder="Search supported servers"
@@ -784,54 +885,89 @@ export function InstallFormClient({
                     value={serverQuery}
                   />
                 </div>
-                <Button disabled={isSearching} onClick={() => loadServerOptions(serverQuery)} type="button" variant="outline">
-                  <Search className="size-4" />
-                  Search
-                </Button>
               </div>
             </div>
             <div className="rounded-md border">
-              {serverResults.length === 0 ? (
-                <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-                  {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
+              <div className="max-h-[32rem] overflow-y-auto">
+                {serverResults.length === 0 ? (
+                  <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+                    {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
+                  </div>
+                ) : (
+                  serverResults.map((entry) => {
+                    const distribution = deliveryDetails(entry);
+                    const DistributionIcon = distribution.icon;
+                    const config = configurationSummary(entry);
+                    return (
+                      <button
+                        className="flex w-full items-start justify-between gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-muted"
+                        key={`${entry.server.name}:${entry.server.version}`}
+                        onClick={() => selectServerForInstall(entry)}
+                        type="button"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium">{entry.server.title || entry.server.name}</div>
+                          <div className="mt-0.5 break-all text-xs text-muted-foreground">{entry.server.name}</div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                          <Badge variant="outline" className="gap-1.5 font-normal">
+                            <DistributionIcon className="size-3.5" />
+                            {distribution.primary}
+                          </Badge>
+                          {config.requiredCount > 0 ? (
+                            <Badge variant="outline" className="gap-1.5 font-normal">
+                              <KeyRound className="size-3.5" />
+                              {config.requiredCount}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="gap-1.5 font-normal">
+                              <ShieldCheck className="size-3.5" />
+                              0
+                            </Badge>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-sm">
+                <div className="text-muted-foreground">
+                  {serverResults.length > 0 ? (
+                    <>
+                      Showing {serverPageStart}-{serverPageEnd}
+                      {appliedServerQuery ? ` for "${appliedServerQuery}"` : ""}
+                    </>
+                  ) : (
+                    "No servers to display"
+                  )}
                 </div>
-              ) : (
-                serverResults.map((entry) => {
-                  const distribution = deliveryDetails(entry);
-                  const DistributionIcon = distribution.icon;
-                  const config = configurationSummary(entry);
-                  return (
-                    <button
-                      className="flex w-full items-start justify-between gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-muted"
-                      key={entry.server.name}
-                      onClick={() => selectServerForInstall(entry)}
-                      type="button"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-medium">{entry.server.title || entry.server.name}</div>
-                        <div className="mt-0.5 break-all text-xs text-muted-foreground">{entry.server.name}</div>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                        <Badge variant="outline" className="gap-1.5 font-normal">
-                          <DistributionIcon className="size-3.5" />
-                          {distribution.primary}
-                        </Badge>
-                        {config.requiredCount > 0 ? (
-                          <Badge variant="outline" className="gap-1.5 font-normal">
-                            <KeyRound className="size-3.5" />
-                            {config.requiredCount}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="gap-1.5 font-normal">
-                            <ShieldCheck className="size-3.5" />
-                            0
-                          </Badge>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    disabled={isSearching || serverPreviousCursors.length === 0}
+                    onClick={() => void loadPreviousServerPage()}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <ChevronLeft className="size-4" />
+                    Previous
+                  </Button>
+                  <div className="min-w-16 whitespace-nowrap text-center text-sm font-medium text-muted-foreground">
+                    Page {serverPageNumber}
+                  </div>
+                  <Button
+                    disabled={isSearching || !serverNextCursor}
+                    onClick={() => void loadNextServerPage()}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Next
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

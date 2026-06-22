@@ -11,8 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   FeedbackMessages,
@@ -140,6 +139,8 @@ export function RegistryListClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const hasInitializedSearch = useRef(false);
+  const searchRequestId = useRef(0);
 
   const installationsByName = useMemo(
     () => {
@@ -155,15 +156,17 @@ export function RegistryListClient({
     [installations]
   );
 
-  async function loadServers({
-    query = appliedSearch,
-    cursor = currentCursor,
-    previous = previousCursors,
+  const loadServers = useCallback(async ({
+    query,
+    cursor,
+    previous,
   }: {
-    query?: string;
-    cursor?: string;
-    previous?: string[];
-  } = {}) {
+    query: string;
+    cursor: string;
+    previous: string[];
+  }) => {
+    const requestId = searchRequestId.current + 1;
+    searchRequestId.current = requestId;
     setIsLoading(true);
     setError("");
     setNotice("");
@@ -190,6 +193,9 @@ export function RegistryListClient({
       const serversData = (await serversResponse.json()) as MCPRegistryServerListResponse;
       const installationsData =
         (await installationsResponse.json()) as MCPServerInstallationListResponse;
+      if (searchRequestId.current !== requestId) {
+        return;
+      }
       setServers(serversData.servers);
       setInstallations(installationsData.installations);
       setAppliedSearch(query);
@@ -197,16 +203,16 @@ export function RegistryListClient({
       setNextCursor(serversData.metadata.nextCursor ?? "");
       setPreviousCursors(previous);
     } catch {
+      if (searchRequestId.current !== requestId) {
+        return;
+      }
       setError("Registry entries could not be loaded.");
     } finally {
-      setIsLoading(false);
+      if (searchRequestId.current === requestId) {
+        setIsLoading(false);
+      }
     }
-  }
-
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await loadServers({ query: search, cursor: "", previous: [] });
-  }
+  }, []);
 
   async function loadNextPage() {
     if (!nextCursor) {
@@ -231,6 +237,19 @@ export function RegistryListClient({
     });
   }
 
+  useEffect(() => {
+    if (!hasInitializedSearch.current) {
+      hasInitializedSearch.current = true;
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void loadServers({ query: search, cursor: "", previous: [] });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadServers, search]);
+
   async function deleteServerVersion(serverName: string, version: string) {
     setIsMutating(true);
     setError("");
@@ -243,7 +262,11 @@ export function RegistryListClient({
         throw new Error(await responseErrorMessage(response, "Failed to delete server."));
       }
       setNotice("Server deleted.");
-      await loadServers();
+      await loadServers({
+        query: appliedSearch,
+        cursor: currentCursor,
+        previous: previousCursors,
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The selected server could not be deleted.");
     } finally {
@@ -296,30 +319,29 @@ export function RegistryListClient({
 
   return (
     <div>
-      <form
-        className="mb-6 rounded-lg border border-[var(--outline-variant)] bg-white p-6"
-        onSubmit={handleSearch}
-      >
+      <div className="mb-6 rounded-lg border border-[var(--outline-variant)] bg-white p-6">
         <div className="flex flex-col gap-4">
           <Label className="text-[var(--on-surface-variant)]" htmlFor="registry-search">
             Search
           </Label>
-          <div className="flex gap-4 max-md:flex-col">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--outline)]" />
             <Input
-              className="h-10 flex-1 rounded border-[var(--outline-variant)] bg-white shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+              className="h-10 rounded border-[var(--outline-variant)] bg-white pl-9 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
               id="registry-search"
               onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                }
+              }}
               placeholder="Name, title, or description"
               type="search"
               value={search}
             />
-            <Button className="h-10 px-6" disabled={isLoading} type="submit" variant="outline">
-              <Search className="size-4" />
-              {isLoading ? "Searching" : "Search"}
-            </Button>
           </div>
         </div>
-      </form>
+      </div>
 
       <FeedbackMessages error={error} notice={notice} />
 

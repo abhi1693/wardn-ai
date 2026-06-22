@@ -14,6 +14,8 @@ import {
 
 import { InstallFormClient } from "./install-form-client";
 
+const SERVER_PICKER_PAGE_SIZE = 10;
+
 async function getInitialInstallations(context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");
   if (!path) {
@@ -36,9 +38,16 @@ async function getInitialInstallations(context: WorkspaceContext) {
 }
 
 async function getInitialServers(context: WorkspaceContext) {
-  const path = organizationMcpRegistryPath(context, "/servers?limit=50&version=latest");
+  const path = organizationMcpRegistryPath(
+    context,
+    `/servers?limit=${SERVER_PICKER_PAGE_SIZE}&version=latest`
+  );
+  const emptyResponse: MCPRegistryServerListResponse = {
+    servers: [],
+    metadata: { count: 0, nextCursor: "" },
+  };
   if (!path) {
-    return [];
+    return emptyResponse;
   }
   try {
     const cookie = await backendCookieHeader();
@@ -47,12 +56,11 @@ async function getInitialServers(context: WorkspaceContext) {
       headers: cookie ? { cookie } : {},
     });
     if (!response.ok) {
-      return [];
+      return emptyResponse;
     }
-    const data = (await response.json()) as MCPRegistryServerListResponse;
-    return data.servers;
+    return (await response.json()) as MCPRegistryServerListResponse;
   } catch {
-    return [];
+    return emptyResponse;
   }
 }
 
@@ -94,7 +102,7 @@ type NewInstallViewProps = {
 
 export async function NewInstallView({ searchParams, workspaceContext }: NewInstallViewProps) {
   const { serverName = "", version = "latest" } = searchParams;
-  const [installations, servers, selectedServer] = await Promise.all([
+  const [installations, serverList, selectedServer] = await Promise.all([
     getInitialInstallations(workspaceContext),
     getInitialServers(workspaceContext),
     getServer(workspaceContext, serverName, version),
@@ -111,7 +119,8 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
         basePath={workspaceInstallPath(workspaceContext)}
         initialInstallations={installations}
         initialSelectedServer={selectedServer}
-        initialServers={selectedServer ? [selectedServer, ...servers] : servers}
+        initialServerNextCursor={serverList.metadata.nextCursor ?? ""}
+        initialServers={selectedServer ? [selectedServer, ...serverList.servers] : serverList.servers}
       />
     </AppShell>
   );
