@@ -125,7 +125,7 @@ def start_stdio_session(
             env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
         )
@@ -134,6 +134,16 @@ def start_stdio_session(
     except OSError as exc:
         raise MCPGatewayUpstreamError(f"stdio MCP command could not start: {exc}") from exc
     return MCPStdioSession(process=process)
+
+
+def stderr_tail(process: subprocess.Popen[str]) -> str:
+    if process.stderr is None:
+        return ""
+    try:
+        stderr = process.stderr.read()
+    except OSError:
+        return ""
+    return stderr.strip()[-1000:]
 
 
 def close_stdio_session(session: MCPStdioSession) -> None:
@@ -173,8 +183,10 @@ def read_stdio_response(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
+            detail = stderr_tail(process)
+            suffix = f": {detail}" if detail else ""
             raise MCPGatewayUpstreamError(
-                f"stdio MCP process exited before response {request_id}"
+                f"stdio MCP process exited before response {request_id}{suffix}"
             )
         remaining = max(0.1, deadline - time.monotonic())
         readable, _, _ = select.select([process.stdout], [], [], remaining)

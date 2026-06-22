@@ -211,6 +211,14 @@ async def create_server_version(session, payload: MCPServerCreate) -> MCPRegistr
         include_deleted=True,
     )
     if existing is not None:
+        if existing.status == "deleted":
+            await repository.clear_latest_for_name(session, payload.name)
+            values = server_values(payload, is_latest=True)
+            for key, value in values.items():
+                setattr(existing, key, value)
+            await session.flush()
+            await session.refresh(existing)
+            return server_response(existing)
         raise DuplicateMCPServerVersionError("server version already exists")
 
     await repository.clear_latest_for_name(session, payload.name)
@@ -241,8 +249,11 @@ async def update_server_version(
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
+    was_deleted = server.status == "deleted"
     was_latest = server.is_latest
-    values = server_values(payload, is_latest=was_latest)
+    if was_deleted:
+        await repository.clear_latest_for_name(session, name)
+    values = server_values(payload, is_latest=was_latest or was_deleted)
     for key, value in values.items():
         setattr(server, key, value)
 

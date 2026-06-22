@@ -141,6 +141,9 @@ def test_mcp_registry_openapi_contract() -> None:
     assert installed_config_tools["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallationToolsResponse"
     }
+    assert installed_config_tools["responses"]["502"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorResponse"
+    }
     assert update["operationId"] == "mcp_registry_update_installed_servers"
     assert update["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"

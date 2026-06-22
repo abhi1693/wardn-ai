@@ -79,10 +79,20 @@ function editInstallUrl(installationId: string) {
 }
 
 function runtimeLabel(installation: MCPServerInstallationRead) {
-  if (installation.installType === "remote") {
+  const normalized = installation.installType.toLowerCase();
+  if (normalized === "remote") {
     return "Remote endpoint";
   }
-  if (installation.installType.toLowerCase() === "oci") {
+  if (normalized === "uvx") {
+    return "UVX";
+  }
+  if (normalized === "npm") {
+    return "NPM";
+  }
+  if (normalized === "pypi") {
+    return "PyPI";
+  }
+  if (normalized === "oci") {
     return "OCI";
   }
   return installation.installType;

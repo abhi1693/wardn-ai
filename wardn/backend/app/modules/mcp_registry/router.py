@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
+from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
@@ -172,6 +173,10 @@ async def uninstall_mcp_server_config(
             "model": ErrorResponse,
             "description": "The requested server configuration is not installed.",
         },
+        status.HTTP_502_BAD_GATEWAY: {
+            "model": ErrorResponse,
+            "description": "The installed MCP server could not provide its tool list.",
+        },
     },
 )
 async def list_installed_mcp_server_tools(
@@ -184,6 +189,11 @@ async def list_installed_mcp_server_tools(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
+        ) from exc
+    except MCPGatewayUpstreamError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"installed MCP server could not list tools: {exc}",
         ) from exc
     if response.cache.get("refreshed"):
         await session.commit()

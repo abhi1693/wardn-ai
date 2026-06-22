@@ -135,12 +135,42 @@ async def test_create_server_version_marks_new_version_latest(monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_create_server_version_rejects_duplicate(monkeypatch) -> None:
     async def existing_server(*args, **kwargs):
-        return object()
+        return server_version("1.0.0", is_latest=True)
 
     monkeypatch.setattr(service.repository, "get_server_version", existing_server)
 
     with pytest.raises(DuplicateMCPServerVersionError):
         await service.create_server_version(FakeSession(), registry_payload())
+
+
+@pytest.mark.asyncio
+async def test_create_server_version_reactivates_deleted_version(monkeypatch) -> None:
+    calls: list[tuple[str, str | None]] = []
+    server = server_version("1.0.0", is_latest=False)
+    server.status = "deleted"
+    server.status_message = "Deleted from Wardn catalog."
+
+    async def existing_server(*args, **kwargs):
+        return server
+
+    async def clear_latest(*args, **kwargs):
+        calls.append(("clear_latest", args[1]))
+
+    monkeypatch.setattr(service.repository, "get_server_version", existing_server)
+    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    session = FakeSession()
+
+    response = await service.create_server_version(session, registry_payload())
+
+    assert calls == [("clear_latest", "io.github.example/weather")]
+    assert response.server.name == "io.github.example/weather"
+    assert response.meta.official.status == "active"
+    assert response.meta.official.is_latest is True
+    assert server.status == "active"
+    assert server.status_message == ""
+    assert server.is_latest is True
+    assert session.flushed is True
+    assert session.refreshed == [server]
 
 
 @pytest.mark.asyncio
@@ -288,6 +318,42 @@ async def test_update_server_version_preserves_latest_marker(monkeypatch) -> Non
 
     assert response.server.title == "Updated Weather"
     assert server.title == "Updated Weather"
+    assert server.is_latest is True
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_update_server_version_reactivates_deleted_version(monkeypatch) -> None:
+    calls: list[tuple[str, str | None]] = []
+    server = server_version("1.0.0", is_latest=False)
+    server.status = "deleted"
+    server.status_message = "Deleted from Wardn catalog."
+    payload = registry_payload("1.0.0")
+    payload.title = "Updated Weather"
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def clear_latest(*args, **kwargs):
+        calls.append(("clear_latest", args[1]))
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    session = FakeSession()
+
+    response = await service.update_server_version(
+        session,
+        "io.github.example/weather",
+        "1.0.0",
+        payload,
+    )
+
+    assert calls == [("clear_latest", "io.github.example/weather")]
+    assert response.server.title == "Updated Weather"
+    assert response.meta.official.status == "active"
+    assert response.meta.official.is_latest is True
+    assert server.status == "active"
+    assert server.status_message == ""
     assert server.is_latest is True
     assert session.flushed is True
 

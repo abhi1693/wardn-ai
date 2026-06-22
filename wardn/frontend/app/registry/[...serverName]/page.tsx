@@ -54,6 +54,29 @@ function repository(entry: MCPRegistryServerResponse) {
   return entry.server.repository as Record<string, unknown> | null | undefined;
 }
 
+function runtimeDisplayName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "uvx") {
+    return "UVX";
+  }
+  if (normalized === "npm") {
+    return "NPM";
+  }
+  if (normalized === "pypi") {
+    return "PyPI";
+  }
+  if (normalized === "oci") {
+    return "OCI";
+  }
+  if (normalized === "streamable-http") {
+    return "Streamable HTTP";
+  }
+  if (normalized === "sse") {
+    return "SSE";
+  }
+  return value || "Package";
+}
+
 function publisherMeta(entry: MCPRegistryServerResponse) {
   const meta = entry.server._meta as Record<string, unknown> | null | undefined;
   return meta?.["io.modelcontextprotocol.registry/publisher-provided"] as
@@ -515,7 +538,7 @@ export default async function RegistryServerPage({
                     const value = remote as Record<string, unknown>;
                     return (
                       <div className="break-all rounded-md border p-2" key={`remote-${index}`}>
-                        <div>{stringValue(value.type) || "remote"}</div>
+                        <div>{runtimeDisplayName(stringValue(value.type) || "remote")}</div>
                         <div className="text-xs text-muted-foreground">{stringValue(value.url)}</div>
                       </div>
                     );
@@ -533,7 +556,7 @@ export default async function RegistryServerPage({
                     const value = packageDefinition as Record<string, unknown>;
                     return (
                       <div className="break-all rounded-md border p-2" key={`package-${index}`}>
-                        <div>{stringValue(value.registryType) || "package"}</div>
+                        <div>{runtimeDisplayName(stringValue(value.registryType) || "package")}</div>
                         <div className="text-xs text-muted-foreground">
                           {stringValue(value.identifier)}
                         </div>

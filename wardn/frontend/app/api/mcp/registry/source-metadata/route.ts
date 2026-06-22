@@ -177,7 +177,7 @@ function supportedPackages(value: unknown, version: string) {
 
 function normalizedVersion(value: unknown, releaseVersion: string) {
   const version = typeof value === "string" ? value.trim() : "";
-  if (!version) {
+  if (!version || version === "0.0.0") {
     return releaseVersion || "latest";
   }
 
@@ -282,7 +282,7 @@ function environmentVariablesFromMcpEnv(value: unknown) {
     const defaultValue = typeof rawValue === "string" ? rawValue : "";
     return {
       name,
-      description: `Environment variable from mcp.json: ${name}`,
+      description: "",
       default: defaultValue,
       isRequired: defaultValue.trim() === "",
       isSecret: secretEnvironmentName(name),
@@ -401,11 +401,11 @@ function packageFromPackageJson(rawPackageJson: string, releaseVersion: string) 
       return null;
     }
 
+    const packageVersion = typeof packageJson.version === "string" ? packageJson.version.trim() : "";
     return {
       registryType: "npm",
       identifier: packageJson.name.trim(),
-      version:
-        releaseVersion || (typeof packageJson.version === "string" ? packageJson.version.trim() : ""),
+      version: releaseVersion || (packageVersion && packageVersion !== "0.0.0" ? packageVersion : "latest"),
     };
   } catch {
     return null;

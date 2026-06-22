@@ -80,7 +80,7 @@ type SourceMetadata = {
 const PACKAGE_RUNTIME_OPTIONS = [
   { value: "uvx", label: "UVX package" },
   { value: "npm", label: "NPM package" },
-  { value: "pypi", label: "Python package" },
+  { value: "pypi", label: "PyPI package" },
   { value: "oci", label: "OCI image" },
 ];
 
@@ -376,11 +376,28 @@ async function responseErrorMessage(response: Response, fallback: string) {
   }
 }
 
+async function responseErrorDetail(response: Response) {
+  try {
+    const payload = (await response.json()) as { detail?: string };
+    return payload.detail || "";
+  } catch {
+    return "";
+  }
+}
+
 function serverVersionUrl(serverName: string, version: string) {
   return `/api/mcp/registry/servers/${serverName
     .split("/")
     .map(encodeURIComponent)
     .join("/")}/${encodeURIComponent(version)}`;
+}
+
+function installServerUrl(serverName: string, version: string) {
+  const params = new URLSearchParams({
+    serverName,
+    version,
+  });
+  return `/install/new?${params.toString()}`;
 }
 
 function publicHeaders(headers: HeaderField[]) {
@@ -658,15 +675,23 @@ export function ServerForm({ initialServer, mode }: ServerFormProps) {
       );
 
       if (!response.ok) {
+        const detail = await responseErrorDetail(response);
+        if (
+          mode === "create" &&
+          response.status === 409 &&
+          detail === "server version already exists"
+        ) {
+          router.push(installServerUrl(serverName, version.trim()));
+          router.refresh();
+          return;
+        }
+
         throw new Error(
-          await responseErrorMessage(
-            response,
-            mode === "create" ? "Failed to add server." : "Failed to update server."
-          )
+          detail || (mode === "create" ? "Failed to add server." : "Failed to update server.")
         );
       }
 
-      router.push("/registry");
+      router.push(mode === "create" ? installServerUrl(serverName, version.trim()) : "/registry");
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The server could not be saved.");

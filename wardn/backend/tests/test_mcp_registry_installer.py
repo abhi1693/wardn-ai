@@ -538,3 +538,59 @@ def test_install_server_runtime_rewrites_package_tmp_paths(tmp_path, monkeypatch
     assert ".tmp" not in install.runtime_config["cwd"]
     assert install.runtime_config["command"].startswith(str(install.install_path))
     assert install.runtime_config["cwd"] == install.install_path
+
+
+def test_install_server_runtime_uses_latest_for_npm_placeholder_version(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "kubernetes-mcp-server",
+                "version": "0.0.0",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+    seen = {}
+
+    def run_install_command(command, *, cwd):
+        seen["package_json"] = json.loads((cwd / "package.json").read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        run_install_command,
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.npm_package_bin",
+        lambda install_path, identifier: install_path / "node_modules" / ".bin" / "kubernetes-mcp-server",
+    )
+
+    install_server_runtime(server, install_root=tmp_path)
+
+    assert seen["package_json"]["dependencies"] == {"kubernetes-mcp-server": "latest"}
+
+
+def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "pypi",
+                "identifier": "openstackmcp-server",
+                "version": "0.0.0",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+    commands = []
+
+    def run_install_command(command, *, cwd):
+        commands.append(command)
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        run_install_command,
+    )
+
+    install_server_runtime(server, install_root=tmp_path)
+
+    assert commands[1][-1] == "openstackmcp-server"

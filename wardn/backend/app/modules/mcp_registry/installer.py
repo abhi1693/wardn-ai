@@ -175,6 +175,13 @@ def custom_header_values(config_values: dict[str, str]) -> dict[str, str]:
     return headers
 
 
+def normalized_package_version(value: Any) -> str:
+    version = str(value or "").strip()
+    if not version or version == "0.0.0":
+        return "latest"
+    return version
+
+
 def require_config_values(
     definitions: list[dict[str, Any]],
     config_values: dict[str, str],
@@ -474,7 +481,7 @@ def build_npm_install(
     config_values: dict[str, str],
 ) -> MCPRuntimeInstall:
     identifier = str(package["identifier"])
-    version = str(package.get("version") or server.version)
+    version = normalized_package_version(package.get("version") or server.version)
     install_path.mkdir(parents=True, exist_ok=True)
     (install_path / "package.json").write_text(
         json.dumps(
@@ -546,13 +553,14 @@ def build_pypi_install(
     config_values: dict[str, str],
 ) -> MCPRuntimeInstall:
     identifier = str(package["identifier"])
-    version = str(package.get("version") or server.version)
+    version = normalized_package_version(package.get("version") or server.version)
     venv_path = install_path / "venv"
     install_path.mkdir(parents=True, exist_ok=True)
     run_install_command([sys.executable, "-m", "venv", str(venv_path)], cwd=install_path)
     pip_path = venv_path / "bin" / "pip"
     python_path = venv_path / "bin" / "python"
-    run_install_command([str(pip_path), "install", f"{identifier}=={version}"], cwd=install_path)
+    package_spec = identifier if version == "latest" else f"{identifier}=={version}"
+    run_install_command([str(pip_path), "install", package_spec], cwd=install_path)
 
     env_vars = (
         package.get("environmentVariables", [])

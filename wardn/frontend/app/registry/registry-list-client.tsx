@@ -6,6 +6,7 @@ import {
   Network,
   Package,
   Pencil,
+  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -62,6 +63,29 @@ function repository(entry: MCPRegistryServerResponse) {
   return entry.server.repository as Record<string, unknown> | null | undefined;
 }
 
+function runtimeDisplayName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "uvx") {
+    return "UVX";
+  }
+  if (normalized === "npm") {
+    return "NPM";
+  }
+  if (normalized === "pypi") {
+    return "PyPI";
+  }
+  if (normalized === "oci") {
+    return "OCI";
+  }
+  if (normalized === "streamable-http") {
+    return "Streamable HTTP";
+  }
+  if (normalized === "sse") {
+    return "SSE";
+  }
+  return value || "Package";
+}
+
 function deliveryDetails(entry: MCPRegistryServerResponse) {
   const firstPackage = entry.server.packages?.[0] as Record<string, unknown> | undefined;
   const firstRemote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
@@ -71,7 +95,7 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
     const url = stringValue(firstRemote.url);
     return {
       icon: Network,
-      primary: type,
+      primary: runtimeDisplayName(type),
       secondary: url ? displayHost(url) : "",
       count:
         entry.server.remotes && entry.server.remotes.length > 1
@@ -85,7 +109,7 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
     const identifier = stringValue(firstPackage.identifier);
     return {
       icon: Package,
-      primary: registryType,
+      primary: runtimeDisplayName(registryType),
       secondary: identifier,
       count:
         entry.server.packages && entry.server.packages.length > 1
@@ -114,6 +138,14 @@ function editServerUrl(serverName: string, version: string) {
     .split("/")
     .map(encodeURIComponent)
     .join("/")}?version=${encodeURIComponent(version)}`;
+}
+
+function installServerUrl(serverName: string, version: string) {
+  const params = new URLSearchParams({
+    serverName,
+    version,
+  });
+  return `/install/new?${params.toString()}`;
 }
 
 function serverVersionUrl(serverName: string, version: string) {
@@ -479,7 +511,7 @@ export function RegistryListClient({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="gap-1.5 font-normal capitalize">
+                          <Badge variant="outline" className="gap-1.5 font-normal">
                             <DistributionIcon className="size-3.5" />
                             {distribution.primary}
                           </Badge>
@@ -498,6 +530,14 @@ export function RegistryListClient({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap justify-end gap-2">
+                          <Button asChild size="icon" variant="outline">
+                            <Link
+                              aria-label={`Add installation for ${entry.server.name}`}
+                              href={installServerUrl(entry.server.name, entry.server.version)}
+                            >
+                              <Plus className="size-4" />
+                            </Link>
+                          </Button>
                           <Button asChild size="icon" variant="outline">
                             <Link
                               aria-label={`Edit ${entry.server.name}`}

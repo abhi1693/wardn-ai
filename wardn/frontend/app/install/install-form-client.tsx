@@ -39,6 +39,7 @@ type CustomHeader = {
 type InstallFormClientProps = {
   initialInstallation?: MCPServerInstallationRead | null;
   initialInstallations: MCPServerInstallationRead[];
+  initialSelectedServer?: MCPRegistryServerResponse | null;
   initialServers?: MCPRegistryServerResponse[];
 };
 
@@ -61,6 +62,29 @@ function displayHost(url: string) {
   }
 }
 
+function runtimeDisplayName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "uvx") {
+    return "UVX";
+  }
+  if (normalized === "npm") {
+    return "NPM";
+  }
+  if (normalized === "pypi") {
+    return "PyPI";
+  }
+  if (normalized === "oci") {
+    return "OCI";
+  }
+  if (normalized === "streamable-http") {
+    return "Streamable HTTP";
+  }
+  if (normalized === "sse") {
+    return "SSE";
+  }
+  return value || "Package";
+}
+
 function deliveryDetails(entry: MCPRegistryServerResponse) {
   const firstPackage = entry.server.packages?.[0] as Record<string, unknown> | undefined;
   const firstRemote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
@@ -68,11 +92,15 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
   if (firstRemote) {
     const type = stringValue(firstRemote.type) || "remote";
     const url = stringValue(firstRemote.url);
-    return { icon: Network, primary: type, secondary: url ? displayHost(url) : "" };
+    return { icon: Network, primary: runtimeDisplayName(type), secondary: url ? displayHost(url) : "" };
   }
   if (firstPackage) {
     const registryType = stringValue(firstPackage.registryType) || "package";
-    return { icon: Package, primary: registryType, secondary: stringValue(firstPackage.identifier) };
+    return {
+      icon: Package,
+      primary: runtimeDisplayName(registryType),
+      secondary: stringValue(firstPackage.identifier),
+    };
   }
   return { icon: Package, primary: "Unspecified", secondary: "" };
 }
@@ -294,6 +322,7 @@ function InstallFieldControl({
 export function InstallFormClient({
   initialInstallation = null,
   initialInstallations,
+  initialSelectedServer = null,
   initialServers = [],
 }: InstallFormClientProps) {
   const router = useRouter();
@@ -306,17 +335,43 @@ export function InstallFormClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [selectedServer, setSelectedServer] = useState<MCPRegistryServerResponse | null>(() =>
-    initialInstallation ? serverResponseFromInstallation(initialInstallation) : null
+    initialInstallation
+      ? serverResponseFromInstallation(initialInstallation)
+      : initialSelectedServer
   );
   const [selectedInstallTarget, setSelectedInstallTarget] = useState<InstallTarget>(() =>
-    initialInstallation ? installTargetFromInstallation(initialInstallation) : "package"
+    initialInstallation
+      ? installTargetFromInstallation(initialInstallation)
+      : initialSelectedServer
+        ? defaultInstallTarget(initialSelectedServer)
+        : "package"
   );
-  const initialFields = initialInstallation && selectedServer
-    ? installFields(selectedServer, installTargetFromInstallation(initialInstallation))
+  const initialFields = selectedServer
+    ? installFields(
+        selectedServer,
+        initialInstallation
+          ? installTargetFromInstallation(initialInstallation)
+          : defaultInstallTarget(selectedServer)
+      )
     : [];
-  const [configName, setConfigName] = useState(initialInstallation?.configName ?? "default");
+  const [configName, setConfigName] = useState(() => {
+    if (initialInstallation) {
+      return initialInstallation.configName;
+    }
+    if (!initialSelectedServer) {
+      return "default";
+    }
+    const existingConfigNames = new Set(
+      initialInstallations
+        .filter((installation) => installation.serverName === initialSelectedServer.server.name)
+        .map((installation) => installation.configName)
+    );
+    return existingConfigNames.has("default") ? "" : "default";
+  });
   const [installValues, setInstallValues] = useState<Record<string, string>>(() =>
-    initialInstallation ? configuredFieldValues(initialFields, initialInstallation) : {}
+    initialInstallation
+      ? configuredFieldValues(initialFields, initialInstallation)
+      : defaultInstallValues(initialFields)
   );
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
   const customHeaderId = useRef(0);
@@ -444,7 +499,7 @@ export function InstallFormClient({
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          version: initialInstallation?.installedVersion ?? "latest",
+          version: initialInstallation?.installedVersion ?? selectedServer.server.version,
           configName: trimmedConfigName,
           installTarget: selectedInstallTarget,
           configValues: installPayloadValues(),
@@ -520,7 +575,7 @@ export function InstallFormClient({
                         <div className="mt-0.5 break-all text-xs text-muted-foreground">{entry.server.name}</div>
                       </div>
                       <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                        <Badge variant="outline" className="gap-1.5 font-normal capitalize">
+                        <Badge variant="outline" className="gap-1.5 font-normal">
                           <DistributionIcon className="size-3.5" />
                           {distribution.primary}
                         </Badge>
