@@ -418,6 +418,18 @@ def npm_package_bin(install_path: Path, identifier: str) -> Path | None:
     return executable if executable.exists() else None
 
 
+def npm_bin_requires_node(executable: Path) -> bool:
+    target = executable.resolve()
+    try:
+        with target.open("rb") as file:
+            first_line = file.readline(256)
+    except OSError:
+        return False
+    if first_line.startswith(b"#!"):
+        return False
+    return target.suffix == ".js"
+
+
 def build_remote_install(
     server: MCPServerVersion,
     install_path: Path,
@@ -517,7 +529,10 @@ def build_npm_install(
     configured_env = configured_values(env_vars, config_values)
     configured_args = configured_package_arguments(package_args, config_values)
     public_package = public_package_config(package, env_vars, package_args, config_values)
-    if executable:
+    if executable and npm_bin_requires_node(executable):
+        command = "node"
+        runtime_args = [str(executable), *configured_args]
+    elif executable:
         runtime_args = configured_args
     else:
         runtime_args = ["--offline", identifier, *configured_args]

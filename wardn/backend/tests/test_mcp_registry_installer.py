@@ -570,6 +570,86 @@ def test_install_server_runtime_uses_latest_for_npm_placeholder_version(tmp_path
     assert seen["package_json"]["dependencies"] == {"kubernetes-mcp-server": "latest"}
 
 
+def test_install_server_runtime_runs_npm_js_bin_without_shebang_with_node(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "alertmanager-mcp",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+
+    def run_install_command(command, *, cwd):
+        package_path = cwd / "node_modules" / "alertmanager-mcp"
+        package_path.mkdir(parents=True, exist_ok=True)
+        (package_path / "package.json").write_text(
+            json.dumps({"bin": {"alertmanager-mcp": "./build/index.js"}}),
+            encoding="utf-8",
+        )
+        bin_path = package_path / "build" / "index.js"
+        bin_path.parent.mkdir(parents=True, exist_ok=True)
+        bin_path.write_text("import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n", encoding="utf-8")
+        bin_link = cwd / "node_modules" / ".bin" / "alertmanager-mcp"
+        bin_link.parent.mkdir(parents=True, exist_ok=True)
+        bin_link.symlink_to("../alertmanager-mcp/build/index.js")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(server, install_root=tmp_path)
+
+    assert install.runtime_config["command"] == "node"
+    assert install.runtime_config["args"][0].endswith("node_modules/.bin/alertmanager-mcp")
+
+
+def test_install_server_runtime_runs_npm_shebang_bin_directly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "weather-mcp",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            }
+        ]
+    )
+
+    def run_install_command(command, *, cwd):
+        package_path = cwd / "node_modules" / "weather-mcp"
+        package_path.mkdir(parents=True, exist_ok=True)
+        (package_path / "package.json").write_text(
+            json.dumps({"bin": {"weather-mcp": "./dist/index.js"}}),
+            encoding="utf-8",
+        )
+        bin_path = package_path / "dist" / "index.js"
+        bin_path.parent.mkdir(parents=True, exist_ok=True)
+        bin_path.write_text("#!/usr/bin/env node\nconsole.log('ok');\n", encoding="utf-8")
+        bin_link = cwd / "node_modules" / ".bin" / "weather-mcp"
+        bin_link.parent.mkdir(parents=True, exist_ok=True)
+        bin_link.symlink_to("../weather-mcp/dist/index.js")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(server, install_root=tmp_path)
+
+    assert install.runtime_config["command"].endswith("node_modules/.bin/weather-mcp")
+    assert install.runtime_config["args"] == []
+
+
 def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(tmp_path, monkeypatch) -> None:
     server = server_version(
         packages=[

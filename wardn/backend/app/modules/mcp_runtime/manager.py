@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -103,8 +104,10 @@ def package_runtime(
     args = [str(normalize_installed_path(arg, installation)) for arg in raw_args or []]
     raw_cwd = runtime_config.get("cwd") or installation.install_path
     cwd = str(normalize_installed_path(raw_cwd, installation))
-    if command and not Path(command).exists():
+    if command and ("/" in command or "\\" in command) and not Path(command).exists():
         raise ValueError(f"package MCP server command does not exist: {command}")
+    if command and "/" not in command and "\\" not in command and shutil.which(command) is None:
+        raise ValueError(f"package MCP server command was not found in PATH: {command}")
     if cwd and not Path(cwd).exists():
         raise ValueError(f"package MCP server working directory does not exist: {cwd}")
     return command, args, cwd, secret_environment(installation)
