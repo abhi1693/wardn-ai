@@ -3,7 +3,7 @@
 import { Download, KeyRound, Network, Package, Search, ShieldCheck, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,18 @@ function installUrl(serverName: string) {
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;
+}
+
+function encodedServerName(serverName: string) {
+  return serverName.split("/").map(encodeURIComponent).join("/");
+}
+
+function serverVersionUrl(serverName: string, version: string) {
+  return `/api/mcp/registry/servers/${encodedServerName(serverName)}/${encodeURIComponent(version)}`;
+}
+
+function serverVersionsUrl(serverName: string) {
+  return `/api/mcp/registry/servers/${encodedServerName(serverName)}/versions`;
 }
 
 function stringValue(value: unknown) {
@@ -291,6 +303,12 @@ function defaultInstallValues(fields: InstallField[]) {
   return Object.fromEntries(fields.map((field) => [field.name, field.defaultValue]));
 }
 
+function mergeInstallValues(fields: InstallField[], currentValues: Record<string, string>) {
+  return Object.fromEntries(
+    fields.map((field) => [field.name, currentValues[field.name] ?? field.defaultValue])
+  );
+}
+
 function configuredFieldValues(fields: InstallField[], installation: MCPServerInstallationRead) {
   const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
   const configuredValues = installation.configuredValues ?? {};
@@ -470,6 +488,14 @@ export function InstallFormClient({
       ? serverResponseFromInstallation(initialInstallation)
       : initialSelectedServer
   );
+  const [serverVersions, setServerVersions] = useState<MCPRegistryServerResponse[]>(() =>
+    initialSelectedServer
+      ? [initialSelectedServer]
+      : initialInstallation
+        ? [serverResponseFromInstallation(initialInstallation)]
+        : []
+  );
+  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [selectedInstallTarget, setSelectedInstallTarget] = useState<InstallTarget>(() =>
     initialInstallation
       ? installTargetFromInstallation(initialInstallation)
@@ -515,6 +541,50 @@ export function InstallFormClient({
   const connectionFields = selectedFields.filter((field) => field.section === "connection");
   const runtimeFields = selectedFields.filter((field) => field.section === "runtime");
   const existingConfiguredFields = useMemo(() => configuredFieldNames(initialInstallation), [initialInstallation]);
+  const selectedServerName = selectedServer?.server.name ?? "";
+  const versionOptions = useMemo(() => {
+    if (!selectedServer) {
+      return [];
+    }
+    const versions = new Map<string, MCPRegistryServerResponse>();
+    versions.set(selectedServer.server.version, selectedServer);
+    for (const version of serverVersions) {
+      versions.set(version.server.version, version);
+    }
+    return Array.from(versions.values());
+  }, [selectedServer, serverVersions]);
+
+  useEffect(() => {
+    if (!selectedServerName) {
+      return;
+    }
+
+    let cancelled = false;
+    async function loadVersions() {
+      setIsLoadingVersions(true);
+      try {
+        const response = await fetch(serverVersionsUrl(selectedServerName), {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as MCPRegistryServerListResponse;
+        if (!cancelled) {
+          setServerVersions(data.servers);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingVersions(false);
+        }
+      }
+    }
+
+    void loadVersions();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedServerName]);
 
   async function loadServerOptions(query: string) {
     setError("");
@@ -546,11 +616,44 @@ export function InstallFormClient({
         .map((installation) => installation.configName)
     );
     setSelectedServer(server);
+    setServerVersions([server]);
     setSelectedInstallTarget(target);
     setConfigName(existingConfigNames.has("default") ? "" : "default");
     setInstallValues(defaultInstallValues(installFields(server, target)));
     setCustomHeaders([]);
     setError("");
+  }
+
+  async function changeServerVersion(version: string) {
+    if (!selectedServer || version === selectedServer.server.version) {
+      return;
+    }
+
+    setIsLoadingVersions(true);
+    setError("");
+    try {
+      const response = await fetch(serverVersionUrl(selectedServer.server.name, version), {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error("Server version could not be loaded.");
+      }
+      const server = (await response.json()) as MCPRegistryServerResponse;
+      const availableTargets = installTargetOptions(server);
+      const target = availableTargets.some((option) => option.value === selectedInstallTarget)
+        ? selectedInstallTarget
+        : defaultInstallTarget(server);
+      const fields = installFields(server, target);
+      setSelectedServer(server);
+      setSelectedInstallTarget(target);
+      setInstallValues((current) =>
+        isEdit ? mergeInstallValues(fields, current) : defaultInstallValues(fields)
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Server version could not be loaded.");
+    } finally {
+      setIsLoadingVersions(false);
+    }
   }
 
   function changeInstallTarget(target: InstallTarget) {
@@ -633,7 +736,7 @@ export function InstallFormClient({
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          version: initialInstallation?.installedVersion ?? selectedServer.server.version,
+          version: selectedServer.server.version,
           configName: trimmedConfigName,
           installTarget: installTargetPayloadValue(selectedInstallTarget),
           configValues: installPayloadValues(),
@@ -749,6 +852,7 @@ export function InstallFormClient({
                     disabled={isMutating}
                     onClick={() => {
                       setSelectedServer(null);
+                      setServerVersions([]);
                       setInstallValues({});
                       setCustomHeaders([]);
                       setError("");
@@ -773,8 +877,32 @@ export function InstallFormClient({
                     value={configName}
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="install-server-version">Version</Label>
+                  <Select
+                    disabled={isLoadingVersions || versionOptions.length <= 1}
+                    onValueChange={(value) => void changeServerVersion(value)}
+                    value={selectedServer.server.version}
+                  >
+                    <SelectTrigger id="install-server-version">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {versionOptions.map((version) => (
+                        <SelectItem key={version.server.version} value={version.server.version}>
+                          <span className="flex items-center gap-2">
+                            <span>{version.server.version}</span>
+                            {version._meta["io.modelcontextprotocol.registry/official"].isLatest ? (
+                              <span className="text-muted-foreground">Default</span>
+                            ) : null}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {isEdit ? (
-                  <div className="grid gap-2">
+                  <div className="grid gap-2 md:col-span-2">
                     <Label>Installation target</Label>
                     <div className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm">
                       {selectedInstallTargetDetails?.kind === "remote" ? (

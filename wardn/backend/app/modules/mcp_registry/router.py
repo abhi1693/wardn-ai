@@ -38,6 +38,7 @@ from app.modules.mcp_registry.service import (
     list_installations,
     list_servers,
     list_versions,
+    set_default_server_version,
     uninstall_installation,
     uninstall_server,
     update_installed_servers,
@@ -267,6 +268,36 @@ async def update_organization_mcp_server_version(
         )
     except MCPServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return response
+
+
+@organization_router.post(
+    "/servers/{server_name:path}/versions/{version}/default",
+    response_model=MCPRegistryServerResponse,
+    operation_id="organization_mcp_registry_set_default_server_version",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def set_default_organization_mcp_server_version(
+    organization_id: UUID,
+    server_name: str,
+    version: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRegistryServerResponse:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    try:
+        response = await set_default_server_version(
+            session,
+            server_name,
+            version,
+            organization_id=organization_id,
+        )
+    except MCPServerNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="server version not found",
+        ) from exc
     await session.commit()
     return response
 

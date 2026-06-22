@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/app/components/app-shell";
+import { ServerVersionSelector } from "@/app/registry/server-version-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -393,6 +394,24 @@ async function getServer(context: WorkspaceContext, serverName: string, version:
   return (await response.json()) as MCPRegistryServerResponse;
 }
 
+async function getVersions(context: WorkspaceContext, serverName: string) {
+  const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
+  const path = organizationMcpRegistryPath(context, `/servers/${encodedName}/versions`);
+  if (!path) {
+    return [];
+  }
+  const cookie = await backendCookieHeader();
+  const response = await fetch(backendPath(path), {
+    cache: "no-store",
+    headers: cookie ? { cookie } : {},
+  });
+  if (!response.ok) {
+    return [];
+  }
+  const data = (await response.json()) as { servers?: MCPRegistryServerResponse[] };
+  return data.servers ?? [];
+}
+
 async function getInstallation(serverName: string, context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");
   if (!path) {
@@ -439,7 +458,10 @@ export default async function RegistryServerPage({
     notFound();
   }
 
-  const [installation] = await Promise.all([getInstallation(response.server.name, workspaceContext)]);
+  const [installation, versions] = await Promise.all([
+    getInstallation(response.server.name, workspaceContext),
+    getVersions(workspaceContext, response.server.name),
+  ]);
   const officialMeta = response._meta["io.modelcontextprotocol.registry/official"];
   const links = sourceLinks(response);
   const config = configurationSummary(response);
@@ -495,6 +517,17 @@ export default async function RegistryServerPage({
         </div>
 
         <aside className="space-y-5">
+          <ServerVersionSelector
+            currentVersion={response.server.version}
+            organizationId={organizationId}
+            serverName={response.server.name}
+            versions={(versions.length > 0 ? versions : [response]).map((versionEntry) => ({
+              isDefault:
+                versionEntry._meta["io.modelcontextprotocol.registry/official"].isLatest,
+              version: versionEntry.server.version,
+            }))}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Configuration</CardTitle>

@@ -484,6 +484,31 @@ async def get_version(
     return server_response(server)
 
 
+async def set_default_server_version(
+    session,
+    name: str,
+    version: str,
+    *,
+    organization_id: uuid.UUID | None = None,
+) -> MCPRegistryServerResponse:
+    organization_id = await catalog_organization_id(session, organization_id)
+    server = await repository.get_server_version(
+        session,
+        name,
+        version,
+        include_deleted=False,
+        organization_id=organization_id,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("server version not found")
+
+    await repository.clear_latest_for_name(session, name, organization_id=organization_id)
+    server.is_latest = True
+    await session.flush()
+    await session.refresh(server)
+    return server_response(server)
+
+
 async def list_installations(
     session,
     workspace_id: uuid.UUID | None = None,

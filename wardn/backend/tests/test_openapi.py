@@ -37,6 +37,10 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
             "/{server_name}/versions/{version}"
         ),
+        (
+            "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+            "/{server_name}/versions/{version}/default"
+        ),
         "/api/v1/organizations/{organization_id}/workspaces",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
@@ -146,6 +150,12 @@ def test_mcp_registry_openapi_contract() -> None:
             "/{server_name}/versions/{version}"
         )
     ]
+    organization_default_version_path = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/mcp/registry/servers"
+            "/{server_name}/versions/{version}/default"
+        )
+    ]
     version_path = schema["paths"][
         "/api/v1/mcp/registry/servers/{server_name}/versions/{version}"
     ]
@@ -181,6 +191,10 @@ def test_mcp_registry_openapi_contract() -> None:
     assert (
         organization_version_path["delete"]["operationId"]
         == "organization_mcp_registry_delete_server_version"
+    )
+    assert (
+        organization_default_version_path["post"]["operationId"]
+        == "organization_mcp_registry_set_default_server_version"
     )
     assert installed["operationId"] == "mcp_registry_list_installed_servers"
     assert installed["responses"]["200"]["content"]["application/json"]["schema"] == {

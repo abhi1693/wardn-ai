@@ -383,3 +383,61 @@ export const organizationMcpRegistryUpdateServerVersion = async (organizationId:
 }
 
 
+export type organizationMcpRegistrySetDefaultServerVersionResponse200 = {
+  data: MCPRegistryServerResponse
+  status: 200
+}
+
+export type organizationMcpRegistrySetDefaultServerVersionResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type organizationMcpRegistrySetDefaultServerVersionResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type organizationMcpRegistrySetDefaultServerVersionResponseSuccess = (organizationMcpRegistrySetDefaultServerVersionResponse200) & {
+  headers: Headers;
+};
+export type organizationMcpRegistrySetDefaultServerVersionResponseError = (organizationMcpRegistrySetDefaultServerVersionResponse404 | organizationMcpRegistrySetDefaultServerVersionResponse422) & {
+  headers: Headers;
+};
+
+export type organizationMcpRegistrySetDefaultServerVersionResponse = (organizationMcpRegistrySetDefaultServerVersionResponseSuccess | organizationMcpRegistrySetDefaultServerVersionResponseError)
+
+export const getOrganizationMcpRegistrySetDefaultServerVersionUrl = (organizationId: string,
+    serverName: string,
+    version: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}/default`
+}
+
+/**
+ * @summary Set Default Organization Mcp Server Version
+ */
+export const organizationMcpRegistrySetDefaultServerVersion = async (organizationId: string,
+    serverName: string,
+    version: string, options?: RequestInit): Promise<organizationMcpRegistrySetDefaultServerVersionResponse> => {
+
+  const res = await fetch(getOrganizationMcpRegistrySetDefaultServerVersionUrl(organizationId,serverName,version),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: organizationMcpRegistrySetDefaultServerVersionResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as organizationMcpRegistrySetDefaultServerVersionResponse
+}
+
+
