@@ -27,6 +27,8 @@ export * from './mCPRuntimeEventReadMetadata';
 export * from './mcpRuntimeListSessionEventsParams';
 export * from './mcpRuntimeListSessionsParams';
 export * from './mCPRuntimeServerError';
+export * from './mCPRuntimeSessionHealthResponse';
+export * from './mCPRuntimeSessionHealthResponseDetails';
 export * from './mCPRuntimeSessionListResponse';
 export * from './mCPRuntimeSessionRead';
 export * from './mCPRuntimeSummaryResponse';

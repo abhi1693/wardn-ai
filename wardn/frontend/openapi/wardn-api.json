@@ -310,6 +310,55 @@
         "title": "MCPRuntimeServerError",
         "type": "object"
       },
+      "MCPRuntimeSessionHealthResponse": {
+        "properties": {
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "runtimeKind": {
+            "title": "Runtimekind",
+            "type": "string"
+          },
+          "runtimeProvider": {
+            "title": "Runtimeprovider",
+            "type": "string"
+          },
+          "runtimeSessionId": {
+            "format": "uuid",
+            "title": "Runtimesessionid",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtimeSessionId",
+          "runtimeProvider",
+          "runtimeKind",
+          "status",
+          "healthy",
+          "ready",
+          "message"
+        ],
+        "title": "MCPRuntimeSessionHealthResponse",
+        "type": "object"
+      },
       "MCPRuntimeSessionListResponse": {
         "properties": {
           "sessions": {
@@ -2611,6 +2660,59 @@
           }
         },
         "summary": "List Mcp Runtime Session Events",
+        "tags": [
+          "mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/mcp/runtime/sessions/{runtime_session_id}/health": {
+      "get": {
+        "operationId": "mcp_runtime_get_session_health",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mcp Runtime Session Health",
         "tags": [
           "mcp-runtime"
         ]
@@ -5027,6 +5129,95 @@
           }
         },
         "summary": "List Workspace Mcp Runtime Session Events",
+        "tags": [
+          "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/runtime/sessions/{runtime_session_id}/health": {
+      "get": {
+        "operationId": "workspace_mcp_runtime_get_session_health",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "runtime_session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Runtime Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRuntimeSessionHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Mcp Runtime Session Health",
         "tags": [
           "workspace-mcp-runtime"
         ]

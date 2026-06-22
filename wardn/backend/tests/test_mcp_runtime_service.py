@@ -10,6 +10,7 @@ from app.modules.mcp_runtime.models import (
     MCPRuntimeSession,
     MCPToolInvocation,
 )
+from app.modules.mcp_runtime.provider import RuntimeHealth
 
 
 class FakeSession:
@@ -58,6 +59,15 @@ class FakeRuntimeManager:
 
     def stop_runtime(self, runtime_session):
         self.stopped_sessions.append(runtime_session)
+
+    def health_runtime(self, runtime_session):
+        return RuntimeHealth(
+            status="ready",
+            healthy=True,
+            ready=True,
+            message="Runtime is ready.",
+            details={"transport": "stdio"},
+        )
 
 
 class FailingRuntimeManager(FakeRuntimeManager):
@@ -401,6 +411,58 @@ async def test_stop_runtime_session_is_idempotent_for_stopped_session(monkeypatc
 
     assert manager.stopped_sessions == []
     assert response.status == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_session_health_uses_manager_and_scope(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    workspace_id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        installation_id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        runtime_provider="local",
+        runtime_kind="package",
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        started_at=now,
+        ready_at=now,
+        last_used_at=now,
+        expires_at=now + timedelta(minutes=5),
+        stopped_at=None,
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    seen = {}
+
+    async def get_runtime_session(session, runtime_session_id, *, workspace_id=None):
+        seen["runtime_session_id"] = runtime_session_id
+        seen["workspace_id"] = workspace_id
+        return runtime_session
+
+    monkeypatch.setattr(repository, "get_runtime_session", get_runtime_session)
+
+    response = await service.get_runtime_session_health(
+        FakeSession(),
+        runtime_session.id,
+        workspace_id=workspace_id,
+        manager=FakeRuntimeManager(),
+    )
+
+    assert seen == {
+        "runtime_session_id": runtime_session.id,
+        "workspace_id": workspace_id,
+    }
+    assert response.runtime_session_id == runtime_session.id
+    assert response.status == "ready"
+    assert response.healthy is True
+    assert response.ready is True
+    assert response.details == {"transport": "stdio"}
 
 
 @pytest.mark.asyncio

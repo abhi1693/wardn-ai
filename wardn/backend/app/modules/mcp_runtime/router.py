@@ -9,6 +9,7 @@ from app.db.session import get_db_session
 from app.modules.mcp_runtime import service
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
+    MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
     MCPRuntimeSessionRead,
     MCPRuntimeSummaryResponse,
@@ -126,6 +127,25 @@ async def stop_mcp_runtime_session(
 
 
 @router.get(
+    "/sessions/{runtime_session_id}/health",
+    response_model=MCPRuntimeSessionHealthResponse,
+    operation_id="mcp_runtime_get_session_health",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_mcp_runtime_session_health(
+    runtime_session_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MCPRuntimeSessionHealthResponse:
+    try:
+        return await service.get_runtime_session_health(session, runtime_session_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="runtime session not found",
+        ) from exc
+
+
+@router.get(
     "/sessions/{runtime_session_id}/events",
     response_model=MCPRuntimeEventListResponse,
     operation_id="mcp_runtime_list_session_events",
@@ -236,6 +256,33 @@ async def stop_workspace_mcp_runtime_session(
         ) from exc
     await session.commit()
     return response
+
+
+@workspace_router.get(
+    "/sessions/{runtime_session_id}/health",
+    response_model=MCPRuntimeSessionHealthResponse,
+    operation_id="workspace_mcp_runtime_get_session_health",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_workspace_mcp_runtime_session_health(
+    organization_id: UUID,
+    workspace_id: UUID,
+    runtime_session_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeSessionHealthResponse:
+    await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
+    try:
+        return await service.get_runtime_session_health(
+            session,
+            runtime_session_id,
+            workspace_id=workspace_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="runtime session not found",
+        ) from exc
 
 
 @workspace_router.get(

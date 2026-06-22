@@ -18,6 +18,7 @@ from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
     MCPRuntimeServerError,
+    MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
     MCPRuntimeSessionRead,
     MCPRuntimeSummaryResponse,
@@ -518,6 +519,35 @@ async def get_runtime_session(
     if runtime_session is None:
         raise LookupError("runtime session not found")
     return runtime_session_read(runtime_session)
+
+
+async def get_runtime_session_health(
+    session: AsyncSession,
+    runtime_session_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+) -> MCPRuntimeSessionHealthResponse:
+    runtime_session = await repository.get_runtime_session(
+        session,
+        runtime_session_id,
+        workspace_id=workspace_id,
+    )
+    if runtime_session is None:
+        raise LookupError("runtime session not found")
+
+    manager = manager or get_runtime_manager()
+    health = manager.health_runtime(runtime_session)
+    return MCPRuntimeSessionHealthResponse(
+        runtimeSessionId=runtime_session.id,
+        runtimeProvider=runtime_session.runtime_provider,
+        runtimeKind=runtime_session.runtime_kind,
+        status=health.status,
+        healthy=health.healthy,
+        ready=health.ready,
+        message=health.message,
+        details=health.details or {},
+    )
 
 
 async def stop_runtime_session(

@@ -8,6 +8,7 @@ import type {
   ErrorResponse,
   HTTPValidationError,
   MCPRuntimeEventListResponse,
+  MCPRuntimeSessionHealthResponse,
   MCPRuntimeSessionListResponse,
   MCPRuntimeSessionRead,
   MCPRuntimeSummaryResponse,
@@ -198,6 +199,64 @@ export const workspaceMcpRuntimeListSessionEvents = async (organizationId: strin
 
   const data: workspaceMcpRuntimeListSessionEventsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeListSessionEventsResponse
+}
+
+
+export type workspaceMcpRuntimeGetSessionHealthResponse200 = {
+  data: MCPRuntimeSessionHealthResponse
+  status: 200
+}
+
+export type workspaceMcpRuntimeGetSessionHealthResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type workspaceMcpRuntimeGetSessionHealthResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type workspaceMcpRuntimeGetSessionHealthResponseSuccess = (workspaceMcpRuntimeGetSessionHealthResponse200) & {
+  headers: Headers;
+};
+export type workspaceMcpRuntimeGetSessionHealthResponseError = (workspaceMcpRuntimeGetSessionHealthResponse404 | workspaceMcpRuntimeGetSessionHealthResponse422) & {
+  headers: Headers;
+};
+
+export type workspaceMcpRuntimeGetSessionHealthResponse = (workspaceMcpRuntimeGetSessionHealthResponseSuccess | workspaceMcpRuntimeGetSessionHealthResponseError)
+
+export const getWorkspaceMcpRuntimeGetSessionHealthUrl = (organizationId: string,
+    workspaceId: string,
+    runtimeSessionId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/health`
+}
+
+/**
+ * @summary Get Workspace Mcp Runtime Session Health
+ */
+export const workspaceMcpRuntimeGetSessionHealth = async (organizationId: string,
+    workspaceId: string,
+    runtimeSessionId: string, options?: RequestInit): Promise<workspaceMcpRuntimeGetSessionHealthResponse> => {
+
+  const res = await fetch(getWorkspaceMcpRuntimeGetSessionHealthUrl(organizationId,workspaceId,runtimeSessionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: workspaceMcpRuntimeGetSessionHealthResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeGetSessionHealthResponse
 }
 
 

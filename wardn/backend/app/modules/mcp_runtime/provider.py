@@ -23,6 +23,20 @@ RUNTIME_PROVIDER_KUBERNETES = "kubernetes"
 RUNTIME_TRANSPORT_STDIO = "stdio"
 WARDN_CUSTOM_HEADERS_ENV = "WARDN_MCP_CUSTOM_HEADERS"
 
+RUNTIME_HEALTH_READY = "ready"
+RUNTIME_HEALTH_NOT_READY = "not_ready"
+RUNTIME_HEALTH_STOPPED = "stopped"
+RUNTIME_HEALTH_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class RuntimeHealth:
+    status: str
+    healthy: bool
+    ready: bool
+    message: str = ""
+    details: dict[str, Any] | None = None
+
 
 class MCPRuntimeProvider(Protocol):
     name: str
@@ -47,6 +61,9 @@ class MCPRuntimeProvider(Protocol):
         ...
 
     def stop_runtime(self, runtime_session: "MCPRuntimeSession") -> None:
+        ...
+
+    def health(self, runtime_session: "MCPRuntimeSession") -> RuntimeHealth:
         ...
 
 

@@ -29,6 +29,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/mcp/runtime/sessions",
         "/api/v1/mcp/runtime/sessions/{runtime_session_id}",
         "/api/v1/mcp/runtime/sessions/{runtime_session_id}/events",
+        "/api/v1/mcp/runtime/sessions/{runtime_session_id}/health",
         "/api/v1/mcp/runtime/sessions/{runtime_session_id}/stop",
         "/api/v1/mcp/runtime/summary",
         "/api/v1/organizations",
@@ -60,6 +61,10 @@ def test_openapi_exposes_expected_paths() -> None:
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/mcp/runtime/sessions/{runtime_session_id}/events"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/runtime/sessions/{runtime_session_id}/health"
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"

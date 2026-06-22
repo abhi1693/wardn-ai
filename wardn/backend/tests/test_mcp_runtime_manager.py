@@ -208,6 +208,31 @@ def test_local_process_provider_stop_runtime_is_idempotent(monkeypatch) -> None:
     assert provider._stdio_sessions == {}
 
 
+def test_local_process_provider_health_reports_missing_process() -> None:
+    provider = LocalProcessRuntimeProvider()
+    runtime_session = MCPRuntimeSession(
+        installation_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        runtime_provider="local",
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+
+    health = provider.health(runtime_session)
+
+    assert health.status == "not_ready"
+    assert health.healthy is False
+    assert health.ready is False
+    assert health.message == "Local runtime process is not present in this backend process."
+
+
 def test_local_process_provider_can_call_tool_through_runtime_adapter(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.modules.mcp_runtime.providers.local_process.get_settings",
@@ -269,12 +294,17 @@ def test_local_process_provider_can_call_tool_through_runtime_adapter(monkeypatc
             arguments={"value": "ok"},
             runtime_session=runtime_session,
         )
+        health = provider.health(runtime_session)
     finally:
         provider.stop_all()
 
     assert runtime_spec.transport == RUNTIME_TRANSPORT_ADAPTER
     assert tools[0]["name"] == "echo"
     assert runtime_session.endpoint_url.startswith("http://127.0.0.1:")
+    assert health.status == "ready"
+    assert health.healthy is True
+    assert health.ready is True
+    assert health.details["transport"] == RUNTIME_TRANSPORT_ADAPTER
     payload = json.loads(result["content"][0]["text"])
     assert payload == {
         "arguments": {"value": "ok"},

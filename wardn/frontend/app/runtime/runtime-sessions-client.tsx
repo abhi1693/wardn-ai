@@ -1,6 +1,14 @@
 "use client";
 
-import { Activity, AlertTriangle, CircleStop, Gauge, History, RefreshCw } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CircleStop,
+  Gauge,
+  HeartPulse,
+  History,
+  RefreshCw,
+} from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -21,6 +29,7 @@ import {
 import type {
   MCPRuntimeEventListResponse,
   MCPRuntimeEventRead,
+  MCPRuntimeSessionHealthResponse,
   MCPRuntimeSessionListResponse,
   MCPRuntimeSessionRead,
   MCPRuntimeSummaryResponse,
@@ -59,6 +68,16 @@ function statusVariant(status: string) {
     return "success" as const;
   }
   if (status === "failed") {
+    return "secondary" as const;
+  }
+  return "outline" as const;
+}
+
+function healthVariant(status: string) {
+  if (status === "ready") {
+    return "success" as const;
+  }
+  if (status === "not_ready") {
     return "secondary" as const;
   }
   return "outline" as const;
@@ -138,6 +157,9 @@ export function RuntimeSessionsClient({
   const [eventsBySession, setEventsBySession] = useState<Record<string, MCPRuntimeEventRead[]>>(
     {}
   );
+  const [healthBySession, setHealthBySession] = useState<
+    Record<string, MCPRuntimeSessionHealthResponse>
+  >({});
   const [eventFiltersBySession, setEventFiltersBySession] = useState<Record<string, string[]>>(
     {}
   );
@@ -233,6 +255,7 @@ export function RuntimeSessionsClient({
       setSessions(payload.sessions);
       setSummary(nextSummary);
       setEventsBySession({});
+      setHealthBySession({});
       setEventFiltersBySession({});
       setExpandedSessionId("");
       setNotice("Runtime sessions refreshed.");
@@ -258,6 +281,11 @@ export function RuntimeSessionsClient({
       setSessions((current) =>
         current.map((item) => (item.id === stopped.id ? stopped : item))
       );
+      setHealthBySession((current) => {
+        const next = { ...current };
+        delete next[session.id];
+        return next;
+      });
       try {
         setSummary(await fetchRuntimeSummary());
       } catch {
@@ -266,6 +294,27 @@ export function RuntimeSessionsClient({
       setNotice("Runtime session stopped.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Runtime session could not be stopped.");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function checkHealth(session: MCPRuntimeSessionRead) {
+    setIsMutating(true);
+    setError("");
+    setNotice("");
+    setExpandedSessionId(session.id);
+    try {
+      const response = await fetch(`${basePath}/${encodeURIComponent(session.id)}/health`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, "Failed to check runtime health."));
+      }
+      const payload = (await response.json()) as MCPRuntimeSessionHealthResponse;
+      setHealthBySession((current) => ({ ...current, [session.id]: payload }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Runtime health could not load.");
     } finally {
       setIsMutating(false);
     }
@@ -406,6 +455,7 @@ export function RuntimeSessionsClient({
                   selectedEventTypes.length === 0
                     ? events
                     : events.filter((event) => selectedEventTypes.includes(event.eventType));
+                const health = healthBySession[session.id];
                 const isLive =
                   isExpanded && activeStatuses.has(session.status) && Boolean(eventsBySession[session.id]);
 
@@ -440,6 +490,16 @@ export function RuntimeSessionsClient({
                         <div className="flex justify-end gap-2">
                           <Button
                             disabled={isMutating}
+                            onClick={() => checkHealth(session)}
+                            size="icon"
+                            title="Check runtime health"
+                            type="button"
+                            variant="outline"
+                          >
+                            <HeartPulse className="size-4" />
+                          </Button>
+                          <Button
+                            disabled={isMutating}
                             onClick={() => toggleEvents(session)}
                             size="icon"
                             title="Show runtime events"
@@ -464,6 +524,19 @@ export function RuntimeSessionsClient({
                     {isExpanded ? (
                       <TableRow>
                         <TableCell colSpan={6} className="bg-muted/20">
+                          {health ? (
+                            <div className="mb-3 flex flex-col gap-2 rounded-md border bg-card px-3 py-2 md:flex-row md:items-center md:justify-between">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <Badge variant={healthVariant(health.status)}>
+                                  {health.status}
+                                </Badge>
+                                <div className="truncate text-sm">{health.message}</div>
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {health.ready ? "Ready" : "Not ready"}
+                              </div>
+                            </div>
+                          ) : null}
                           {events.length === 0 ? (
                             <div className="py-4 text-sm text-muted-foreground">
                               No runtime events recorded.

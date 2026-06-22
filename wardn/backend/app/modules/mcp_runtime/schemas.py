@@ -32,6 +32,19 @@ class MCPRuntimeSessionListResponse(BaseModel):
     sessions: list[MCPRuntimeSessionRead]
 
 
+class MCPRuntimeSessionHealthResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    runtime_session_id: UUID = Field(alias="runtimeSessionId")
+    runtime_provider: str = Field(alias="runtimeProvider")
+    runtime_kind: str = Field(alias="runtimeKind")
+    status: str
+    healthy: bool
+    ready: bool
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class MCPRuntimeEventRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

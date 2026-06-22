@@ -8,6 +8,7 @@ import type {
   ErrorResponse,
   HTTPValidationError,
   MCPRuntimeEventListResponse,
+  MCPRuntimeSessionHealthResponse,
   MCPRuntimeSessionListResponse,
   MCPRuntimeSessionRead,
   MCPRuntimeSummaryResponse,
@@ -186,6 +187,60 @@ export const mcpRuntimeListSessionEvents = async (runtimeSessionId: string,
 
   const data: mcpRuntimeListSessionEventsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as mcpRuntimeListSessionEventsResponse
+}
+
+
+export type mcpRuntimeGetSessionHealthResponse200 = {
+  data: MCPRuntimeSessionHealthResponse
+  status: 200
+}
+
+export type mcpRuntimeGetSessionHealthResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRuntimeGetSessionHealthResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRuntimeGetSessionHealthResponseSuccess = (mcpRuntimeGetSessionHealthResponse200) & {
+  headers: Headers;
+};
+export type mcpRuntimeGetSessionHealthResponseError = (mcpRuntimeGetSessionHealthResponse404 | mcpRuntimeGetSessionHealthResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRuntimeGetSessionHealthResponse = (mcpRuntimeGetSessionHealthResponseSuccess | mcpRuntimeGetSessionHealthResponseError)
+
+export const getMcpRuntimeGetSessionHealthUrl = (runtimeSessionId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/runtime/sessions/${runtimeSessionId}/health`
+}
+
+/**
+ * @summary Get Mcp Runtime Session Health
+ */
+export const mcpRuntimeGetSessionHealth = async (runtimeSessionId: string, options?: RequestInit): Promise<mcpRuntimeGetSessionHealthResponse> => {
+
+  const res = await fetch(getMcpRuntimeGetSessionHealthUrl(runtimeSessionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRuntimeGetSessionHealthResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as mcpRuntimeGetSessionHealthResponse
 }
 
 

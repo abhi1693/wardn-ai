@@ -14,6 +14,7 @@ from app.modules.mcp_runtime.provider import (
     RUNTIME_TRANSPORT_STDIO,
     WARDN_CUSTOM_HEADERS_ENV,
     MCPRuntimeProvider,
+    RuntimeHealth,
     RuntimeSpec,
     normalize_installed_path,
     package_runtime,
@@ -50,6 +51,9 @@ class MCPRuntimeManager(Protocol):
         ...
 
     def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
+        ...
+
+    def health_runtime(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
         ...
 
 
@@ -136,6 +140,11 @@ class DefaultMCPRuntimeManager:
             runtime_session
         )
 
+    def health_runtime(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
+        return self._registry.provider_by_name(runtime_session.runtime_provider).health(
+            runtime_session
+        )
+
 
 def get_runtime_manager() -> MCPRuntimeManager:
     return _DEFAULT_RUNTIME_MANAGER
@@ -155,6 +164,7 @@ __all__ = [
     "RUNTIME_PROVIDER_REMOTE",
     "RUNTIME_TRANSPORT_STDIO",
     "RuntimeProviderRegistry",
+    "RuntimeHealth",
     "RuntimeSpec",
     "WARDN_CUSTOM_HEADERS_ENV",
     "get_runtime_manager",

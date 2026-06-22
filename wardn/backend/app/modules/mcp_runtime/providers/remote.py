@@ -4,8 +4,10 @@ from app.modules.mcp_gateway import client
 from app.modules.mcp_registry.models import MCPServerInstallation
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
+    RUNTIME_HEALTH_UNKNOWN,
     RUNTIME_KIND_REMOTE,
     RUNTIME_PROVIDER_REMOTE,
+    RuntimeHealth,
     RuntimeSpec,
     base_runtime_spec,
     require_remote_installation,
@@ -50,3 +52,12 @@ class RemoteRuntimeProvider:
 
     def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
         return None
+
+    def health(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
+        return RuntimeHealth(
+            status=RUNTIME_HEALTH_UNKNOWN,
+            healthy=True,
+            ready=True,
+            message="Remote runtime is externally hosted; no local readiness probe is available.",
+            details={"endpointConfigured": bool(runtime_session.endpoint_url)},
+        )

@@ -26,15 +26,21 @@ from app.modules.mcp_runtime.adapter_contract import (
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
+    RUNTIME_HEALTH_NOT_READY,
+    RUNTIME_HEALTH_READY,
+    RUNTIME_HEALTH_STOPPED,
     RUNTIME_KIND_PACKAGE,
     RUNTIME_PROVIDER_LOCAL,
     RUNTIME_TRANSPORT_STDIO,
     PackageRuntimeSpec,
+    RuntimeHealth,
     RuntimeSpec,
     base_runtime_spec,
     package_runtime,
     runtime_kind,
 )
+
+TERMINAL_RUNTIME_STATUSES = {"stopped", "failed", "expired"}
 
 RUNTIME_TRANSPORT_ADAPTER = "streamable_http"
 LOCAL_TRANSPORT_ADAPTER = "adapter"
@@ -130,6 +136,30 @@ class LocalProcessRuntimeProvider:
     def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:
         self._drop_stdio_session(runtime_session.config_fingerprint)
         self._drop_adapter_session(runtime_session.config_fingerprint)
+
+    def health(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
+        if runtime_session.status in TERMINAL_RUNTIME_STATUSES:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_STOPPED,
+                healthy=False,
+                ready=False,
+                message=f"Runtime session is {runtime_session.status}.",
+            )
+
+        adapter_health = self._adapter_session_health(runtime_session)
+        if adapter_health is not None:
+            return adapter_health
+
+        stdio_health = self._stdio_session_health(runtime_session)
+        if stdio_health is not None:
+            return stdio_health
+
+        return RuntimeHealth(
+            status=RUNTIME_HEALTH_NOT_READY,
+            healthy=False,
+            ready=False,
+            message="Local runtime process is not present in this backend process.",
+        )
 
     def stop_all(self) -> None:
         with self._stdio_lock:
@@ -298,6 +328,82 @@ class LocalProcessRuntimeProvider:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+    def _adapter_session_health(
+        self,
+        runtime_session: MCPRuntimeSession,
+    ) -> RuntimeHealth | None:
+        with self._adapter_lock:
+            managed = self._adapter_sessions.get(runtime_session.config_fingerprint)
+        if managed is None:
+            return None
+
+        return_code = managed.process.poll()
+        details: dict[str, Any] = {
+            "transport": RUNTIME_TRANSPORT_ADAPTER,
+            "processId": managed.process.pid,
+            "returnCode": return_code,
+        }
+        if return_code is not None:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_NOT_READY,
+                healthy=False,
+                ready=False,
+                message="Runtime adapter process has exited.",
+                details=details,
+            )
+
+        try:
+            status_payload = adapter_client.get_adapter_status(managed.endpoint_url)
+        except adapter_client.MCPRuntimeAdapterError as exc:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_NOT_READY,
+                healthy=False,
+                ready=False,
+                message=str(exc),
+                details=details,
+            )
+
+        ready = bool(status_payload.get("ready"))
+        details.update({"adapter": status_payload})
+        return RuntimeHealth(
+            status=RUNTIME_HEALTH_READY if ready else RUNTIME_HEALTH_NOT_READY,
+            healthy=ready,
+            ready=ready,
+            message="Runtime adapter is ready." if ready else "Runtime adapter is not ready.",
+            details=details,
+        )
+
+    def _stdio_session_health(
+        self,
+        runtime_session: MCPRuntimeSession,
+    ) -> RuntimeHealth | None:
+        with self._stdio_lock:
+            managed = self._stdio_sessions.get(runtime_session.config_fingerprint)
+        if managed is None:
+            return None
+
+        return_code = managed.session.process.poll()
+        details = {
+            "transport": RUNTIME_TRANSPORT_STDIO,
+            "processId": managed.session.process.pid,
+            "returnCode": return_code,
+        }
+        if return_code is not None:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_NOT_READY,
+                healthy=False,
+                ready=False,
+                message="Local stdio runtime process has exited.",
+                details=details,
+            )
+        return RuntimeHealth(
+            status=RUNTIME_HEALTH_READY,
+            healthy=True,
+            ready=True,
+            message="Local stdio runtime process is running.",
+            details=details,
+        )
 
     def _wait_for_adapter_ready(self, managed: ManagedAdapterSession) -> None:
         deadline = time.monotonic() + get_settings().mcp_runtime_adapter_startup_timeout_seconds

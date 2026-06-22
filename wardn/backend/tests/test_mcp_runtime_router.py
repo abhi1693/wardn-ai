@@ -10,6 +10,7 @@ from app.modules.mcp_runtime import service as runtime_service
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
+    MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
     MCPRuntimeSessionRead,
     MCPRuntimeSummaryResponse,
@@ -70,6 +71,21 @@ def runtime_event_read(runtime_session_id: uuid.UUID) -> MCPRuntimeEventRead:
         message="Runtime session created.",
         metadata={"runtimeProvider": "local"},
         createdAt=datetime(2026, 6, 22, tzinfo=UTC),
+    )
+
+
+def runtime_session_health_response(
+    runtime_session_id: uuid.UUID,
+) -> MCPRuntimeSessionHealthResponse:
+    return MCPRuntimeSessionHealthResponse(
+        runtimeSessionId=runtime_session_id,
+        runtimeProvider="local",
+        runtimeKind="package",
+        status="ready",
+        healthy=True,
+        ready=True,
+        message="Runtime is ready.",
+        details={"transport": "stdio"},
     )
 
 
@@ -169,6 +185,33 @@ def test_stop_runtime_session_route_commits(monkeypatch) -> None:
     assert response.json()["status"] == "stopped"
     assert seen["runtime_session_id"] == runtime_session_id
     assert seen["session"].committed is True
+
+
+def test_get_runtime_session_health_route(monkeypatch) -> None:
+    seen = {}
+    runtime_session_id = uuid.uuid4()
+
+    async def get_runtime_session_health(session, seen_runtime_session_id):
+        seen["session"] = session
+        seen["runtime_session_id"] = seen_runtime_session_id
+        return runtime_session_health_response(seen_runtime_session_id)
+
+    monkeypatch.setattr(
+        runtime_service,
+        "get_runtime_session_health",
+        get_runtime_session_health,
+    )
+
+    response = runtime_client().get(
+        f"/api/v1/mcp/runtime/sessions/{runtime_session_id}/health"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["runtimeSessionId"] == str(runtime_session_id)
+    assert response.json()["status"] == "ready"
+    assert response.json()["details"] == {"transport": "stdio"}
+    assert seen["runtime_session_id"] == runtime_session_id
+    assert seen["session"] is not None
 
 
 def test_list_runtime_session_events_route(monkeypatch) -> None:
@@ -301,6 +344,46 @@ def test_workspace_stop_runtime_session_route_requires_admin_and_commits(monkeyp
     assert seen["runtime_session_id"] == runtime_session_id
     assert seen["workspace_id"] == workspace_id
     assert seen["session"].committed is True
+
+
+def test_workspace_get_runtime_session_health_route_filters_workspace(monkeypatch) -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    runtime_session_id = uuid.uuid4()
+    seen = {}
+
+    async def require_workspace_member(
+        session,
+        current_user,
+        seen_organization_id,
+        seen_workspace_id,
+    ):
+        seen["member_check"] = (seen_organization_id, seen_workspace_id)
+
+    async def get_runtime_session_health(session, seen_runtime_session_id, *, workspace_id=None):
+        seen["runtime_session_id"] = seen_runtime_session_id
+        seen["workspace_id"] = workspace_id
+        return runtime_session_health_response(seen_runtime_session_id)
+
+    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_service,
+        "get_runtime_session_health",
+        get_runtime_session_health,
+    )
+
+    response = runtime_client(authenticated=True).get(
+        f"/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+        f"/mcp/runtime/sessions/{runtime_session_id}/health"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["healthy"] is True
+    assert seen == {
+        "member_check": (organization_id, workspace_id),
+        "runtime_session_id": runtime_session_id,
+        "workspace_id": workspace_id,
+    }
 
 
 def test_workspace_get_runtime_session_route_returns_404_for_out_of_scope_session(

@@ -4,7 +4,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.modules.mcp_registry.installer import parse_mcp_response_body
-from app.modules.mcp_runtime.adapter_contract import ADAPTER_MCP_PATH, adapter_url
+from app.modules.mcp_runtime.adapter_contract import (
+    ADAPTER_MCP_PATH,
+    ADAPTER_READY_PATH,
+    adapter_url,
+)
 
 
 class MCPRuntimeAdapterError(Exception):
@@ -42,6 +46,34 @@ def send_adapter_request(
         raise MCPRuntimeAdapterError(f"runtime adapter is not reachable: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise MCPRuntimeAdapterError("runtime adapter returned invalid JSON-RPC") from exc
+
+
+def get_adapter_status(
+    endpoint_url: str,
+    *,
+    timeout: float = 5,
+) -> dict[str, Any]:
+    request = Request(
+        adapter_url(endpoint_url, ADAPTER_READY_PATH),
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "Wardn/0.1 Runtime Adapter Client",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", "replace")
+            return json.loads(body) if body else {}
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace").strip()
+        raise MCPRuntimeAdapterError(
+            f"runtime adapter returned HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
+    except (TimeoutError, URLError) as exc:
+        raise MCPRuntimeAdapterError(f"runtime adapter is not reachable: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise MCPRuntimeAdapterError("runtime adapter returned invalid status JSON") from exc
 
 
 def list_tools(
