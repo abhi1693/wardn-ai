@@ -38,6 +38,7 @@ class RemoteRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         runtime = require_remote_installation(installation)
         return client.call_tool(

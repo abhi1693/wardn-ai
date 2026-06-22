@@ -12,7 +12,6 @@ from app.modules.mcp_runtime import repository
 from app.modules.mcp_runtime.manager import (
     MCPRuntimeManager,
     get_runtime_manager,
-    runtime_kind,
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.schemas import (
@@ -147,7 +146,8 @@ async def ensure_runtime_session(
     now: datetime | None = None,
 ) -> MCPRuntimeSession:
     now = now or datetime.now(UTC)
-    config_fingerprint = manager.runtime_fingerprint(installation)
+    runtime_spec = manager.runtime_spec(installation)
+    config_fingerprint = runtime_spec.fingerprint()
     existing = await repository.get_active_runtime_session(
         session,
         installation.id,
@@ -198,10 +198,11 @@ async def ensure_runtime_session(
         workspace_id=installation.workspace_id,
         server_name=server.name,
         server_version=server.version,
-        runtime_provider=manager.provider_name(installation),
-        runtime_kind=runtime_kind(installation),
+        runtime_provider=runtime_spec.provider_name,
+        runtime_kind=runtime_spec.runtime_kind,
         config_fingerprint=config_fingerprint,
         namespace=get_settings().mcp_runtime_namespace,
+        endpoint_url=runtime_spec.endpoint_url,
         now=now,
         expires_at=expires_at,
     )
@@ -308,6 +309,7 @@ async def call_tool_with_tracking(
             installation,
             tool_name=tool_name,
             arguments=arguments,
+            runtime_session=runtime_session,
         )
     except Exception as exc:
         mark_invocation_failed(

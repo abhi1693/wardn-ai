@@ -35,13 +35,25 @@ class FakeRuntimeManager:
     def provider_name(self, installation):
         return "local"
 
+    def runtime_spec(self, installation):
+        return type(
+            "RuntimeSpec",
+            (),
+            {
+                "provider_name": "local",
+                "runtime_kind": "remote",
+                "endpoint_url": "",
+                "fingerprint": lambda self: "runtime-fingerprint",
+            },
+        )()
+
     def runtime_fingerprint(self, installation):
         return self.fingerprint
 
     def list_tools(self, installation):
         return []
 
-    def call_tool(self, installation, *, tool_name, arguments):
+    def call_tool(self, installation, *, tool_name, arguments, runtime_session=None):
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     def stop_runtime(self, runtime_session):
@@ -49,7 +61,7 @@ class FakeRuntimeManager:
 
 
 class FailingRuntimeManager(FakeRuntimeManager):
-    def call_tool(self, installation, *, tool_name, arguments):
+    def call_tool(self, installation, *, tool_name, arguments, runtime_session=None):
         raise RuntimeError("tool failed")
 
 

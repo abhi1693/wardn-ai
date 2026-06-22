@@ -25,8 +25,11 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 60 * 60 * 12
     mcp_install_root: str = "data/mcp-installations"
     mcp_runtime_provider: str = "local"
+    mcp_runtime_local_transport: str = "stdio"
     mcp_runtime_namespace: str = "wardn-runtimes"
     mcp_runtime_idle_timeout_seconds: int = 60 * 10
+    mcp_runtime_adapter_startup_timeout_seconds: int = 30
+    mcp_runtime_adapter_request_timeout_seconds: int = 300
     mcp_runtime_max_age_seconds: int = 60 * 60
     mcp_runtime_reaper_interval_seconds: int = 60
     mcp_runtime_reaper_batch_size: int = 100

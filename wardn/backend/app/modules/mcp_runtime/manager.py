@@ -45,6 +45,7 @@ class MCPRuntimeManager(Protocol):
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -121,11 +122,13 @@ class DefaultMCPRuntimeManager:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         return self._registry.select_provider(installation).call_tool(
             installation,
             tool_name=tool_name,
             arguments=arguments,
+            runtime_session=runtime_session,
         )
 
     def stop_runtime(self, runtime_session: MCPRuntimeSession) -> None:

@@ -42,6 +42,7 @@ class MCPRuntimeProvider(Protocol):
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        runtime_session: "MCPRuntimeSession | None" = None,
     ) -> dict[str, Any]:
         ...
 
