@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
-MCPServerInstallTarget = Literal["remote", "package"]
+MCPServerInstallTarget = str
 MCPServerStatus = Literal["active", "deprecated", "deleted"]
 MCPServerValidationStatus = Literal["passed", "failed"]
 
@@ -89,7 +89,12 @@ class MCPServerInstallRequest(BaseModel):
     version: str = Field(default="latest", min_length=1, max_length=255)
     config_name: str = Field(default="default", alias="configName", min_length=1, max_length=100)
     config_values: dict[str, str] = Field(default_factory=dict, alias="configValues")
-    install_target: MCPServerInstallTarget | None = Field(default=None, alias="installTarget")
+    install_target: MCPServerInstallTarget | None = Field(
+        default=None,
+        alias="installTarget",
+        max_length=50,
+        pattern=r"^(remote|package)(:\d+)?$",
+    )
 
 
 class MCPServerBulkUpdateRequest(BaseModel):

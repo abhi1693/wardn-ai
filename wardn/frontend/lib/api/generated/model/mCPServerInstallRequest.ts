@@ -5,7 +5,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MCPServerInstallRequestConfigValues } from './mCPServerInstallRequestConfigValues';
-import type { MCPServerInstallRequestInstallTarget } from './mCPServerInstallRequestInstallTarget';
 
 export interface MCPServerInstallRequest {
   /**
@@ -14,7 +13,7 @@ export interface MCPServerInstallRequest {
      */
   configName?: string;
   configValues?: MCPServerInstallRequestConfigValues;
-  installTarget?: MCPServerInstallRequestInstallTarget;
+  installTarget?: string | null;
   /**
      * @minLength 1
      * @maxLength 255

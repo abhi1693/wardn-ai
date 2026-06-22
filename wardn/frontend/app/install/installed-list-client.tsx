@@ -121,12 +121,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function schemaType(schema: Record<string, unknown>) {
-  const rawType = schema.type;
-  if (Array.isArray(rawType)) {
-    return rawType.find((item) => typeof item === "string") ?? "object";
+function schemaVariants(schema: Record<string, unknown>) {
+  for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+    const variants = schema[key];
+    if (Array.isArray(variants)) {
+      return variants.filter(isRecord);
+    }
   }
-  return typeof rawType === "string" ? rawType : "object";
+  return [];
+}
+
+function isNullSchema(schema: Record<string, unknown>) {
+  const rawType = schema.type;
+  return rawType === "null" || (Array.isArray(rawType) && rawType.every((item) => item === "null"));
+}
+
+function effectiveSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const variants = schemaVariants(schema).filter((variant) => !isNullSchema(variant));
+  if (variants.length === 0) {
+    return schema;
+  }
+  const firstVariant = effectiveSchema(variants[0]);
+  return {
+    ...firstVariant,
+    description: schema.description ?? firstVariant.description,
+    default: schema.default ?? firstVariant.default,
+  };
+}
+
+function schemaType(schema: Record<string, unknown>) {
+  const resolvedSchema = effectiveSchema(schema);
+  const rawType = resolvedSchema.type;
+  if (Array.isArray(rawType)) {
+    return rawType.find((item) => typeof item === "string" && item !== "null") ?? "object";
+  }
+  return typeof rawType === "string" && rawType !== "null" ? rawType : "object";
+}
+
+function hasNullVariant(schema: Record<string, unknown>) {
+  return schemaVariants(schema).some(isNullSchema);
 }
 
 function exampleValueForSchema(schema: unknown, depth = 0): unknown {
@@ -134,7 +167,11 @@ function exampleValueForSchema(schema: unknown, depth = 0): unknown {
     return "";
   }
 
-  const type = schemaType(schema);
+  const resolvedSchema = effectiveSchema(schema);
+  const type = schemaType(resolvedSchema);
+  if (resolvedSchema.default !== undefined && resolvedSchema.default !== null) {
+    return resolvedSchema.default;
+  }
   if (type === "boolean") {
     return false;
   }
@@ -145,7 +182,7 @@ function exampleValueForSchema(schema: unknown, depth = 0): unknown {
     return [];
   }
   if (type === "object") {
-    return argumentsTemplateForSchema(schema, depth + 1);
+    return argumentsTemplateForSchema(resolvedSchema, depth + 1);
   }
   return "";
 }
@@ -165,13 +202,18 @@ function inputProperties(schema: unknown) {
   const requiredNames = new Set(requiredInputNames(schema));
   return Object.entries(schema.properties).map(([name, propertySchema]) => {
     const property = isRecord(propertySchema) ? propertySchema : {};
+    const resolvedProperty = effectiveSchema(property);
     return {
       name,
       required: requiredNames.has(name),
-      type: schemaType(property),
-      description: typeof property.description === "string" ? property.description : "",
-      enumValues: Array.isArray(property.enum)
-        ? property.enum.filter((item): item is string => typeof item === "string")
+      type: schemaType(resolvedProperty),
+      description: typeof property.description === "string"
+        ? property.description
+        : typeof resolvedProperty.description === "string"
+          ? resolvedProperty.description
+          : "",
+      enumValues: Array.isArray(resolvedProperty.enum)
+        ? resolvedProperty.enum.filter((item): item is string => typeof item === "string")
         : [],
       schema: property,
     };
@@ -202,7 +244,9 @@ function initialArgumentValuesForSchema(schema: unknown): Record<string, Validat
     if (input.type === "boolean") {
       result[input.name] = Boolean(example);
     } else if (input.type === "object" || input.type === "array") {
-      result[input.name] = JSON.stringify(example, null, 2);
+      result[input.name] = !input.required && isRecord(input.schema) && hasNullVariant(input.schema)
+        ? ""
+        : JSON.stringify(example, null, 2);
     } else if (input.enumValues.length > 0) {
       result[input.name] = input.enumValues[0] ?? "";
     } else if (typeof example === "number") {

@@ -447,10 +447,8 @@
           "installTarget": {
             "anyOf": [
               {
-                "enum": [
-                  "remote",
-                  "package"
-                ],
+                "maxLength": 50,
+                "pattern": "^(remote|package)(:\\d+)?$",
                 "type": "string"
               },
               {
@@ -1091,6 +1089,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The installed MCP server could not provide its tool list."
           }
         },
         "summary": "List Installed Mcp Server Tools",

@@ -438,6 +438,58 @@ def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(
     assert install.secret_config == {"environment": {"WEATHER_TOKEN": "secret"}}
 
 
+def test_install_server_runtime_uses_explicit_package_index(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "weather-mcp",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            },
+            {
+                "registryType": "oci",
+                "identifier": "docker.io/example/weather:1.0.0",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            },
+        ],
+    )
+    seen_commands = []
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda command, **kwargs: seen_commands.append(command),
+    )
+
+    install = install_server_runtime(
+        server,
+        install_target="package:1",
+        install_root=tmp_path,
+    )
+
+    assert install.install_type == "oci"
+    assert install.runtime_config["registryType"] == "oci"
+    assert install.runtime_config["package"]["identifier"] == "docker.io/example/weather:1.0.0"
+    assert seen_commands == [["/bin/docker", "pull", "docker.io/example/weather:1.0.0"]]
+
+
+def test_install_server_runtime_rejects_missing_package_index(tmp_path) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "weather-mcp",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            },
+        ],
+    )
+
+    with pytest.raises(MCPServerInstallationUnsupportedError, match="package installation target 2"):
+        install_server_runtime(server, install_target="package:2", install_root=tmp_path)
+
+
 def test_install_server_runtime_creates_uvx_runtime_manifest(tmp_path, monkeypatch) -> None:
     server = server_version(
         packages=[
@@ -479,6 +531,42 @@ def test_install_server_runtime_creates_uvx_runtime_manifest(tmp_path, monkeypat
             "GRAFANA_SERVICE_ACCOUNT_TOKEN": "token",
         }
     }
+
+
+def test_install_server_runtime_creates_uvx_source_runtime_manifest(tmp_path, monkeypatch) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "uvx",
+                "identifier": "git+https://github.com/netboxlabs/netbox-mcp-server@v1.2.1",
+                "version": "1.2.1",
+                "transport": {"type": "stdio"},
+                "packageArguments": [{"value": "netbox-mcp-server"}],
+                "environmentVariables": [
+                    {"name": "NETBOX_URL", "isRequired": True},
+                    {"name": "NETBOX_TOKEN", "isRequired": True, "isSecret": True},
+                ],
+            }
+        ]
+    )
+    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+
+    install = install_server_runtime(
+        server,
+        config_values={
+            "NETBOX_URL": "https://netbox.example.com",
+            "NETBOX_TOKEN": "token",
+        },
+        install_root=tmp_path,
+    )
+
+    assert install.install_type == "uvx"
+    assert install.runtime_config["command"] == "/bin/uvx"
+    assert install.runtime_config["args"] == [
+        "--from",
+        "git+https://github.com/netboxlabs/netbox-mcp-server@v1.2.1",
+        "netbox-mcp-server",
+    ]
 
 
 def test_install_server_runtime_stores_custom_package_headers(tmp_path, monkeypatch) -> None:

@@ -92,10 +92,15 @@ export type mcpRegistryListInstalledServerToolsResponse422 = {
   status: 422
 }
 
+export type mcpRegistryListInstalledServerToolsResponse502 = {
+  data: ErrorResponse
+  status: 502
+}
+
 export type mcpRegistryListInstalledServerToolsResponseSuccess = (mcpRegistryListInstalledServerToolsResponse200) & {
   headers: Headers;
 };
-export type mcpRegistryListInstalledServerToolsResponseError = (mcpRegistryListInstalledServerToolsResponse404 | mcpRegistryListInstalledServerToolsResponse422) & {
+export type mcpRegistryListInstalledServerToolsResponseError = (mcpRegistryListInstalledServerToolsResponse404 | mcpRegistryListInstalledServerToolsResponse422 | mcpRegistryListInstalledServerToolsResponse502) & {
   headers: Headers;
 };
 

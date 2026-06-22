@@ -17,7 +17,16 @@ import type {
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
 
-type InstallTarget = "remote" | "package";
+type InstallTarget = string;
+type InstallTargetKind = "remote" | "package";
+
+type InstallTargetOption = {
+  value: InstallTarget;
+  kind: InstallTargetKind;
+  index: number;
+  label: string;
+  description: string;
+};
 
 type InstallField = {
   name: string;
@@ -105,23 +114,68 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
   return { icon: Package, primary: "Unspecified", secondary: "" };
 }
 
-function installTargetOptions(entry: MCPRegistryServerResponse) {
-  const options: Array<{ value: InstallTarget; label: string }> = [];
-  if (entry.server.packages?.length) {
-    options.push({ value: "package", label: "Local runtime" });
-  }
-  if (entry.server.remotes?.length) {
-    options.push({ value: "remote", label: "Remote endpoint" });
-  }
-  return options;
+function packageDescription(packageDefinition: Record<string, unknown>) {
+  return stringValue(packageDefinition.identifier) || "Run this MCP server from a package or image.";
+}
+
+function remoteDescription(remote: Record<string, unknown>) {
+  const url = stringValue(remote.url);
+  return url ? displayHost(url) : "Connect to an existing MCP endpoint.";
+}
+
+function installTargetOptions(entry: MCPRegistryServerResponse): InstallTargetOption[] {
+  const packageOptions = (entry.server.packages ?? []).map((packageDefinition, index) => {
+    const packageRecord = packageDefinition as Record<string, unknown>;
+    const registryType = stringValue(packageRecord.registryType) || "package";
+    return {
+      value: `package:${index}`,
+      kind: "package" as const,
+      index,
+      label: runtimeDisplayName(registryType),
+      description: packageDescription(packageRecord),
+    };
+  });
+  const remoteOptions = (entry.server.remotes ?? []).map((remote, index) => {
+    const remoteRecord = remote as Record<string, unknown>;
+    const type = stringValue(remoteRecord.type) || "remote";
+    return {
+      value: `remote:${index}`,
+      kind: "remote" as const,
+      index,
+      label: runtimeDisplayName(type),
+      description: remoteDescription(remoteRecord),
+    };
+  });
+  return [...packageOptions, ...remoteOptions];
 }
 
 function defaultInstallTarget(entry: MCPRegistryServerResponse): InstallTarget {
-  return entry.server.packages?.length ? "package" : "remote";
+  return installTargetOptions(entry)[0]?.value ?? "package:0";
 }
 
 function installTargetFromInstallation(installation: MCPServerInstallationRead): InstallTarget {
-  return installation.installType === "remote" ? "remote" : "package";
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  if (installation.installType === "remote") {
+    const transport = runtimeConfig.transport as Record<string, unknown> | undefined;
+    const transportUrl = stringValue(transport?.url);
+    const remoteIndex = (installation.server.remotes ?? []).findIndex((remote) => {
+      const remoteRecord = remote as Record<string, unknown>;
+      return stringValue(remoteRecord.url) === transportUrl;
+    });
+    return `remote:${remoteIndex >= 0 ? remoteIndex : 0}`;
+  }
+
+  const packageConfig = runtimeConfig.package as Record<string, unknown> | undefined;
+  const packageIdentifier = stringValue(packageConfig?.identifier);
+  const packageRegistryType = stringValue(packageConfig?.registryType);
+  const packageIndex = (installation.server.packages ?? []).findIndex((packageDefinition) => {
+    const packageRecord = packageDefinition as Record<string, unknown>;
+    return (
+      stringValue(packageRecord.identifier) === packageIdentifier &&
+      stringValue(packageRecord.registryType).toLowerCase() === packageRegistryType.toLowerCase()
+    );
+  });
+  return `package:${packageIndex >= 0 ? packageIndex : 0}`;
 }
 
 function serverResponseFromInstallation(installation: MCPServerInstallationRead): MCPRegistryServerResponse {
@@ -164,10 +218,41 @@ function configurationSummary(entry: MCPRegistryServerResponse) {
   };
 }
 
+function installTargetKind(target: InstallTarget): InstallTargetKind {
+  return target.startsWith("remote") ? "remote" : "package";
+}
+
+function installTargetIndex(target: InstallTarget) {
+  const rawIndex = target.split(":")[1];
+  const index = Number.parseInt(rawIndex ?? "0", 10);
+  return Number.isFinite(index) && index >= 0 ? index : 0;
+}
+
+function installTargetPayloadValue(target: InstallTarget) {
+  const kind = installTargetKind(target);
+  const index = installTargetIndex(target);
+  return index === 0 ? kind : `${kind}:${index}`;
+}
+
+function selectedInstallTargetOption(
+  entry: MCPRegistryServerResponse,
+  target: InstallTarget,
+): InstallTargetOption {
+  return installTargetOptions(entry).find((option) => option.value === target) ?? {
+    value: target,
+    kind: installTargetKind(target),
+    index: installTargetIndex(target),
+    label: installTargetKind(target) === "remote" ? "Remote endpoint" : "Local runtime",
+    description: "",
+  };
+}
+
 function installFields(entry: MCPRegistryServerResponse, target: InstallTarget): InstallField[] {
-  const remote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
+  const targetKind = installTargetKind(target);
+  const targetIndex = installTargetIndex(target);
+  const remote = entry.server.remotes?.[targetIndex] as Record<string, unknown> | undefined;
   const remoteHeaders = Array.isArray(remote?.headers) ? (remote.headers as Record<string, unknown>[]) : [];
-  const packageDefinition = entry.server.packages?.[0] as Record<string, unknown> | undefined;
+  const packageDefinition = entry.server.packages?.[targetIndex] as Record<string, unknown> | undefined;
   const environmentVariables = Array.isArray(packageDefinition?.environmentVariables)
     ? (packageDefinition.environmentVariables as Record<string, unknown>[])
     : [];
@@ -175,7 +260,7 @@ function installFields(entry: MCPRegistryServerResponse, target: InstallTarget):
     ? (packageDefinition.packageArguments as Record<string, unknown>[])
     : [];
 
-  const connectionFields = (target === "remote" ? remoteHeaders : environmentVariables).map((field) => ({
+  const connectionFields = (targetKind === "remote" ? remoteHeaders : environmentVariables).map((field) => ({
     name: String(field.name ?? ""),
     description: String(field.description ?? ""),
     required: Boolean(field.isRequired),
@@ -185,7 +270,7 @@ function installFields(entry: MCPRegistryServerResponse, target: InstallTarget):
     options: Array.isArray(field.options) ? field.options.map(String) : [],
     section: "connection" as const,
   }));
-  const runtimeFields = target === "package"
+  const runtimeFields = targetKind === "package"
     ? packageArguments.map((field) => ({
         name: String(field.name ?? ""),
         description: String(field.description ?? ""),
@@ -245,10 +330,54 @@ function configuredFieldNames(installation: MCPServerInstallationRead | null) {
     .map((item) => String(item.name)));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (!isRecord(item)) {
+          return formatApiErrorDetail(item);
+        }
+        const location = Array.isArray(item.loc)
+          ? item.loc.filter((part) => part !== "body").join(".")
+          : "";
+        const message = typeof item.msg === "string" ? item.msg : formatApiErrorDetail(item);
+        return location ? `${location}: ${message}` : message;
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+  if (isRecord(detail)) {
+    for (const key of ["detail", "message", "error"]) {
+      const nested = formatApiErrorDetail(detail[key]);
+      if (nested) {
+        return nested;
+      }
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
 async function responseErrorMessage(response: Response, fallback: string) {
   try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || fallback;
+    const payload = (await response.json()) as { detail?: unknown; message?: unknown; error?: unknown };
+    return (
+      formatApiErrorDetail(payload.detail) ||
+      formatApiErrorDetail(payload.message) ||
+      formatApiErrorDetail(payload.error) ||
+      fallback
+    );
   } catch {
     return fallback;
   }
@@ -377,6 +506,9 @@ export function InstallFormClient({
   const customHeaderId = useRef(0);
 
   const availableInstallTargets = selectedServer ? installTargetOptions(selectedServer) : [];
+  const selectedInstallTargetDetails = selectedServer
+    ? selectedInstallTargetOption(selectedServer, selectedInstallTarget)
+    : null;
   const selectedFields = selectedServer ? installFields(selectedServer, selectedInstallTarget) : [];
   const connectionFields = selectedFields.filter((field) => field.section === "connection");
   const runtimeFields = selectedFields.filter((field) => field.section === "runtime");
@@ -501,7 +633,7 @@ export function InstallFormClient({
         body: JSON.stringify({
           version: initialInstallation?.installedVersion ?? selectedServer.server.version,
           configName: trimmedConfigName,
-          installTarget: selectedInstallTarget,
+          installTarget: installTargetPayloadValue(selectedInstallTarget),
           configValues: installPayloadValues(),
         }),
       });
@@ -643,16 +775,29 @@ export function InstallFormClient({
                   <div className="grid gap-2">
                     <Label>Installation target</Label>
                     <div className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm">
-                      {selectedInstallTarget === "remote" ? <Network className="size-4 text-muted-foreground" /> : <Package className="size-4 text-muted-foreground" />}
-                      {selectedInstallTarget === "remote" ? "Remote endpoint" : "Local runtime"}
+                      {selectedInstallTargetDetails?.kind === "remote" ? (
+                        <Network className="size-4 text-muted-foreground" />
+                      ) : (
+                        <Package className="size-4 text-muted-foreground" />
+                      )}
+                      <span className="min-w-0">
+                        <span className="block font-medium">
+                          {selectedInstallTargetDetails?.label ?? "Local runtime"}
+                        </span>
+                        {selectedInstallTargetDetails?.description ? (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {selectedInstallTargetDetails.description}
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                   </div>
                 ) : availableInstallTargets.length > 1 ? (
                   <div className="grid gap-2 md:col-span-2">
                     <Label>Installation target</Label>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-2 md:grid-cols-2">
                       {availableInstallTargets.map((option) => {
-                        const Icon = option.value === "remote" ? Network : Package;
+                        const Icon = option.kind === "remote" ? Network : Package;
                         const selected = selectedInstallTarget === option.value;
                         return (
                           <button
@@ -662,11 +807,9 @@ export function InstallFormClient({
                             type="button"
                           >
                             <Icon className="mt-0.5 size-4 text-muted-foreground" />
-                            <div>
-                              <div className="text-sm font-medium">{option.value === "remote" ? "Remote endpoint" : "Local runtime"}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {option.value === "remote" ? "Connect to an existing MCP endpoint." : "Run this MCP server from a package or image."}
-                              </div>
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium">{option.label}</div>
+                              <div className="break-all text-xs text-muted-foreground">{option.description}</div>
                             </div>
                           </button>
                         );

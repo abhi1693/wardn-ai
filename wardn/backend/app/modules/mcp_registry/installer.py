@@ -430,12 +430,51 @@ def npm_bin_requires_node(executable: Path) -> bool:
     return target.suffix == ".js"
 
 
+def parse_install_target(install_target: str | None) -> tuple[str | None, int]:
+    if not install_target:
+        return None, 0
+
+    target_kind, separator, target_index = install_target.partition(":")
+    if target_kind not in {"remote", "package"}:
+        raise MCPServerInstallationUnsupportedError(
+            f"MCP server installation target is not supported: {install_target}"
+        )
+    if not separator:
+        return target_kind, 0
+    try:
+        index = int(target_index)
+    except ValueError as exc:
+        raise MCPServerInstallationUnsupportedError(
+            f"MCP server installation target is not supported: {install_target}"
+        ) from exc
+    if index < 0:
+        raise MCPServerInstallationUnsupportedError(
+            f"MCP server installation target is not supported: {install_target}"
+        )
+    return target_kind, index
+
+
+def indexed_install_definition(
+    definitions: list[dict[str, Any]],
+    index: int,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    try:
+        return definitions[index]
+    except IndexError as exc:
+        raise MCPServerInstallationUnsupportedError(
+            f"MCP server does not define {label} installation target {index}"
+        ) from exc
+
+
 def build_remote_install(
     server: MCPServerVersion,
     install_path: Path,
     config_values: dict[str, str],
+    target_index: int = 0,
 ) -> MCPRuntimeInstall:
-    remote = server.remotes[0]
+    remote = indexed_install_definition(server.remotes, target_index, label="remote")
     headers = remote.get("headers", []) if isinstance(remote.get("headers"), list) else []
     require_config_values(headers, config_values, label="connection settings")
     configured_headers = {
@@ -643,6 +682,14 @@ def build_uvx_install(
     require_config_values(package_args, config_values, label="package arguments")
     configured_env = configured_values(env_vars, config_values)
     configured_args = configured_package_arguments(package_args, config_values)
+    if identifier.startswith(("git+", "http://", "https://", "file:")) or identifier.startswith((".", "/")):
+        if not configured_args:
+            raise MCPServerInstallationUnsupportedError(
+                "uvx source installs require a package argument with the command to run"
+            )
+        runtime_args = ["--from", identifier, *configured_args]
+    else:
+        runtime_args = [identifier, *configured_args]
     public_package = public_package_config(package, env_vars, package_args, config_values)
     secret_config = package_secret_config(env_vars, package_args, config_values)
     runtime_config = {
@@ -654,7 +701,7 @@ def build_uvx_install(
         "package": public_package,
         "transport": package.get("transport", {"type": "stdio"}),
         "command": executable,
-        "args": [identifier, *configured_args],
+        "args": runtime_args,
         "cwd": str(install_path),
         "requiresConfiguration": False,
     }
@@ -775,8 +822,9 @@ def build_package_install(
     server: MCPServerVersion,
     install_path: Path,
     config_values: dict[str, str],
+    target_index: int = 0,
 ) -> MCPRuntimeInstall:
-    package = server.packages[0]
+    package = indexed_install_definition(server.packages, target_index, label="package")
     registry_type = str(package.get("registryType", "")).casefold()
     if registry_type == "npm":
         return build_npm_install(server, package, install_path, config_values)
@@ -806,11 +854,22 @@ def install_server_runtime(
     temporary_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        selected_target = install_target or selected_install_target(server, config_values)
+        parsed_target, target_index = parse_install_target(install_target)
+        selected_target = parsed_target or selected_install_target(server, config_values)
         if selected_target == "remote" and server.remotes:
-            runtime_install = build_remote_install(server, temporary_path, config_values)
+            runtime_install = build_remote_install(
+                server,
+                temporary_path,
+                config_values,
+                target_index,
+            )
         elif selected_target == "package" and server.packages:
-            runtime_install = build_package_install(server, temporary_path, config_values)
+            runtime_install = build_package_install(
+                server,
+                temporary_path,
+                config_values,
+                target_index,
+            )
         else:
             raise MCPServerInstallationUnsupportedError(
                 "MCP server does not define a remote or package installation target"

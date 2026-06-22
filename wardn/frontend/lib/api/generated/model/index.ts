@@ -45,7 +45,6 @@ export * from './mCPServerInstallationToolValidationResponseResult';
 export * from './mCPServerInstallationToolValidationResponseStatus';
 export * from './mCPServerInstallRequest';
 export * from './mCPServerInstallRequestConfigValues';
-export * from './mCPServerInstallRequestInstallTarget';
 export * from './mCPServerToolRead';
 export * from './mCPServerToolReadAnnotations';
 export * from './mCPServerToolReadInputSchema';
