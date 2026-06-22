@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkspaceRead } from "@/lib/api/generated/model";
+import { selectedOrganizationCookie } from "@/lib/workspace-types";
 
 type WorkspaceFormProps = {
   initialWorkspace?: WorkspaceRead;
@@ -24,6 +25,10 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function setSelectionCookie(name: string, value: string) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
 }
 
 export function WorkspaceForm({ initialWorkspace, mode, organizationId }: WorkspaceFormProps) {
@@ -67,7 +72,8 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
       setSubmitting(false);
       return;
     }
-    router.push(`/organizations/${organizationId}`);
+    setSelectionCookie(selectedOrganizationCookie, organizationId);
+    router.push(`/org/${encodeURIComponent(organizationId)}/workspaces`);
     router.refresh();
   }
 

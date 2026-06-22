@@ -11,6 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { OrganizationRead } from "@/lib/api/generated/model";
+import {
+  selectedOrganizationCookie,
+  selectedWorkspaceCookie,
+} from "@/lib/workspace-types";
 
 type OrganizationFormProps = {
   initialOrganization?: OrganizationRead;
@@ -23,6 +27,10 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function setSelectionCookie(name: string, value: string, maxAge = 31536000) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; samesite=lax`;
 }
 
 export function OrganizationForm({ initialOrganization, mode }: OrganizationFormProps) {
@@ -64,7 +72,9 @@ export function OrganizationForm({ initialOrganization, mode }: OrganizationForm
       return;
     }
     const organization = (await response.json()) as OrganizationRead;
-    router.push(`/organizations/${organization.id}`);
+    setSelectionCookie(selectedOrganizationCookie, organization.id);
+    setSelectionCookie(selectedWorkspaceCookie, "", 0);
+    router.push(`/org/${encodeURIComponent(organization.id)}/workspaces`);
     router.refresh();
   }
 

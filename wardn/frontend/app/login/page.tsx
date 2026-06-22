@@ -56,8 +56,7 @@ export default function LoginPage() {
       return;
     }
 
-    const nextPath = new URLSearchParams(window.location.search).get("next") ?? "/";
-    router.replace(nextPath.startsWith("/") ? nextPath : "/");
+    router.replace("/org");
     router.refresh();
   }
 

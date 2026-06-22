@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 const sessionCookieName = "wardn_session";
 const loginPath = "/login";
+const organizationSelectionPath = "/org";
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -13,7 +14,7 @@ export function proxy(request: NextRequest) {
       return NextResponse.next();
     }
 
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL(organizationSelectionPath, request.url));
   }
 
   if (hasSession) {
