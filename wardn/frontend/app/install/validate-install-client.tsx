@@ -514,9 +514,6 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
               <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
                 {installation.server.title || installation.serverName}
               </h3>
-              <p className="mt-1 break-all text-sm leading-5 text-[var(--on-surface-variant)]">
-                {installation.serverName}
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -529,10 +526,6 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
               <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
                 {installation.configName}
               </h3>
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--on-secondary-container)]">
-                <div className="size-2 rounded-full bg-emerald-500" />
-                {installation.status}
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -600,9 +593,6 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                     <span className="block truncate text-sm font-semibold leading-5 text-[var(--on-surface)]">
                       {tool.title || tool.toolName}
                     </span>
-                    <span className="mt-0.5 block truncate text-[11px] leading-4 text-[var(--on-surface-variant)]">
-                      {tool.toolName}
-                    </span>
                   </button>
                 ))}
               </div>
@@ -618,22 +608,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                   <CardTitle className="text-2xl font-bold leading-8 tracking-normal text-[var(--on-surface)]">
                     {selectedTool?.title || selectedTool?.toolName || "Select a tool"}
                   </CardTitle>
-                  {selectedTool ? (
-                    <p className="mt-1 break-all text-sm leading-5 text-[var(--on-surface-variant)]">
-                      {selectedTool.toolName}
-                    </p>
-                  ) : null}
                 </div>
-                {selectedTool ? (
-                  <div className="flex flex-wrap gap-2">
-                    <span className="rounded border border-[var(--outline-variant)]/30 bg-[var(--surface-container)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-surface-variant)]">
-                      {selectedInputs.length} inputs
-                    </span>
-                    <span className="rounded border border-[var(--outline-variant)]/30 bg-[var(--surface-container)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-surface-variant)]">
-                      {selectedInputs.filter((input) => input.required).length} required
-                    </span>
-                  </div>
-                ) : null}
               </div>
             </CardHeader>
             <CardContent className="space-y-6 p-6">
