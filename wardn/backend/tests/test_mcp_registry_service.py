@@ -11,7 +11,11 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.installer import MCPRuntimeInstall
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_registry.models import (
+    MCPServerInstallation,
+    MCPServerToolSchema,
+    MCPServerVersion,
+)
 from app.modules.mcp_registry.schemas import (
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
@@ -520,6 +524,79 @@ async def test_validate_installation_tool_reports_passed_result(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+    cached_tool = MCPServerToolSchema(
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        tool_name="get_forecast",
+        title="Get forecast",
+        description="Get weather forecast",
+        input_schema={
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+        },
+        output_schema=None,
+        annotations={},
+        source_hash="hash",
+        is_active=True,
+    )
+    refreshed = {}
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def count_active_tool_schemas(*args, **kwargs):
+        return 0
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        refreshed["installation"] = kwargs["installation"]
+        refreshed["server"] = kwargs["server"]
+
+    async def list_active_tool_schemas(*args, **kwargs):
+        return [cached_tool]
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(
+        service.tool_repository,
+        "count_active_tool_schemas",
+        count_active_tool_schemas,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+    monkeypatch.setattr(
+        service.tool_repository,
+        "list_active_tool_schemas",
+        list_active_tool_schemas,
+    )
+
+    response = await service.list_installation_tools(FakeSession(), installation.id)
+
+    assert response.server_name == "io.github.example/weather"
+    assert response.config_name == "default"
+    assert response.server_version == "1.0.0"
+    assert response.cache["refreshed"] is True
+    assert response.tools[0].tool_name == "get_forecast"
+    assert response.tools[0].input_schema["required"] == ["location"]
+    assert refreshed == {"installation": installation, "server": server}
+
+
+@pytest.mark.asyncio
 async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
@@ -555,6 +632,48 @@ async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatc
     assert response.status == "failed"
     assert response.is_error is True
     assert response.error == "invalid authentication credentials"
+
+
+@pytest.mark.asyncio
+async def test_validate_installation_tool_reports_text_only_invalid_input(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Invalid input: expected string, received undefined",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = await service.validate_installation_tool(
+        FakeSession(),
+        installation.id,
+        MCPServerInstallationToolValidationRequest(toolName="query-docs"),
+    )
+
+    assert response.status == "failed"
+    assert response.is_error is True
+    assert response.error == "Invalid input: expected string, received undefined"
 
 
 @pytest.mark.asyncio

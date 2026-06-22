@@ -25,6 +25,21 @@ async def refresh_tool_schemas(
         raise LookupError("enabled MCP server was not found")
 
     installation, server = row
+    return await refresh_tool_schemas_for_installation(
+        session,
+        installation=installation,
+        server=server,
+        runtime_manager=runtime_manager,
+    )
+
+
+async def refresh_tool_schemas_for_installation(
+    session: AsyncSession,
+    *,
+    installation,
+    server,
+    runtime_manager: MCPRuntimeManager | None = None,
+) -> MCPToolRefreshResult:
     manager = runtime_manager or get_runtime_manager()
     tools = manager.list_tools(installation)
     tool_count = await tool_repository.upsert_tool_schemas(

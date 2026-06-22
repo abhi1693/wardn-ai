@@ -18,6 +18,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/health/ready",
         "/api/v1/mcp/gateway",
         "/api/v1/mcp/registry/installed-server-configs/{installation_id}",
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}/tools",
         "/api/v1/mcp/registry/installed-server-configs/{installation_id}/validate-tool",
         "/api/v1/mcp/registry/installed-servers",
         "/api/v1/mcp/registry/installed-servers/updates",
@@ -88,6 +89,9 @@ def test_mcp_registry_openapi_contract() -> None:
     installed_config_validation = schema["paths"][
         "/api/v1/mcp/registry/installed-server-configs/{installation_id}/validate-tool"
     ]["post"]
+    installed_config_tools = schema["paths"][
+        "/api/v1/mcp/registry/installed-server-configs/{installation_id}/tools"
+    ]["get"]
     installation_path = schema["paths"]["/api/v1/mcp/registry/installed-servers/{server_name}"]
     install = installation_path["put"]
     uninstall = installation_path["delete"]
@@ -132,6 +136,10 @@ def test_mcp_registry_openapi_contract() -> None:
     }
     assert installed_config_validation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallationToolValidationResponse"
+    }
+    assert installed_config_tools["operationId"] == "mcp_registry_list_installed_server_tools"
+    assert installed_config_tools["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPServerInstallationToolsResponse"
     }
     assert update["operationId"] == "mcp_registry_update_installed_servers"
     assert update["requestBody"]["content"]["application/json"]["schema"] == {

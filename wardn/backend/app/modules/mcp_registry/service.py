@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
-from app.modules.mcp_registry import repository
+from app.modules.mcp_registry import repository, tool_repository
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
@@ -22,11 +22,14 @@ from app.modules.mcp_registry.schemas import (
     MCPServerDocument,
     MCPServerInstallationListResponse,
     MCPServerInstallationRead,
+    MCPServerInstallationToolsResponse,
     MCPServerInstallRequest,
     MCPServerInstallationToolValidationRequest,
     MCPServerInstallationToolValidationResponse,
+    MCPServerToolRead,
 )
 from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 
 
 def official_metadata(payload: MCPServerCreate) -> MCPRegistryOfficialMetadata | None:
@@ -385,6 +388,91 @@ async def list_installations(session) -> MCPServerInstallationListResponse:
     )
 
 
+def tool_schema_response(tool) -> MCPServerToolRead:
+    return MCPServerToolRead(
+        server_name=tool.server_name,
+        server_version=tool.server_version,
+        tool_name=tool.tool_name,
+        title=tool.title or tool.tool_name,
+        description=tool.description or "",
+        input_schema=tool.input_schema or {"type": "object"},
+        output_schema=tool.output_schema,
+        annotations=tool.annotations or {},
+    )
+
+
+def first_text_content(result: dict | None) -> str:
+    if not result:
+        return ""
+    content = result.get("content")
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, dict):
+            return str(first.get("text") or "")
+    return ""
+
+
+def validation_error_from_result(result: dict | None) -> str:
+    text = first_text_content(result)
+    if not result:
+        return ""
+    if result.get("isError"):
+        return text
+
+    normalized = text.strip().casefold()
+    if normalized.startswith(("invalid input", "invalid request", "error:")):
+        return text
+    return ""
+
+
+async def list_installation_tools(
+    session,
+    installation_id,
+) -> MCPServerInstallationToolsResponse:
+    installation = await repository.get_installation_by_id(session, installation_id)
+    if installation is None:
+        raise MCPServerInstallationNotFoundError("server configuration is not installed")
+
+    server = await repository.get_server_version(
+        session,
+        installation.server_name,
+        installation.installed_version,
+        include_deleted=True,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("installed server version not found")
+
+    refreshed = False
+    tool_count = await tool_repository.count_active_tool_schemas(
+        session,
+        server_name=server.name,
+        server_version=server.version,
+    )
+    if tool_count == 0:
+        await refresh_tool_schemas_for_installation(
+            session,
+            installation=installation,
+            server=server,
+        )
+        refreshed = True
+
+    tools = await tool_repository.list_active_tool_schemas(
+        session,
+        server_name=server.name,
+        server_version=server.version,
+    )
+    return MCPServerInstallationToolsResponse(
+        server_name=installation.server_name,
+        config_name=installation.config_name or "default",
+        server_version=server.version,
+        tools=[tool_schema_response(tool) for tool in tools],
+        cache={
+            "mode": "cached-with-refresh" if refreshed else "cached",
+            "refreshed": refreshed,
+        },
+    )
+
+
 async def validate_installation_tool(
     session,
     installation_id,
@@ -413,13 +501,8 @@ async def validate_installation_tool(
             tool_name=payload.tool_name,
             arguments=payload.arguments,
         )
-        is_error = bool(result.get("isError"))
-        if is_error:
-            content = result.get("content")
-            if isinstance(content, list) and content:
-                first = content[0]
-                if isinstance(first, dict):
-                    error = str(first.get("text") or "")
+        error = validation_error_from_result(result)
+        is_error = bool(error)
     except (MCPGatewayUpstreamError, ValueError) as exc:
         is_error = True
         error = str(exc)

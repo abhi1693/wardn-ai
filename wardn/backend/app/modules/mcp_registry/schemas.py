@@ -137,3 +137,26 @@ class MCPServerInstallationToolValidationResponse(BaseModel):
     error: str = ""
     result: dict[str, Any] | None = None
     validated_at: datetime = Field(alias="validatedAt")
+
+
+class MCPServerToolRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_name: str = Field(alias="serverName")
+    server_version: str = Field(alias="serverVersion")
+    tool_name: str = Field(alias="toolName")
+    title: str
+    description: str
+    input_schema: dict[str, Any] = Field(alias="inputSchema")
+    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
+    annotations: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPServerInstallationToolsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_name: str = Field(alias="serverName")
+    config_name: str = Field(alias="configName")
+    server_version: str = Field(alias="serverVersion")
+    tools: list[MCPServerToolRead]
+    cache: dict[str, Any] = Field(default_factory=dict)

@@ -108,6 +108,24 @@ async def count_active_tool_schemas(
     return int(result.scalar_one())
 
 
+async def list_active_tool_schemas(
+    session: AsyncSession,
+    *,
+    server_name: str,
+    server_version: str,
+) -> list[MCPServerToolSchema]:
+    result = await session.execute(
+        select(MCPServerToolSchema)
+        .where(
+            MCPServerToolSchema.server_name == server_name,
+            MCPServerToolSchema.server_version == server_version,
+            MCPServerToolSchema.is_active.is_(True),
+        )
+        .order_by(MCPServerToolSchema.tool_name.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def upsert_tool_schemas(
     session: AsyncSession,
     *,

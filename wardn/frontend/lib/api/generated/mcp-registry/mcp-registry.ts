@@ -16,6 +16,7 @@ import type {
   MCPServerInstallationRead,
   MCPServerInstallationToolValidationRequest,
   MCPServerInstallationToolValidationResponse,
+  MCPServerInstallationToolsResponse,
   McpRegistryGetServerVersionParams,
   McpRegistryListServerVersionsParams,
   McpRegistryListServersParams
@@ -73,6 +74,60 @@ export const mcpRegistryUninstallServerConfig = async (installationId: string, o
 
   const data: mcpRegistryUninstallServerConfigResponse['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as mcpRegistryUninstallServerConfigResponse
+}
+
+
+export type mcpRegistryListInstalledServerToolsResponse200 = {
+  data: MCPServerInstallationToolsResponse
+  status: 200
+}
+
+export type mcpRegistryListInstalledServerToolsResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type mcpRegistryListInstalledServerToolsResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type mcpRegistryListInstalledServerToolsResponseSuccess = (mcpRegistryListInstalledServerToolsResponse200) & {
+  headers: Headers;
+};
+export type mcpRegistryListInstalledServerToolsResponseError = (mcpRegistryListInstalledServerToolsResponse404 | mcpRegistryListInstalledServerToolsResponse422) & {
+  headers: Headers;
+};
+
+export type mcpRegistryListInstalledServerToolsResponse = (mcpRegistryListInstalledServerToolsResponseSuccess | mcpRegistryListInstalledServerToolsResponseError)
+
+export const getMcpRegistryListInstalledServerToolsUrl = (installationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/mcp/registry/installed-server-configs/${installationId}/tools`
+}
+
+/**
+ * @summary List Installed Mcp Server Tools
+ */
+export const mcpRegistryListInstalledServerTools = async (installationId: string, options?: RequestInit): Promise<mcpRegistryListInstalledServerToolsResponse> => {
+
+  const res = await fetch(getMcpRegistryListInstalledServerToolsUrl(installationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: mcpRegistryListInstalledServerToolsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as mcpRegistryListInstalledServerToolsResponse
 }
 
 

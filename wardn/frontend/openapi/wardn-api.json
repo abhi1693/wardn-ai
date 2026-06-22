@@ -664,6 +664,98 @@
         "title": "MCPServerInstallationToolValidationResponse",
         "type": "object"
       },
+      "MCPServerInstallationToolsResponse": {
+        "properties": {
+          "cache": {
+            "additionalProperties": true,
+            "title": "Cache",
+            "type": "object"
+          },
+          "configName": {
+            "title": "Configname",
+            "type": "string"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "serverVersion": {
+            "title": "Serverversion",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/MCPServerToolRead"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "serverName",
+          "configName",
+          "serverVersion",
+          "tools"
+        ],
+        "title": "MCPServerInstallationToolsResponse",
+        "type": "object"
+      },
+      "MCPServerToolRead": {
+        "properties": {
+          "annotations": {
+            "additionalProperties": true,
+            "title": "Annotations",
+            "type": "object"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputSchema": {
+            "additionalProperties": true,
+            "title": "Inputschema",
+            "type": "object"
+          },
+          "outputSchema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputschema"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "serverVersion": {
+            "title": "Serverversion",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverName",
+          "serverVersion",
+          "toolName",
+          "title",
+          "description",
+          "inputSchema"
+        ],
+        "title": "MCPServerToolRead",
+        "type": "object"
+      },
       "UserRead": {
         "properties": {
           "created_at": {
@@ -949,6 +1041,59 @@
           }
         },
         "summary": "Uninstall Mcp Server Config",
+        "tags": [
+          "mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/mcp/registry/installed-server-configs/{installation_id}/tools": {
+      "get": {
+        "operationId": "mcp_registry_list_installed_server_tools",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerInstallationToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested server configuration is not installed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Installed Mcp Server Tools",
         "tags": [
           "mcp-registry"
         ]
