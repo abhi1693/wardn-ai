@@ -113,7 +113,7 @@ def test_runtime_manager_selects_remote_provider_even_when_kubernetes_configured
     assert DefaultMCPRuntimeManager().provider_name(installation) == RUNTIME_PROVIDER_REMOTE
 
 
-def test_runtime_manager_rejects_kubernetes_package_provider_until_implemented(
+def test_runtime_manager_selects_kubernetes_package_provider_when_configured(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -133,8 +133,7 @@ def test_runtime_manager_rejects_kubernetes_package_provider_until_implemented(
         },
     )
 
-    with pytest.raises(ValueError, match="kubernetes MCP runtime provider is not implemented"):
-        DefaultMCPRuntimeManager().provider_name(installation)
+    assert DefaultMCPRuntimeManager().provider_name(installation) == RUNTIME_PROVIDER_KUBERNETES
 
 
 def test_runtime_fingerprint_changes_when_secret_config_changes() -> None:

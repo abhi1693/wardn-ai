@@ -13,6 +13,7 @@ dependencies = [
   "email-validator>=2.2.0",
   "fastapi>=0.115.0",
   "greenlet>=3.1.0",
+  "kubernetes>=31.0.0",
   "psycopg[binary]>=3.2.0",
   "pydantic-settings>=2.6.0",
   "pwdlib[argon2]>=0.2.1",

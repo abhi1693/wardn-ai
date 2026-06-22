@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     mcp_runtime_provider: str = "local"
     mcp_runtime_local_transport: str = "stdio"
     mcp_runtime_namespace: str = "wardn-runtimes"
+    mcp_runtime_kubernetes_namespace_prefix: str = "wardn"
+    mcp_runtime_kubernetes_allow_kubeconfig: bool = True
+    mcp_runtime_kubernetes_kubeconfig_path: str = ""
+    mcp_runtime_kubernetes_context: str = ""
+    mcp_runtime_kubernetes_adapter_image: str = "wardn-runtime-adapter:latest"
+    mcp_runtime_kubernetes_service_port: int = 8000
     mcp_runtime_idle_timeout_seconds: int = 60 * 10
     mcp_runtime_adapter_startup_timeout_seconds: int = 30
     mcp_runtime_adapter_request_timeout_seconds: int = 300

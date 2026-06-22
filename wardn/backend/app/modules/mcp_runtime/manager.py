@@ -12,6 +12,7 @@ from app.modules.mcp_runtime.provider import (
     RUNTIME_PROVIDER_LOCAL,
     RUNTIME_PROVIDER_REMOTE,
     RUNTIME_TRANSPORT_STDIO,
+    RUNTIME_TRANSPORT_STREAMABLE_HTTP,
     WARDN_CUSTOM_HEADERS_ENV,
     MCPRuntimeProvider,
     RuntimeHealth,
@@ -24,7 +25,11 @@ from app.modules.mcp_runtime.provider import (
     secret_environment,
     secret_headers,
 )
-from app.modules.mcp_runtime.providers import LocalProcessRuntimeProvider, RemoteRuntimeProvider
+from app.modules.mcp_runtime.providers import (
+    KubernetesRuntimeProvider,
+    LocalProcessRuntimeProvider,
+    RemoteRuntimeProvider,
+)
 
 
 class MCPRuntimeManager(Protocol):
@@ -71,10 +76,7 @@ class RuntimeProviderRegistry:
             if configured_provider in (RUNTIME_PROVIDER_AUTO, RUNTIME_PROVIDER_LOCAL):
                 return self._provider(RUNTIME_PROVIDER_LOCAL, installation)
             if configured_provider == RUNTIME_PROVIDER_KUBERNETES:
-                raise ValueError(
-                    "kubernetes MCP runtime provider is not implemented yet; "
-                    "set WARDN_MCP_RUNTIME_PROVIDER=local for package servers"
-                )
+                return self._provider(RUNTIME_PROVIDER_KUBERNETES, installation)
             return self._provider(configured_provider, installation)
 
         raise ValueError(f"MCP server runtime is not supported yet: {kind}")
@@ -105,6 +107,7 @@ class DefaultMCPRuntimeManager:
             [
                 RemoteRuntimeProvider(),
                 LocalProcessRuntimeProvider(),
+                KubernetesRuntimeProvider(),
             ]
         )
 
@@ -162,6 +165,7 @@ __all__ = [
     "RUNTIME_PROVIDER_KUBERNETES",
     "RUNTIME_PROVIDER_LOCAL",
     "RUNTIME_PROVIDER_REMOTE",
+    "RUNTIME_TRANSPORT_STREAMABLE_HTTP",
     "RUNTIME_TRANSPORT_STDIO",
     "RuntimeProviderRegistry",
     "RuntimeHealth",

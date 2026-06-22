@@ -32,6 +32,7 @@ from app.modules.mcp_runtime.provider import (
     RUNTIME_KIND_PACKAGE,
     RUNTIME_PROVIDER_LOCAL,
     RUNTIME_TRANSPORT_STDIO,
+    RUNTIME_TRANSPORT_STREAMABLE_HTTP,
     PackageRuntimeSpec,
     RuntimeHealth,
     RuntimeSpec,
@@ -42,7 +43,7 @@ from app.modules.mcp_runtime.provider import (
 
 TERMINAL_RUNTIME_STATUSES = {"stopped", "failed", "expired"}
 
-RUNTIME_TRANSPORT_ADAPTER = "streamable_http"
+RUNTIME_TRANSPORT_ADAPTER = RUNTIME_TRANSPORT_STREAMABLE_HTTP
 LOCAL_TRANSPORT_ADAPTER = "adapter"
 LOCAL_TRANSPORT_STDIO = "stdio"
 
