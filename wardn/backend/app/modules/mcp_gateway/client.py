@@ -303,6 +303,40 @@ def list_stdio_tools(
         close_stdio_session(session)
 
 
+def list_stdio_session_tools(
+    session: MCPStdioSession,
+    *,
+    request_id_start: int = 2,
+    max_pages: int = 100,
+) -> tuple[list[dict[str, Any]], int]:
+    tools: list[dict[str, Any]] = []
+    cursor = None
+    next_request_id = request_id_start
+    for request_id in range(request_id_start, request_id_start + max_pages):
+        next_request_id = request_id + 1
+        params = {"cursor": cursor} if cursor else {}
+        send_stdio_message(
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/list",
+                "params": params,
+            },
+        )
+        response = read_stdio_response(session, request_id)
+        if "error" in response:
+            raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
+        result = response.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("tools"), list):
+            raise MCPGatewayUpstreamError("upstream tools/list returned no tools array")
+        tools.extend(item for item in result["tools"] if isinstance(item, dict))
+        cursor = result.get("nextCursor")
+        if not cursor:
+            break
+    return tools, next_request_id
+
+
 def call_tool(
     url: str,
     headers: dict[str, str],
@@ -330,6 +364,31 @@ def call_tool(
     return result
 
 
+def call_stdio_session_tool(
+    session: MCPStdioSession,
+    *,
+    request_id: int,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    send_stdio_message(
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        },
+    )
+    response = read_stdio_response(session, request_id)
+    if "error" in response:
+        raise MCPGatewayUpstreamError(f"upstream tools/call failed: {response['error']}")
+    result = response.get("result")
+    if not isinstance(result, dict):
+        raise MCPGatewayUpstreamError("upstream tools/call returned no result")
+    return result
+
+
 def call_stdio_tool(
     command: str,
     args: list[str],
@@ -341,21 +400,11 @@ def call_stdio_tool(
 ) -> dict[str, Any]:
     session = open_stdio_session(command, args, cwd=cwd, environment=environment)
     try:
-        send_stdio_message(
+        return call_stdio_session_tool(
             session,
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
-            },
+            request_id=2,
+            tool_name=tool_name,
+            arguments=arguments,
         )
-        response = read_stdio_response(session, 2)
-        if "error" in response:
-            raise MCPGatewayUpstreamError(f"upstream tools/call failed: {response['error']}")
-        result = response.get("result")
-        if not isinstance(result, dict):
-            raise MCPGatewayUpstreamError("upstream tools/call returned no result")
-        return result
     finally:
         close_stdio_session(session)

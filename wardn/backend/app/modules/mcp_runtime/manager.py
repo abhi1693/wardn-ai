@@ -1,6 +1,8 @@
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 from app.modules.mcp_gateway import client
@@ -113,7 +115,17 @@ def package_runtime(
     return command, args, cwd, secret_environment(installation)
 
 
+@dataclass
+class ManagedStdioSession:
+    session: client.MCPStdioSession
+    next_request_id: int = 2
+
+
 class DefaultMCPRuntimeManager:
+    def __init__(self) -> None:
+        self._stdio_sessions: dict[str, ManagedStdioSession] = {}
+        self._stdio_lock = Lock()
+
     def provider_name(self, installation: MCPServerInstallation) -> str:
         kind = runtime_kind(installation)
         if kind == "remote":
@@ -129,7 +141,14 @@ class DefaultMCPRuntimeManager:
             return client.list_tools(url, headers)
         if kind == "package":
             command, args, cwd, environment = package_runtime(installation)
-            return client.list_stdio_tools(command, args, cwd=cwd, environment=environment)
+            return self._with_stdio_session(
+                installation,
+                command=command,
+                args=args,
+                cwd=cwd,
+                environment=environment,
+                action=lambda managed: self._list_stdio_tools(managed),
+            )
         raise ValueError(f"MCP server runtime is not supported yet: {kind}")
 
     def call_tool(
@@ -150,16 +169,103 @@ class DefaultMCPRuntimeManager:
             )
         if kind == "package":
             command, args, cwd, environment = package_runtime(installation)
-            return client.call_stdio_tool(
-                command,
-                args,
+            return self._with_stdio_session(
+                installation,
+                command=command,
+                args=args,
                 cwd=cwd,
                 environment=environment,
-                tool_name=tool_name,
-                arguments=arguments,
+                action=lambda managed: self._call_stdio_tool(
+                    managed,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                ),
             )
         raise ValueError(f"MCP server runtime is not supported yet: {kind}")
 
+    def _stdio_session_key(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        command: str,
+        args: list[str],
+        cwd: str,
+        environment: dict[str, str],
+    ) -> str:
+        return json.dumps(
+            {
+                "installationId": str(getattr(installation, "id", "")),
+                "command": command,
+                "args": args,
+                "cwd": cwd,
+                "environment": environment,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def _with_stdio_session(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        command: str,
+        args: list[str],
+        cwd: str,
+        environment: dict[str, str],
+        action,
+    ):
+        key = self._stdio_session_key(
+            installation,
+            command=command,
+            args=args,
+            cwd=cwd,
+            environment=environment,
+        )
+        with self._stdio_lock:
+            managed = self._stdio_sessions.get(key)
+            if managed is None or managed.session.process.poll() is not None:
+                managed = ManagedStdioSession(
+                    client.open_stdio_session(command, args, cwd=cwd, environment=environment)
+                )
+                self._stdio_sessions[key] = managed
+            try:
+                return action(managed)
+            except Exception:
+                self._drop_stdio_session(key)
+                raise
+
+    def _drop_stdio_session(self, key: str) -> None:
+        managed = self._stdio_sessions.pop(key, None)
+        if managed is not None:
+            client.close_stdio_session(managed.session)
+
+    def _list_stdio_tools(self, managed: ManagedStdioSession) -> list[dict[str, Any]]:
+        tools, next_request_id = client.list_stdio_session_tools(
+            managed.session,
+            request_id_start=managed.next_request_id,
+        )
+        managed.next_request_id = next_request_id
+        return tools
+
+    def _call_stdio_tool(
+        self,
+        managed: ManagedStdioSession,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        request_id = managed.next_request_id
+        managed.next_request_id += 1
+        return client.call_stdio_session_tool(
+            managed.session,
+            request_id=request_id,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+
 
 def get_runtime_manager() -> MCPRuntimeManager:
-    return DefaultMCPRuntimeManager()
+    return _DEFAULT_RUNTIME_MANAGER
+
+
+_DEFAULT_RUNTIME_MANAGER = DefaultMCPRuntimeManager()
