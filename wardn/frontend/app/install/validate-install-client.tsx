@@ -21,6 +21,7 @@ import type {
   MCPServerInstallationToolValidationResponse,
   MCPServerToolRead,
 } from "@/lib/api/generated/model";
+import { cn } from "@/lib/utils";
 
 type ToolInputProperty = {
   name: string;
@@ -32,6 +33,11 @@ type ToolInputProperty = {
 };
 
 type ValidationArgumentValue = string | boolean;
+
+type ArgumentFieldError = {
+  field: string;
+  message: string;
+};
 
 type GatewayRpcResponse = {
   result?: {
@@ -211,7 +217,7 @@ function initialArgumentValuesForSchema(schema: unknown): Record<string, Validat
 function parseArgumentsFromFields(
   inputs: ToolInputProperty[],
   values: Record<string, ValidationArgumentValue>
-): { argumentsValue: Record<string, unknown>; error: string } {
+): { argumentsValue: Record<string, unknown>; error: ArgumentFieldError | null } {
   const argumentsValue: Record<string, unknown> = {};
 
   for (const input of inputs) {
@@ -225,7 +231,10 @@ function parseArgumentsFromFields(
     const value = typeof rawValue === "string" ? rawValue.trim() : "";
     if (!value) {
       if (input.required) {
-        return { argumentsValue: {}, error: `Required argument missing: ${input.name}` };
+        return {
+          argumentsValue: {},
+          error: { field: input.name, message: `Required argument missing: ${input.name}` },
+        };
       }
       continue;
     }
@@ -233,7 +242,10 @@ function parseArgumentsFromFields(
     if (input.type === "integer" || input.type === "number") {
       const parsed = Number(value);
       if (!Number.isFinite(parsed) || (input.type === "integer" && !Number.isInteger(parsed))) {
-        return { argumentsValue: {}, error: `${input.name} must be a valid ${input.type}.` };
+        return {
+          argumentsValue: {},
+          error: { field: input.name, message: `${input.name} must be a valid ${input.type}.` },
+        };
       }
       argumentsValue[input.name] = parsed;
       continue;
@@ -243,14 +255,23 @@ function parseArgumentsFromFields(
       try {
         const parsed = JSON.parse(value) as unknown;
         if (input.type === "object" && (!isRecord(parsed) || Array.isArray(parsed))) {
-          return { argumentsValue: {}, error: `${input.name} must be a JSON object.` };
+          return {
+            argumentsValue: {},
+            error: { field: input.name, message: `${input.name} must be a JSON object.` },
+          };
         }
         if (input.type === "array" && !Array.isArray(parsed)) {
-          return { argumentsValue: {}, error: `${input.name} must be a JSON array.` };
+          return {
+            argumentsValue: {},
+            error: { field: input.name, message: `${input.name} must be a JSON array.` },
+          };
         }
         argumentsValue[input.name] = parsed;
       } catch {
-        return { argumentsValue: {}, error: `${input.name} must contain valid JSON.` };
+        return {
+          argumentsValue: {},
+          error: { field: input.name, message: `${input.name} must contain valid JSON.` },
+        };
       }
       continue;
     }
@@ -258,7 +279,29 @@ function parseArgumentsFromFields(
     argumentsValue[input.name] = value;
   }
 
-  return { argumentsValue, error: "" };
+  return { argumentsValue, error: null };
+}
+
+function validateRequiredArguments(
+  inputs: ToolInputProperty[],
+  values: Record<string, ValidationArgumentValue>
+): ArgumentFieldError | null {
+  for (const input of inputs) {
+    if (!input.required || input.type === "boolean") {
+      continue;
+    }
+
+    const rawValue = values[input.name];
+    const value = typeof rawValue === "string" ? rawValue.trim() : "";
+    if (!value) {
+      return {
+        field: input.name,
+        message: "This field is required",
+      };
+    }
+  }
+
+  return null;
 }
 
 async function loadToolsFromGateway(
@@ -326,7 +369,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
   const [toolSearch, setToolSearch] = useState("");
   const [selectedToolName, setSelectedToolName] = useState("");
   const [argumentValues, setArgumentValues] = useState<Record<string, ValidationArgumentValue>>({});
-  const [argumentError, setArgumentError] = useState("");
+  const [argumentError, setArgumentError] = useState<ArgumentFieldError | null>(null);
   const [result, setResult] = useState<MCPServerInstallationToolValidationResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoadingTools, setIsLoadingTools] = useState(true);
@@ -355,7 +398,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
   function selectTool(tool: MCPServerToolRead) {
     setSelectedToolName(tool.toolName);
     setArgumentValues(initialArgumentValuesForSchema(tool.inputSchema));
-    setArgumentError("");
+    setArgumentError(null);
     setResult(null);
   }
 
@@ -420,17 +463,23 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
       return;
     }
 
-    const parsedArguments = parseArgumentsFromFields(selectedInputs, argumentValues);
-    if (parsedArguments.error) {
-      setArgumentError(parsedArguments.error);
+    const requiredError = validateRequiredArguments(selectedInputs, argumentValues);
+    if (requiredError) {
+      setArgumentError(requiredError);
       return;
     }
 
     setIsValidating(true);
     setError("");
-    setArgumentError("");
+    setArgumentError(null);
     setResult(null);
     try {
+      const parsedArguments = parseArgumentsFromFields(selectedInputs, argumentValues);
+      if (parsedArguments.error) {
+        setArgumentError(parsedArguments.error);
+        return;
+      }
+
       const response = await fetch(validationEndpoint(installation.id), {
         method: "POST",
         headers: {
@@ -611,6 +660,8 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                       {selectedInputs.map((input) => {
                         const inputId = `validation-argument-${input.name}`;
                         const value = argumentValues[input.name];
+                        const fieldError =
+                          argumentError?.field === input.name ? argumentError.message : "";
 
                         return (
                           <div className="space-y-3" key={input.name}>
@@ -621,13 +672,16 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                   htmlFor={inputId}
                                 >
                                   {input.name}
-                                  {input.required ? <span className="text-[var(--error)]"> *</span> : null}
+                                  {input.required ? <span className="text-red-600"> *</span> : null}
                                 </label>
                                 {input.description ? (
-                                  <CircleHelp
-                                    aria-hidden="true"
-                                    className="size-4 text-[var(--on-surface-variant)]"
-                                  />
+                                  <span
+                                    aria-label={`${input.name} help`}
+                                    className="inline-flex text-[var(--on-surface-variant)]"
+                                    title={input.description}
+                                  >
+                                    <CircleHelp className="size-4" />
+                                  </span>
                                 ) : null}
                               </div>
                               <span className="rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--on-surface-variant)]">
@@ -635,16 +689,13 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                               </span>
                             </div>
 
-                            {input.description ? (
-                              <div className="rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] p-4 font-mono text-[13px] leading-5 text-[var(--on-surface-variant)]">
-                                <span className="font-bold text-primary">Arg:</span>
-                                <br />
-                                <span className="ml-4">{input.description}</span>
-                              </div>
-                            ) : null}
-
                             {input.type === "boolean" ? (
-                              <label className="flex h-11 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-4 text-sm">
+                              <label
+                                className={cn(
+                                  "flex h-11 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-4 text-sm",
+                                  fieldError && "!border-red-500"
+                                )}
+                              >
                                 <input
                                   checked={value === true}
                                   id={inputId}
@@ -653,7 +704,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                       ...current,
                                       [input.name]: event.target.checked,
                                     }));
-                                    setArgumentError("");
+                                    setArgumentError(null);
                                   }}
                                   type="checkbox"
                                 />
@@ -666,12 +717,16 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                     ...current,
                                     [input.name]: value,
                                   }));
-                                  setArgumentError("");
+                                  setArgumentError(null);
                                 }}
                                 value={typeof value === "string" ? value : ""}
                               >
                                 <SelectTrigger
-                                  className="h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                                  className={cn(
+                                    "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
+                                    fieldError &&
+                                      "!border-red-500 focus-visible:!border-red-600 focus-visible:!ring-red-100"
+                                  )}
                                   id={inputId}
                                 >
                                   <SelectValue />
@@ -686,27 +741,34 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                               </Select>
                             ) : input.type === "object" || input.type === "array" ? (
                               <textarea
-                                className="min-h-32 w-full rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                className={cn(
+                                  "min-h-32 w-full rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                  fieldError && "!border-red-500 focus:!border-red-600 focus:!ring-red-100"
+                                )}
                                 id={inputId}
                                 onChange={(event) => {
                                   setArgumentValues((current) => ({
                                     ...current,
                                     [input.name]: event.target.value,
                                   }));
-                                  setArgumentError("");
+                                  setArgumentError(null);
                                 }}
                                 value={typeof value === "string" ? value : ""}
                               />
                             ) : (
                               <Input
-                                className="h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                                className={cn(
+                                  "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
+                                  fieldError &&
+                                    "!border-red-500 focus-visible:!border-red-600 focus-visible:!ring-red-100"
+                                )}
                                 id={inputId}
                                 onChange={(event) => {
                                   setArgumentValues((current) => ({
                                     ...current,
                                     [input.name]: event.target.value,
                                   }));
-                                  setArgumentError("");
+                                  setArgumentError(null);
                                 }}
                                 type={
                                   input.type === "integer" || input.type === "number"
@@ -716,17 +778,16 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                 value={typeof value === "string" ? value : ""}
                               />
                             )}
+                            {fieldError ? (
+                              <p className="text-xs font-medium leading-4 text-red-600">
+                                {fieldError}
+                              </p>
+                            ) : null}
                           </div>
                         );
                       })}
                     </div>
                   )}
-
-                  {argumentError ? (
-                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      {argumentError}
-                    </div>
-                  ) : null}
 
                   <details className="group rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface)]">
                     <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)]">
