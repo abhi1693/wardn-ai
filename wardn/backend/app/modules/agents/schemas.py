@@ -101,6 +101,26 @@ class AgentToolListResponse(BaseModel):
     tools: list[AgentToolRead]
 
 
+class AgentAvailableToolRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_schema_id: uuid.UUID = Field(alias="toolSchemaId")
+    installation_id: uuid.UUID = Field(alias="installationId")
+    workspace_id: uuid.UUID = Field(alias="workspaceId")
+    server_name: str = Field(alias="serverName")
+    config_name: str = Field(alias="configName")
+    tool_name: str = Field(alias="toolName")
+    title: str
+    description: str
+    input_schema: dict[str, Any] = Field(alias="inputSchema")
+    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
+    annotations: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentAvailableToolListResponse(BaseModel):
+    tools: list[AgentAvailableToolRead]
+
+
 class AgentChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
     parts: list[dict[str, Any]] = Field(default_factory=list)

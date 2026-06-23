@@ -22,10 +22,6 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/mcp/gateway",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
-        "/api/v1/organizations/{organization_id}/agents",
-        "/api/v1/organizations/{organization_id}/agents/{agent_id}",
-        "/api/v1/organizations/{organization_id}/agents/{agent_id}/chat",
-        "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}",
         (
@@ -48,6 +44,26 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/workspaces",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/available-tools"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/chat"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/tools"
+        ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/mcp/runtime/sessions"
@@ -224,35 +240,62 @@ def test_llm_provider_credentials_openapi_contract() -> None:
     }
 
 
-def test_agents_openapi_contract() -> None:
+def test_workspace_agents_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
-    agents = schema["paths"]["/api/v1/organizations/{organization_id}/agents"]
-    agent = schema["paths"]["/api/v1/organizations/{organization_id}/agents/{agent_id}"]
+    agents = schema["paths"][
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents"
+    ]
+    available_tools = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/available-tools"
+        )
+    ]
+    agent = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}"
+        )
+    ]
     chat = schema["paths"][
-        "/api/v1/organizations/{organization_id}/agents/{agent_id}/chat"
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/chat"
+        )
     ]
     tools = schema["paths"][
-        "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools"
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/tools"
+        )
     ]
 
-    assert agents["get"]["operationId"] == "agents_list"
+    assert not any(
+        path.startswith("/api/v1/organizations/{organization_id}/agents")
+        for path in schema["paths"]
+    )
+    assert agents["get"]["operationId"] == "workspace_agents_list"
     assert agents["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentListResponse"
     }
-    assert agents["post"]["operationId"] == "agents_create"
+    assert agents["post"]["operationId"] == "workspace_agents_create"
     assert agents["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentCreate"
     }
     assert agents["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentRead"
     }
-    assert agent["get"]["operationId"] == "agents_get"
-    assert agent["patch"]["operationId"] == "agents_update"
+    assert available_tools["get"]["operationId"] == "workspace_agents_list_available_tools"
+    assert available_tools["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentAvailableToolListResponse"
+    }
+    assert agent["get"]["operationId"] == "workspace_agents_get"
+    assert agent["patch"]["operationId"] == "workspace_agents_update"
     assert agent["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentUpdate"
     }
-    assert agent["delete"]["operationId"] == "agents_delete"
-    assert chat["post"]["operationId"] == "agents_chat"
+    assert agent["delete"]["operationId"] == "workspace_agents_delete"
+    assert chat["post"]["operationId"] == "workspace_agents_chat"
     assert chat["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentChatRequest"
     }
@@ -262,11 +305,11 @@ def test_agents_openapi_contract() -> None:
     assert chat["post"]["responses"]["502"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ErrorResponse"
     }
-    assert tools["get"]["operationId"] == "agents_list_tools"
+    assert tools["get"]["operationId"] == "workspace_agents_list_tools"
     assert tools["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentToolListResponse"
     }
-    assert tools["put"]["operationId"] == "agents_replace_tools"
+    assert tools["put"]["operationId"] == "workspace_agents_replace_tools"
     assert tools["put"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentToolAssignmentUpdate"
     }

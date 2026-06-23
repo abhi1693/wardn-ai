@@ -47,12 +47,6 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       icon: PlugZap,
     },
     {
-      label: "Agents",
-      href: organizationId ? `/org/${organizationId}/agents` : "/org",
-      activeKey: "agents",
-      icon: Bot,
-    },
-    {
       label: "Agent Tokens",
       href: organizationId ? `/org/${organizationId}/tokens` : "/org",
       activeKey: "agent-tokens",
@@ -102,6 +96,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: Activity,
     },
     {
+      label: "Agents",
+      href: `${workspaceBasePath}/agents`,
+      activeKey: "workspace-agents",
+      icon: Bot,
+    },
+    {
       label: "Settings",
       href: `/organizations/${encodeURIComponent(
         organizationId
@@ -124,6 +124,7 @@ type AppShellProps = {
     | "registry"
     | "llm-credentials"
     | "agents"
+    | "workspace-agents"
     | "agent-tokens"
     | "runtime"
     | "install";
@@ -146,6 +147,7 @@ export function AppShell({
     active === "workspace-dashboard" ||
     active === "install" ||
     active === "runtime" ||
+    active === "workspace-agents" ||
     active === "workspace-settings";
   const navigationItems = isWorkspaceScope
     ? workspaceNavItems(workspaceContext)

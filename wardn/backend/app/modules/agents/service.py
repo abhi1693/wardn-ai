@@ -20,6 +20,8 @@ from app.modules.agents.exceptions import (
 )
 from app.modules.agents.models import Agent
 from app.modules.agents.schemas import (
+    AgentAvailableToolListResponse,
+    AgentAvailableToolRead,
     AgentChatMessage,
     AgentChatRequest,
     AgentCreate,
@@ -200,11 +202,16 @@ async def list_agents(
     session: AsyncSession,
     user: User,
     organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> AgentListResponse:
-    await require_organization_member(session, user, organization_id)
+    if workspace_id is None:
+        await require_organization_member(session, user, organization_id)
+    else:
+        await require_workspace_member(session, user, organization_id, workspace_id)
     rows = await repository.list_agents(
         session,
         organization_id=organization_id,
+        workspace_id=workspace_id,
         user_id=user.id,
         is_superuser=user.is_superuser,
     )
@@ -218,12 +225,17 @@ async def get_agent(
     user: User,
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> AgentRead:
-    await require_organization_member(session, user, organization_id)
+    if workspace_id is None:
+        await require_organization_member(session, user, organization_id)
+    else:
+        await require_workspace_member(session, user, organization_id, workspace_id)
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")
@@ -235,12 +247,17 @@ async def get_agent_model_for_run(
     user: User,
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[Agent, LLMProviderCredential]:
-    await require_organization_member(session, user, organization_id)
+    if workspace_id is None:
+        await require_organization_member(session, user, organization_id)
+    else:
+        await require_workspace_member(session, user, organization_id, workspace_id)
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")
@@ -307,6 +324,58 @@ async def create_agent(
     await session.flush()
     await session.refresh(agent)
     return agent_response(agent, tool_count=0)
+
+
+async def create_workspace_agent(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: AgentCreate,
+) -> AgentRead:
+    return await create_agent(
+        session,
+        user,
+        organization_id,
+        payload.model_copy(update={"scope": "workspace", "workspace_id": workspace_id}),
+    )
+
+
+def available_tool_response(
+    tool_schema: MCPServerToolSchema,
+    installation: MCPServerInstallation,
+) -> AgentAvailableToolRead:
+    if tool_schema.workspace_id is None or tool_schema.installation_id is None:
+        raise InvalidAgentToolAssignmentError("tool is not workspace assignable")
+    return AgentAvailableToolRead(
+        toolSchemaId=tool_schema.id,
+        installationId=installation.id,
+        workspaceId=tool_schema.workspace_id,
+        serverName=tool_schema.server_name,
+        configName=installation.config_name,
+        toolName=tool_schema.tool_name,
+        title=tool_schema.title,
+        description=tool_schema.description,
+        inputSchema=tool_schema.input_schema,
+        outputSchema=tool_schema.output_schema,
+        annotations=tool_schema.annotations,
+    )
+
+
+async def list_available_agent_tools(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> AgentAvailableToolListResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    rows = await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
+    return AgentAvailableToolListResponse(
+        tools=[
+            available_tool_response(tool_schema, installation)
+            for tool_schema, installation in rows
+        ]
+    )
 
 
 def text_from_chat_message(message: AgentChatMessage) -> str:
@@ -741,12 +810,14 @@ async def stream_agent_chat(
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
     payload: AgentChatRequest,
+    workspace_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
         session,
         user,
         organization_id,
         agent_id,
+        workspace_id=workspace_id,
     )
     messages = provider_messages(payload.messages)
     if not messages:
@@ -769,19 +840,23 @@ async def update_agent(
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
     payload: AgentUpdate,
+    workspace_id: uuid.UUID | None = None,
 ) -> AgentRead:
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
         include_inactive=True,
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")
 
-    scope = payload.scope or agent.scope
-    workspace_id = (
-        payload.workspace_id
+    scope = "workspace" if workspace_id is not None else payload.scope or agent.scope
+    target_workspace_id = (
+        workspace_id
+        if workspace_id is not None
+        else payload.workspace_id
         if "workspace_id" in payload.model_fields_set
         else agent.workspace_id
     )
@@ -790,7 +865,7 @@ async def update_agent(
         user,
         organization_id,
         scope=scope,
-        workspace_id=workspace_id,
+        workspace_id=target_workspace_id,
     )
 
     if payload.name is not None:
@@ -807,14 +882,22 @@ async def update_agent(
         agent.description = payload.description.strip()
     if payload.instructions is not None:
         agent.instructions = payload.instructions.strip()
-    if payload.scope is not None or "workspace_id" in payload.model_fields_set:
+    if (
+        workspace_id is not None
+        or payload.scope is not None
+        or "workspace_id" in payload.model_fields_set
+    ):
         agent.scope = scope
-        agent.workspace_id = workspace_id
+        agent.workspace_id = target_workspace_id
     provider_credential_changed = (
         payload.provider_credential_id is not None
         or "provider_credential_id" in payload.model_fields_set
     )
-    scope_changed = payload.scope is not None or "workspace_id" in payload.model_fields_set
+    scope_changed = (
+        workspace_id is not None
+        or payload.scope is not None
+        or "workspace_id" in payload.model_fields_set
+    )
     provider_credential = None
     if provider_credential_changed:
         provider_credential = await validate_provider_credential(
@@ -853,11 +936,13 @@ async def delete_agent(
     user: User,
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
         include_inactive=True,
     )
     if agent is None:
@@ -900,11 +985,13 @@ async def list_agent_tools(
     user: User,
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> AgentToolListResponse:
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")
@@ -929,11 +1016,13 @@ async def replace_agent_tools(
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
     payload: AgentToolAssignmentUpdate,
+    workspace_id: uuid.UUID | None = None,
 ) -> AgentToolListResponse:
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
         agent_id=agent_id,
+        workspace_id=workspace_id,
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")

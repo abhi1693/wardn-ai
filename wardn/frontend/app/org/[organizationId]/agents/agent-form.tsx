@@ -15,20 +15,18 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AgentRead, OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
-import { cn } from "@/lib/utils";
+import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
 
+import type { AgentAvailableTool } from "./data";
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import { errorMessage } from "../tokens/token-form";
-
-type AgentScope = "organization" | "workspace";
 
 type AgentPayload = {
   name: string;
   description: string;
   instructions: string;
-  scope: AgentScope;
-  workspaceId?: string | null;
+  scope: "workspace";
+  workspaceId: string;
   providerCredentialId?: string | null;
   modelName: string;
   isActive?: boolean;
@@ -36,32 +34,17 @@ type AgentPayload = {
 
 type AgentFormProps = {
   agent?: AgentRead;
+  assignedToolSchemaIds?: string[];
+  availableTools?: AgentAvailableTool[];
   credentials: LlmCredentialRead[];
   organization: OrganizationRead;
-  workspaces: WorkspaceRead[];
+  fixedWorkspaceId: string;
 };
 
 type ProviderModel = {
   id: string;
   name: string;
 };
-
-const scopeOptions: Array<{
-  value: AgentScope;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "organization",
-    label: "Organization",
-    description: "Available across this organization.",
-  },
-  {
-    value: "workspace",
-    label: "Workspace",
-    description: "Available only inside one workspace.",
-  },
-];
 
 function providerLabel(credential: LlmCredentialRead) {
   if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
@@ -73,29 +56,30 @@ function providerLabel(credential: LlmCredentialRead) {
   return credential.provider;
 }
 
-export function AgentForm({ agent, credentials, organization, workspaces }: AgentFormProps) {
+export function AgentForm({
+  agent,
+  assignedToolSchemaIds = [],
+  availableTools = [],
+  credentials,
+  fixedWorkspaceId,
+  organization,
+}: AgentFormProps) {
   const router = useRouter();
   const isEditing = Boolean(agent);
   const [name, setName] = useState(agent?.name ?? "");
   const [description, setDescription] = useState(agent?.description ?? "");
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
-  const [scope, setScope] = useState<AgentScope>(agent?.scope ?? "organization");
-  const [workspaceId, setWorkspaceId] = useState(agent?.workspaceId ?? "");
   const [providerCredentialId, setProviderCredentialId] = useState(
     agent?.providerCredentialId ?? ""
   );
   const [modelName, setModelName] = useState(agent?.modelName ?? "");
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(assignedToolSchemaIds);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(Boolean(agent?.providerCredentialId));
   const [modelError, setModelError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const activeWorkspaces = useMemo(
-    () => workspaces.filter((workspace) => workspace.status === "active"),
-    [workspaces]
-  );
 
   const availableCredentials = useMemo(
     () =>
@@ -106,9 +90,9 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
         if (credential.visibility !== "workspace") {
           return true;
         }
-        return scope === "workspace" && credential.workspaceId === workspaceId;
+        return credential.workspaceId === fixedWorkspaceId;
       }),
-    [credentials, scope, workspaceId]
+    [credentials, fixedWorkspaceId]
   );
 
   const effectiveProviderCredentialId =
@@ -170,8 +154,18 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
     !isLoadingModels &&
     !modelError &&
     !selectedModelUnavailable &&
-    (scope !== "workspace" || workspaceId.length > 0) &&
     (!effectiveProviderCredentialId || modelName.trim().length > 0);
+
+  const formBasePath = `/api/organizations/${organization.id}/workspaces/${fixedWorkspaceId}/agents`;
+  const pageBasePath = `/org/${organization.id}/workspace/${fixedWorkspaceId}/agents`;
+
+  function toggleTool(toolSchemaId: string) {
+    setSelectedToolIds((current) =>
+      current.includes(toolSchemaId)
+        ? current.filter((entry) => entry !== toolSchemaId)
+        : [...current, toolSchemaId]
+    );
+  }
 
   async function submitAgent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -186,8 +180,8 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
       name: name.trim(),
       description: description.trim(),
       instructions: instructions.trim(),
-      scope,
-      workspaceId: scope === "workspace" ? workspaceId : null,
+      scope: "workspace",
+      workspaceId: fixedWorkspaceId,
       providerCredentialId: effectiveProviderCredentialId || null,
       modelName: effectiveProviderCredentialId ? modelName.trim() : "",
       ...(isEditing ? { isActive } : {}),
@@ -195,9 +189,7 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
 
     try {
       const response = await fetch(
-        agent
-          ? `/api/organizations/${organization.id}/agents/${agent.id}`
-          : `/api/organizations/${organization.id}/agents`,
+        agent ? `${formBasePath}/${agent.id}` : formBasePath,
         {
           method: agent ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
@@ -208,7 +200,19 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
       if (!response.ok) {
         throw new Error(errorMessage(data, "Agent could not be saved."));
       }
-      router.push(`/org/${organization.id}/agents`);
+      const savedAgentId = (data as { id?: string } | null)?.id ?? agent?.id;
+      if (savedAgentId) {
+        const toolsResponse = await fetch(`${formBasePath}/${savedAgentId}/tools`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ toolSchemaIds: selectedToolIds }),
+        });
+        const toolsData = (await toolsResponse.json().catch(() => null)) as unknown;
+        if (!toolsResponse.ok) {
+          throw new Error(errorMessage(toolsData, "Agent tools could not be saved."));
+        }
+      }
+      router.push(pageBasePath);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Agent could not be saved.");
     } finally {
@@ -266,73 +270,6 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
                 value={instructions}
               />
             </div>
-
-            <div className="space-y-3">
-              <Label>Scope</Label>
-              <div className="grid gap-3 md:grid-cols-2">
-                {scopeOptions.map((option) => (
-                  <label
-                    className={cn(
-                      "flex min-h-28 cursor-pointer flex-col justify-between rounded-lg border bg-white p-4 transition-colors",
-                      scope === option.value
-                        ? "border-primary ring-2 ring-primary/15"
-                        : "border-[var(--outline-variant)] hover:border-primary/40"
-                    )}
-                    key={option.value}
-                  >
-                    <span>
-                      <span className="flex items-center gap-2 text-sm font-semibold">
-                        <input
-                          checked={scope === option.value}
-                          className="size-4 accent-primary"
-                          name="scope"
-                          onChange={() => {
-                            setScope(option.value);
-                            setProviderCredentialId("");
-                            setModelName("");
-                            setModelOptions([]);
-                            setModelError(null);
-                            setIsLoadingModels(false);
-                          }}
-                          type="radio"
-                        />
-                        {option.label}
-                      </span>
-                      <span className="mt-2 block text-sm leading-5 text-[var(--on-surface-variant)]">
-                        {option.description}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {scope === "workspace" ? (
-              <div className="space-y-2">
-                <Label htmlFor="agent-workspace">Workspace</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  id="agent-workspace"
-                  onChange={(event) => {
-                    setWorkspaceId(event.target.value);
-                    setProviderCredentialId("");
-                    setModelName("");
-                    setModelOptions([]);
-                    setModelError(null);
-                    setIsLoadingModels(false);
-                  }}
-                  required
-                  value={workspaceId}
-                >
-                  <option value="">Select workspace</option>
-                  {activeWorkspaces.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="agent-credential">LLM credential</Label>
@@ -403,6 +340,49 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
               </label>
             ) : null}
 
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Tools</Label>
+                <span className="text-xs text-[var(--on-surface-variant)]">
+                  {selectedToolIds.length} selected
+                </span>
+              </div>
+              {availableTools.length > 0 ? (
+                <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border border-[var(--outline-variant)] p-2">
+                  {availableTools.map((tool) => (
+                    <label
+                      className="flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm hover:bg-[var(--surface-container)]"
+                      key={tool.toolSchemaId}
+                    >
+                      <input
+                        checked={selectedToolIds.includes(tool.toolSchemaId)}
+                        className="mt-1 size-4 accent-primary"
+                        onChange={() => toggleTool(tool.toolSchemaId)}
+                        type="checkbox"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">
+                          {tool.title || tool.toolName}
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-[var(--on-surface-variant)]">
+                          {tool.serverName} / {tool.configName} / {tool.toolName}
+                        </span>
+                        {tool.description ? (
+                          <span className="mt-1 block text-xs leading-5 text-[var(--on-surface-variant)]">
+                            {tool.description}
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed border-[var(--outline-variant)] px-3 py-6 text-sm text-[var(--on-surface-variant)]">
+                  No MCP tools are available in this workspace yet.
+                </div>
+              )}
+            </div>
+
             {error ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
@@ -411,7 +391,7 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
 
             <div className="flex justify-end gap-2">
               <Button asChild type="button" variant="outline">
-                <Link href={`/org/${organization.id}/agents`}>Cancel</Link>
+                <Link href={pageBasePath}>Cancel</Link>
               </Button>
               <Button disabled={!canSave} type="submit">
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Check />}

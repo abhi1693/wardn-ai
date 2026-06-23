@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 type AgentChatClientProps = {
   agent: AgentRead;
   organization: OrganizationRead;
+  workspaceId: string;
 };
 
 function messageText(parts: Array<{ type: string; text?: string }>) {
@@ -29,14 +30,15 @@ function messageText(parts: Array<{ type: string; text?: string }>) {
     .join("");
 }
 
-export function AgentChatClient({ agent, organization }: AgentChatClientProps) {
+export function AgentChatClient({ agent, organization, workspaceId }: AgentChatClientProps) {
   const [input, setInput] = useState("");
+  const chatApi = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents/${agent.id}/chat`;
   const transport = useMemo(
     () =>
       new TextStreamChatTransport({
-        api: `/api/organizations/${organization.id}/agents/${agent.id}/chat`,
+        api: chatApi,
       }),
-    [agent.id, organization.id]
+    [chatApi]
   );
   const { error, messages, sendMessage, status, stop } = useChat({ transport });
   const isRunning = status === "submitted" || status === "streaming";

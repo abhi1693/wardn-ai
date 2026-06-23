@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AgentRead, OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
+import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import { errorMessage } from "../tokens/token-form";
@@ -30,15 +30,8 @@ type AgentsClientProps = {
   agents: AgentRead[];
   credentials: LlmCredentialRead[];
   organization: OrganizationRead;
-  workspaces: WorkspaceRead[];
+  workspaceId: string;
 };
-
-function workspaceName(workspaces: WorkspaceRead[], workspaceId?: string | null) {
-  if (!workspaceId) {
-    return null;
-  }
-  return workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? workspaceId;
-}
 
 function credentialName(credentials: LlmCredentialRead[], credentialId?: string | null) {
   if (!credentialId) {
@@ -61,11 +54,13 @@ export function AgentsClient({
   agents: initialAgents,
   credentials,
   organization,
-  workspaces,
+  workspaceId,
 }: AgentsClientProps) {
   const [agents, setAgents] = useState(initialAgents);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const basePath = `/org/${organization.id}/workspace/${workspaceId}/agents`;
+  const apiBasePath = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents`;
 
   async function deleteAgent(agent: AgentRead) {
     if (!window.confirm(`Delete ${agent.name}?`)) {
@@ -75,7 +70,7 @@ export function AgentsClient({
     setDeletingAgentId(agent.id);
     setError(null);
     try {
-      const response = await fetch(`/api/organizations/${organization.id}/agents/${agent.id}`, {
+      const response = await fetch(`${apiBasePath}/${agent.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -110,7 +105,6 @@ export function AgentsClient({
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Scope</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead>Credential</TableHead>
                 <TableHead>Tools</TableHead>
@@ -130,11 +124,6 @@ export function AgentsClient({
                         </div>
                       ) : null}
                     </div>
-                  </TableCell>
-                  <TableCell>
-                    {agent.scope === "workspace"
-                      ? workspaceName(workspaces, agent.workspaceId) ?? "Workspace"
-                      : "Organization"}
                   </TableCell>
                   <TableCell>{agent.modelName || "Default"}</TableCell>
                   <TableCell>
@@ -156,7 +145,7 @@ export function AgentsClient({
                         size="icon"
                         variant="outline"
                       >
-                        <Link href={`/org/${organization.id}/agents/${agent.id}`}>
+                        <Link href={`${basePath}/${agent.id}`}>
                           <MessageSquare className="size-4" />
                         </Link>
                       </Button>
@@ -166,7 +155,7 @@ export function AgentsClient({
                         size="icon"
                         variant="outline"
                       >
-                        <Link href={`/org/${organization.id}/agents/${agent.id}/edit`}>
+                        <Link href={`${basePath}/${agent.id}/edit`}>
                           <Pencil className="size-4" />
                         </Link>
                       </Button>
@@ -200,7 +189,7 @@ export function AgentsClient({
               Create an agent and assign an LLM credential to start validating the setup.
             </p>
             <Button asChild className="mt-4" size="sm">
-              <Link href={`/org/${organization.id}/agents/new`}>
+              <Link href={`${basePath}/new`}>
                 <Plus className="size-4" />
                 New agent
               </Link>

@@ -23,12 +23,15 @@ async def get_agent(
     *,
     organization_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     include_inactive: bool = False,
 ) -> Agent | None:
     statement = select(Agent).where(
         Agent.id == agent_id,
         Agent.organization_id == organization_id,
     )
+    if workspace_id is not None:
+        statement = statement.where(Agent.workspace_id == workspace_id)
     if not include_inactive:
         statement = statement.where(Agent.is_active.is_(True))
     result = await session.execute(statement)
@@ -56,6 +59,7 @@ async def list_agents(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
     is_superuser: bool,
+    workspace_id: uuid.UUID | None = None,
     include_inactive: bool = False,
 ) -> list[tuple[Agent, int]]:
     statement = (
@@ -65,6 +69,8 @@ async def list_agents(
         .group_by(Agent.id)
         .order_by(Agent.name.asc())
     )
+    if workspace_id is not None:
+        statement = statement.where(Agent.workspace_id == workspace_id)
     if not include_inactive:
         statement = statement.where(Agent.is_active.is_(True))
     if not is_superuser:
@@ -95,6 +101,32 @@ async def list_agents(
         )
     result = await session.execute(statement)
     return [(agent, int(tool_count)) for agent, tool_count in result.all()]
+
+
+async def list_workspace_available_tools(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+) -> list[tuple[MCPServerToolSchema, MCPServerInstallation]]:
+    result = await session.execute(
+        select(MCPServerToolSchema, MCPServerInstallation)
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == MCPServerToolSchema.installation_id,
+        )
+        .where(
+            MCPServerToolSchema.workspace_id == workspace_id,
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.workspace_id == workspace_id,
+            MCPServerInstallation.status == "enabled",
+        )
+        .order_by(
+            MCPServerToolSchema.server_name.asc(),
+            MCPServerInstallation.config_name.asc(),
+            MCPServerToolSchema.tool_name.asc(),
+        )
+    )
+    return list(result.all())
 
 
 async def count_agent_tools(session: AsyncSession, agent_id: uuid.UUID) -> int:
