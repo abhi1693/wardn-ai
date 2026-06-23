@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
+from app.modules.agents.router import router as agents_router
 from app.modules.health.router import router as health_router
+from app.modules.llm_providers.router import router as llm_provider_credentials_router
 from app.modules.mcp_gateway.router import router as mcp_gateway_router
 from app.modules.mcp_gateway.router import workspace_router as workspace_mcp_gateway_router
 from app.modules.mcp_registry.router import organization_router as organization_mcp_registry_router
@@ -15,6 +17,8 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(organizations_router)
+api_router.include_router(llm_provider_credentials_router)
+api_router.include_router(agents_router)
 api_router.include_router(organization_mcp_registry_router)
 api_router.include_router(workspace_mcp_registry_router)
 api_router.include_router(mcp_gateway_router)

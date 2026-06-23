@@ -2,9 +2,11 @@ import {
   BookOpen,
   Boxes,
   Activity,
+  Bot,
   Home,
   KeyRound,
   Layers3,
+  PlugZap,
   Replace,
   ServerCog,
   Settings,
@@ -37,6 +39,18 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/registry` : "/org",
       activeKey: "registry",
       icon: BookOpen,
+    },
+    {
+      label: "LLM Credentials",
+      href: organizationId ? `/org/${organizationId}/llm-credentials` : "/org",
+      activeKey: "llm-credentials",
+      icon: PlugZap,
+    },
+    {
+      label: "Agents",
+      href: organizationId ? `/org/${organizationId}/agents` : "/org",
+      activeKey: "agents",
+      icon: Bot,
     },
     {
       label: "Agent Tokens",
@@ -108,6 +122,8 @@ type AppShellProps = {
     | "workspace-settings"
     | "workspace-dashboard"
     | "registry"
+    | "llm-credentials"
+    | "agents"
     | "agent-tokens"
     | "runtime"
     | "install";

@@ -16,11 +16,17 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/auth/api-tokens/{token_id}",
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
+        "/api/v1/auth/me",
         "/api/v1/health/live",
         "/api/v1/health/ready",
         "/api/v1/mcp/gateway",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
+        "/api/v1/organizations/{organization_id}/agents",
+        "/api/v1/organizations/{organization_id}/agents/{agent_id}",
+        "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools",
+        "/api/v1/organizations/{organization_id}/llm/provider-credentials",
+        "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}",
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
         (
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
@@ -135,6 +141,7 @@ def test_auth_openapi_contract() -> None:
     api_token = schema["paths"]["/api/v1/auth/api-tokens/{token_id}"]
     login = schema["paths"]["/api/v1/auth/login"]["post"]
     logout = schema["paths"]["/api/v1/auth/logout"]["post"]
+    me = schema["paths"]["/api/v1/auth/me"]["get"]
 
     assert api_tokens["get"]["operationId"] == "auth_list_api_tokens"
     assert api_tokens["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -168,6 +175,79 @@ def test_auth_openapi_contract() -> None:
     }
     assert logout["operationId"] == "auth_logout"
     assert logout["responses"]["204"]["description"] == "Successful Response"
+    assert me["operationId"] == "auth_me"
+    assert me["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserRead"
+    }
+
+
+def test_llm_provider_credentials_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    credentials = schema["paths"][
+        "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+    ]
+    credential = schema["paths"][
+        "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}"
+    ]
+
+    assert credentials["get"]["operationId"] == "llm_provider_credentials_list"
+    assert credentials["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderCredentialListResponse"
+    }
+    assert credentials["post"]["operationId"] == "llm_provider_credentials_create"
+    assert credentials["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderCredentialCreate"
+    }
+    assert credentials["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderCredentialRead"
+    }
+    assert credential["patch"]["operationId"] == "llm_provider_credentials_update"
+    assert credential["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderCredentialUpdate"
+    }
+    assert credential["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderCredentialRead"
+    }
+    assert credential["delete"]["operationId"] == "llm_provider_credentials_delete"
+    assert credential["delete"]["responses"]["204"]["description"] == "Successful Response"
+
+
+def test_agents_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    agents = schema["paths"]["/api/v1/organizations/{organization_id}/agents"]
+    agent = schema["paths"]["/api/v1/organizations/{organization_id}/agents/{agent_id}"]
+    tools = schema["paths"][
+        "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools"
+    ]
+
+    assert agents["get"]["operationId"] == "agents_list"
+    assert agents["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentListResponse"
+    }
+    assert agents["post"]["operationId"] == "agents_create"
+    assert agents["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentCreate"
+    }
+    assert agents["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRead"
+    }
+    assert agent["get"]["operationId"] == "agents_get"
+    assert agent["patch"]["operationId"] == "agents_update"
+    assert agent["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentUpdate"
+    }
+    assert agent["delete"]["operationId"] == "agents_delete"
+    assert tools["get"]["operationId"] == "agents_list_tools"
+    assert tools["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentToolListResponse"
+    }
+    assert tools["put"]["operationId"] == "agents_replace_tools"
+    assert tools["put"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentToolAssignmentUpdate"
+    }
+    assert tools["put"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentToolListResponse"
+    }
 
 
 def test_mcp_registry_openapi_contract() -> None:

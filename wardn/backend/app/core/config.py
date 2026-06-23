@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     session_cookie_name: str = "wardn_session"
     session_secret: str = "dev-session-secret-change-me"
     session_ttl_seconds: int = 60 * 60 * 12
+    public_base_url: str = ""
+    frontend_base_url: str = "http://localhost:3000"
     mcp_install_root: str = "data/mcp-installations"
     mcp_runtime_provider: str = "local"
     mcp_runtime_namespace: str = "wardn-runtimes"

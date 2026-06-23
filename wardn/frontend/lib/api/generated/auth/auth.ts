@@ -330,3 +330,52 @@ export const authLogout = async ( options?: RequestInit): Promise<authLogoutResp
 }
 
 
+export type authMeResponse200 = {
+  data: UserRead
+  status: 200
+}
+
+export type authMeResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authMeResponseSuccess = (authMeResponse200) & {
+  headers: Headers;
+};
+export type authMeResponseError = (authMeResponse422) & {
+  headers: Headers;
+};
+
+export type authMeResponse = (authMeResponseSuccess | authMeResponseError)
+
+export const getAuthMeUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/me`
+}
+
+/**
+ * @summary Current User
+ */
+export const authMe = async ( options?: RequestInit): Promise<authMeResponse> => {
+
+  const res = await fetch(getAuthMeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authMeResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authMeResponse
+}
+
+

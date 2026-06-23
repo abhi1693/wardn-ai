@@ -6,6 +6,8 @@ class Base(DeclarativeBase):
 
 
 def import_models() -> None:
+    from app.modules.agents import models as _agents_models  # noqa: F401
+    from app.modules.llm_providers import models as _llm_provider_models  # noqa: F401
     from app.modules.mcp_registry import models as _mcp_registry_models  # noqa: F401
     from app.modules.mcp_runtime import models as _mcp_runtime_models  # noqa: F401
     from app.modules.organizations import models as _organization_models  # noqa: F401
