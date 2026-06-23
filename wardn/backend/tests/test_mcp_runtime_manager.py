@@ -67,6 +67,46 @@ def test_package_runtime_allows_path_resolved_command(tmp_path, monkeypatch) -> 
     assert environment == {}
 
 
+def test_package_runtime_materializes_secret_files_from_db(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.manager.shutil.which",
+        lambda command: "/usr/bin/weather-mcp",
+    )
+    config_path = tmp_path / "runtime-files" / "KUBECONFIG"
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="uvx",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "weather-mcp",
+            "args": ["--kubeconfig", str(config_path)],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+        secret_config={
+            "files": {
+                "KUBECONFIG": {
+                    "key": "KUBECONFIG",
+                    "filename": "config",
+                    "content": "apiVersion: v1\nclusters: []\n",
+                    "path": str(config_path),
+                }
+            }
+        },
+    )
+
+    command, args, cwd, environment = package_runtime(installation)
+
+    assert command == "weather-mcp"
+    assert args == ["--kubeconfig", str(config_path)]
+    assert cwd == str(tmp_path)
+    assert environment == {}
+    assert config_path.read_text(encoding="utf-8") == "apiVersion: v1\nclusters: []\n"
+
+
 def test_package_runtime_rejects_missing_path_resolved_command(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("app.modules.mcp_runtime.manager.shutil.which", lambda command: None)
     installation = MCPServerInstallation(
@@ -226,4 +266,3 @@ def test_local_process_provider_health_reports_missing_process() -> None:
     assert health.healthy is False
     assert health.ready is False
     assert health.message == "Local runtime process is not present in this backend process."
-

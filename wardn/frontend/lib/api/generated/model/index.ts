@@ -12,6 +12,7 @@ export * from './errorResponse';
 export * from './healthStatus';
 export * from './hTTPValidationError';
 export * from './loginRequest';
+export * from './mCPFileConfigValue';
 export * from './mcpGatewayRpcParams';
 export * from './mCPRegistryListMetadata';
 export * from './mCPRegistryOfficialMetadata';

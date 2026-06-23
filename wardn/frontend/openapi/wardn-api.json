@@ -95,6 +95,40 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MCPFileConfigValue": {
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "contentBase64": {
+            "default": "",
+            "title": "Contentbase64",
+            "type": "string"
+          },
+          "filename": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Filename",
+            "type": "string"
+          },
+          "path": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Path",
+            "type": "string"
+          },
+          "type": {
+            "const": "file",
+            "default": "file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "MCPFileConfigValue",
+        "type": "object"
+      },
       "MCPRegistryListMetadata": {
         "properties": {
           "count": {
@@ -856,7 +890,14 @@
           },
           "configValues": {
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/MCPFileConfigValue"
+                }
+              ]
             },
             "title": "Configvalues",
             "type": "object"

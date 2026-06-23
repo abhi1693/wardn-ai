@@ -77,6 +77,25 @@ def registry_payload(version: str = "1.0.0") -> MCPServerCreate:
     )
 
 
+def test_install_request_accepts_file_config_values() -> None:
+    payload = MCPServerInstallRequest(
+        configValues={
+            "KUBECONFIG": {
+                "type": "file",
+                "filename": "config",
+                "contentBase64": "YXBpVmVyc2lvbjogdjEK",
+            },
+            "LOG_LEVEL": "debug",
+        }
+    )
+
+    assert payload.config_values["LOG_LEVEL"] == "debug"
+    file_value = payload.config_values["KUBECONFIG"]
+    assert not isinstance(file_value, str)
+    assert file_value.filename == "config"
+    assert file_value.content_base64 == "YXBpVmVyc2lvbjogdjEK"
+
+
 def official_registry_payload(version: str, *, is_latest: bool) -> MCPServerCreate:
     return MCPServerCreate(
         **{
@@ -582,6 +601,60 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
         "WEATHER_URL": "new-url",
         "LOG_LEVEL": "debug",
         "READ_ONLY": "true",
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_preserves_existing_file_config_values(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_config={
+            "packageArguments": {"KUBECONFIG": "/old/runtime-files/KUBECONFIG"},
+            "files": {
+                "KUBECONFIG": {
+                    "key": "KUBECONFIG",
+                    "filename": "config",
+                    "content": "apiVersion: v1\nclusters: []\n",
+                    "path": "/old/runtime-files/KUBECONFIG",
+                    "mountPath": "/opt/wardn/runtime-files/KUBECONFIG",
+                }
+            },
+        },
+    )
+    seen = {}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    def install_runtime(server, **kwargs):
+        seen["config_values"] = kwargs["config_values"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+
+    await service.install_server_version(
+        FakeSession(),
+        "io.github.example/weather",
+        MCPServerInstallRequest(version="latest", configValues={"LOG_LEVEL": "debug"}),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["config_values"] == {
+        "KUBECONFIG": {
+            "type": "file",
+            "filename": "config",
+            "content": "apiVersion: v1\nclusters: []\n",
+        },
+        "LOG_LEVEL": "debug",
     }
 
 

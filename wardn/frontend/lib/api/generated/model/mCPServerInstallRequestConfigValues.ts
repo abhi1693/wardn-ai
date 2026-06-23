@@ -4,5 +4,6 @@
  * Wardn AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { MCPFileConfigValue } from './mCPFileConfigValue';
 
-export type MCPServerInstallRequestConfigValues = {[key: string]: string};
+export type MCPServerInstallRequestConfigValues = {[key: string]: string | MCPFileConfigValue};

@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileUp,
   KeyRound,
   Network,
   Package,
@@ -24,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type {
   MCPRegistryServerListResponse,
   MCPRegistryServerResponse,
+  MCPServerInstallRequestConfigValues,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
 
@@ -48,6 +50,14 @@ type InstallField = {
   options: string[];
   section: "connection" | "runtime";
 };
+
+type FileInstallValue = {
+  type: "file";
+  filename: string;
+  content: string;
+};
+
+type InstallValue = string | FileInstallValue;
 
 type CustomHeader = {
   id: string;
@@ -268,6 +278,21 @@ function installTargetPayloadValue(target: InstallTarget) {
   return index === 0 ? kind : `${kind}:${index}`;
 }
 
+function installValueConfigured(value: InstallValue | undefined) {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  return Boolean(value?.content);
+}
+
+function installValueInputText(value: InstallValue | undefined) {
+  return typeof value === "string" ? value : "";
+}
+
+function installValueFilename(value: InstallValue | undefined) {
+  return typeof value === "string" ? "" : value?.filename || "";
+}
+
 function selectedInstallTargetOption(
   entry: MCPRegistryServerResponse,
   target: InstallTarget,
@@ -320,17 +345,23 @@ function installFields(entry: MCPRegistryServerResponse, target: InstallTarget):
   return [...connectionFields, ...runtimeFields].filter((field) => field.name);
 }
 
-function defaultInstallValues(fields: InstallField[]) {
+function defaultInstallValues(fields: InstallField[]): Record<string, InstallValue> {
   return Object.fromEntries(fields.map((field) => [field.name, field.defaultValue]));
 }
 
-function mergeInstallValues(fields: InstallField[], currentValues: Record<string, string>) {
+function mergeInstallValues(
+  fields: InstallField[],
+  currentValues: Record<string, InstallValue>,
+): Record<string, InstallValue> {
   return Object.fromEntries(
     fields.map((field) => [field.name, currentValues[field.name] ?? field.defaultValue])
   );
 }
 
-function configuredFieldValues(fields: InstallField[], installation: MCPServerInstallationRead) {
+function configuredFieldValues(
+  fields: InstallField[],
+  installation: MCPServerInstallationRead,
+): Record<string, InstallValue> {
   const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
   const configuredValues = installation.configuredValues ?? {};
   const packageConfig = runtimeConfig.package as Record<string, unknown> | undefined;
@@ -344,6 +375,9 @@ function configuredFieldValues(fields: InstallField[], installation: MCPServerIn
   return Object.fromEntries(fields.map((field) => {
     const configured = configuredInputs.find((item) => item.name === field.name);
     if (configuredValues[field.name] !== undefined) {
+      if (field.format === "file") {
+        return [field.name, ""];
+      }
       return [field.name, configuredValues[field.name]];
     }
     if (field.format === "boolean" && configured?.configured) {
@@ -431,8 +465,8 @@ function InstallFieldControl({
 }: {
   field: InstallField;
   hasExistingValue?: boolean;
-  onChange: (value: string) => void;
-  value: string;
+  onChange: (value: InstallValue) => void;
+  value: InstallValue;
 }) {
   const inputId = `install-${field.name}`;
 
@@ -440,7 +474,7 @@ function InstallFieldControl({
     return (
       <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
         <input
-          checked={value === "true"}
+          checked={installValueInputText(value) === "true"}
           className="mt-1"
           onChange={(event) => onChange(event.target.checked ? "true" : "false")}
           type="checkbox"
@@ -456,6 +490,47 @@ function InstallFieldControl({
     );
   }
 
+  if (field.format === "file") {
+    const selectedFilename = installValueFilename(value);
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor={inputId}>
+          {field.name}
+          {field.required ? <span className="text-red-600"> *</span> : null}
+        </Label>
+        <div className="grid gap-2">
+          <Input
+            id={inputId}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) {
+                onChange("");
+                return;
+              }
+              void file.text().then((content) => {
+                onChange({
+                  type: "file",
+                  filename: file.name,
+                  content,
+                });
+              });
+            }}
+            type="file"
+          />
+          {selectedFilename ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <FileUp className="size-3.5" />
+              {selectedFilename}
+            </div>
+          ) : hasExistingValue ? (
+            <div className="text-xs text-muted-foreground">Configured file is saved.</div>
+          ) : null}
+        </div>
+        {field.description ? <div className="text-xs leading-5 text-muted-foreground">{field.description}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
       <Label htmlFor={inputId}>
@@ -463,7 +538,7 @@ function InstallFieldControl({
         {field.required ? <span className="text-red-600"> *</span> : null}
       </Label>
       {field.options.length > 0 || field.format === "select" ? (
-        <Select onValueChange={onChange} value={value}>
+        <Select onValueChange={onChange} value={installValueInputText(value)}>
           <SelectTrigger id={inputId}>
             <SelectValue placeholder="Default" />
           </SelectTrigger>
@@ -480,7 +555,7 @@ function InstallFieldControl({
           onChange={(event) => onChange(event.target.value)}
           placeholder={field.secret && hasExistingValue ? "Configured value" : field.secret ? "Secret value" : "Value"}
           type={field.secret ? "password" : field.format === "integer" ? "number" : "text"}
-          value={value}
+          value={installValueInputText(value)}
         />
       )}
       {field.description ? <div className="text-xs leading-5 text-muted-foreground">{field.description}</div> : null}
@@ -553,7 +628,7 @@ export function InstallFormClient({
     );
     return existingConfigNames.has("default") ? "" : "default";
   });
-  const [installValues, setInstallValues] = useState<Record<string, string>>(() =>
+  const [installValues, setInstallValues] = useState<Record<string, InstallValue>>(() =>
     initialInstallation
       ? configuredFieldValues(initialFields, initialInstallation)
       : defaultInstallValues(initialFields)
@@ -776,8 +851,13 @@ export function InstallFormClient({
     setCustomHeaders((current) => current.filter((header) => header.id !== id));
   }
 
-  function installPayloadValues() {
-    const payload = { ...installValues };
+  function installPayloadValues(): MCPServerInstallRequestConfigValues {
+    const payload: MCPServerInstallRequestConfigValues = {};
+    for (const [key, value] of Object.entries(installValues)) {
+      if (installValueConfigured(value)) {
+        payload[key] = value;
+      }
+    }
     for (const header of customHeaders) {
       const name = header.name.trim();
       const value = header.value.trim();
@@ -812,7 +892,9 @@ export function InstallFormClient({
       return;
     }
 
-    const missing = selectedFields.filter((field) => field.required && !isEdit && !installValues[field.name]?.trim());
+    const missing = selectedFields.filter(
+      (field) => field.required && !isEdit && !installValueConfigured(installValues[field.name])
+    );
     if (missing.length > 0) {
       setError(`Missing required settings: ${missing.map((field) => field.name).join(", ")}`);
       return;

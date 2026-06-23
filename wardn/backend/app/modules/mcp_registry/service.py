@@ -11,7 +11,14 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
 )
-from app.modules.mcp_registry.installer import install_server_runtime, remove_installation_artifacts
+from app.modules.mcp_registry.installer import (
+    ConfigValues,
+    config_value_mapping,
+    config_value_present,
+    config_value_text,
+    install_server_runtime,
+    remove_installation_artifacts,
+)
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_registry.schemas import (
     MCPPulseServerVersionMetadata,
@@ -161,10 +168,10 @@ def server_values(payload: MCPServerCreate, *, is_latest: bool) -> dict:
     return values
 
 
-def install_config_values_from_secret_config(secret_config: dict | None) -> dict[str, str]:
+def install_config_values_from_secret_config(secret_config: dict | None) -> ConfigValues:
     if not secret_config:
         return {}
-    values = {}
+    values: ConfigValues = {}
     for namespace in ("headers", "environment", "packageArguments"):
         namespace_values = secret_config.get(namespace)
         if isinstance(namespace_values, dict):
@@ -175,6 +182,19 @@ def install_config_values_from_secret_config(secret_config: dict | None) -> dict
                     if value is not None
                 }
             )
+    files = secret_config.get("files")
+    if isinstance(files, dict):
+        for name, detail in files.items():
+            if not isinstance(detail, dict):
+                continue
+            content = detail.get("content")
+            if content is None:
+                continue
+            values[str(name)] = {
+                "type": "file",
+                "filename": str(detail.get("filename") or ""),
+                "content": str(content),
+            }
     return values
 
 
@@ -208,6 +228,13 @@ def visible_config_field_names(
     }
 
 
+def public_config_value(value) -> str:
+    mapping = config_value_mapping(value)
+    if not mapping:
+        return config_value_text(value)
+    return str(mapping.get("filename") or "configured")
+
+
 def public_configured_values(
     server: MCPServerVersion,
     installation: MCPServerInstallation,
@@ -215,7 +242,7 @@ def public_configured_values(
     visible_names = visible_config_field_names(server, installation)
     stored_values = install_config_values_from_secret_config(installation.secret_config)
     return {
-        key: value
+        key: public_config_value(value)
         for key, value in stored_values.items()
         if key in visible_names
     }
@@ -223,12 +250,12 @@ def public_configured_values(
 
 def merged_install_config_values(
     existing: MCPServerInstallation | None,
-    new_values: dict[str, str],
-) -> dict[str, str]:
+    new_values: ConfigValues,
+) -> ConfigValues:
     merged = install_config_values_from_secret_config(
         existing.secret_config if existing else None
     )
-    merged.update({key: value for key, value in new_values.items() if value})
+    merged.update({key: value for key, value in new_values.items() if config_value_present(value)})
     return merged
 
 

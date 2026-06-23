@@ -28,6 +28,7 @@ RUNTIME_HEALTH_READY = "ready"
 RUNTIME_HEALTH_NOT_READY = "not_ready"
 RUNTIME_HEALTH_STOPPED = "stopped"
 RUNTIME_HEALTH_UNKNOWN = "unknown"
+RUNTIME_FILE_DIR_NAME = "runtime-files"
 
 
 @dataclass(frozen=True)
@@ -248,10 +249,38 @@ def normalize_installed_path(value: Any, installation: MCPServerInstallation) ->
     return value
 
 
+def materialize_runtime_files(installation: MCPServerInstallation) -> None:
+    secret_config = installation.secret_config or {}
+    files = secret_config.get("files")
+    if not isinstance(files, dict):
+        return
+
+    runtime_config = installation.runtime_config or {}
+    install_path = str(runtime_config.get("installPath") or installation.install_path or "")
+    default_file_dir = Path(install_path) / RUNTIME_FILE_DIR_NAME if install_path else None
+    for name, detail in files.items():
+        if not isinstance(detail, dict):
+            continue
+        content = detail.get("content")
+        if content is None:
+            continue
+        path = str(normalize_installed_path(detail.get("path") or "", installation))
+        if not path:
+            if default_file_dir is None:
+                continue
+            key = str(detail.get("key") or name)
+            path = str(default_file_dir / key)
+        file_path = Path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(str(content), encoding="utf-8")
+        file_path.chmod(0o600)
+
+
 def package_runtime(installation: MCPServerInstallation) -> PackageRuntimeSpec:
     if runtime_kind(installation) != RUNTIME_KIND_PACKAGE:
         raise ValueError("installation is not a package MCP server")
 
+    materialize_runtime_files(installation)
     runtime_config = installation.runtime_config or {}
     transport = runtime_config.get("transport")
     if isinstance(transport, dict) and transport.get("type") not in (None, RUNTIME_TRANSPORT_STDIO):

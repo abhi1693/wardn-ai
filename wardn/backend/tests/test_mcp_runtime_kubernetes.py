@@ -150,10 +150,12 @@ class FakeKubernetesClient:
     V1ResourceRequirements = FakeKubernetesModel
     V1Secret = FakeKubernetesModel
     V1SecretKeySelector = FakeKubernetesModel
+    V1SecretVolumeSource = FakeKubernetesModel
     V1Service = FakeKubernetesModel
     V1ServiceBackendPort = FakeKubernetesModel
     V1ServicePort = FakeKubernetesModel
     V1ServiceSpec = FakeKubernetesModel
+    V1KeyToPath = FakeKubernetesModel
     V1Volume = FakeKubernetesModel
     V1VolumeMount = FakeKubernetesModel
 
@@ -1221,6 +1223,158 @@ def test_kubernetes_runtime_manifest_runs_oci_image_directly(
     assert manifest.pod.spec.init_containers is None
     assert manifest.health_path is None
     assert not hasattr(container, "readiness_probe")
+
+
+def test_kubernetes_runtime_manifest_mounts_runtime_files(
+    tmp_path,
+) -> None:
+    local_ca_path = str(tmp_path / "runtime-files" / "GRAFANA_CLI_TLS_CA_FILE")
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/grafana",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="oci",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "oci",
+            "args": [
+                "run",
+                "--rm",
+                "docker.io/example/grafana-mcp:1.0.0",
+                "--tls-ca-file",
+                local_ca_path,
+            ],
+            "fileMounts": [
+                {
+                    "name": "GRAFANA_CLI_TLS_CA_FILE",
+                    "key": "GRAFANA_CLI_TLS_CA_FILE",
+                    "path": local_ca_path,
+                    "mountPath": "/opt/wardn/runtime-files/GRAFANA_CLI_TLS_CA_FILE",
+                }
+            ],
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+        secret_config={
+            "environment": {"GRAFANA_URL": "https://grafana.example.com"},
+            "files": {
+                "GRAFANA_CLI_TLS_CA_FILE": {
+                    "key": "GRAFANA_CLI_TLS_CA_FILE",
+                    "path": local_ca_path,
+                    "mountPath": "/opt/wardn/runtime-files/GRAFANA_CLI_TLS_CA_FILE",
+                    "content": "ca",
+                }
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    container = manifest.pod.spec.containers[0]
+    assert container.args == [
+        "--tls-ca-file",
+        "/opt/wardn/runtime-files/GRAFANA_CLI_TLS_CA_FILE",
+        "-t",
+        "streamable-http",
+        "-address",
+        "0.0.0.0:8000",
+        "-endpoint-path",
+        "/mcp",
+    ]
+    assert [env.name for env in container.env] == ["GRAFANA_URL"]
+    assert manifest.secret.string_data == {
+        "GRAFANA_URL": "https://grafana.example.com",
+        "runtime-file-grafana-cli-tls-ca-file": "ca",
+    }
+    assert manifest.secret_env_keys == ["GRAFANA_URL"]
+    volume = manifest.pod.spec.volumes[0]
+    assert volume.name == "runtime-files"
+    assert volume.secret.secret_name == manifest.names.secret_name
+    assert volume.secret.items[0].key == "runtime-file-grafana-cli-tls-ca-file"
+    assert volume.secret.items[0].path == "GRAFANA_CLI_TLS_CA_FILE"
+    assert container.volume_mounts[0].mount_path == "/opt/wardn/runtime-files"
+    assert container.volume_mounts[0].read_only is True
+
+
+def test_kubernetes_runtime_manifest_preserves_oci_http_port_args(
+    tmp_path,
+) -> None:
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.containers/kubernetes-mcp-server",
+        installed_version="0.0.63",
+        status="enabled",
+        install_type="oci",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "oci",
+            "args": [
+                "run",
+                "--rm",
+                "ghcr.io/containers/kubernetes-mcp-server:v0.0.63",
+                "--port",
+                "8000",
+                "--stateless",
+            ],
+            "transport": {"type": RUNTIME_TRANSPORT_STREAMABLE_HTTP},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert manifest.pod.spec.containers[0].args == [
+        "--port",
+        "8000",
+        "--stateless",
+    ]
 
 
 def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(

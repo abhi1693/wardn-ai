@@ -10,6 +10,19 @@ MCPServerStatus = Literal["active", "deprecated", "deleted"]
 MCPServerValidationStatus = Literal["passed", "failed"]
 
 
+class MCPFileConfigValue(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["file"] = "file"
+    filename: str = Field(default="", max_length=255)
+    content: str = ""
+    content_base64: str = Field(default="", alias="contentBase64")
+    path: str = Field(default="", max_length=4096)
+
+
+MCPConfigValue = str | MCPFileConfigValue
+
+
 class MCPServerDocument(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -99,7 +112,7 @@ class MCPRegistryServerListResponse(BaseModel):
 class MCPServerInstallRequest(BaseModel):
     version: str = Field(default="latest", min_length=1, max_length=255)
     config_name: str = Field(default="default", alias="configName", min_length=1, max_length=100)
-    config_values: dict[str, str] = Field(default_factory=dict, alias="configValues")
+    config_values: dict[str, MCPConfigValue] = Field(default_factory=dict, alias="configValues")
     install_target: MCPServerInstallTarget | None = Field(
         default=None,
         alias="installTarget",

@@ -245,7 +245,10 @@ def test_install_server_runtime_creates_oci_runtime_manifest(tmp_path, monkeypat
         ]
     )
     seen_commands = []
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.run_install_command",
         lambda command, **kwargs: seen_commands.append(command),
@@ -287,7 +290,10 @@ def test_install_server_runtime_passes_custom_headers_to_oci_container(
             }
         ]
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.run_install_command",
         lambda *args, **kwargs: None,
@@ -356,7 +362,10 @@ def test_install_server_runtime_adds_configured_oci_package_arguments(
             }
         ],
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.run_install_command",
         lambda *args, **kwargs: None,
@@ -393,6 +402,84 @@ def test_install_server_runtime_adds_configured_oci_package_arguments(
         "GRAFANA_CLI_TLS_SKIP_VERIFY": "true",
         "GRAFANA_CLI_LOG_LEVEL": "warn",
     }
+
+
+def test_install_server_runtime_materializes_file_package_arguments(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    ca_content = "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n"
+    server = server_version(
+        packages=[
+            {
+                "registryType": "oci",
+                "identifier": "docker.io/grafana/mcp-grafana:0.16.0",
+                "version": "0.16.0",
+                "transport": {"type": "stdio"},
+                "packageArguments": [
+                    {
+                        "name": "GRAFANA_CLI_TLS_CA_FILE",
+                        "flag": "--tls-ca-file",
+                        "format": "file",
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={
+            "GRAFANA_CLI_TLS_CA_FILE": {
+                "type": "file",
+                "filename": "grafana-ca.pem",
+                "content": ca_content,
+            },
+        },
+        install_root=tmp_path / "installs",
+    )
+
+    local_path = install.secret_config["files"]["GRAFANA_CLI_TLS_CA_FILE"]["path"]
+    mount_path = install.secret_config["files"]["GRAFANA_CLI_TLS_CA_FILE"]["mountPath"]
+    assert local_path.startswith(install.install_path)
+    assert mount_path == "/opt/wardn/runtime-files/GRAFANA_CLI_TLS_CA_FILE"
+    assert install.runtime_config["args"] == [
+        "run",
+        "--rm",
+        "-i",
+        "docker.io/grafana/mcp-grafana:0.16.0",
+        "--tls-ca-file",
+        local_path,
+    ]
+    assert install.runtime_config["fileMounts"] == [
+        {
+            "name": "GRAFANA_CLI_TLS_CA_FILE",
+            "key": "GRAFANA_CLI_TLS_CA_FILE",
+            "path": local_path,
+            "mountPath": mount_path,
+        }
+    ]
+    assert install.secret_config["files"]["GRAFANA_CLI_TLS_CA_FILE"]["content"] == (
+        "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n"
+    )
+    assert install.secret_config["files"]["GRAFANA_CLI_TLS_CA_FILE"]["filename"] == (
+        "grafana-ca.pem"
+    )
+    assert (tmp_path / "installs").joinpath(
+        "io.github.example__weather",
+        "default",
+        "1.0.0",
+        "runtime-files",
+        "GRAFANA_CLI_TLS_CA_FILE",
+    ).read_text(encoding="utf-8") == ca_content
 
 
 def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(
@@ -456,7 +543,10 @@ def test_install_server_runtime_uses_explicit_package_index(tmp_path, monkeypatc
         ],
     )
     seen_commands = []
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/docker")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.run_install_command",
         lambda command, **kwargs: seen_commands.append(command),
@@ -470,7 +560,10 @@ def test_install_server_runtime_uses_explicit_package_index(tmp_path, monkeypatc
 
     assert install.install_type == "oci"
     assert install.runtime_config["registryType"] == "oci"
-    assert install.runtime_config["package"]["identifier"] == "docker.io/example/weather:1.0.0"
+    assert (
+        install.runtime_config["package"]["identifier"]
+        == "docker.io/example/weather:1.0.0"
+    )
     assert seen_commands == [["/bin/docker", "pull", "docker.io/example/weather:1.0.0"]]
 
 
@@ -486,7 +579,10 @@ def test_install_server_runtime_rejects_missing_package_index(tmp_path) -> None:
         ],
     )
 
-    with pytest.raises(MCPServerInstallationUnsupportedError, match="package installation target 2"):
+    with pytest.raises(
+        MCPServerInstallationUnsupportedError,
+        match="package installation target 2",
+    ):
         install_server_runtime(server, install_target="package:2", install_root=tmp_path)
 
 
@@ -628,7 +724,10 @@ def test_install_server_runtime_rewrites_package_tmp_paths(tmp_path, monkeypatch
     assert install.runtime_config["cwd"] == install.install_path
 
 
-def test_install_server_runtime_uses_latest_for_npm_placeholder_version(tmp_path, monkeypatch) -> None:
+def test_install_server_runtime_uses_latest_for_npm_placeholder_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
     server = server_version(
         packages=[
             {
@@ -650,7 +749,9 @@ def test_install_server_runtime_uses_latest_for_npm_placeholder_version(tmp_path
     )
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.npm_package_bin",
-        lambda install_path, identifier: install_path / "node_modules" / ".bin" / "kubernetes-mcp-server",
+        lambda install_path, identifier: (
+            install_path / "node_modules" / ".bin" / "kubernetes-mcp-server"
+        ),
     )
 
     install_server_runtime(server, install_root=tmp_path)
@@ -682,7 +783,10 @@ def test_install_server_runtime_runs_npm_js_bin_without_shebang_with_node(
         )
         bin_path = package_path / "build" / "index.js"
         bin_path.parent.mkdir(parents=True, exist_ok=True)
-        bin_path.write_text("import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n", encoding="utf-8")
+        bin_path.write_text(
+            "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n",
+            encoding="utf-8",
+        )
         bin_link = cwd / "node_modules" / ".bin" / "alertmanager-mcp"
         bin_link.parent.mkdir(parents=True, exist_ok=True)
         bin_link.symlink_to("../alertmanager-mcp/build/index.js")
@@ -738,7 +842,10 @@ def test_install_server_runtime_runs_npm_shebang_bin_directly(
     assert install.runtime_config["args"] == []
 
 
-def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(tmp_path, monkeypatch) -> None:
+def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
     server = server_version(
         packages=[
             {

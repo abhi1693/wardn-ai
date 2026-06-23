@@ -36,6 +36,7 @@ type HeaderField = {
 
 type EnvironmentField = HeaderField & {
   defaultValue: string;
+  format: string;
 };
 
 type PackageArgumentField = HeaderField & {
@@ -99,6 +100,7 @@ const PACKAGE_ARGUMENT_FORMAT_OPTIONS = [
   { value: "boolean", label: "Toggle" },
   { value: "integer", label: "Number" },
   { value: "select", label: "Select" },
+  { value: "file", label: "File" },
 ];
 
 function createId(prefix: string) {
@@ -136,6 +138,7 @@ function initialEnvironment(value: unknown): EnvironmentField[] {
     name: stringValue(envVar.name),
     description: stringValue(envVar.description),
     defaultValue: stringValue(envVar.default),
+    format: stringValue(envVar.format) || "string",
     required: booleanValue(envVar.isRequired),
     secret: booleanValue(envVar.isSecret),
   }));
@@ -223,6 +226,7 @@ function emptyEnvironment(): EnvironmentField {
     ...emptyHeader(),
     id: createId("env"),
     defaultValue: "",
+    format: "string",
   };
 }
 
@@ -423,7 +427,7 @@ function publicEnvironment(environmentVariables: EnvironmentField[]) {
       default: envVar.defaultValue.trim(),
       isRequired: envVar.required,
       isSecret: envVar.secret,
-      format: "string",
+      format: envVar.format || "string",
     }));
 }
 
@@ -1066,7 +1070,7 @@ export function ServerForm({
                   </Button>
                 </div>
                 {packageTarget.environmentVariables.map((envVar) => (
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto_auto_auto]" key={envVar.id}>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_140px_auto_auto_auto]" key={envVar.id}>
                     <Input
                       onChange={(event) =>
                         updatePackageEnvironment(packageTarget.id, envVar.id, {
@@ -1094,6 +1098,25 @@ export function ServerForm({
                       placeholder="Default"
                       value={envVar.defaultValue}
                     />
+                    <Select
+                      onValueChange={(value) =>
+                        updatePackageEnvironment(packageTarget.id, envVar.id, {
+                          format: value,
+                        })
+                      }
+                      value={envVar.format}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PACKAGE_ARGUMENT_FORMAT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <label className="flex items-center gap-2 text-sm">
                       <input
                         checked={envVar.required}
