@@ -12,6 +12,8 @@ def test_openapi_exposes_expected_paths() -> None:
     schema = response.json()
     assert schema["openapi"].startswith("3.")
     assert set(schema["paths"]) == {
+        "/api/v1/auth/api-tokens",
+        "/api/v1/auth/api-tokens/{token_id}",
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/health/live",
@@ -90,7 +92,7 @@ def test_openapi_exposes_expected_paths() -> None:
 def test_only_top_level_mcp_gateway_route_is_mounted() -> None:
     client = TestClient(create_app())
 
-    assert client.post("/api/v1/mcp/gateway", json={}).status_code == 200
+    assert client.post("/api/v1/mcp/gateway", json={}).status_code == 401
     assert client.get("/api/v1/mcp/runtime/sessions").status_code == 404
     assert client.get("/api/v1/mcp/registry/servers").status_code == 404
     assert client.get("/api/v1/mcp/registry/installed-servers").status_code == 404
@@ -129,9 +131,31 @@ def test_bootstrap_openapi_contract() -> None:
 
 def test_auth_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    api_tokens = schema["paths"]["/api/v1/auth/api-tokens"]
+    api_token = schema["paths"]["/api/v1/auth/api-tokens/{token_id}"]
     login = schema["paths"]["/api/v1/auth/login"]["post"]
     logout = schema["paths"]["/api/v1/auth/logout"]["post"]
 
+    assert api_tokens["get"]["operationId"] == "auth_list_api_tokens"
+    assert api_tokens["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserAPITokenListResponse"
+    }
+    assert api_tokens["post"]["operationId"] == "auth_create_api_token"
+    assert api_tokens["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserAPITokenCreate"
+    }
+    assert api_tokens["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserAPITokenCreated"
+    }
+    assert api_token["patch"]["operationId"] == "auth_update_api_token"
+    assert api_token["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserAPITokenUpdate"
+    }
+    assert api_token["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/UserAPITokenRead"
+    }
+    assert api_token["delete"]["operationId"] == "auth_delete_api_token"
+    assert api_token["delete"]["responses"]["204"]["description"] == "Successful Response"
     assert login["operationId"] == "auth_login"
     assert login["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/LoginRequest"
@@ -292,10 +316,7 @@ def test_mcp_gateway_openapi_contract() -> None:
 
     assert top_level_gateway["operationId"] == "mcp_gateway_rpc"
     assert [param["name"] for param in top_level_gateway["parameters"]] == [
-        "organization_id",
-        "workspace_id",
-        "X-Wardn-Organization-Id",
-        "X-Wardn-Workspace-Id",
+        "authorization",
     ]
     assert gateway["operationId"] == "workspace_mcp_gateway_rpc"
 

@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,8 @@ from app.modules.organizations.exceptions import (
 )
 from app.modules.organizations.service import require_organization_admin, require_workspace_admin
 from app.modules.users.dependencies import get_current_user
-from app.modules.users.models import User
+from app.modules.users.models import User, UserAPIToken
+from app.modules.users.service import authenticate_api_token
 
 router = APIRouter(prefix="/mcp/gateway", tags=["mcp-gateway"])
 workspace_router = APIRouter(
@@ -36,17 +37,6 @@ def jsonrpc_error(request_id: Any, code: int, message: str) -> JSONResponse:
         {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}},
         status_code=status.HTTP_200_OK,
     )
-
-
-def choose_scope_id(
-    query_value: UUID | None,
-    header_value: UUID | None,
-    *,
-    name: str,
-) -> UUID | None:
-    if query_value is not None and header_value is not None and query_value != header_value:
-        raise ValueError(f"{name} query parameter and header do not match")
-    return query_value or header_value
 
 
 async def build_authenticated_gateway_scope(
@@ -89,22 +79,40 @@ async def build_authenticated_gateway_scope(
     )
 
 
-async def build_common_gateway_scope(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None,
-    workspace_id: UUID | None,
-) -> GatewayScope:
-    if organization_id is not None and workspace_id is not None:
-        workspace = await organizations_repository.get_workspace_by_id(session, workspace_id)
-        if workspace is None or workspace.organization_id != organization_id:
-            raise WorkspaceNotFoundError("workspace not found")
+def api_token_scope_ids(values: list[str] | None) -> frozenset[UUID] | None:
+    if values is None:
+        return None
+    parsed = frozenset(UUID(str(value)) for value in values if value)
+    return parsed if parsed else None
 
+
+async def require_gateway_api_token(
+    session: AsyncSession,
+    authorization: str | None,
+) -> tuple[User, UserAPIToken]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="gateway bearer token required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    plaintext_token = authorization.removeprefix("Bearer ").removeprefix("bearer ").strip()
+    authenticated = await authenticate_api_token(session, plaintext_token)
+    if authenticated is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid gateway bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return authenticated
+
+
+def build_api_token_gateway_scope(user: User, api_token: UserAPIToken) -> GatewayScope:
     return GatewayScope(
-        user_id=UUID(int=0),
-        is_superuser=True,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
+        user_id=user.id,
+        is_superuser=user.is_superuser,
+        organization_ids=api_token_scope_ids(api_token.organization_ids),
+        workspace_ids=api_token_scope_ids(api_token.workspace_ids),
     )
 
 
@@ -160,33 +168,11 @@ async def handle_mcp_gateway_rpc(
 async def mcp_gateway_rpc(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
-    organization_id_query: Annotated[UUID | None, Query(alias="organization_id")] = None,
-    workspace_id_query: Annotated[UUID | None, Query(alias="workspace_id")] = None,
-    organization_id_header: Annotated[
-        UUID | None,
-        Header(alias="X-Wardn-Organization-Id"),
-    ] = None,
-    workspace_id_header: Annotated[
-        UUID | None,
-        Header(alias="X-Wardn-Workspace-Id"),
-    ] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
     try:
-        organization_id = choose_scope_id(
-            organization_id_query,
-            organization_id_header,
-            name="organization_id",
-        )
-        workspace_id = choose_scope_id(
-            workspace_id_query,
-            workspace_id_header,
-            name="workspace_id",
-        )
-        scope = await build_common_gateway_scope(
-            session,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-        )
+        user, api_token = await require_gateway_api_token(session, authorization)
+        scope = build_api_token_gateway_scope(user, api_token)
     except ValueError as exc:
         return jsonrpc_error(None, -32602, str(exc))
     except (OrganizationNotFoundError, WorkspaceNotFoundError) as exc:

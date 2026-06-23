@@ -10,10 +10,16 @@ from app.modules.users.exceptions import (
     BootstrapUserExistsError,
     DuplicateUserError,
     InvalidLoginError,
+    UserAPITokenNotFoundError,
     UserNotFoundError,
 )
 from app.modules.users.models import LocalAuthCredential, User, UserAPIToken
-from app.modules.users.schemas import LoginRequest, UserAPITokenCreate, UserCreate
+from app.modules.users.schemas import (
+    LoginRequest,
+    UserAPITokenCreate,
+    UserAPITokenUpdate,
+    UserCreate,
+)
 
 
 class FakeSession:
@@ -146,9 +152,57 @@ async def test_create_user_api_token(monkeypatch) -> None:
     assert record.description == "local automation"
     assert record.token_prefix == "abc123"
     assert record.token_hash == "hashed:wardn_abc123.secret"
+    assert record.organization_ids == []
+    assert record.workspace_ids == []
     assert record.is_active is True
     assert session.added == [record]
     assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_create_user_api_token_stores_validated_scopes(monkeypatch) -> None:
+    user_id = uuid.uuid4()
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    user = User(id=user_id, email="admin@example.com")
+
+    async def existing_user(*args, **kwargs):
+        return user
+
+    async def require_organization_admin(*args, **kwargs):
+        assert args[2] == organization_id
+
+    async def get_workspace_by_id(*args, **kwargs):
+        assert args[1] == workspace_id
+        return type("Workspace", (), {"organization_id": organization_id})()
+
+    async def require_workspace_member(*args, **kwargs):
+        assert args[2] == organization_id
+        assert args[3] == workspace_id
+
+    monkeypatch.setattr(service.repository, "get_user_by_id", existing_user)
+    monkeypatch.setattr(service, "require_organization_admin", require_organization_admin)
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_workspace_by_id",
+        get_workspace_by_id,
+    )
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service, "generate_api_token", lambda: ("abc123", "wardn_abc123.secret"))
+    monkeypatch.setattr(service, "hash_api_token", lambda token: f"hashed:{token}")
+
+    record, _plaintext = await service.create_user_api_token(
+        FakeSession(),
+        user_id,
+        UserAPITokenCreate(
+            name="agent",
+            organizationIds=[organization_id],
+            workspaceIds=[workspace_id],
+        ),
+    )
+
+    assert record.organization_ids == [str(organization_id)]
+    assert record.workspace_ids == [str(workspace_id)]
 
 
 @pytest.mark.asyncio
@@ -164,6 +218,137 @@ async def test_create_user_api_token_requires_existing_user(monkeypatch) -> None
             uuid.uuid4(),
             UserAPITokenCreate(name="automation"),
         )
+
+
+@pytest.mark.asyncio
+async def test_list_user_api_tokens_delegates_to_repository(monkeypatch) -> None:
+    user_id = uuid.uuid4()
+    tokens = [UserAPIToken(id=uuid.uuid4(), user_id=user_id, name="agent")]
+
+    async def list_tokens(*args, **kwargs):
+        assert args[1] == user_id
+        return tokens
+
+    monkeypatch.setattr(service.repository, "list_user_api_tokens", list_tokens)
+
+    assert await service.list_user_api_tokens(FakeSession(), user_id) == tokens
+
+
+@pytest.mark.asyncio
+async def test_update_user_api_token_updates_fields_and_scopes(monkeypatch) -> None:
+    user_id = uuid.uuid4()
+    token_id = uuid.uuid4()
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    user = User(id=user_id, email="admin@example.com")
+    token = UserAPIToken(
+        id=token_id,
+        user_id=user_id,
+        name="old",
+        description="old description",
+        organization_ids=[],
+        workspace_ids=[],
+        is_active=True,
+    )
+
+    async def existing_user(*args, **kwargs):
+        return user
+
+    async def existing_token(*args, **kwargs):
+        assert args[1] == user_id
+        assert args[2] == token_id
+        return token
+
+    async def require_organization_admin(*args, **kwargs):
+        assert args[2] == organization_id
+
+    async def get_workspace_by_id(*args, **kwargs):
+        assert args[1] == workspace_id
+        return type("Workspace", (), {"organization_id": organization_id})()
+
+    async def require_workspace_member(*args, **kwargs):
+        assert args[2] == organization_id
+        assert args[3] == workspace_id
+
+    monkeypatch.setattr(service.repository, "get_user_by_id", existing_user)
+    monkeypatch.setattr(service.repository, "get_user_api_token_by_id", existing_token)
+    monkeypatch.setattr(service, "require_organization_admin", require_organization_admin)
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_workspace_by_id",
+        get_workspace_by_id,
+    )
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    session = FakeSession()
+
+    result = await service.update_user_api_token(
+        session,
+        user_id,
+        token_id,
+        UserAPITokenUpdate(
+            name="new",
+            description="updated",
+            organizationIds=[organization_id],
+            workspaceIds=[workspace_id],
+            is_active=False,
+        ),
+    )
+
+    assert result is token
+    assert token.name == "new"
+    assert token.description == "updated"
+    assert token.organization_ids == [str(organization_id)]
+    assert token.workspace_ids == [str(workspace_id)]
+    assert token.is_active is False
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_update_user_api_token_requires_owned_token(monkeypatch) -> None:
+    user_id = uuid.uuid4()
+
+    async def existing_user(*args, **kwargs):
+        return User(id=user_id, email="admin@example.com")
+
+    async def missing_token(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_user_by_id", existing_user)
+    monkeypatch.setattr(service.repository, "get_user_api_token_by_id", missing_token)
+
+    with pytest.raises(UserAPITokenNotFoundError):
+        await service.update_user_api_token(
+            FakeSession(),
+            user_id,
+            uuid.uuid4(),
+            UserAPITokenUpdate(name="new"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_user_api_token(monkeypatch) -> None:
+    user_id = uuid.uuid4()
+    token_id = uuid.uuid4()
+
+    async def delete_token(*args, **kwargs):
+        assert args[1] == user_id
+        assert args[2] == token_id
+        return True
+
+    monkeypatch.setattr(service.repository, "delete_user_api_token", delete_token)
+
+    await service.delete_user_api_token(FakeSession(), user_id, token_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_user_api_token_requires_owned_token(monkeypatch) -> None:
+    async def delete_token(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(service.repository, "delete_user_api_token", delete_token)
+
+    with pytest.raises(UserAPITokenNotFoundError):
+        await service.delete_user_api_token(FakeSession(), uuid.uuid4(), uuid.uuid4())
 
 
 def test_is_token_expired() -> None:

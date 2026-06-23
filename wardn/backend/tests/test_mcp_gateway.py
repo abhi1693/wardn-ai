@@ -22,7 +22,7 @@ from app.modules.mcp_registry.models import (
 from app.modules.mcp_runtime import manager as runtime_manager
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesMetadataError
 from app.modules.users.dependencies import get_current_user
-from app.modules.users.models import User
+from app.modules.users.models import User, UserAPIToken
 
 TEST_ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111"
 TEST_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222"
@@ -49,6 +49,21 @@ async def fake_current_user():
 
 async def failing_current_user():
     raise AssertionError("top-level MCP gateway must not require user auth")
+
+
+async def fake_gateway_api_token(*args, **kwargs):
+    user_id = uuid.uuid4()
+    return (
+        User(id=user_id, email="admin@example.com", is_superuser=True),
+        UserAPIToken(
+            user_id=user_id,
+            token_prefix="test",
+            token_hash="hashed",
+            organization_ids=[],
+            workspace_ids=[],
+            is_active=True,
+        ),
+    )
 
 
 async def fake_require_workspace_admin(*args, **kwargs):
@@ -199,20 +214,22 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
     return installation, server
 
 
-def gateway_client() -> TestClient:
+def gateway_client(api_token_auth=fake_gateway_api_token) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db_session] = fake_session
     app.dependency_overrides[get_current_user] = fake_current_user
+    gateway_router.authenticate_api_token = api_token_auth
     gateway_router.require_organization_admin = fake_require_organization_admin
     gateway_router.require_workspace_admin = fake_require_workspace_admin
-    return TestClient(app)
+    return TestClient(app, headers={"Authorization": "Bearer wardn_test.secret"})
 
 
-def common_gateway_client() -> TestClient:
+def common_gateway_client(api_token_auth=fake_gateway_api_token) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db_session] = fake_session
     app.dependency_overrides[get_current_user] = failing_current_user
-    return TestClient(app)
+    gateway_router.authenticate_api_token = api_token_auth
+    return TestClient(app, headers={"Authorization": "Bearer wardn_test.secret"})
 
 
 def test_mcp_gateway_initialize() -> None:
@@ -225,6 +242,18 @@ def test_mcp_gateway_initialize() -> None:
     payload = response.json()
     assert payload["result"]["serverInfo"]["name"] == "wardn-mcp-gateway"
     assert payload["result"]["capabilities"] == {"tools": {"listChanged": True}}
+
+
+def test_mcp_gateway_requires_bearer_token() -> None:
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    response = TestClient(app).post(
+        GATEWAY_PATH,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "gateway bearer token required"
 
 
 def test_mcp_gateway_tools_list_is_bounded() -> None:
@@ -756,12 +785,11 @@ def test_mcp_gateway_initialized_notification_returns_accepted() -> None:
     assert response.content == b""
 
 
-def test_top_level_mcp_gateway_organization_scope(monkeypatch) -> None:
+def test_top_level_mcp_gateway_ignores_legacy_request_scope(monkeypatch) -> None:
     seen = {}
 
     async def search_enabled_installations(*args, **kwargs):
-        scope = kwargs["scope"]
-        seen["scope"] = scope
+        seen["scope"] = kwargs["scope"]
         return [installed_server()], ""
 
     monkeypatch.setattr(
@@ -772,6 +800,11 @@ def test_top_level_mcp_gateway_organization_scope(monkeypatch) -> None:
 
     response = gateway_client().post(
         f"{GATEWAY_PATH}?organization_id={TEST_ORGANIZATION_ID}",
+        headers={
+            "Authorization": "Bearer wardn_test.secret",
+            "X-Wardn-Organization-Id": TEST_ORGANIZATION_ID,
+            "X-Wardn-Workspace-Id": TEST_WORKSPACE_ID,
+        },
         json={
             "jsonrpc": "2.0",
             "id": 2,
@@ -785,11 +818,61 @@ def test_top_level_mcp_gateway_organization_scope(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["result"]["isError"] is False
-    assert seen["scope"].organization_id == uuid.UUID(TEST_ORGANIZATION_ID)
+    assert seen["scope"].organization_id is None
+    assert seen["scope"].workspace_id is None
+    assert seen["scope"].organization_ids is None
+    assert seen["scope"].workspace_ids is None
+
+
+def test_top_level_mcp_gateway_uses_token_organization_scope(monkeypatch) -> None:
+    seen = {}
+
+    async def scoped_gateway_api_token(*args, **kwargs):
+        user_id = uuid.uuid4()
+        return (
+            User(id=user_id, email="admin@example.com", is_superuser=False),
+            UserAPIToken(
+                user_id=user_id,
+                token_prefix="test",
+                token_hash="hashed",
+                organization_ids=[TEST_ORGANIZATION_ID],
+                workspace_ids=[],
+                is_active=True,
+            ),
+        )
+
+    async def search_enabled_installations(*args, **kwargs):
+        scope = kwargs["scope"]
+        seen["scope"] = scope
+        return [installed_server()], ""
+
+    monkeypatch.setattr(
+        repository,
+        "search_enabled_installations",
+        search_enabled_installations,
+    )
+
+    response = gateway_client(api_token_auth=scoped_gateway_api_token).post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search_mcp_servers",
+                "arguments": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is False
+    assert seen["scope"].organization_id is None
+    assert seen["scope"].organization_ids == frozenset({uuid.UUID(TEST_ORGANIZATION_ID)})
     assert seen["scope"].workspace_id is None
 
 
-def test_top_level_mcp_gateway_uses_common_global_scope(monkeypatch) -> None:
+def test_top_level_mcp_gateway_uses_token_global_scope(monkeypatch) -> None:
     seen = {}
 
     async def search_enabled_installations(*args, **kwargs):
@@ -820,3 +903,5 @@ def test_top_level_mcp_gateway_uses_common_global_scope(monkeypatch) -> None:
     assert seen["scope"].organization_id is None
     assert seen["scope"].workspace_id is None
     assert seen["scope"].is_superuser is True
+    assert seen["scope"].organization_ids is None
+    assert seen["scope"].workspace_ids is None

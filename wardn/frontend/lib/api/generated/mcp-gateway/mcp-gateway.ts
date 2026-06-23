@@ -5,8 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type {
-  HTTPValidationError,
-  McpGatewayRpcParams
+  HTTPValidationError
 } from '../model';
 
 
@@ -29,27 +28,20 @@ export type mcpGatewayRpcResponseError = (mcpGatewayRpcResponse422) & {
 
 export type mcpGatewayRpcResponse = (mcpGatewayRpcResponseSuccess | mcpGatewayRpcResponseError)
 
-export const getMcpGatewayRpcUrl = (params?: McpGatewayRpcParams,) => {
-  const normalizedParams = new URLSearchParams();
+export const getMcpGatewayRpcUrl = () => {
 
-  Object.entries(params || {}).forEach(([key, value]) => {
 
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
 
-  const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/mcp/gateway?${stringifiedParams}` : `http://localhost:8000/api/v1/mcp/gateway`
+  return `http://localhost:8000/api/v1/mcp/gateway`
 }
 
 /**
  * @summary Mcp Gateway Rpc
  */
-export const mcpGatewayRpc = async (params?: McpGatewayRpcParams, options?: RequestInit): Promise<mcpGatewayRpcResponse> => {
+export const mcpGatewayRpc = async ( options?: RequestInit): Promise<mcpGatewayRpcResponse> => {
 
-  const res = await fetch(getMcpGatewayRpcUrl(params),
+  const res = await fetch(getMcpGatewayRpcUrl(),
   {
     ...options,
     method: 'POST'

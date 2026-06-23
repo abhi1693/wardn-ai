@@ -21,10 +21,13 @@ export async function proxyBackend(
     },
   });
   const body = await response.text();
-  return new NextResponse(body, {
+  const hasBody = ![204, 205, 304].includes(response.status);
+  return new NextResponse(hasBody ? body : null, {
     status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    },
+    headers: hasBody
+      ? {
+          "content-type": response.headers.get("content-type") ?? "application/json",
+        }
+      : undefined,
   });
 }

@@ -14,5 +14,13 @@ class UserNotFoundError(UserModuleError):
     pass
 
 
+class UserAPITokenNotFoundError(UserModuleError):
+    pass
+
+
 class InvalidLoginError(UserModuleError):
+    pass
+
+
+class InvalidAPITokenScopeError(UserModuleError):
     pass

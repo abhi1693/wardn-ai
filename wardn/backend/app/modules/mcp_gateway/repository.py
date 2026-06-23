@@ -15,17 +15,38 @@ ADMIN_ROLES = ("owner", "admin")
 
 
 def apply_gateway_scope(statement, scope: GatewayScope):
-    if scope.workspace_id is not None:
-        return statement.where(MCPServerInstallation.workspace_id == scope.workspace_id)
-    if scope.organization_id is not None:
-        return statement.join(
+    joined_workspace = False
+
+    def ensure_workspace_join(current_statement):
+        nonlocal joined_workspace
+        if joined_workspace:
+            return current_statement
+        joined_workspace = True
+        return current_statement.join(
             Workspace,
             Workspace.id == MCPServerInstallation.workspace_id,
-        ).where(Workspace.organization_id == scope.organization_id)
+        )
+
+    if scope.workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == scope.workspace_id)
+    if scope.organization_id is not None:
+        statement = ensure_workspace_join(statement).where(
+            Workspace.organization_id == scope.organization_id
+        )
+
+    token_scope_conditions = []
+    if scope.workspace_ids is not None:
+        token_scope_conditions.append(MCPServerInstallation.workspace_id.in_(scope.workspace_ids))
+    if scope.organization_ids is not None:
+        statement = ensure_workspace_join(statement)
+        token_scope_conditions.append(Workspace.organization_id.in_(scope.organization_ids))
+    if token_scope_conditions:
+        statement = statement.where(or_(*token_scope_conditions))
+
     if scope.is_superuser:
         return statement
     return (
-        statement.join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
+        ensure_workspace_join(statement)
         .outerjoin(
             OrganizationMembership,
             and_(

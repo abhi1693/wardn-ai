@@ -8,8 +8,230 @@ import type {
   ErrorResponse,
   HTTPValidationError,
   LoginRequest,
+  UserAPITokenCreate,
+  UserAPITokenCreated,
+  UserAPITokenListResponse,
+  UserAPITokenRead,
+  UserAPITokenUpdate,
   UserRead
 } from '../model';
+
+
+export type authListApiTokensResponse200 = {
+  data: UserAPITokenListResponse
+  status: 200
+}
+
+export type authListApiTokensResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authListApiTokensResponseSuccess = (authListApiTokensResponse200) & {
+  headers: Headers;
+};
+export type authListApiTokensResponseError = (authListApiTokensResponse422) & {
+  headers: Headers;
+};
+
+export type authListApiTokensResponse = (authListApiTokensResponseSuccess | authListApiTokensResponseError)
+
+export const getAuthListApiTokensUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/api-tokens`
+}
+
+/**
+ * @summary List Api Tokens
+ */
+export const authListApiTokens = async ( options?: RequestInit): Promise<authListApiTokensResponse> => {
+
+  const res = await fetch(getAuthListApiTokensUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authListApiTokensResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authListApiTokensResponse
+}
+
+
+export type authCreateApiTokenResponse201 = {
+  data: UserAPITokenCreated
+  status: 201
+}
+
+export type authCreateApiTokenResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type authCreateApiTokenResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authCreateApiTokenResponseSuccess = (authCreateApiTokenResponse201) & {
+  headers: Headers;
+};
+export type authCreateApiTokenResponseError = (authCreateApiTokenResponse400 | authCreateApiTokenResponse422) & {
+  headers: Headers;
+};
+
+export type authCreateApiTokenResponse = (authCreateApiTokenResponseSuccess | authCreateApiTokenResponseError)
+
+export const getAuthCreateApiTokenUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/api-tokens`
+}
+
+/**
+ * @summary Create Api Token
+ */
+export const authCreateApiToken = async (userAPITokenCreate: UserAPITokenCreate, options?: RequestInit): Promise<authCreateApiTokenResponse> => {
+
+  const res = await fetch(getAuthCreateApiTokenUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(userAPITokenCreate)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authCreateApiTokenResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authCreateApiTokenResponse
+}
+
+
+export type authDeleteApiTokenResponse204 = {
+  data: void
+  status: 204
+}
+
+export type authDeleteApiTokenResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type authDeleteApiTokenResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authDeleteApiTokenResponseSuccess = (authDeleteApiTokenResponse204) & {
+  headers: Headers;
+};
+export type authDeleteApiTokenResponseError = (authDeleteApiTokenResponse404 | authDeleteApiTokenResponse422) & {
+  headers: Headers;
+};
+
+export type authDeleteApiTokenResponse = (authDeleteApiTokenResponseSuccess | authDeleteApiTokenResponseError)
+
+export const getAuthDeleteApiTokenUrl = (tokenId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/api-tokens/${tokenId}`
+}
+
+/**
+ * @summary Delete Api Token
+ */
+export const authDeleteApiToken = async (tokenId: string, options?: RequestInit): Promise<authDeleteApiTokenResponse> => {
+
+  const res = await fetch(getAuthDeleteApiTokenUrl(tokenId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authDeleteApiTokenResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as authDeleteApiTokenResponse
+}
+
+
+export type authUpdateApiTokenResponse200 = {
+  data: UserAPITokenRead
+  status: 200
+}
+
+export type authUpdateApiTokenResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type authUpdateApiTokenResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type authUpdateApiTokenResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authUpdateApiTokenResponseSuccess = (authUpdateApiTokenResponse200) & {
+  headers: Headers;
+};
+export type authUpdateApiTokenResponseError = (authUpdateApiTokenResponse400 | authUpdateApiTokenResponse404 | authUpdateApiTokenResponse422) & {
+  headers: Headers;
+};
+
+export type authUpdateApiTokenResponse = (authUpdateApiTokenResponseSuccess | authUpdateApiTokenResponseError)
+
+export const getAuthUpdateApiTokenUrl = (tokenId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/api-tokens/${tokenId}`
+}
+
+/**
+ * @summary Update Api Token
+ */
+export const authUpdateApiToken = async (tokenId: string,
+    userAPITokenUpdate: UserAPITokenUpdate, options?: RequestInit): Promise<authUpdateApiTokenResponse> => {
+
+  const res = await fetch(getAuthUpdateApiTokenUrl(tokenId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(userAPITokenUpdate)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authUpdateApiTokenResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authUpdateApiTokenResponse
+}
 
 
 export type authLoginResponse200 = {

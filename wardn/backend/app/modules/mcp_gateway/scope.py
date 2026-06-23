@@ -8,4 +8,5 @@ class GatewayScope:
     is_superuser: bool
     organization_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
-
+    organization_ids: frozenset[uuid.UUID] | None = None
+    workspace_ids: frozenset[uuid.UUID] | None = None

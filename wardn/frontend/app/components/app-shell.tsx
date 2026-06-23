@@ -3,6 +3,7 @@ import {
   Boxes,
   Activity,
   Home,
+  KeyRound,
   Layers3,
   Replace,
   ServerCog,
@@ -36,6 +37,12 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/registry` : "/org",
       activeKey: "registry",
       icon: BookOpen,
+    },
+    {
+      label: "Agent Tokens",
+      href: organizationId ? `/org/${organizationId}/tokens` : "/org",
+      activeKey: "agent-tokens",
+      icon: KeyRound,
     },
     ...(organizationId
       ? [
@@ -101,6 +108,7 @@ type AppShellProps = {
     | "workspace-settings"
     | "workspace-dashboard"
     | "registry"
+    | "agent-tokens"
     | "runtime"
     | "install";
   eyebrow: string;
