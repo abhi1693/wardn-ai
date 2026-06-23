@@ -40,6 +40,8 @@ export * from './lLMProviderCredentialUpdateAuthMethod';
 export * from './lLMProviderCredentialUpdateExtraHeaders';
 export * from './lLMProviderCredentialUpdateOauthMetadata';
 export * from './lLMProviderCredentialUpdateVisibility';
+export * from './lLMProviderModelListResponse';
+export * from './lLMProviderModelRead';
 export * from './loginRequest';
 export * from './mCPFileConfigValue';
 export * from './mCPRegistryListMetadata';

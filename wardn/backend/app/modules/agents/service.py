@@ -20,6 +20,8 @@ from app.modules.agents.schemas import (
     AgentUpdate,
 )
 from app.modules.llm_providers import repository as llm_provider_repository
+from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.llm_providers.service import credential_supports_model
 from app.modules.organizations.service import (
     require_organization_admin,
     require_organization_member,
@@ -60,7 +62,7 @@ async def validate_provider_credential(
     *,
     agent_workspace_id: uuid.UUID | None,
     provider_credential_id: uuid.UUID | None,
-) -> uuid.UUID | None:
+) -> LLMProviderCredential | None:
     if provider_credential_id is None:
         return None
     credential = await llm_provider_repository.get_credential(
@@ -74,7 +76,21 @@ async def validate_provider_credential(
         raise InvalidAgentScopeError("provider credential is not available to this user")
     if credential.visibility == "workspace" and credential.workspace_id != agent_workspace_id:
         raise InvalidAgentScopeError("workspace credential must match the agent workspace")
-    return credential.id
+    return credential
+
+
+async def validate_agent_model(
+    credential: LLMProviderCredential | None,
+    model_name: str,
+) -> str:
+    normalized_model = model_name.strip()
+    if credential is None:
+        return normalized_model
+    if not normalized_model:
+        raise InvalidAgentScopeError("model is required when an LLM credential is selected")
+    if not await credential_supports_model(credential, normalized_model):
+        raise InvalidAgentScopeError("model is not available for the selected LLM credential")
+    return normalized_model
 
 
 def agent_response(agent: Agent, *, tool_count: int) -> AgentRead:
@@ -146,23 +162,24 @@ async def create_agent(
     )
     if await repository.get_agent_by_name(session, organization_id=organization_id, name=name):
         raise DuplicateAgentError("agent name already exists")
-    provider_credential_id = await validate_provider_credential(
+    provider_credential = await validate_provider_credential(
         session,
         user,
         organization_id,
         agent_workspace_id=workspace_id,
         provider_credential_id=payload.provider_credential_id,
     )
+    model_name = await validate_agent_model(provider_credential, payload.model_name)
     agent = Agent(
         organization_id=organization_id,
         workspace_id=workspace_id,
         created_by_id=user.id,
-        provider_credential_id=provider_credential_id,
+        provider_credential_id=provider_credential.id if provider_credential else None,
         name=name,
         description=payload.description.strip(),
         instructions=payload.instructions.strip(),
         scope=payload.scope,
-        model_name=payload.model_name.strip(),
+        model_name=model_name,
         is_active=True,
     )
     session.add(agent)
@@ -218,19 +235,33 @@ async def update_agent(
     if payload.scope is not None or "workspace_id" in payload.model_fields_set:
         agent.scope = scope
         agent.workspace_id = workspace_id
-    if (
+    provider_credential_changed = (
         payload.provider_credential_id is not None
         or "provider_credential_id" in payload.model_fields_set
-    ):
-        agent.provider_credential_id = await validate_provider_credential(
+    )
+    scope_changed = payload.scope is not None or "workspace_id" in payload.model_fields_set
+    provider_credential = None
+    if provider_credential_changed:
+        provider_credential = await validate_provider_credential(
             session,
             user,
             organization_id,
             agent_workspace_id=agent.workspace_id,
             provider_credential_id=payload.provider_credential_id,
         )
+        agent.provider_credential_id = provider_credential.id if provider_credential else None
+    elif (scope_changed or payload.model_name is not None) and agent.provider_credential_id:
+        provider_credential = await validate_provider_credential(
+            session,
+            user,
+            organization_id,
+            agent_workspace_id=agent.workspace_id,
+            provider_credential_id=agent.provider_credential_id,
+        )
     if payload.model_name is not None:
-        agent.model_name = payload.model_name.strip()
+        agent.model_name = await validate_agent_model(provider_credential, payload.model_name)
+    elif provider_credential_changed and provider_credential is not None:
+        agent.model_name = await validate_agent_model(provider_credential, agent.model_name)
     if payload.is_active is not None:
         agent.is_active = payload.is_active
 

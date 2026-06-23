@@ -6,6 +6,7 @@ import pytest
 from app.modules.agents import service
 from app.modules.agents.exceptions import (
     DuplicateAgentError,
+    InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
 from app.modules.agents.models import Agent, AgentTool
@@ -89,8 +90,12 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
     async def get_credential(*args, **kwargs):
         return credential
 
+    async def credential_supports_model(*args, **kwargs):
+        return True
+
     monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
     monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
 
     session = FakeSession()
     response = await service.create_agent(
@@ -112,6 +117,55 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
     assert agent.provider_credential_id == credential.id
     assert agent.scope == "organization"
     assert response.tool_count == 0
+
+
+@pytest.mark.asyncio
+async def test_create_agent_rejects_model_unavailable_for_credential(monkeypatch) -> None:
+    organization_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        secret_value="sk-test",
+        base_url="",
+        extra_headers={},
+        is_default=True,
+        is_active=True,
+    )
+
+    patch_org_owner(monkeypatch, organization_id, user)
+
+    async def no_duplicate(*args, **kwargs):
+        return None
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    async def credential_supports_model(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
+    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
+
+    session = FakeSession()
+    with pytest.raises(InvalidAgentScopeError):
+        await service.create_agent(
+            session,
+            user,
+            organization_id,
+            AgentCreate(
+                name="SRE Agent",
+                instructions="Use tools carefully.",
+                providerCredentialId=credential.id,
+                modelName="not-a-real-model",
+            ),
+        )
+
+    assert session.added == []
 
 
 @pytest.mark.asyncio

@@ -117,3 +117,11 @@ class LLMProviderCredentialRead(BaseModel):
 class LLMProviderCredentialListResponse(BaseModel):
     credentials: list[LLMProviderCredentialRead]
 
+
+class LLMProviderModelRead(BaseModel):
+    id: str
+    name: str
+
+
+class LLMProviderModelListResponse(BaseModel):
+    models: list[LLMProviderModelRead]

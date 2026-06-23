@@ -23,6 +23,8 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
     LLMProviderCredentialUpdate,
+    LLMProviderModelListResponse,
+    LLMProviderModelRead,
 )
 from app.modules.organizations.service import (
     require_organization_admin,
@@ -43,6 +45,14 @@ OPENAI_CODEX_AUTH_CLAIM = "https://api.openai.com/auth"
 OPENAI_CODEX_PROFILE_CLAIM = "https://api.openai.com/profile"
 OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
 OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS = 15.0
+OPENAI_CHATGPT_MODEL_IDS = (
+    "gpt-5.5",
+    "gpt-5.5-pro",
+    "gpt-5.4",
+    "gpt-5.4-pro",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex-spark",
+)
 
 
 def normalize_provider(value: str) -> str:
@@ -243,6 +253,58 @@ async def validate_openai_api_key(secret_value: str) -> None:
         )
 
 
+async def fetch_openai_models(bearer_token: str) -> list[LLMProviderModelRead]:
+    try:
+        async with httpx.AsyncClient(
+            timeout=OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS
+        ) as client:
+            response = await client.get(
+                OPENAI_MODELS_URL,
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+    except httpx.HTTPError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "OpenAI model discovery could not reach OpenAI"
+        ) from exc
+
+    if response.status_code in {401, 403}:
+        raise InvalidLLMProviderCredentialAuthError("OpenAI credential was rejected")
+    if not response.is_success:
+        raise InvalidLLMProviderCredentialAuthError(
+            f"OpenAI model discovery failed with HTTP {response.status_code}"
+        )
+
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "OpenAI model discovery response is invalid"
+        ) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise InvalidLLMProviderCredentialAuthError(
+            "OpenAI model discovery response is invalid"
+        )
+
+    models = []
+    seen: set[str] = set()
+    for entry in payload["data"]:
+        if not isinstance(entry, dict):
+            continue
+        model_id = entry.get("id")
+        if not isinstance(model_id, str) or not model_id.strip() or model_id in seen:
+            continue
+        seen.add(model_id)
+        models.append(LLMProviderModelRead(id=model_id, name=model_id))
+    return sorted(models, key=lambda model: model.id)
+
+
+def openai_chatgpt_models() -> list[LLMProviderModelRead]:
+    return [
+        LLMProviderModelRead(id=model_id, name=model_id)
+        for model_id in OPENAI_CHATGPT_MODEL_IDS
+    ]
+
+
 def validate_chatgpt_oauth_credential(
     *,
     oauth_access_token: str,
@@ -297,6 +359,59 @@ async def validate_provider_credential(
     raise InvalidLLMProviderCredentialAuthError(
         f"unsupported provider/auth combination: {provider}/{auth_method}"
     )
+
+
+async def list_models_for_credential(
+    credential: LLMProviderCredential,
+) -> LLMProviderModelListResponse:
+    if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
+        return LLMProviderModelListResponse(
+            models=await fetch_openai_models(credential.secret_value)
+        )
+    if (
+        credential.provider == OPENAI_CHATGPT_PROVIDER
+        and credential.auth_method == "oauth"
+        and credential.oauth_provider == "chatgpt"
+    ):
+        validate_chatgpt_oauth_credential(
+            oauth_access_token=credential.oauth_access_token,
+            oauth_refresh_token=credential.oauth_refresh_token,
+            oauth_expires_at=credential.oauth_expires_at,
+        )
+        return LLMProviderModelListResponse(models=openai_chatgpt_models())
+    raise InvalidLLMProviderCredentialAuthError(
+        f"unsupported provider/auth combination: {credential.provider}/{credential.auth_method}"
+    )
+
+
+async def list_provider_credential_models(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    credential_id: uuid.UUID,
+) -> LLMProviderModelListResponse:
+    await require_organization_member(session, user, organization_id)
+    credential = await repository.get_credential(
+        session,
+        organization_id=organization_id,
+        credential_id=credential_id,
+    )
+    if credential is None or not credential.is_active:
+        raise LLMProviderCredentialNotFoundError("provider credential not found")
+    if not user_can_see_credential(user, credential):
+        raise LLMProviderCredentialNotFoundError("provider credential not found")
+    return await list_models_for_credential(credential)
+
+
+async def credential_supports_model(
+    credential: LLMProviderCredential,
+    model_name: str,
+) -> bool:
+    normalized_model = model_name.strip()
+    if not normalized_model:
+        return False
+    models = await list_models_for_credential(credential)
+    return any(model.id == normalized_model for model in models.models)
 
 
 def credential_response(credential: LLMProviderCredential) -> LLMProviderCredentialRead:

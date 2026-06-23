@@ -14,6 +14,7 @@ from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import (
     LLMProviderCredentialCreate,
     LLMProviderCredentialUpdate,
+    LLMProviderModelRead,
 )
 from app.modules.organizations.models import Organization, OrganizationMembership
 from app.modules.users.models import User
@@ -311,6 +312,133 @@ async def test_update_provider_credential_validates_existing_openai_api_key(monk
     assert validated_secrets == ["sk-existing"]
     assert existing.is_active is False
     assert response.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_list_provider_credential_models_uses_credential_secret(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        auth_method="api_key",
+        secret_value="sk-existing",
+        base_url="",
+        extra_headers={},
+        is_default=False,
+        is_active=True,
+    )
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    discovered_tokens: list[str] = []
+
+    async def fetch_openai_models(token: str):
+        discovered_tokens.append(token)
+        return [
+            LLMProviderModelRead(id="gpt-4.1", name="gpt-4.1"),
+            LLMProviderModelRead(id="gpt-4o-mini", name="gpt-4o-mini"),
+        ]
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "fetch_openai_models", fetch_openai_models)
+
+    response = await service.list_provider_credential_models(
+        FakeSession(),
+        user,
+        organization_id,
+        credential_id,
+    )
+
+    assert discovered_tokens == ["sk-existing"]
+    assert [model.id for model in response.models] == ["gpt-4.1", "gpt-4o-mini"]
+
+
+@pytest.mark.asyncio
+async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="OpenAI ChatGPT",
+        provider="openai_chatgpt",
+        visibility="organization",
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_access_token="access-token",
+        oauth_refresh_token="refresh-token",
+        base_url="",
+        extra_headers={},
+        is_default=False,
+        is_active=True,
+    )
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    async def fail_openai_model_fetch(*args, **kwargs):
+        raise AssertionError("ChatGPT OAuth should use the local model catalog")
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "fetch_openai_models", fail_openai_model_fetch)
+
+    response = await service.list_provider_credential_models(
+        FakeSession(),
+        user,
+        organization_id,
+        credential_id,
+    )
+
+    assert [model.id for model in response.models] == list(service.OPENAI_CHATGPT_MODEL_IDS)
 
 
 def test_oauth_auth_rejects_unsupported_provider() -> None:

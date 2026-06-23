@@ -17,10 +17,12 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
     LLMProviderCredentialUpdate,
+    LLMProviderModelListResponse,
 )
 from app.modules.llm_providers.service import (
     create_provider_credential,
     delete_provider_credential,
+    list_provider_credential_models,
     list_provider_credentials,
     update_provider_credential,
 )
@@ -141,6 +143,36 @@ async def update_provider_credential_route(
         raise
     await session.commit()
     return response
+
+
+@router.get(
+    "/{credential_id}/models",
+    response_model=LLMProviderModelListResponse,
+    operation_id="llm_provider_credentials_list_models",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def list_provider_credential_models_route(
+    organization_id: UUID,
+    credential_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> LLMProviderModelListResponse:
+    try:
+        return await list_provider_credential_models(
+            session,
+            current_user,
+            organization_id,
+            credential_id,
+        )
+    except LLMProviderCredentialNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_access_error(exc)
+        raise
 
 
 @router.delete(

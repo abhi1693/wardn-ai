@@ -10,7 +10,8 @@ import type {
   LLMProviderCredentialCreate,
   LLMProviderCredentialListResponse,
   LLMProviderCredentialRead,
-  LLMProviderCredentialUpdate
+  LLMProviderCredentialUpdate,
+  LLMProviderModelListResponse
 } from '../model';
 
 
@@ -273,6 +274,72 @@ export const llmProviderCredentialsUpdate = async (organizationId: string,
 
   const data: llmProviderCredentialsUpdateResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as llmProviderCredentialsUpdateResponse
+}
+
+
+export type llmProviderCredentialsListModelsResponse200 = {
+  data: LLMProviderModelListResponse
+  status: 200
+}
+
+export type llmProviderCredentialsListModelsResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type llmProviderCredentialsListModelsResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type llmProviderCredentialsListModelsResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type llmProviderCredentialsListModelsResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type llmProviderCredentialsListModelsResponseSuccess = (llmProviderCredentialsListModelsResponse200) & {
+  headers: Headers;
+};
+export type llmProviderCredentialsListModelsResponseError = (llmProviderCredentialsListModelsResponse400 | llmProviderCredentialsListModelsResponse403 | llmProviderCredentialsListModelsResponse404 | llmProviderCredentialsListModelsResponse422) & {
+  headers: Headers;
+};
+
+export type llmProviderCredentialsListModelsResponse = (llmProviderCredentialsListModelsResponseSuccess | llmProviderCredentialsListModelsResponseError)
+
+export const getLlmProviderCredentialsListModelsUrl = (organizationId: string,
+    credentialId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/models`
+}
+
+/**
+ * @summary List Provider Credential Models Route
+ */
+export const llmProviderCredentialsListModels = async (organizationId: string,
+    credentialId: string, options?: RequestInit): Promise<llmProviderCredentialsListModelsResponse> => {
+
+  const res = await fetch(getLlmProviderCredentialsListModelsUrl(organizationId,credentialId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: llmProviderCredentialsListModelsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsListModelsResponse
 }
 
 

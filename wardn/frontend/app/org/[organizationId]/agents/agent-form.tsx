@@ -3,7 +3,7 @@
 import { Bot, Check, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +39,11 @@ type AgentFormProps = {
   credentials: LlmCredentialRead[];
   organization: OrganizationRead;
   workspaces: WorkspaceRead[];
+};
+
+type ProviderModel = {
+  id: string;
+  name: string;
 };
 
 const scopeOptions: Array<{
@@ -82,6 +87,9 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
   const [modelName, setModelName] = useState(agent?.modelName ?? "");
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(Boolean(agent?.providerCredentialId));
+  const [modelError, setModelError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const activeWorkspaces = useMemo(
@@ -103,11 +111,67 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
     [credentials, scope, workspaceId]
   );
 
+  const effectiveProviderCredentialId =
+    providerCredentialId &&
+    availableCredentials.some((credential) => credential.id === providerCredentialId)
+      ? providerCredentialId
+      : "";
+
+  useEffect(() => {
+    if (!effectiveProviderCredentialId) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    async function loadModels() {
+      try {
+        const response = await fetch(
+          `/api/organizations/${organization.id}/llm/provider-credentials/${effectiveProviderCredentialId}/models`,
+          { signal: abortController.signal }
+        );
+        const data = (await response.json().catch(() => null)) as
+          | { models?: ProviderModel[] }
+          | unknown;
+        if (!response.ok) {
+          throw new Error(errorMessage(data, "Models could not be loaded."));
+        }
+        setModelOptions(
+          Array.isArray((data as { models?: unknown }).models)
+            ? ((data as { models: ProviderModel[] }).models ?? [])
+            : []
+        );
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          return;
+        }
+        setModelOptions([]);
+        setModelError(caught instanceof Error ? caught.message : "Models could not be loaded.");
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsLoadingModels(false);
+        }
+      }
+    }
+
+    void loadModels();
+    return () => abortController.abort();
+  }, [organization.id, effectiveProviderCredentialId]);
+
+  const selectedModelUnavailable =
+    Boolean(modelName) &&
+    modelOptions.length > 0 &&
+    !modelOptions.some((model) => model.id === modelName);
+
   const canSave =
     name.trim().length > 0 &&
     instructions.trim().length > 0 &&
     !isSubmitting &&
-    (scope !== "workspace" || workspaceId.length > 0);
+    !isLoadingModels &&
+    !modelError &&
+    !selectedModelUnavailable &&
+    (scope !== "workspace" || workspaceId.length > 0) &&
+    (!effectiveProviderCredentialId || modelName.trim().length > 0);
 
   async function submitAgent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -124,8 +188,8 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
       instructions: instructions.trim(),
       scope,
       workspaceId: scope === "workspace" ? workspaceId : null,
-      providerCredentialId: providerCredentialId || null,
-      modelName: modelName.trim(),
+      providerCredentialId: effectiveProviderCredentialId || null,
+      modelName: effectiveProviderCredentialId ? modelName.trim() : "",
       ...(isEditing ? { isActive } : {}),
     };
 
@@ -170,27 +234,15 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
         </CardHeader>
         <CardContent>
           <form className="space-y-6" onSubmit={submitAgent}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="agent-name">Name</Label>
-                <Input
-                  id="agent-name"
-                  maxLength={100}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  value={name}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="agent-model">Model</Label>
-                <Input
-                  id="agent-model"
-                  maxLength={255}
-                  onChange={(event) => setModelName(event.target.value)}
-                  placeholder="gpt-4.1, claude-sonnet-4, local-model"
-                  value={modelName}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="agent-name">Name</Label>
+              <Input
+                id="agent-name"
+                maxLength={100}
+                onChange={(event) => setName(event.target.value)}
+                required
+                value={name}
+              />
             </div>
 
             <div className="space-y-2">
@@ -234,7 +286,14 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
                           checked={scope === option.value}
                           className="size-4 accent-primary"
                           name="scope"
-                          onChange={() => setScope(option.value)}
+                          onChange={() => {
+                            setScope(option.value);
+                            setProviderCredentialId("");
+                            setModelName("");
+                            setModelOptions([]);
+                            setModelError(null);
+                            setIsLoadingModels(false);
+                          }}
                           type="radio"
                         />
                         {option.label}
@@ -257,6 +316,10 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
                   onChange={(event) => {
                     setWorkspaceId(event.target.value);
                     setProviderCredentialId("");
+                    setModelName("");
+                    setModelOptions([]);
+                    setModelError(null);
+                    setIsLoadingModels(false);
                   }}
                   required
                   value={workspaceId}
@@ -276,7 +339,14 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
               <select
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 id="agent-credential"
-                onChange={(event) => setProviderCredentialId(event.target.value)}
+                onChange={(event) => {
+                  const nextCredentialId = event.target.value;
+                  setProviderCredentialId(nextCredentialId);
+                  setModelName("");
+                  setModelOptions([]);
+                  setModelError(null);
+                  setIsLoadingModels(Boolean(nextCredentialId));
+                }}
                 value={providerCredentialId}
               >
                 <option value="">Use default routing</option>
@@ -286,6 +356,39 @@ export function AgentForm({ agent, credentials, organization, workspaces }: Agen
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agent-model">Model</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={
+                  !effectiveProviderCredentialId || isLoadingModels || Boolean(modelError)
+                }
+                id="agent-model"
+                onChange={(event) => setModelName(event.target.value)}
+                required={Boolean(effectiveProviderCredentialId)}
+                value={modelName}
+              >
+                <option value="">
+                  {effectiveProviderCredentialId
+                    ? isLoadingModels
+                      ? "Loading models"
+                      : "Select model"
+                    : "Select an LLM credential first"}
+                </option>
+                {selectedModelUnavailable ? (
+                  <option value={modelName}>{modelName} (unavailable)</option>
+                ) : null}
+                {modelOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+              {modelError ? (
+                <div className="text-sm text-red-700">{modelError}</div>
+              ) : null}
             </div>
 
             {isEditing ? (

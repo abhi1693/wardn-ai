@@ -27,6 +27,10 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}",
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/{credential_id}/models"
+        ),
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
         (
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
@@ -189,6 +193,9 @@ def test_llm_provider_credentials_openapi_contract() -> None:
     credential = schema["paths"][
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}"
     ]
+    models = schema["paths"][
+        "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}/models"
+    ]
 
     assert credentials["get"]["operationId"] == "llm_provider_credentials_list"
     assert credentials["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -210,6 +217,10 @@ def test_llm_provider_credentials_openapi_contract() -> None:
     }
     assert credential["delete"]["operationId"] == "llm_provider_credentials_delete"
     assert credential["delete"]["responses"]["204"]["description"] == "Successful Response"
+    assert models["get"]["operationId"] == "llm_provider_credentials_list_models"
+    assert models["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LLMProviderModelListResponse"
+    }
 
 
 def test_agents_openapi_contract() -> None:
