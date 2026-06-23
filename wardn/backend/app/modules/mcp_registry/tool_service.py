@@ -1,10 +1,14 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.mcp_gateway import repository as gateway_repository
+from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
+
+SYSTEM_SCOPE_USER_ID = UUID(int=0)
 
 
 @dataclass(frozen=True)
@@ -24,7 +28,11 @@ async def refresh_tool_schemas(
     row = await gateway_repository.get_enabled_installation(
         session,
         server_name,
-        workspace_id,
+        scope=GatewayScope(
+            user_id=SYSTEM_SCOPE_USER_ID,
+            is_superuser=True,
+            workspace_id=workspace_id,
+        ),
     )
     if row is None:
         raise LookupError("enabled MCP server was not found")
@@ -49,6 +57,7 @@ async def refresh_tool_schemas_for_installation(
     tools = manager.list_tools(installation)
     tool_count = await tool_repository.upsert_tool_schemas(
         session,
+        installation=installation,
         server=server,
         tools=tools,
     )

@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type McpRegistryListServerVersionsParams = {
-include_deleted?: boolean;
+export type McpGatewayRpcParams = {
+organization_id?: string | null;
+workspace_id?: string | null;
 };

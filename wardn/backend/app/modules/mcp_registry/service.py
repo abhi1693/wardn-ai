@@ -652,6 +652,7 @@ async def list_installation_tools(
 
     tools = await tool_repository.list_active_tool_schemas(
         session,
+        installation_id=installation.id,
         server_name=server.name,
         server_version=server.version,
     )

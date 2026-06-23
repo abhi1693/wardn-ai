@@ -7,11 +7,19 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
     MCPServerVersion,
 )
+from app.modules.organizations.models import (
+    OrganizationMembership,
+    Workspace,
+    WorkspaceMembership,
+)
+
+ADMIN_ROLES = ("owner", "admin")
 
 
 def tool_source_hash(tool: dict[str, Any]) -> str:
@@ -19,35 +27,63 @@ def tool_source_hash(tool: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def apply_gateway_scope(statement, scope: GatewayScope):
+    statement = statement.join(
+        MCPServerInstallation,
+        MCPServerInstallation.id == MCPServerToolSchema.installation_id,
+    ).where(MCPServerInstallation.status == "enabled")
+    if scope.workspace_id is not None:
+        return statement.where(MCPServerInstallation.workspace_id == scope.workspace_id)
+    if scope.organization_id is not None:
+        return statement.join(
+            Workspace,
+            Workspace.id == MCPServerInstallation.workspace_id,
+        ).where(Workspace.organization_id == scope.organization_id)
+    if scope.is_superuser:
+        return statement
+    return (
+        statement.join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
+        .outerjoin(
+            OrganizationMembership,
+            and_(
+                OrganizationMembership.organization_id == Workspace.organization_id,
+                OrganizationMembership.user_id == scope.user_id,
+                OrganizationMembership.is_active.is_(True),
+            ),
+        )
+        .outerjoin(
+            WorkspaceMembership,
+            and_(
+                WorkspaceMembership.workspace_id == Workspace.id,
+                WorkspaceMembership.user_id == scope.user_id,
+                WorkspaceMembership.is_active.is_(True),
+            ),
+        )
+        .where(
+            or_(
+                OrganizationMembership.role.in_(ADMIN_ROLES),
+                WorkspaceMembership.id.is_not(None),
+            )
+        )
+    )
+
+
 async def search_enabled_tool_schemas(
     session: AsyncSession,
     *,
-    workspace_id: uuid.UUID | None = None,
+    scope: GatewayScope,
     server_name: str,
     search: str,
     offset: int,
     limit: int,
 ) -> tuple[list[MCPServerToolSchema], str]:
-    statement = (
-        select(MCPServerToolSchema)
-        .join(
-            MCPServerInstallation,
-            and_(
-                MCPServerInstallation.server_name == MCPServerToolSchema.server_name,
-                MCPServerInstallation.installed_version == MCPServerToolSchema.server_version,
-            ),
-        )
-        .where(
-            MCPServerInstallation.status == "enabled",
-            MCPServerToolSchema.is_active.is_(True),
-        )
-        .order_by(
-            MCPServerToolSchema.server_name.asc(),
-            MCPServerToolSchema.tool_name.asc(),
-        )
+    statement = select(MCPServerToolSchema).where(MCPServerToolSchema.is_active.is_(True))
+    statement = apply_gateway_scope(statement, scope)
+
+    statement = statement.order_by(
+        MCPServerToolSchema.server_name.asc(),
+        MCPServerToolSchema.tool_name.asc(),
     )
-    if workspace_id is not None:
-        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
 
     if server_name:
         statement = statement.where(MCPServerToolSchema.server_name == server_name)
@@ -72,28 +108,19 @@ async def search_enabled_tool_schemas(
 async def get_enabled_tool_schema(
     session: AsyncSession,
     *,
-    workspace_id: uuid.UUID | None = None,
+    scope: GatewayScope,
+    installation_id: uuid.UUID | None = None,
     server_name: str,
     tool_name: str,
 ) -> MCPServerToolSchema | None:
-    statement = (
-        select(MCPServerToolSchema)
-        .join(
-            MCPServerInstallation,
-            and_(
-                MCPServerInstallation.server_name == MCPServerToolSchema.server_name,
-                MCPServerInstallation.installed_version == MCPServerToolSchema.server_version,
-            ),
-        )
-        .where(
-            MCPServerInstallation.status == "enabled",
-            MCPServerToolSchema.server_name == server_name,
-            MCPServerToolSchema.tool_name == tool_name,
-            MCPServerToolSchema.is_active.is_(True),
-        )
+    statement = select(MCPServerToolSchema).where(
+        MCPServerToolSchema.server_name == server_name,
+        MCPServerToolSchema.tool_name == tool_name,
+        MCPServerToolSchema.is_active.is_(True),
     )
-    if workspace_id is not None:
-        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    if installation_id is not None:
+        statement = statement.where(MCPServerToolSchema.installation_id == installation_id)
+    statement = apply_gateway_scope(statement, scope)
     result = await session.execute(statement)
     return result.scalar_one_or_none()
 
@@ -101,42 +128,49 @@ async def get_enabled_tool_schema(
 async def count_active_tool_schemas(
     session: AsyncSession,
     *,
+    installation_id: uuid.UUID | None = None,
     server_name: str,
     server_version: str,
 ) -> int:
-    result = await session.execute(
+    statement = (
         select(func.count())
         .select_from(MCPServerToolSchema)
-        .where(
+        .where(MCPServerToolSchema.is_active.is_(True))
+    )
+    if installation_id is not None:
+        statement = statement.where(MCPServerToolSchema.installation_id == installation_id)
+    else:
+        statement = statement.where(
             MCPServerToolSchema.server_name == server_name,
             MCPServerToolSchema.server_version == server_version,
-            MCPServerToolSchema.is_active.is_(True),
         )
-    )
+    result = await session.execute(statement)
     return int(result.scalar_one())
 
 
 async def list_active_tool_schemas(
     session: AsyncSession,
     *,
+    installation_id: uuid.UUID | None = None,
     server_name: str,
     server_version: str,
 ) -> list[MCPServerToolSchema]:
-    result = await session.execute(
-        select(MCPServerToolSchema)
-        .where(
+    statement = select(MCPServerToolSchema).where(MCPServerToolSchema.is_active.is_(True))
+    if installation_id is not None:
+        statement = statement.where(MCPServerToolSchema.installation_id == installation_id)
+    else:
+        statement = statement.where(
             MCPServerToolSchema.server_name == server_name,
             MCPServerToolSchema.server_version == server_version,
-            MCPServerToolSchema.is_active.is_(True),
         )
-        .order_by(MCPServerToolSchema.tool_name.asc())
-    )
+    result = await session.execute(statement.order_by(MCPServerToolSchema.tool_name.asc()))
     return list(result.scalars().all())
 
 
 async def upsert_tool_schemas(
     session: AsyncSession,
     *,
+    installation: MCPServerInstallation,
     server: MCPServerVersion,
     tools: list[dict[str, Any]],
 ) -> int:
@@ -145,8 +179,7 @@ async def upsert_tool_schemas(
 
     existing_result = await session.execute(
         select(MCPServerToolSchema).where(
-            MCPServerToolSchema.server_name == server.name,
-            MCPServerToolSchema.server_version == server.version,
+            MCPServerToolSchema.installation_id == installation.id,
         )
     )
     existing = {tool.tool_name: tool for tool in existing_result.scalars()}
@@ -162,6 +195,8 @@ async def upsert_tool_schemas(
         output_schema = raw_tool.get("outputSchema")
         annotations = raw_tool.get("annotations")
         values = {
+            "workspace_id": installation.workspace_id,
+            "installation_id": installation.id,
             "title": title,
             "description": description,
             "input_schema": input_schema if isinstance(input_schema, dict) else {"type": "object"},
@@ -179,6 +214,8 @@ async def upsert_tool_schemas(
         else:
             session.add(
                 MCPServerToolSchema(
+                    workspace_id=installation.workspace_id,
+                    installation_id=installation.id,
                     server_name=server.name,
                     server_version=server.version,
                     tool_name=tool_name,

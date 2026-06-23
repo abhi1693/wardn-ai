@@ -4,33 +4,52 @@
  * Wardn AI API
  * OpenAPI spec version: 0.1.0
  */
+import type {
+  HTTPValidationError,
+  McpGatewayRpcParams
+} from '../model';
+
 
 export type mcpGatewayRpcResponse200 = {
   data: unknown
   status: 200
 }
 
+export type mcpGatewayRpcResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
 export type mcpGatewayRpcResponseSuccess = (mcpGatewayRpcResponse200) & {
   headers: Headers;
 };
-;
+export type mcpGatewayRpcResponseError = (mcpGatewayRpcResponse422) & {
+  headers: Headers;
+};
 
-export type mcpGatewayRpcResponse = (mcpGatewayRpcResponseSuccess)
+export type mcpGatewayRpcResponse = (mcpGatewayRpcResponseSuccess | mcpGatewayRpcResponseError)
 
-export const getMcpGatewayRpcUrl = () => {
+export const getMcpGatewayRpcUrl = (params?: McpGatewayRpcParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/mcp/gateway`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/mcp/gateway?${stringifiedParams}` : `http://localhost:8000/api/v1/mcp/gateway`
 }
 
 /**
  * @summary Mcp Gateway Rpc
  */
-export const mcpGatewayRpc = async ( options?: RequestInit): Promise<mcpGatewayRpcResponse> => {
+export const mcpGatewayRpc = async (params?: McpGatewayRpcParams, options?: RequestInit): Promise<mcpGatewayRpcResponse> => {
 
-  const res = await fetch(getMcpGatewayRpcUrl(),
+  const res = await fetch(getMcpGatewayRpcUrl(params),
   {
     ...options,
     method: 'POST'

@@ -123,13 +123,24 @@ class MCPServerToolSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_tool_schemas"
     __table_args__ = (
         UniqueConstraint(
-            "server_name",
-            "server_version",
+            "installation_id",
             "tool_name",
-            name="uq_mcp_server_tool_schemas_server_version_tool",
+            name="uq_mcp_server_tool_schemas_installation_tool",
         ),
     )
 
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    installation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_server_installations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     server_version: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)

@@ -19,6 +19,9 @@ from app.modules.mcp_runtime.schemas import (
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
 
+TEST_ORGANIZATION_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
+TEST_WORKSPACE_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
+
 
 class FakeSession:
     committed = False
@@ -33,6 +36,21 @@ async def fake_session():
 
 async def fake_current_user():
     return User(id=uuid.uuid4(), email="admin@example.com", is_superuser=True)
+
+
+async def fake_require_workspace_member(*args, **kwargs):
+    return None
+
+
+async def fake_require_workspace_admin(*args, **kwargs):
+    return None
+
+
+def workspace_runtime_path(suffix: str = "") -> str:
+    return (
+        f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}"
+        f"/mcp/runtime{suffix}"
+    )
 
 
 def runtime_session_read(
@@ -123,46 +141,58 @@ def runtime_client(*, authenticated: bool = False) -> TestClient:
 def test_list_runtime_sessions_route(monkeypatch) -> None:
     seen = {}
 
-    async def list_runtime_sessions(session, *, status=None, limit=100):
+    async def list_runtime_sessions(session, *, workspace_id=None, status=None, limit=100):
+        seen["workspace_id"] = workspace_id
         seen["status"] = status
         seen["limit"] = limit
-        return MCPRuntimeSessionListResponse(sessions=[runtime_session_read()])
+        return MCPRuntimeSessionListResponse(
+            sessions=[runtime_session_read(workspace_id=workspace_id)]
+        )
 
+    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
     monkeypatch.setattr(runtime_service, "list_runtime_sessions", list_runtime_sessions)
 
-    response = runtime_client().get("/api/v1/mcp/runtime/sessions?status=idle&limit=10")
+    response = runtime_client(authenticated=True).get(
+        workspace_runtime_path("/sessions?status=idle&limit=10")
+    )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["sessions"][0]["serverName"] == "io.github.example/weather"
     assert "configFingerprint" not in payload["sessions"][0]
     assert "endpointUrl" not in payload["sessions"][0]
-    assert seen == {"status": "idle", "limit": 10}
+    assert seen == {"workspace_id": TEST_WORKSPACE_ID, "status": "idle", "limit": 10}
 
 
 def test_get_runtime_summary_route(monkeypatch) -> None:
     seen = {}
 
-    async def get_runtime_summary(session):
+    async def get_runtime_summary(session, *, workspace_id=None):
         seen["session"] = session
+        seen["workspace_id"] = workspace_id
         return runtime_summary_response()
 
+    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
     monkeypatch.setattr(runtime_service, "get_runtime_summary", get_runtime_summary)
 
-    response = runtime_client().get("/api/v1/mcp/runtime/summary")
+    response = runtime_client(authenticated=True).get(workspace_runtime_path("/summary"))
 
     assert response.status_code == 200
     assert response.json()["toolCalls"]["recentFailureRate"] == 0.5
     assert seen["session"] is not None
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
 
 
 def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
-    async def get_runtime_session(session, runtime_session_id):
+    async def get_runtime_session(session, runtime_session_id, *, workspace_id=None):
         raise LookupError("not found")
 
+    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
     monkeypatch.setattr(runtime_service, "get_runtime_session", get_runtime_session)
 
-    response = runtime_client().get(f"/api/v1/mcp/runtime/sessions/{uuid.uuid4()}")
+    response = runtime_client(authenticated=True).get(
+        workspace_runtime_path(f"/sessions/{uuid.uuid4()}")
+    )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "runtime session not found"}
@@ -171,19 +201,24 @@ def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
 def test_stop_runtime_session_route_commits(monkeypatch) -> None:
     seen = {}
 
-    async def stop_runtime_session(session, runtime_session_id):
+    async def stop_runtime_session(session, runtime_session_id, *, workspace_id=None):
         seen["session"] = session
         seen["runtime_session_id"] = runtime_session_id
-        return runtime_session_read(status="stopped")
+        seen["workspace_id"] = workspace_id
+        return runtime_session_read(workspace_id=workspace_id, status="stopped")
 
+    monkeypatch.setattr(runtime_router, "require_workspace_admin", fake_require_workspace_admin)
     monkeypatch.setattr(runtime_service, "stop_runtime_session", stop_runtime_session)
     runtime_session_id = uuid.uuid4()
 
-    response = runtime_client().post(f"/api/v1/mcp/runtime/sessions/{runtime_session_id}/stop")
+    response = runtime_client(authenticated=True).post(
+        workspace_runtime_path(f"/sessions/{runtime_session_id}/stop")
+    )
 
     assert response.status_code == 200
     assert response.json()["status"] == "stopped"
     assert seen["runtime_session_id"] == runtime_session_id
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
     assert seen["session"].committed is True
 
 
@@ -191,19 +226,21 @@ def test_get_runtime_session_health_route(monkeypatch) -> None:
     seen = {}
     runtime_session_id = uuid.uuid4()
 
-    async def get_runtime_session_health(session, seen_runtime_session_id):
+    async def get_runtime_session_health(session, seen_runtime_session_id, *, workspace_id=None):
         seen["session"] = session
         seen["runtime_session_id"] = seen_runtime_session_id
+        seen["workspace_id"] = workspace_id
         return runtime_session_health_response(seen_runtime_session_id)
 
+    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
     monkeypatch.setattr(
         runtime_service,
         "get_runtime_session_health",
         get_runtime_session_health,
     )
 
-    response = runtime_client().get(
-        f"/api/v1/mcp/runtime/sessions/{runtime_session_id}/health"
+    response = runtime_client(authenticated=True).get(
+        workspace_runtime_path(f"/sessions/{runtime_session_id}/health")
     )
 
     assert response.status_code == 200
@@ -211,6 +248,7 @@ def test_get_runtime_session_health_route(monkeypatch) -> None:
     assert response.json()["status"] == "ready"
     assert response.json()["details"] == {"transport": "stdio"}
     assert seen["runtime_session_id"] == runtime_session_id
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
     assert seen["session"] is not None
 
 
@@ -218,20 +256,32 @@ def test_list_runtime_session_events_route(monkeypatch) -> None:
     seen = {}
     runtime_session_id = uuid.uuid4()
 
-    async def list_runtime_events(session, seen_runtime_session_id, *, limit=100):
+    async def list_runtime_events(
+        session,
+        seen_runtime_session_id,
+        *,
+        workspace_id=None,
+        limit=100,
+    ):
         seen["runtime_session_id"] = seen_runtime_session_id
+        seen["workspace_id"] = workspace_id
         seen["limit"] = limit
         return MCPRuntimeEventListResponse(events=[runtime_event_read(seen_runtime_session_id)])
 
+    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
     monkeypatch.setattr(runtime_service, "list_runtime_events", list_runtime_events)
 
-    response = runtime_client().get(
-        f"/api/v1/mcp/runtime/sessions/{runtime_session_id}/events?limit=5"
+    response = runtime_client(authenticated=True).get(
+        workspace_runtime_path(f"/sessions/{runtime_session_id}/events?limit=5")
     )
 
     assert response.status_code == 200
     assert response.json()["events"][0]["eventType"] == "runtime_session_created"
-    assert seen == {"runtime_session_id": runtime_session_id, "limit": 5}
+    assert seen == {
+        "runtime_session_id": runtime_session_id,
+        "workspace_id": TEST_WORKSPACE_ID,
+        "limit": 5,
+    }
 
 
 def test_workspace_list_runtime_sessions_route_filters_workspace(monkeypatch) -> None:

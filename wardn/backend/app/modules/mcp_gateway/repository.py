@@ -3,13 +3,58 @@ import uuid
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.organizations.models import (
+    OrganizationMembership,
+    Workspace,
+    WorkspaceMembership,
+)
+
+ADMIN_ROLES = ("owner", "admin")
+
+
+def apply_gateway_scope(statement, scope: GatewayScope):
+    if scope.workspace_id is not None:
+        return statement.where(MCPServerInstallation.workspace_id == scope.workspace_id)
+    if scope.organization_id is not None:
+        return statement.join(
+            Workspace,
+            Workspace.id == MCPServerInstallation.workspace_id,
+        ).where(Workspace.organization_id == scope.organization_id)
+    if scope.is_superuser:
+        return statement
+    return (
+        statement.join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
+        .outerjoin(
+            OrganizationMembership,
+            and_(
+                OrganizationMembership.organization_id == Workspace.organization_id,
+                OrganizationMembership.user_id == scope.user_id,
+                OrganizationMembership.is_active.is_(True),
+            ),
+        )
+        .outerjoin(
+            WorkspaceMembership,
+            and_(
+                WorkspaceMembership.workspace_id == Workspace.id,
+                WorkspaceMembership.user_id == scope.user_id,
+                WorkspaceMembership.is_active.is_(True),
+            ),
+        )
+        .where(
+            or_(
+                OrganizationMembership.role.in_(ADMIN_ROLES),
+                WorkspaceMembership.id.is_not(None),
+            )
+        )
+    )
 
 
 async def search_enabled_installations(
     session: AsyncSession,
     *,
-    workspace_id: uuid.UUID | None = None,
+    scope: GatewayScope,
     search: str,
     offset: int,
     limit: int,
@@ -26,8 +71,7 @@ async def search_enabled_installations(
         .where(MCPServerInstallation.status == "enabled")
         .order_by(MCPServerInstallation.server_name.asc())
     )
-    if workspace_id is not None:
-        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    statement = apply_gateway_scope(statement, scope)
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -48,7 +92,9 @@ async def search_enabled_installations(
 async def get_enabled_installation(
     session: AsyncSession,
     server_name: str,
-    workspace_id: uuid.UUID | None = None,
+    *,
+    scope: GatewayScope,
+    installation_id: uuid.UUID | None = None,
 ) -> tuple[MCPServerInstallation, MCPServerVersion] | None:
     statement = (
         select(MCPServerInstallation, MCPServerVersion)
@@ -64,7 +110,11 @@ async def get_enabled_installation(
             MCPServerInstallation.status == "enabled",
         )
     )
-    if workspace_id is not None:
-        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    if installation_id is not None:
+        statement = statement.where(MCPServerInstallation.id == installation_id)
+    statement = apply_gateway_scope(statement, scope)
     result = await session.execute(statement)
-    return result.one_or_none()
+    rows = result.all()
+    if len(rows) > 1:
+        raise LookupError("enabled MCP server is ambiguous; pass installationId")
+    return rows[0] if rows else None

@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,7 @@ from app.db.session import get_db_session
 from app.main import create_app
 from app.modules.mcp_gateway import client as gateway_client_module
 from app.modules.mcp_gateway import repository
+from app.modules.mcp_gateway import router as gateway_router
 from app.modules.mcp_gateway import service as gateway_service
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_registry.models import (
@@ -17,7 +19,17 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
+from app.modules.mcp_runtime import manager as runtime_manager
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesMetadataError
+from app.modules.users.dependencies import get_current_user
+from app.modules.users.models import User
+
+TEST_ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111"
+TEST_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222"
+GATEWAY_PATH = "/api/v1/mcp/gateway"
+WORKSPACE_GATEWAY_PATH = (
+    f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}/mcp/gateway"
+)
 
 
 class FakeSession:
@@ -29,6 +41,22 @@ class FakeSession:
 
 async def fake_session():
     yield FakeSession()
+
+
+async def fake_current_user():
+    return User(id=uuid.uuid4(), email="admin@example.com", is_superuser=True)
+
+
+async def failing_current_user():
+    raise AssertionError("top-level MCP gateway must not require user auth")
+
+
+async def fake_require_workspace_admin(*args, **kwargs):
+    return None
+
+
+async def fake_require_organization_admin(*args, **kwargs):
+    return None
 
 
 def cached_tool(
@@ -63,6 +91,7 @@ def cached_tool(
 def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
     now = datetime(2026, 6, 21, tzinfo=UTC)
     installation = MCPServerInstallation(
+        workspace_id=uuid.UUID(TEST_WORKSPACE_ID),
         server_name="io.github.example/weather",
         installed_version="1.0.0",
         status="enabled",
@@ -75,6 +104,7 @@ def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
         },
         secret_config={"headers": {"Authorization": "Bearer test"}},
     )
+    installation.id = uuid.uuid4()
     installation.installed_at = now
     server = MCPServerVersion(
         name="io.github.example/weather",
@@ -118,6 +148,7 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
     command.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
     command.chmod(0o755)
     installation = MCPServerInstallation(
+        workspace_id=uuid.UUID(TEST_WORKSPACE_ID),
         server_name="io.github.containers/kubernetes-mcp-server",
         installed_version="0.0.62",
         status="enabled",
@@ -133,6 +164,7 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
         },
         secret_config={"environment": {"KUBECONFIG": "/tmp/kubeconfig"}},
     )
+    installation.id = uuid.uuid4()
     installation.installed_at = now
     server = MCPServerVersion(
         name="io.github.containers/kubernetes-mcp-server",
@@ -170,12 +202,22 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
 def gateway_client() -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db_session] = fake_session
+    app.dependency_overrides[get_current_user] = fake_current_user
+    gateway_router.require_organization_admin = fake_require_organization_admin
+    gateway_router.require_workspace_admin = fake_require_workspace_admin
+    return TestClient(app)
+
+
+def common_gateway_client() -> TestClient:
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    app.dependency_overrides[get_current_user] = failing_current_user
     return TestClient(app)
 
 
 def test_mcp_gateway_initialize() -> None:
-    response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+    response = common_gateway_client().post(
+        GATEWAY_PATH,
         json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
     )
 
@@ -186,8 +228,8 @@ def test_mcp_gateway_initialize() -> None:
 
 
 def test_mcp_gateway_tools_list_is_bounded() -> None:
-    response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+    response = common_gateway_client().post(
+        GATEWAY_PATH,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
     )
 
@@ -252,7 +294,7 @@ def test_mcp_gateway_search_servers(monkeypatch) -> None:
     )
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 2,
@@ -268,6 +310,8 @@ def test_mcp_gateway_search_servers(monkeypatch) -> None:
     assert result["isError"] is False
     assert result["structuredContent"]["nextCursor"] == "10"
     assert result["structuredContent"]["servers"][0]["serverName"] == "io.github.example/weather"
+    assert result["structuredContent"]["servers"][0]["installationId"]
+    assert result["structuredContent"]["servers"][0]["workspaceId"] == TEST_WORKSPACE_ID
     assert result["structuredContent"]["servers"][0]["inputCounts"] == {
         "total": 1,
         "required": 1,
@@ -282,7 +326,7 @@ def test_mcp_gateway_get_server(monkeypatch) -> None:
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 3,
@@ -301,8 +345,10 @@ def test_mcp_gateway_get_server(monkeypatch) -> None:
 
 
 def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
+    installation, server = installed_server()
+
     async def get_enabled_installation(*args, **kwargs):
-        return installed_server()
+        return installation, server
 
     seen = {}
 
@@ -324,6 +370,7 @@ def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
         ]
 
     async def count_active_tool_schemas(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
         return 0
 
     async def upsert_tool_schemas(*args, **kwargs):
@@ -341,7 +388,7 @@ def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
     monkeypatch.setattr(tool_repository, "search_enabled_tool_schemas", search_enabled_tool_schemas)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 4,
@@ -367,8 +414,16 @@ def test_mcp_gateway_search_tools_for_server(monkeypatch) -> None:
 
 
 def test_mcp_gateway_search_tools_for_package_server(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_manager,
+        "get_settings",
+        lambda: type("Settings", (), {"mcp_runtime_provider": "local"})(),
+    )
+
+    installation, server = installed_package_server(tmp_path)
+
     async def get_enabled_installation(*args, **kwargs):
-        return installed_package_server(tmp_path)
+        return installation, server
 
     seen = {}
 
@@ -391,6 +446,7 @@ def test_mcp_gateway_search_tools_for_package_server(tmp_path, monkeypatch) -> N
         ]
 
     async def count_active_tool_schemas(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
         return 0
 
     async def upsert_tool_schemas(*args, **kwargs):
@@ -414,7 +470,7 @@ def test_mcp_gateway_search_tools_for_package_server(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(tool_repository, "search_enabled_tool_schemas", search_enabled_tool_schemas)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 4,
@@ -437,8 +493,10 @@ def test_mcp_gateway_search_tools_for_package_server(tmp_path, monkeypatch) -> N
 
 
 def test_mcp_gateway_get_tool(monkeypatch) -> None:
+    installation, server = installed_server()
+
     async def get_enabled_installation(*args, **kwargs):
-        return installed_server()
+        return installation, server
 
     def list_tools(*args, **kwargs):
         return [
@@ -457,6 +515,7 @@ def test_mcp_gateway_get_tool(monkeypatch) -> None:
     calls = {"get": 0}
 
     async def get_enabled_tool_schema(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
         calls["get"] += 1
         if calls["get"] == 1:
             return None
@@ -477,7 +536,7 @@ def test_mcp_gateway_get_tool(monkeypatch) -> None:
     monkeypatch.setattr(tool_repository, "upsert_tool_schemas", upsert_tool_schemas)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 5,
@@ -521,7 +580,7 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 6,
@@ -561,7 +620,7 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatc
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 6,
@@ -606,7 +665,7 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_kubernetes_runtime_failure(
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 6,
@@ -663,7 +722,7 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={
             "jsonrpc": "2.0",
             "id": 6,
@@ -689,9 +748,75 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
 
 def test_mcp_gateway_initialized_notification_returns_accepted() -> None:
     response = gateway_client().post(
-        "/api/v1/mcp/gateway",
+        GATEWAY_PATH,
         json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
     )
 
     assert response.status_code == 202
     assert response.content == b""
+
+
+def test_top_level_mcp_gateway_organization_scope(monkeypatch) -> None:
+    seen = {}
+
+    async def search_enabled_installations(*args, **kwargs):
+        scope = kwargs["scope"]
+        seen["scope"] = scope
+        return [installed_server()], ""
+
+    monkeypatch.setattr(
+        repository,
+        "search_enabled_installations",
+        search_enabled_installations,
+    )
+
+    response = gateway_client().post(
+        f"{GATEWAY_PATH}?organization_id={TEST_ORGANIZATION_ID}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search_mcp_servers",
+                "arguments": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is False
+    assert seen["scope"].organization_id == uuid.UUID(TEST_ORGANIZATION_ID)
+    assert seen["scope"].workspace_id is None
+
+
+def test_top_level_mcp_gateway_uses_common_global_scope(monkeypatch) -> None:
+    seen = {}
+
+    async def search_enabled_installations(*args, **kwargs):
+        seen["scope"] = kwargs["scope"]
+        return [installed_server()], ""
+
+    monkeypatch.setattr(
+        repository,
+        "search_enabled_installations",
+        search_enabled_installations,
+    )
+
+    response = common_gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search_mcp_servers",
+                "arguments": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is False
+    assert seen["scope"].organization_id is None
+    assert seen["scope"].workspace_id is None
+    assert seen["scope"].is_superuser is True

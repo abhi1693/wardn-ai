@@ -714,6 +714,7 @@ async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> Non
         refreshed["server"] = kwargs["server"]
 
     async def list_active_tool_schemas(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
         return [cached_tool]
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
@@ -781,6 +782,7 @@ async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> 
         refreshed["server"] = kwargs["server"]
 
     async def list_active_tool_schemas(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
         return [cached_tool]
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
@@ -971,6 +973,7 @@ async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
         return installation, server
 
     async def upsert_tool_schemas(*args, **kwargs):
+        seen["upsert_installation"] = kwargs["installation"]
         seen["server"] = kwargs["server"]
         seen["tools"] = kwargs["tools"]
         return len(kwargs["tools"])
@@ -996,5 +999,6 @@ async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
     assert result.server_version == "1.0.0"
     assert result.tool_count == 1
     assert seen["installation"] is installation
+    assert seen["upsert_installation"] is installation
     assert seen["server"] is server
     assert seen["tools"][0]["name"] == "get_forecast"
