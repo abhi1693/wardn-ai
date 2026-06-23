@@ -10,7 +10,7 @@ from app.modules.agents.exceptions import (
     InvalidAgentToolAssignmentError,
 )
 from app.modules.agents.models import Agent, AgentTool
-from app.modules.agents.schemas import AgentCreate, AgentToolAssignmentUpdate
+from app.modules.agents.schemas import AgentChatMessage, AgentCreate, AgentToolAssignmentUpdate
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerToolSchema
 from app.modules.organizations.models import Organization, OrganizationMembership, Workspace
@@ -40,6 +40,130 @@ class FakeSession:
         instance.updated_at = now
 
 
+def test_provider_messages_keeps_text_user_and_assistant_messages() -> None:
+    messages = [
+        AgentChatMessage(role="system", parts=[{"type": "text", "text": "ignored"}]),
+        AgentChatMessage(
+            role="user",
+            parts=[
+                {"type": "text", "text": "hello"},
+                {"type": "file", "text": "ignored"},
+                {"type": "text", "text": "world"},
+            ],
+        ),
+        AgentChatMessage(role="assistant", parts=[{"type": "text", "text": "answer"}]),
+        AgentChatMessage(role="user", parts=[{"type": "text", "text": ""}]),
+    ]
+
+    assert service.provider_messages(messages) == [
+        {"role": "user", "content": "hello\nworld"},
+        {"role": "assistant", "content": "answer"},
+    ]
+
+
+def test_sse_payloads_parses_complete_json_blocks_and_preserves_tail() -> None:
+    payloads, tail = service.sse_payloads(
+        'event: message\ndata: {"type":"response.output_text.delta","delta":"hi"}\n\n'
+        "data: [DONE]\n\n"
+        'data: {"partial":'
+    )
+
+    assert payloads == [{"type": "response.output_text.delta", "delta": "hi"}]
+    assert tail == 'data: {"partial":'
+
+
+def test_text_delta_from_openai_event_supports_responses_and_chat_chunks() -> None:
+    assert (
+        service.text_delta_from_openai_event(
+            {"type": "response.output_text.delta", "delta": "hello"}
+        )
+        == "hello"
+    )
+    assert (
+        service.text_delta_from_openai_event({"choices": [{"delta": {"content": "world"}}]})
+        == "world"
+    )
+
+
+def test_chatgpt_codex_request_body_uses_websocket_response_create_shape() -> None:
+    agent = Agent(
+        id=uuid4(),
+        organization_id=uuid4(),
+        name="SRE Agent",
+        instructions="Use tools carefully.",
+        scope="organization",
+        model_name="gpt-5.3-codex-spark",
+    )
+
+    body = service.chatgpt_codex_request_body(
+        agent,
+        input_items=service.chatgpt_codex_messages(
+            [AgentChatMessage(role="user", parts=[{"type": "text", "text": "hello"}])]
+        ),
+        tools=[],
+    )
+
+    assert body == {
+        "type": "response.create",
+        "model": "gpt-5.3-codex-spark",
+        "instructions": "Use tools carefully.",
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "hello"}],
+            }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": False,
+        "reasoning": None,
+        "store": False,
+        "stream": True,
+        "include": [],
+    }
+
+
+def test_tool_calls_from_response_output_item_done() -> None:
+    calls = service.tool_calls_from_event(
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "name": "wardn_abc",
+                "call_id": "call_123",
+                "arguments": '{"namespace":"media"}',
+            },
+        }
+    )
+
+    assert calls == [
+        service.AgentToolCall(
+            name="wardn_abc",
+            call_id="call_123",
+            arguments={"namespace": "media"},
+        )
+    ]
+
+
+def test_websocket_error_message_reads_codex_error_events() -> None:
+    assert (
+        service.websocket_error_message(
+            {
+                "type": "error",
+                "status": 400,
+                "error": {"message": "Model does not support this request"},
+            }
+        )
+        == "Model does not support this request"
+    )
+
+
+def test_codex_compat_headers_use_current_default_version() -> None:
+    assert service.CODEX_COMPAT_VERSION == service.DEFAULT_CODEX_COMPAT_VERSION
+    assert service.CODEX_COMPAT_VERSION == "0.142.0"
+    assert service.CODEX_COMPAT_USER_AGENT.startswith("codex_cli_rs/0.142.0 ")
+
+
 def patch_org_owner(monkeypatch, organization_id, user):
     organization = Organization(
         id=organization_id,
@@ -63,6 +187,73 @@ def patch_org_owner(monkeypatch, organization_id, user):
     org_repository = service.require_organization_admin.__globals__["repository"]
     monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
     monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+
+
+@pytest.mark.asyncio
+async def test_get_agent_model_for_run_allows_workspace_member(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="workspace",
+        secret_value="sk-test",
+        base_url="",
+        extra_headers={},
+        is_default=False,
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        provider_credential_id=credential.id,
+        name="Workspace Agent",
+        instructions="Use tools carefully.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    calls: list[str] = []
+
+    async def require_organization_member(*args, **kwargs):
+        calls.append("organization_member")
+        return None, None
+
+    async def require_workspace_member(*args, **kwargs):
+        calls.append("workspace_member")
+        return None, None, None
+
+    async def require_workspace_admin(*args, **kwargs):
+        raise AssertionError("running an agent should not require workspace admin access")
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    monkeypatch.setattr(service, "require_organization_member", require_organization_member)
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
+
+    result_agent, result_credential = await service.get_agent_model_for_run(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+    )
+
+    assert result_agent is agent
+    assert result_credential is credential
+    assert calls == ["organization_member", "workspace_member"]
 
 
 @pytest.mark.asyncio

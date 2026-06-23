@@ -7,6 +7,10 @@
 
 export * from './_mCPServerCreateMeta';
 export * from './_mCPServerDocumentMeta';
+export * from './agentChatMessage';
+export * from './agentChatMessagePartsItem';
+export * from './agentChatMessageRole';
+export * from './agentChatRequest';
 export * from './agentCreate';
 export * from './agentCreateScope';
 export * from './agentListResponse';

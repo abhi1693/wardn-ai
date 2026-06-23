@@ -20,9 +20,8 @@ export async function proxyBackend(
       ...init.headers,
     },
   });
-  const body = await response.text();
   const hasBody = ![204, 205, 304].includes(response.status);
-  return new NextResponse(hasBody ? body : null, {
+  return new NextResponse(hasBody ? response.body : null, {
     status: response.status,
     headers: hasBody
       ? {

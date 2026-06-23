@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Bot, Loader2, MessageSquare, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -150,6 +150,16 @@ export function AgentsClient({
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
+                      <Button
+                        asChild
+                        aria-label={`Chat with ${agent.name}`}
+                        size="icon"
+                        variant="outline"
+                      >
+                        <Link href={`/org/${organization.id}/agents/${agent.id}`}>
+                          <MessageSquare className="size-4" />
+                        </Link>
+                      </Button>
                       <Button
                         asChild
                         aria-label={`Edit ${agent.name}`}

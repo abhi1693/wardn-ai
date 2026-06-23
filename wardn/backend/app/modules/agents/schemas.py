@@ -100,3 +100,14 @@ class AgentToolRead(BaseModel):
 class AgentToolListResponse(BaseModel):
     tools: list[AgentToolRead]
 
+
+class AgentChatMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    parts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str | None = None
+    messages: list[AgentChatMessage] = Field(default_factory=list)

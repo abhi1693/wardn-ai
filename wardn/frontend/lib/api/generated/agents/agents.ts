@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type {
+  AgentChatRequest,
   AgentCreate,
   AgentListResponse,
   AgentRead,
@@ -336,6 +337,78 @@ export const agentsUpdate = async (organizationId: string,
 
   const data: agentsUpdateResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as agentsUpdateResponse
+}
+
+
+export type agentsChatResponse200 = {
+  data: string
+  status: 200
+}
+
+export type agentsChatResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type agentsChatResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type agentsChatResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type agentsChatResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type agentsChatResponse502 = {
+  data: ErrorResponse
+  status: 502
+}
+
+export type agentsChatResponseSuccess = (agentsChatResponse200) & {
+  headers: Headers;
+};
+export type agentsChatResponseError = (agentsChatResponse400 | agentsChatResponse403 | agentsChatResponse404 | agentsChatResponse422 | agentsChatResponse502) & {
+  headers: Headers;
+};
+
+export type agentsChatResponse = (agentsChatResponseSuccess | agentsChatResponseError)
+
+export const getAgentsChatUrl = (organizationId: string,
+    agentId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/agents/${agentId}/chat`
+}
+
+/**
+ * @summary Chat Agent Route
+ */
+export const agentsChat = async (organizationId: string,
+    agentId: string,
+    agentChatRequest: AgentChatRequest, options?: RequestInit): Promise<agentsChatResponse> => {
+
+  const res = await fetch(getAgentsChatUrl(organizationId,agentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentChatRequest)
+  }
+)
+
+  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: agentsChatResponse['data'] = body ? (contentType.includes('json') ? JSON.parse(body) : body) : {}
+  return { data, status: res.status, headers: res.headers } as agentsChatResponse
 }
 
 

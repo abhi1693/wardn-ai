@@ -4,7 +4,11 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents.models import Agent, AgentTool
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerToolSchema
+from app.modules.mcp_registry.models import (
+    MCPServerInstallation,
+    MCPServerToolSchema,
+    MCPServerVersion,
+)
 from app.modules.organizations.models import (
     OrganizationMembership,
     Workspace,
@@ -155,3 +159,28 @@ async def list_agent_tools(
     )
     return list(result.all())
 
+
+async def list_agent_tool_runtime_rows(
+    session: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+) -> list[tuple[AgentTool, MCPServerToolSchema, MCPServerInstallation, MCPServerVersion]]:
+    result = await session.execute(
+        select(AgentTool, MCPServerToolSchema, MCPServerInstallation, MCPServerVersion)
+        .join(MCPServerToolSchema, MCPServerToolSchema.id == AgentTool.tool_schema_id)
+        .join(MCPServerInstallation, MCPServerInstallation.id == AgentTool.installation_id)
+        .join(
+            MCPServerVersion,
+            and_(
+                MCPServerVersion.name == MCPServerInstallation.server_name,
+                MCPServerVersion.version == MCPServerInstallation.installed_version,
+            ),
+        )
+        .where(
+            AgentTool.agent_id == agent_id,
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+        .order_by(MCPServerToolSchema.server_name.asc(), MCPServerToolSchema.tool_name.asc())
+    )
+    return list(result.all())

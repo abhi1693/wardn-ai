@@ -24,6 +24,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}",
         "/api/v1/organizations/{organization_id}/agents",
         "/api/v1/organizations/{organization_id}/agents/{agent_id}",
+        "/api/v1/organizations/{organization_id}/agents/{agent_id}/chat",
         "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}",
@@ -227,6 +228,9 @@ def test_agents_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     agents = schema["paths"]["/api/v1/organizations/{organization_id}/agents"]
     agent = schema["paths"]["/api/v1/organizations/{organization_id}/agents/{agent_id}"]
+    chat = schema["paths"][
+        "/api/v1/organizations/{organization_id}/agents/{agent_id}/chat"
+    ]
     tools = schema["paths"][
         "/api/v1/organizations/{organization_id}/agents/{agent_id}/tools"
     ]
@@ -248,6 +252,16 @@ def test_agents_openapi_contract() -> None:
         "$ref": "#/components/schemas/AgentUpdate"
     }
     assert agent["delete"]["operationId"] == "agents_delete"
+    assert chat["post"]["operationId"] == "agents_chat"
+    assert chat["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentChatRequest"
+    }
+    assert chat["post"]["responses"]["200"]["content"]["text/plain"]["schema"] == {
+        "type": "string"
+    }
+    assert chat["post"]["responses"]["502"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorResponse"
+    }
     assert tools["get"]["operationId"] == "agents_list_tools"
     assert tools["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentToolListResponse"
