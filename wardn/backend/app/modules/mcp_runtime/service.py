@@ -455,6 +455,81 @@ async def call_tool_with_tracking(
     return result
 
 
+async def list_tools_with_tracking(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+    server: MCPServerVersion,
+    *,
+    manager: MCPRuntimeManager | None = None,
+) -> list[dict[str, Any]]:
+    manager = manager or get_runtime_manager()
+    now = datetime.now(UTC)
+    runtime_session = await ensure_runtime_session(
+        session,
+        installation,
+        server,
+        manager=manager,
+        now=now,
+    )
+    runtime_session.status = "running"
+    runtime_session.last_error = ""
+    add_runtime_event(
+        session,
+        runtime_session,
+        RUNTIME_EVENT_TOOL_CALL_STARTED,
+        message="Tool discovery started.",
+        metadata={"toolName": "tools/list"},
+        now=now,
+    )
+    await session.flush()
+
+    try:
+        tools = await run_in_threadpool(
+            manager.list_tools,
+            installation,
+            runtime_session=runtime_session,
+        )
+    except Exception as exc:
+        failed_at = datetime.now(UTC)
+        runtime_session.status = "idle"
+        runtime_session.last_used_at = failed_at
+        runtime_session.expires_at = runtime_expires_at(failed_at)
+        runtime_session.failure_count += 1
+        runtime_session.last_error = str(exc)
+        add_runtime_event(
+            session,
+            runtime_session,
+            RUNTIME_EVENT_TOOL_CALL_FAILED,
+            message="Tool discovery failed.",
+            metadata={
+                "toolName": "tools/list",
+                "errorType": exc.__class__.__name__,
+            },
+            now=failed_at,
+        )
+        await session.flush()
+        raise
+
+    finished_at = datetime.now(UTC)
+    runtime_session.status = "idle"
+    runtime_session.last_used_at = finished_at
+    runtime_session.expires_at = runtime_expires_at(finished_at)
+    runtime_session.last_error = ""
+    add_runtime_event(
+        session,
+        runtime_session,
+        RUNTIME_EVENT_TOOL_CALL_SUCCEEDED,
+        message="Tool discovery succeeded.",
+        metadata={
+            "toolName": "tools/list",
+            "toolCount": len(tools),
+        },
+        now=finished_at,
+    )
+    await session.flush()
+    return tools
+
+
 async def reap_expired_runtime_sessions(
     session: AsyncSession,
     *,

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     mcp_runtime_kubernetes_gateway_image: str = "supercorp/supergateway"
     mcp_runtime_kubernetes_gateway_uvx_image: str = "supercorp/supergateway:uvx"
     mcp_runtime_kubernetes_gateway_deno_image: str = "supercorp/supergateway:deno"
+    mcp_runtime_kubernetes_cpu_request: str = "100m"
+    mcp_runtime_kubernetes_cpu_limit: str = "1"
+    mcp_runtime_kubernetes_memory_request: str = "256Mi"
+    mcp_runtime_kubernetes_memory_limit: str = "1Gi"
     mcp_runtime_kubernetes_service_port: int = 8000
     mcp_runtime_kubernetes_image_pull_secret_name: str = ""
     mcp_runtime_kubernetes_namespace_labels_json: str = "{}"

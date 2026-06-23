@@ -1002,3 +1002,67 @@ async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
     assert seen["upsert_installation"] is installation
     assert seen["server"] is server
     assert seen["tools"][0]["name"] == "get_forecast"
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_falls_back_to_tracked_discovery(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    seen = {}
+
+    class SessionRequiredRuntimeManager:
+        def list_tools(self, runtime_installation):
+            seen["stateless_installation"] = runtime_installation
+            raise NotImplementedError("runtime session required")
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def list_tools_with_tracking(*args, **kwargs):
+        seen["tracked_args"] = args
+        seen["tracked_manager"] = kwargs["manager"]
+        return [
+            {
+                "name": "get_forecast",
+                "description": "Get weather forecast",
+                "inputSchema": {"type": "object"},
+            }
+        ]
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "list_tools_with_tracking",
+        list_tools_with_tracking,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+
+    manager = SessionRequiredRuntimeManager()
+    result = await tool_service.refresh_tool_schemas(
+        FakeSession(),
+        "io.github.example/weather",
+        runtime_manager=manager,
+    )
+
+    assert result.tool_count == 1
+    assert seen["stateless_installation"] is installation
+    assert seen["tracked_args"][1] is installation
+    assert seen["tracked_args"][2] is server
+    assert seen["tracked_manager"] is manager
+    assert seen["tools"][0]["name"] == "get_forecast"

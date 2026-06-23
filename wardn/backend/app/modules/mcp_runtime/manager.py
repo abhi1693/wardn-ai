@@ -42,7 +42,12 @@ class MCPRuntimeManager(Protocol):
     def runtime_fingerprint(self, installation: MCPServerInstallation) -> str:
         ...
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+    ) -> list[dict[str, Any]]:
         ...
 
     def call_tool(
@@ -134,8 +139,16 @@ class DefaultMCPRuntimeManager:
     def runtime_fingerprint(self, installation: MCPServerInstallation) -> str:
         return self.runtime_spec(installation).fingerprint()
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
-        return self._registry.select_provider(installation).list_tools(installation)
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._registry.select_provider(installation).list_tools(
+            installation,
+            runtime_session=runtime_session,
+        )
 
     def call_tool(
         self,

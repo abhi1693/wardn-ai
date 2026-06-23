@@ -63,6 +63,10 @@ class FakeSettings:
     mcp_runtime_kubernetes_gateway_image = "registry.example/supergateway:test"
     mcp_runtime_kubernetes_gateway_uvx_image = "registry.example/supergateway:uvx"
     mcp_runtime_kubernetes_gateway_deno_image = "registry.example/supergateway:deno"
+    mcp_runtime_kubernetes_cpu_request = "100m"
+    mcp_runtime_kubernetes_cpu_limit = "1"
+    mcp_runtime_kubernetes_memory_request = "256Mi"
+    mcp_runtime_kubernetes_memory_limit = "1Gi"
     mcp_runtime_kubernetes_service_port = 8000
     mcp_runtime_kubernetes_image_pull_secret_name = ""
     mcp_runtime_kubernetes_namespace_labels_json = "{}"
@@ -143,6 +147,7 @@ class FakeKubernetesClient:
     V1PodSpec = FakeKubernetesModel
     V1PodTemplateSpec = FakeKubernetesModel
     V1Probe = FakeKubernetesModel
+    V1ResourceRequirements = FakeKubernetesModel
     V1Secret = FakeKubernetesModel
     V1SecretKeySelector = FakeKubernetesModel
     V1Service = FakeKubernetesModel
@@ -1058,7 +1063,7 @@ def test_kubernetes_runtime_manifest_rewrites_uvx_host_paths(
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
 
 
-def test_kubernetes_runtime_manifest_rewrites_npm_host_paths_to_npx(
+def test_kubernetes_runtime_manifest_installs_npm_package_in_init_container(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1114,8 +1119,108 @@ def test_kubernetes_runtime_manifest_rewrites_npm_host_paths_to_npx(
         client_module=FakeKubernetesClient,
     )
 
-    assert supergateway_stdio_arg(manifest) == "npx --yes weather-mcp@1.2.3 --stdio"
+    assert supergateway_stdio_arg(manifest) == (
+        "/opt/wardn/npm-package/node_modules/.bin/weather-mcp --stdio"
+    )
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
+    assert manifest.pod.spec.containers[0].resources.requests == {
+        "cpu": "100m",
+        "memory": "256Mi",
+    }
+    assert manifest.pod.spec.containers[0].resources.limits == {
+        "cpu": "1",
+        "memory": "1Gi",
+    }
+    assert manifest.pod.spec.volumes[0].name == "npm-package"
+    assert manifest.pod.spec.containers[0].volume_mounts[0].mount_path == (
+        "/opt/wardn/npm-package"
+    )
+    init_container = manifest.pod.spec.init_containers[0]
+    assert init_container.name == "install-npm-package"
+    assert init_container.image == "registry.example/supergateway:test"
+    assert init_container.command == ["sh", "-lc"]
+    assert init_container.args == [
+        (
+            "npm install --omit=dev --no-audit --no-fund --prefix "
+            "/opt/wardn/npm-package weather-mcp@1.2.3"
+        )
+    ]
+    assert init_container.resources.requests == {"cpu": "100m", "memory": "256Mi"}
+    assert init_container.resources.limits == {"cpu": "1", "memory": "1Gi"}
+
+
+def test_kubernetes_runtime_manifest_runs_oci_image_directly(
+    tmp_path,
+) -> None:
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/grafana",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="oci",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "oci",
+            "command": "/usr/bin/docker",
+            "args": [
+                "run",
+                "--rm",
+                "-i",
+                "-e",
+                "GRAFANA_URL",
+                "docker.io/example/grafana-mcp:1.0.0",
+                "--disable-write",
+                "-t",
+                "stdio",
+            ],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+        secret_config={"environment": {"GRAFANA_URL": "https://grafana.example.com"}},
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    container = manifest.pod.spec.containers[0]
+    assert container.name == "mcp-server"
+    assert container.image == "docker.io/example/grafana-mcp:1.0.0"
+    assert container.args == [
+        "--disable-write",
+        "-t",
+        "streamable-http",
+        "-address",
+        "0.0.0.0:8000",
+        "-endpoint-path",
+        "/mcp",
+    ]
+    assert [env.name for env in container.env] == ["GRAFANA_URL"]
+    assert manifest.pod.spec.init_containers is None
+    assert manifest.health_path is None
+    assert not hasattr(container, "readiness_probe")
 
 
 def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(

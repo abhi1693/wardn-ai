@@ -52,7 +52,12 @@ class LocalProcessRuntimeProvider:
             cwd=runtime.cwd,
         )
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+    ) -> list[dict[str, Any]]:
         runtime = package_runtime(installation)
         return client.list_stdio_tools(
             runtime.command,

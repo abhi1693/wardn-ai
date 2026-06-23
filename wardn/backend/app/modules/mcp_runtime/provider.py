@@ -48,7 +48,12 @@ class MCPRuntimeProvider(Protocol):
     def runtime_spec(self, installation: MCPServerInstallation) -> "RuntimeSpec":
         ...
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: "MCPRuntimeSession | None" = None,
+    ) -> list[dict[str, Any]]:
         ...
 
     def call_tool(

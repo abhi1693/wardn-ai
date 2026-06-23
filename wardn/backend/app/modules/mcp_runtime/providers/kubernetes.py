@@ -30,6 +30,7 @@ from app.modules.mcp_runtime.provider import (
     fingerprint_payload,
     package_runtime,
     runtime_kind,
+    secret_environment,
     secret_fingerprint_payload,
 )
 
@@ -46,9 +47,12 @@ WARDN_RUNTIME_APP_NAME = "wardn-mcp-runtime"
 KUBERNETES_NAME_MAX_LENGTH = 63
 KUBERNETES_LABEL_VALUE_MAX_LENGTH = 63
 KUBERNETES_GATEWAY_CONTAINER_NAME = "supergateway"
+KUBERNETES_MCP_SERVER_CONTAINER_NAME = "mcp-server"
 KUBERNETES_GATEWAY_PORT_NAME = "http"
 KUBERNETES_SUPERGATEWAY_MCP_PATH = "/mcp"
 KUBERNETES_SUPERGATEWAY_HEALTH_PATH = "/healthz"
+KUBERNETES_NPM_PACKAGE_VOLUME_NAME = "npm-package"
+KUBERNETES_NPM_PACKAGE_MOUNT_PATH = "/opt/wardn/npm-package"
 KUBERNETES_API_CONNECT_TIMEOUT_SECONDS = 5
 KUBERNETES_API_READ_TIMEOUT_SECONDS = 10
 KUBERNETES_METADATA_KEY_NAME_PATTERN = re.compile(
@@ -122,6 +126,7 @@ class KubernetesRuntimeManifest:
     deployment: Any
     service: Any
     ingress: Any | None = None
+    health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
 
 
 @dataclass(frozen=True)
@@ -535,7 +540,7 @@ def runtime_secret_data(
     *,
     settings=None,
 ) -> dict[str, str]:
-    return package_runtime(installation).environment
+    return secret_environment(installation)
 
 
 def supergateway_stdio_command(installation: MCPServerInstallation) -> str:
@@ -569,11 +574,11 @@ def supergateway_container_args(
 def supergateway_image(installation: MCPServerInstallation, *, settings=None) -> str:
     runtime_settings = settings or get_settings()
     runtime_config = installation.runtime_config or {}
-    registry_type = str(runtime_config.get("registryType") or "").strip().lower()
+    package_registry_type = registry_type(runtime_config)
     command_name = Path(package_runtime(installation).command).name
-    if registry_type in {"uvx", "pypi"} or command_name == "uvx":
+    if package_registry_type in {"uvx", "pypi"} or command_name == "uvx":
         return runtime_settings.mcp_runtime_kubernetes_gateway_uvx_image
-    if registry_type == "deno" or command_name == "deno":
+    if package_registry_type == "deno" or command_name == "deno":
         return runtime_settings.mcp_runtime_kubernetes_gateway_deno_image
     return runtime_settings.mcp_runtime_kubernetes_gateway_image
 
@@ -598,6 +603,90 @@ def runtime_package_version(runtime_config: dict[str, Any]) -> str:
     return normalized_runtime_package_version(package_version or runtime_config.get("version"))
 
 
+def runtime_package_spec(identifier: str, version: str) -> str:
+    return identifier if version == "latest" else f"{identifier}@{version}"
+
+
+def registry_type(runtime_config: dict[str, Any]) -> str:
+    return str(runtime_config.get("registryType") or "").strip().lower()
+
+
+def is_oci_runtime(runtime_config: dict[str, Any]) -> bool:
+    return registry_type(runtime_config) == "oci"
+
+
+def npm_package_binary_name(runtime, runtime_config: dict[str, Any]) -> str:
+    command_name = Path(runtime.command).name
+    if command_name not in {"node", "npx"}:
+        return command_name
+    for arg in runtime.args:
+        arg_name = Path(str(arg)).name
+        if arg_name and arg_name not in {"node", "npx"}:
+            return arg_name
+    identifier = runtime_package_identifier(runtime_config)
+    return identifier.rsplit("/", 1)[-1]
+
+
+def npm_package_volume_required(runtime_config: dict[str, Any]) -> bool:
+    return registry_type(runtime_config) == "npm" and bool(
+        runtime_package_identifier(runtime_config)
+    )
+
+
+def npm_package_install_command(runtime_config: dict[str, Any]) -> str:
+    identifier = runtime_package_identifier(runtime_config)
+    version = runtime_package_version(runtime_config)
+    if not identifier:
+        raise KubernetesReconcileError("Kubernetes npm runtime package identifier is missing")
+    package_spec = runtime_package_spec(identifier, version)
+    return shlex.join(
+        [
+            "npm",
+            "install",
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+            "--prefix",
+            KUBERNETES_NPM_PACKAGE_MOUNT_PATH,
+            package_spec,
+        ]
+    )
+
+
+def npm_package_volume_mount(client_module: Any | None = None) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1VolumeMount(
+        name=KUBERNETES_NPM_PACKAGE_VOLUME_NAME,
+        mount_path=KUBERNETES_NPM_PACKAGE_MOUNT_PATH,
+    )
+
+
+def npm_package_volume(client_module: Any | None = None) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1Volume(
+        name=KUBERNETES_NPM_PACKAGE_VOLUME_NAME,
+        empty_dir={},
+    )
+
+
+def npm_package_init_container(
+    *,
+    installation: MCPServerInstallation,
+    image: str,
+    resources: Any | None = None,
+    client_module: Any | None = None,
+) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1Container(
+        name="install-npm-package",
+        image=image,
+        command=["sh", "-lc"],
+        args=[npm_package_install_command(installation.runtime_config or {})],
+        resources=resources,
+        volume_mounts=[npm_package_volume_mount(client)],
+    )
+
+
 def strip_npm_launcher_args(args: list[str], identifier: str) -> list[str]:
     remaining = list(args)
     if remaining and remaining[0] in {"--offline", "--yes", "-y"}:
@@ -611,15 +700,14 @@ def kubernetes_runtime_process(
     runtime,
     runtime_config: dict[str, Any],
 ) -> tuple[str, list[str], str]:
-    registry_type = runtime_config.get("registryType")
+    package_registry_type = registry_type(runtime_config)
     identifier = runtime_package_identifier(runtime_config)
     version = runtime_package_version(runtime_config)
 
-    if registry_type == "uvx":
+    if package_registry_type == "uvx":
         return Path(runtime.command).name, runtime.args, ""
 
-    if registry_type == "npm" and identifier:
-        package_spec = identifier if version == "latest" else f"{identifier}@{version}"
+    if package_registry_type == "npm" and identifier:
         command_name = Path(runtime.command).name
         if command_name == "node" and runtime.args:
             configured_args = runtime.args[1:]
@@ -627,9 +715,13 @@ def kubernetes_runtime_process(
             configured_args = strip_npm_launcher_args(runtime.args, identifier)
         else:
             configured_args = runtime.args
-        return "npx", ["--yes", package_spec, *configured_args], ""
+        binary_name = npm_package_binary_name(runtime, runtime_config)
+        binary_path = (
+            f"{KUBERNETES_NPM_PACKAGE_MOUNT_PATH}/node_modules/.bin/{binary_name}"
+        )
+        return binary_path, configured_args, ""
 
-    if registry_type == "pypi" and identifier:
+    if package_registry_type == "pypi" and identifier:
         package_spec = identifier if version == "latest" else f"{identifier}=={version}"
         module_name = identifier.replace("-", "_")
         configured_args = runtime.args
@@ -638,6 +730,106 @@ def kubernetes_runtime_process(
         return "uvx", ["--from", package_spec, "python", "-m", module_name, *configured_args], ""
 
     return runtime.command, runtime.args, runtime.cwd
+
+
+def oci_runtime_image(runtime_config: dict[str, Any]) -> str:
+    for key in ("image", "containerImage"):
+        image = str(runtime_config.get(key) or "").strip()
+        if image:
+            return image
+    identifier = runtime_package_identifier(runtime_config)
+    if identifier:
+        return identifier
+    args = runtime_config.get("args")
+    if not isinstance(args, list):
+        raise KubernetesReconcileError("Kubernetes OCI runtime image is missing")
+    image, _ = parse_docker_run_image_and_args([str(arg) for arg in args])
+    if not image:
+        raise KubernetesReconcileError("Kubernetes OCI runtime image is missing")
+    return image
+
+
+def parse_docker_run_image_and_args(args: list[str]) -> tuple[str, list[str]]:
+    remaining = list(args)
+    if remaining and remaining[0] == "run":
+        remaining = remaining[1:]
+
+    index = 0
+    options_with_values = {
+        "-e",
+        "--env",
+        "--env-file",
+        "--name",
+        "--network",
+        "--user",
+        "-u",
+        "--workdir",
+        "-w",
+        "--entrypoint",
+        "--add-host",
+        "-p",
+        "--publish",
+        "-v",
+        "--volume",
+    }
+    while index < len(remaining):
+        arg = remaining[index]
+        if arg == "--":
+            index += 1
+            break
+        if not arg.startswith("-"):
+            break
+        if arg in options_with_values:
+            index += 2
+            continue
+        if any(arg.startswith(f"{option}=") for option in options_with_values):
+            index += 1
+            continue
+        index += 1
+
+    if index >= len(remaining):
+        return "", []
+    return remaining[index], remaining[index + 1 :]
+
+
+def replace_flag_value(args: list[str], names: set[str], value: str) -> bool:
+    for index, arg in enumerate(args):
+        if arg in names:
+            if index + 1 < len(args):
+                args[index + 1] = value
+            else:
+                args.append(value)
+            return True
+        for name in names:
+            prefix = f"{name}="
+            if arg.startswith(prefix):
+                args[index] = f"{name}={value}"
+                return True
+    return False
+
+
+def has_flag(args: list[str], names: set[str]) -> bool:
+    return any(arg in names or any(arg.startswith(f"{name}=") for name in names) for arg in args)
+
+
+def oci_runtime_container_args(runtime_config: dict[str, Any], *, port: int) -> list[str]:
+    configured_args = runtime_config.get("containerArgs")
+    if isinstance(configured_args, list):
+        args = [str(arg) for arg in configured_args]
+    else:
+        docker_args = runtime_config.get("args")
+        if not isinstance(docker_args, list):
+            args = []
+        else:
+            _, args = parse_docker_run_image_and_args([str(arg) for arg in docker_args])
+
+    if not replace_flag_value(args, {"-t", "--transport"}, "streamable-http"):
+        args.extend(["-t", "streamable-http"])
+    if not has_flag(args, {"-address", "--address"}):
+        args.extend(["-address", f"0.0.0.0:{port}"])
+    if not has_flag(args, {"-endpoint-path", "--endpoint-path"}):
+        args.extend(["-endpoint-path", KUBERNETES_SUPERGATEWAY_MCP_PATH])
+    return args
 
 
 def build_namespace_manifest(
@@ -765,24 +957,48 @@ def gateway_container_probes(settings=None, client_module: Any | None = None) ->
     }
 
 
+def runtime_container_resources(settings=None, client_module: Any | None = None) -> Any:
+    runtime_settings = settings or get_settings()
+    client = kubernetes_client_module(client_module)
+    return client.V1ResourceRequirements(
+        requests={
+            "cpu": runtime_settings.mcp_runtime_kubernetes_cpu_request,
+            "memory": runtime_settings.mcp_runtime_kubernetes_memory_request,
+        },
+        limits={
+            "cpu": runtime_settings.mcp_runtime_kubernetes_cpu_limit,
+            "memory": runtime_settings.mcp_runtime_kubernetes_memory_limit,
+        },
+    )
+
+
 def build_pod_template_manifest(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     secret_keys: list[str],
-    gateway_image: str,
-    gateway_port: int,
+    container_name: str,
+    container_image: str,
+    container_port: int,
     container_args: list[str],
+    init_containers: list[Any] | None = None,
+    volumes: list[Any] | None = None,
+    volume_mounts: list[Any] | None = None,
+    enable_health_probes: bool = True,
     image_pull_secret_names: list[str] | None = None,
     settings=None,
     client_module: Any | None = None,
 ) -> Any:
     runtime_settings = settings or get_settings()
     client = kubernetes_client_module(client_module)
+    resources = runtime_container_resources(runtime_settings, client_module=client)
     image_pull_secrets = [
         client.V1LocalObjectReference(name=name)
         for name in (image_pull_secret_names or [])
     ]
+    for init_container in init_containers or []:
+        if getattr(init_container, "resources", None) is None:
+            init_container.resources = resources
     return client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(
             name=names.pod_name,
@@ -792,15 +1008,17 @@ def build_pod_template_manifest(
         spec=client.V1PodSpec(
             automount_service_account_token=False,
             image_pull_secrets=image_pull_secrets or None,
+            init_containers=init_containers or None,
             restart_policy="Always",
+            volumes=volumes or None,
             containers=[
                 client.V1Container(
-                    name=KUBERNETES_GATEWAY_CONTAINER_NAME,
-                    image=gateway_image,
+                    name=container_name,
+                    image=container_image,
                     args=container_args,
                     ports=[
                         client.V1ContainerPort(
-                            container_port=gateway_port,
+                            container_port=container_port,
                             name=KUBERNETES_GATEWAY_PORT_NAME,
                         )
                     ],
@@ -811,7 +1029,13 @@ def build_pod_template_manifest(
                             client_module=client,
                         ),
                     ],
-                    **gateway_container_probes(runtime_settings, client_module=client),
+                    resources=resources,
+                    volume_mounts=volume_mounts or None,
+                    **(
+                        gateway_container_probes(runtime_settings, client_module=client)
+                        if enable_health_probes
+                        else {}
+                    ),
                 )
             ],
         ),
@@ -975,16 +1199,54 @@ def build_runtime_manifests(
     namespace_annotations = custom_namespace_annotations(runtime_settings)
     pull_secret_names = image_pull_secret_names(runtime_settings)
     workload_labels = runtime_workload_labels(labels)
+    runtime_config = installation.runtime_config or {}
+    container_name = KUBERNETES_GATEWAY_CONTAINER_NAME
+    container_image = ""
+    container_args: list[str] = []
+    health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
+    package_volumes = []
+    package_volume_mounts = []
+    init_containers = []
+    if is_oci_runtime(runtime_config):
+        container_name = KUBERNETES_MCP_SERVER_CONTAINER_NAME
+        container_image = oci_runtime_image(runtime_config)
+        container_args = oci_runtime_container_args(
+            runtime_config,
+            port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        )
+        health_path = None
+    else:
+        container_image = supergateway_image(installation, settings=runtime_settings)
+        container_args = supergateway_container_args(
+            installation,
+            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        )
+        if npm_package_volume_required(runtime_config):
+            package_volumes.append(npm_package_volume(client))
+            package_volume_mounts.append(npm_package_volume_mount(client))
+            init_containers.append(
+                npm_package_init_container(
+                    installation=installation,
+                    image=container_image,
+                    resources=runtime_container_resources(
+                        runtime_settings,
+                        client_module=client,
+                    ),
+                    client_module=client,
+                )
+            )
     pod_template = build_pod_template_manifest(
         names=names,
         labels=workload_labels,
         secret_keys=list(secret_data),
-        gateway_image=supergateway_image(installation, settings=runtime_settings),
-        gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
-        container_args=supergateway_container_args(
-            installation,
-            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
-        ),
+        container_name=container_name,
+        container_image=container_image,
+        container_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        container_args=container_args,
+        init_containers=init_containers,
+        volumes=package_volumes,
+        volume_mounts=package_volume_mounts,
+        enable_health_probes=health_path is not None,
         image_pull_secret_names=pull_secret_names,
         settings=runtime_settings,
         client_module=client,
@@ -1027,6 +1289,7 @@ def build_runtime_manifests(
             settings=runtime_settings,
             client_module=client,
         ),
+        health_path=health_path,
     )
 
 
@@ -1416,6 +1679,12 @@ class KubernetesRuntimeReconciler:
         endpoint_url: str,
     ) -> KubernetesReconcileResult:
         deployment = self.wait_for_deployment_ready(manifest.names)
+        if manifest.health_path is None:
+            return KubernetesReconcileResult(
+                endpoint_url=endpoint_url,
+                pod=deployment,
+                gateway_status={"ready": True, "source": "deployment"},
+            )
         gateway_status = self.wait_for_gateway_ready(endpoint_url)
         return KubernetesReconcileResult(
             endpoint_url=endpoint_url,
@@ -1470,15 +1739,28 @@ class KubernetesRuntimeProvider:
         return runtime_kind(installation) == RUNTIME_KIND_PACKAGE
 
     def runtime_spec(self, installation: MCPServerInstallation) -> RuntimeSpec:
-        runtime = package_runtime(installation)
         runtime_config = installation.runtime_config or {}
-        command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
         settings = get_settings()
+        if is_oci_runtime(runtime_config):
+            command = oci_runtime_image(runtime_config)
+            args = oci_runtime_container_args(
+                runtime_config,
+                port=settings.mcp_runtime_kubernetes_service_port,
+            )
+            cwd = ""
+            runtime_image = command
+            workload_runtime = "oci-image"
+        else:
+            runtime = package_runtime(installation)
+            command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
+            runtime_image = supergateway_image(installation, settings=settings)
+            workload_runtime = "supergateway"
         provider_config = {
             "installationRuntimeConfig": runtime_config,
             "workloadKind": "deployment",
+            "workloadRuntime": workload_runtime,
             "objectIdentity": "runtime_config_fingerprint",
-            "gatewayImage": supergateway_image(installation, settings=settings),
+            "runtimeImage": runtime_image,
             "gatewayBaseImage": settings.mcp_runtime_kubernetes_gateway_image,
             "gatewayUvxImage": settings.mcp_runtime_kubernetes_gateway_uvx_image,
             "gatewayDenoImage": settings.mcp_runtime_kubernetes_gateway_deno_image,
@@ -1500,6 +1782,10 @@ class KubernetesRuntimeProvider:
                 settings.mcp_runtime_kubernetes_ingress_external_dns_enabled
             ),
             "ingressAnnotations": settings.mcp_runtime_kubernetes_ingress_annotations_json,
+            "cpuRequest": settings.mcp_runtime_kubernetes_cpu_request,
+            "cpuLimit": settings.mcp_runtime_kubernetes_cpu_limit,
+            "memoryRequest": settings.mcp_runtime_kubernetes_memory_request,
+            "memoryLimit": settings.mcp_runtime_kubernetes_memory_limit,
             "startupTimeoutSeconds": settings.mcp_runtime_kubernetes_startup_timeout_seconds,
         }
         return RuntimeSpec(
@@ -1519,10 +1805,31 @@ class KubernetesRuntimeProvider:
             workspace_id=str(installation.workspace_id or ""),
         )
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
-        raise NotImplementedError(
-            "kubernetes MCP runtime tool discovery requires a runtime session; "
-            "use a tracked runtime call path before invocation"
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+    ) -> list[dict[str, Any]]:
+        if runtime_session is None:
+            raise NotImplementedError(
+                "kubernetes MCP runtime tool discovery requires a runtime session; "
+                "use a tracked runtime call path before invocation"
+            )
+        manifest = build_runtime_manifests(installation, runtime_session)
+        reconciler = self._new_reconciler()
+        reconcile_result = reconciler.reconcile(manifest)
+        runtime_session.namespace = manifest.names.namespace
+        runtime_session.pod_name = manifest.names.pod_name
+        runtime_session.endpoint_url = reconcile_result.endpoint_url
+        reconciler.wait_until_ready(
+            manifest,
+            endpoint_url=runtime_session.endpoint_url,
+        )
+        return mcp_client.list_tools(
+            runtime_session.endpoint_url,
+            {},
+            verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
         )
 
     def call_tool(

@@ -30,7 +30,12 @@ class RemoteRuntimeProvider:
             endpoint_url=runtime.url,
         )
 
-    def list_tools(self, installation: MCPServerInstallation) -> list[dict[str, Any]]:
+    def list_tools(
+        self,
+        installation: MCPServerInstallation,
+        *,
+        runtime_session: MCPRuntimeSession | None = None,
+    ) -> list[dict[str, Any]]:
         runtime = require_remote_installation(installation)
         return client.list_tools(runtime.url, runtime.headers)
 

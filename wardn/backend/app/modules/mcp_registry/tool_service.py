@@ -7,6 +7,7 @@ from app.modules.mcp_gateway import repository as gateway_repository
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
+from app.modules.mcp_runtime.service import list_tools_with_tracking
 
 SYSTEM_SCOPE_USER_ID = UUID(int=0)
 
@@ -54,7 +55,15 @@ async def refresh_tool_schemas_for_installation(
     runtime_manager: MCPRuntimeManager | None = None,
 ) -> MCPToolRefreshResult:
     manager = runtime_manager or get_runtime_manager()
-    tools = manager.list_tools(installation)
+    try:
+        tools = manager.list_tools(installation)
+    except NotImplementedError:
+        tools = await list_tools_with_tracking(
+            session,
+            installation,
+            server,
+            manager=manager,
+        )
     tool_count = await tool_repository.upsert_tool_schemas(
         session,
         installation=installation,
