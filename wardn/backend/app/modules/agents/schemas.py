@@ -72,10 +72,31 @@ class AgentListResponse(BaseModel):
     agents: list[AgentRead]
 
 
-class AgentToolAssignmentUpdate(BaseModel):
+TOOL_ASSIGNMENT_WILDCARD = "*"
+ToolAssignmentSelection = uuid.UUID | Literal["*"]
+
+
+class AgentServerToolAssignmentUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    tool_schema_ids: list[uuid.UUID] = Field(default_factory=list, alias="toolSchemaIds")
+    installation_id: uuid.UUID = Field(alias="installationId")
+    tool_schema_ids: list[ToolAssignmentSelection] = Field(
+        default_factory=list,
+        alias="toolSchemaIds",
+    )
+
+    @model_validator(mode="after")
+    def validate_tool_selection(self) -> "AgentServerToolAssignmentUpdate":
+        has_wildcard = TOOL_ASSIGNMENT_WILDCARD in self.tool_schema_ids
+        if not self.tool_schema_ids:
+            raise ValueError("toolSchemaIds must include at least one tool or '*'")
+        if has_wildcard and len(self.tool_schema_ids) > 1:
+            raise ValueError("'*' cannot be combined with individual tool IDs")
+        return self
+
+
+class AgentToolAssignmentUpdate(BaseModel):
+    servers: list[AgentServerToolAssignmentUpdate] = Field(default_factory=list)
 
 
 class AgentToolRead(BaseModel):
@@ -97,8 +118,16 @@ class AgentToolRead(BaseModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class AgentServerToolAssignmentRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    installation_id: uuid.UUID = Field(alias="installationId")
+    tool_schema_ids: list[ToolAssignmentSelection] = Field(alias="toolSchemaIds")
+
+
 class AgentToolListResponse(BaseModel):
     tools: list[AgentToolRead]
+    servers: list[AgentServerToolAssignmentRead] = Field(default_factory=list)
 
 
 class AgentAvailableToolRead(BaseModel):

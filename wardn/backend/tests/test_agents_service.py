@@ -9,7 +9,7 @@ from app.modules.agents.exceptions import (
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
-from app.modules.agents.models import Agent, AgentTool
+from app.modules.agents.models import Agent, AgentMCPServerAssignment, AgentMCPToolAssignment
 from app.modules.agents.schemas import AgentChatMessage, AgentCreate, AgentToolAssignmentUpdate
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerToolSchema
@@ -435,10 +435,14 @@ async def test_replace_agent_tools_rejects_tool_outside_workspace(monkeypatch) -
     async def get_tool_schemas_by_ids(*args, **kwargs):
         return [(tool_schema, installation, workspace)]
 
+    async def get_installations_by_ids(*args, **kwargs):
+        return [(installation, workspace)]
+
     async def require_workspace_admin(*args, **kwargs):
         return None
 
     monkeypatch.setattr(service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
     monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
     monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
 
@@ -448,7 +452,14 @@ async def test_replace_agent_tools_rejects_tool_outside_workspace(monkeypatch) -
             user,
             organization_id,
             agent.id,
-            AgentToolAssignmentUpdate(toolSchemaIds=[tool_schema.id]),
+            AgentToolAssignmentUpdate(
+                servers=[
+                    {
+                        "installationId": installation.id,
+                        "toolSchemaIds": [tool_schema.id],
+                    }
+                ]
+            ),
         )
 
 
@@ -502,26 +513,50 @@ async def test_replace_agent_tools_persists_unique_assignments(monkeypatch) -> N
     async def get_tool_schemas_by_ids(*args, **kwargs):
         return [(tool_schema, installation, workspace)]
 
+    async def get_installations_by_ids(*args, **kwargs):
+        return [(installation, workspace)]
+
     async def replace_agent_tools(*args, **kwargs):
         return None
 
     async def list_agent_tools(*args, **kwargs):
-        assignment = AgentTool(
+        assignment = AgentMCPServerAssignment(
             id=uuid4(),
             agent_id=agent.id,
-            tool_schema_id=tool_schema.id,
             installation_id=installation.id,
             created_at=datetime(2026, 6, 23, tzinfo=UTC),
         )
         return [(assignment, tool_schema, installation)]
 
+    async def list_agent_server_assignments(*args, **kwargs):
+        server_assignment = AgentMCPServerAssignment(
+            id=uuid4(),
+            agent_id=agent.id,
+            installation_id=installation.id,
+            created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        )
+        tool_assignment = AgentMCPToolAssignment(
+            id=uuid4(),
+            server_assignment_id=server_assignment.id,
+            tool_schema_id=tool_schema.id,
+            wildcard=False,
+            created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        )
+        return [(server_assignment, tool_assignment)]
+
     async def require_workspace_admin(*args, **kwargs):
         return None
 
     monkeypatch.setattr(service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
     monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
     monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
     monkeypatch.setattr(service.repository, "list_agent_tools", list_agent_tools)
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_server_assignments",
+        list_agent_server_assignments,
+    )
     monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
 
     response = await service.replace_agent_tools(
@@ -529,9 +564,116 @@ async def test_replace_agent_tools_persists_unique_assignments(monkeypatch) -> N
         user,
         organization_id,
         agent.id,
-        AgentToolAssignmentUpdate(toolSchemaIds=[tool_schema.id, tool_schema.id]),
+        AgentToolAssignmentUpdate(
+            servers=[
+                {
+                    "installationId": installation.id,
+                    "toolSchemaIds": [tool_schema.id, tool_schema.id],
+                }
+            ]
+        ),
     )
 
     assert len(response.tools) == 1
     assert response.tools[0].tool_schema_id == tool_schema.id
     assert response.tools[0].installation_id == installation.id
+    assert response.servers[0].installation_id == installation.id
+    assert response.servers[0].tool_schema_ids == [tool_schema.id]
+
+
+@pytest.mark.asyncio
+async def test_replace_agent_tools_persists_wildcard_server_assignment(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        name="Workspace Agent",
+        instructions="Use tools carefully.",
+        scope="workspace",
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    workspace = Workspace(
+        id=workspace_id,
+        organization_id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    captured_assignments = []
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_installations_by_ids(*args, **kwargs):
+        return [(installation, workspace)]
+
+    async def get_tool_schemas_by_ids(*args, **kwargs):
+        return []
+
+    async def replace_agent_tools(*args, **kwargs):
+        captured_assignments.extend(kwargs["server_assignments"])
+
+    async def list_agent_tools(*args, **kwargs):
+        return []
+
+    async def list_agent_server_assignments(*args, **kwargs):
+        server_assignment = AgentMCPServerAssignment(
+            id=uuid4(),
+            agent_id=agent.id,
+            installation_id=installation.id,
+            created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        )
+        tool_assignment = AgentMCPToolAssignment(
+            id=uuid4(),
+            server_assignment_id=server_assignment.id,
+            tool_schema_id=None,
+            wildcard=True,
+            created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        )
+        return [(server_assignment, tool_assignment)]
+
+    async def require_workspace_admin(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
+    monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(service.repository, "list_agent_tools", list_agent_tools)
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_server_assignments",
+        list_agent_server_assignments,
+    )
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+
+    response = await service.replace_agent_tools(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentToolAssignmentUpdate(
+            servers=[
+                {
+                    "installationId": installation.id,
+                    "toolSchemaIds": ["*"],
+                }
+            ]
+        ),
+    )
+
+    assert captured_assignments == [(installation, True, [])]
+    assert response.servers[0].installation_id == installation.id
+    assert response.servers[0].tool_schema_ids == ["*"]

@@ -4,8 +4,10 @@
  * Wardn AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentServerToolAssignmentRead } from './agentServerToolAssignmentRead';
 import type { AgentToolRead } from './agentToolRead';
 
 export interface AgentToolListResponse {
+  servers?: AgentServerToolAssignmentRead[];
   tools: AgentToolRead[];
 }

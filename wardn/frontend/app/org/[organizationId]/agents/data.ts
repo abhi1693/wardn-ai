@@ -1,21 +1,12 @@
-import type { AgentListResponse, AgentToolListResponse } from "@/lib/api/generated/model";
+import type { AgentListResponse } from "@/lib/api/generated/model";
 import { backendCookieHeader, backendPath } from "@/lib/workspace-context";
 
-export type AgentAvailableTool = {
-  annotations?: Record<string, unknown>;
-  configName: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  installationId: string;
-  outputSchema?: Record<string, unknown> | null;
-  serverName: string;
-  title: string;
-  toolName: string;
-  toolSchemaId: string;
-  workspaceId: string;
-};
+import type { AgentAvailableTool, AgentToolAssignments } from "./tool-types";
 
-export async function getWorkspaceAgents(organizationId: string, workspaceId: string) {
+export async function getWorkspaceAgents(
+  organizationId: string,
+  workspaceId: string
+): Promise<AgentListResponse["agents"]> {
   const cookie = await backendCookieHeader();
   try {
     const response = await fetch(
@@ -42,7 +33,7 @@ export async function getWorkspaceAgents(organizationId: string, workspaceId: st
 export async function getWorkspaceAgentAvailableTools(
   organizationId: string,
   workspaceId: string
-) {
+): Promise<AgentAvailableTool[]> {
   const cookie = await backendCookieHeader();
   try {
     const response = await fetch(
@@ -70,7 +61,7 @@ export async function getWorkspaceAgentTools(
   organizationId: string,
   workspaceId: string,
   agentId: string
-) {
+): Promise<AgentToolAssignments> {
   const cookie = await backendCookieHeader();
   try {
     const response = await fetch(
@@ -87,11 +78,14 @@ export async function getWorkspaceAgentTools(
       }
     );
     if (!response.ok) {
-      return [];
+      return { servers: [], tools: [] };
     }
-    const payload = (await response.json()) as AgentToolListResponse;
-    return payload.tools;
+    const payload = (await response.json()) as AgentToolAssignments;
+    return {
+      servers: payload.servers ?? [],
+      tools: payload.tools ?? [],
+    };
   } catch {
-    return [];
+    return { servers: [], tools: [] };
   }
 }

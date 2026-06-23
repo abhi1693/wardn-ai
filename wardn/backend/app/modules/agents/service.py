@@ -20,6 +20,7 @@ from app.modules.agents.exceptions import (
 )
 from app.modules.agents.models import Agent
 from app.modules.agents.schemas import (
+    TOOL_ASSIGNMENT_WILDCARD,
     AgentAvailableToolListResponse,
     AgentAvailableToolRead,
     AgentChatMessage,
@@ -27,6 +28,7 @@ from app.modules.agents.schemas import (
     AgentCreate,
     AgentListResponse,
     AgentRead,
+    AgentServerToolAssignmentRead,
     AgentToolAssignmentUpdate,
     AgentToolListResponse,
     AgentToolRead,
@@ -963,9 +965,9 @@ def assigned_tool_response(row) -> AgentToolRead:
     if tool_schema.workspace_id is None:
         raise InvalidAgentToolAssignmentError("assigned tool has no workspace")
     return AgentToolRead(
-        id=assignment.id,
+        id=tool_schema.id,
         agentId=assignment.agent_id,
-        toolSchemaId=assignment.tool_schema_id,
+        toolSchemaId=tool_schema.id,
         installationId=assignment.installation_id,
         workspaceId=tool_schema.workspace_id,
         serverName=tool_schema.server_name,
@@ -978,6 +980,23 @@ def assigned_tool_response(row) -> AgentToolRead:
         annotations=tool_schema.annotations,
         createdAt=assignment.created_at,
     )
+
+
+def server_assignment_responses(rows) -> list[AgentServerToolAssignmentRead]:
+    assignments: dict[uuid.UUID, list[uuid.UUID | str]] = {}
+    for server_assignment, tool_assignment in rows:
+        selected = assignments.setdefault(server_assignment.installation_id, [])
+        if tool_assignment.wildcard:
+            selected[:] = [TOOL_ASSIGNMENT_WILDCARD]
+        elif TOOL_ASSIGNMENT_WILDCARD not in selected and tool_assignment.tool_schema_id:
+            selected.append(tool_assignment.tool_schema_id)
+    return [
+        AgentServerToolAssignmentRead(
+            installationId=installation_id,
+            toolSchemaIds=tool_schema_ids,
+        )
+        for installation_id, tool_schema_ids in assignments.items()
+    ]
 
 
 async def list_agent_tools(
@@ -1006,7 +1025,10 @@ async def list_agent_tools(
         tools=[
             assigned_tool_response(row)
             for row in await repository.list_agent_tools(session, agent_id=agent.id)
-        ]
+        ],
+        servers=server_assignment_responses(
+            await repository.list_agent_server_assignments(session, agent_id=agent.id)
+        ),
     )
 
 
@@ -1034,23 +1056,86 @@ async def replace_agent_tools(
         workspace_id=agent.workspace_id,
     )
 
-    unique_tool_ids = sorted(set(payload.tool_schema_ids), key=str)
+    requested_installation_ids = [server.installation_id for server in payload.servers]
+    if len(set(requested_installation_ids)) != len(requested_installation_ids):
+        raise InvalidAgentToolAssignmentError("server assignments must be unique")
+
+    installation_rows = await repository.get_installations_by_ids(
+        session,
+        requested_installation_ids,
+    )
+    installations = {
+        installation.id: (installation, workspace)
+        for installation, workspace in installation_rows
+    }
+    if len(installations) != len(set(requested_installation_ids)):
+        raise InvalidAgentToolAssignmentError(
+            "one or more MCP server installations are not available"
+        )
+
+    unique_tool_ids = sorted(
+        {
+            tool_id
+            for server in payload.servers
+            for tool_id in server.tool_schema_ids
+            if tool_id != TOOL_ASSIGNMENT_WILDCARD
+        },
+        key=str,
+    )
     tool_rows = await repository.get_tool_schemas_by_ids(session, unique_tool_ids)
-    found_tool_ids = {tool_schema.id for tool_schema, _installation, _workspace in tool_rows}
-    missing = [tool_id for tool_id in unique_tool_ids if tool_id not in found_tool_ids]
-    if missing:
+    tools_by_id = {
+        tool_schema.id: (tool_schema, installation, workspace)
+        for tool_schema, installation, workspace in tool_rows
+    }
+    if len(tools_by_id) != len(unique_tool_ids):
         raise InvalidAgentToolAssignmentError("one or more tools are not available")
 
-    for tool_schema, _installation, workspace in tool_rows:
+    server_assignments: list[tuple[MCPServerInstallation, bool, list[MCPServerToolSchema]]] = []
+    for server in payload.servers:
+        installation, workspace = installations[server.installation_id]
         if workspace.organization_id != organization_id:
-            raise InvalidAgentToolAssignmentError("tool is outside the agent organization")
-        if agent.workspace_id is not None and tool_schema.workspace_id != agent.workspace_id:
-            raise InvalidAgentToolAssignmentError("tool must belong to the agent workspace")
+            raise InvalidAgentToolAssignmentError("MCP server is outside the agent organization")
+        if agent.workspace_id is not None and installation.workspace_id != agent.workspace_id:
+            raise InvalidAgentToolAssignmentError("MCP server must belong to the agent workspace")
 
-    await repository.replace_agent_tools(session, agent_id=agent.id, tool_rows=tool_rows)
+        wildcard = server.tool_schema_ids == [TOOL_ASSIGNMENT_WILDCARD]
+        if wildcard:
+            server_assignments.append((installation, True, []))
+            continue
+
+        selected_tools: list[MCPServerToolSchema] = []
+        seen_tool_ids: set[uuid.UUID] = set()
+        for tool_id in server.tool_schema_ids:
+            if tool_id == TOOL_ASSIGNMENT_WILDCARD:
+                raise InvalidAgentToolAssignmentError(
+                    "'*' cannot be combined with individual tool IDs"
+                )
+            if tool_id in seen_tool_ids:
+                continue
+            seen_tool_ids.add(tool_id)
+            tool_schema, _tool_installation, tool_workspace = tools_by_id[tool_id]
+            if tool_workspace.organization_id != organization_id:
+                raise InvalidAgentToolAssignmentError("tool is outside the agent organization")
+            if tool_schema.installation_id != installation.id:
+                raise InvalidAgentToolAssignmentError(
+                    "tool must belong to the assigned MCP server"
+                )
+            if agent.workspace_id is not None and tool_schema.workspace_id != agent.workspace_id:
+                raise InvalidAgentToolAssignmentError("tool must belong to the agent workspace")
+            selected_tools.append(tool_schema)
+        server_assignments.append((installation, False, selected_tools))
+
+    await repository.replace_agent_tools(
+        session,
+        agent_id=agent.id,
+        server_assignments=server_assignments,
+    )
     return AgentToolListResponse(
         tools=[
             assigned_tool_response(row)
             for row in await repository.list_agent_tools(session, agent_id=agent.id)
-        ]
+        ],
+        servers=server_assignment_responses(
+            await repository.list_agent_server_assignments(session, agent_id=agent.id)
+        ),
     )

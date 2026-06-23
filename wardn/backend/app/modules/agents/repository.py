@@ -1,9 +1,9 @@
 import uuid
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents.models import Agent, AgentTool
+from app.modules.agents.models import Agent, AgentMCPServerAssignment, AgentMCPToolAssignment
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -63,10 +63,8 @@ async def list_agents(
     include_inactive: bool = False,
 ) -> list[tuple[Agent, int]]:
     statement = (
-        select(Agent, func.count(AgentTool.id).label("tool_count"))
-        .outerjoin(AgentTool, AgentTool.agent_id == Agent.id)
+        select(Agent)
         .where(Agent.organization_id == organization_id)
-        .group_by(Agent.id)
         .order_by(Agent.name.asc())
     )
     if workspace_id is not None:
@@ -100,7 +98,8 @@ async def list_agents(
             )
         )
     result = await session.execute(statement)
-    return [(agent, int(tool_count)) for agent, tool_count in result.all()]
+    agents = list(result.scalars().all())
+    return [(agent, await count_agent_tools(session, agent.id)) for agent in agents]
 
 
 async def list_workspace_available_tools(
@@ -130,10 +129,25 @@ async def list_workspace_available_tools(
 
 
 async def count_agent_tools(session: AsyncSession, agent_id: uuid.UUID) -> int:
+    rows = await list_agent_tools(session, agent_id=agent_id)
+    return len({tool_schema.id for _assignment, tool_schema, _installation in rows})
+
+
+async def get_installations_by_ids(
+    session: AsyncSession,
+    installation_ids: list[uuid.UUID],
+) -> list[tuple[MCPServerInstallation, Workspace]]:
+    if not installation_ids:
+        return []
     result = await session.execute(
-        select(func.count()).select_from(AgentTool).where(AgentTool.agent_id == agent_id)
+        select(MCPServerInstallation, Workspace)
+        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
+        .where(
+            MCPServerInstallation.id.in_(installation_ids),
+            MCPServerInstallation.status == "enabled",
+        )
     )
-    return int(result.scalar_one())
+    return list(result.all())
 
 
 async def get_tool_schemas_by_ids(
@@ -163,17 +177,36 @@ async def replace_agent_tools(
     session: AsyncSession,
     *,
     agent_id: uuid.UUID,
-    tool_rows: list[tuple[MCPServerToolSchema, MCPServerInstallation, Workspace]],
+    server_assignments: list[tuple[MCPServerInstallation, bool, list[MCPServerToolSchema]]],
 ) -> None:
-    await session.execute(delete(AgentTool).where(AgentTool.agent_id == agent_id))
-    for tool_schema, installation, _workspace in tool_rows:
-        session.add(
-            AgentTool(
-                agent_id=agent_id,
-                tool_schema_id=tool_schema.id,
-                installation_id=installation.id,
-            )
+    await session.execute(
+        delete(AgentMCPServerAssignment).where(AgentMCPServerAssignment.agent_id == agent_id)
+    )
+    await session.flush()
+    for installation, wildcard, tool_schemas in server_assignments:
+        server_assignment = AgentMCPServerAssignment(
+            agent_id=agent_id,
+            installation_id=installation.id,
         )
+        session.add(server_assignment)
+        await session.flush()
+        if wildcard:
+            session.add(
+                AgentMCPToolAssignment(
+                    server_assignment_id=server_assignment.id,
+                    tool_schema_id=None,
+                    wildcard=True,
+                )
+            )
+            continue
+        for tool_schema in tool_schemas:
+            session.add(
+                AgentMCPToolAssignment(
+                    server_assignment_id=server_assignment.id,
+                    tool_schema_id=tool_schema.id,
+                    wildcard=False,
+                )
+            )
     await session.flush()
 
 
@@ -181,13 +214,66 @@ async def list_agent_tools(
     session: AsyncSession,
     *,
     agent_id: uuid.UUID,
-) -> list[tuple[AgentTool, MCPServerToolSchema, MCPServerInstallation]]:
+) -> list[tuple[AgentMCPServerAssignment, MCPServerToolSchema, MCPServerInstallation]]:
+    explicit_result = await session.execute(
+        select(AgentMCPServerAssignment, MCPServerToolSchema, MCPServerInstallation)
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .join(
+            MCPServerToolSchema,
+            MCPServerToolSchema.id == AgentMCPToolAssignment.tool_schema_id,
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .where(
+            AgentMCPServerAssignment.agent_id == agent_id,
+            AgentMCPToolAssignment.wildcard.is_(False),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    wildcard_result = await session.execute(
+        select(AgentMCPServerAssignment, MCPServerToolSchema, MCPServerInstallation)
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .join(MCPServerToolSchema, MCPServerToolSchema.installation_id == MCPServerInstallation.id)
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .where(
+            AgentMCPServerAssignment.agent_id == agent_id,
+            AgentMCPToolAssignment.wildcard.is_(True),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    rows = list(explicit_result.all()) + list(wildcard_result.all())
+    return sorted(rows, key=lambda row: (row[2].server_name, row[2].config_name, row[1].tool_name))
+
+
+async def list_agent_server_assignments(
+    session: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+) -> list[tuple[AgentMCPServerAssignment, AgentMCPToolAssignment]]:
     result = await session.execute(
-        select(AgentTool, MCPServerToolSchema, MCPServerInstallation)
-        .join(MCPServerToolSchema, MCPServerToolSchema.id == AgentTool.tool_schema_id)
-        .join(MCPServerInstallation, MCPServerInstallation.id == AgentTool.installation_id)
-        .where(AgentTool.agent_id == agent_id)
-        .order_by(MCPServerToolSchema.server_name.asc(), MCPServerToolSchema.tool_name.asc())
+        select(AgentMCPServerAssignment, AgentMCPToolAssignment)
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .where(AgentMCPServerAssignment.agent_id == agent_id)
+        .order_by(
+            AgentMCPServerAssignment.created_at.asc(),
+            AgentMCPToolAssignment.created_at.asc(),
+        )
     )
     return list(result.all())
 
@@ -196,23 +282,45 @@ async def list_agent_tool_runtime_rows(
     session: AsyncSession,
     *,
     agent_id: uuid.UUID,
-) -> list[tuple[AgentTool, MCPServerToolSchema, MCPServerInstallation, MCPServerVersion]]:
-    result = await session.execute(
-        select(AgentTool, MCPServerToolSchema, MCPServerInstallation, MCPServerVersion)
-        .join(MCPServerToolSchema, MCPServerToolSchema.id == AgentTool.tool_schema_id)
-        .join(MCPServerInstallation, MCPServerInstallation.id == AgentTool.installation_id)
-        .join(
-            MCPServerVersion,
-            and_(
-                MCPServerVersion.name == MCPServerInstallation.server_name,
-                MCPServerVersion.version == MCPServerInstallation.installed_version,
-            ),
+) -> list[
+    tuple[
+        AgentMCPServerAssignment,
+        MCPServerToolSchema,
+        MCPServerInstallation,
+        MCPServerVersion,
+    ]
+]:
+    tool_rows = await list_agent_tools(session, agent_id=agent_id)
+    version_keys = {
+        (installation.server_name, installation.installed_version)
+        for _assignment, _tool_schema, installation in tool_rows
+    }
+    if not version_keys:
+        return []
+    version_result = await session.execute(
+        select(MCPServerVersion).where(
+            or_(
+                *[
+                    and_(
+                        MCPServerVersion.name == server_name,
+                        MCPServerVersion.version == installed_version,
+                    )
+                    for server_name, installed_version in version_keys
+                ]
+            )
         )
-        .where(
-            AgentTool.agent_id == agent_id,
-            MCPServerToolSchema.is_active.is_(True),
-            MCPServerInstallation.status == "enabled",
-        )
-        .order_by(MCPServerToolSchema.server_name.asc(), MCPServerToolSchema.tool_name.asc())
     )
-    return list(result.all())
+    versions = {
+        (version.name, version.version): version
+        for version in version_result.scalars().all()
+    }
+    return [
+        (
+            assignment,
+            tool_schema,
+            installation,
+            versions[(installation.server_name, installation.installed_version)],
+        )
+        for assignment, tool_schema, installation in tool_rows
+        if (installation.server_name, installation.installed_version) in versions
+    ]

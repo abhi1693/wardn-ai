@@ -1,6 +1,15 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,25 +59,19 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
 
-class AgentTool(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "agent_tools"
+class AgentMCPServerAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_mcp_server_assignments"
     __table_args__ = (
         UniqueConstraint(
             "agent_id",
-            "tool_schema_id",
-            name="uq_agent_tools_agent_tool_schema",
+            "installation_id",
+            name="uq_agent_mcp_server_assignments_agent_installation",
         ),
     )
 
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    tool_schema_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("mcp_server_tool_schemas.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -79,3 +82,38 @@ class AgentTool(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
 
+
+class AgentMCPToolAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_mcp_tool_assignments"
+    __table_args__ = (
+        CheckConstraint(
+            "(wildcard = true and tool_schema_id is null) "
+            "or (wildcard = false and tool_schema_id is not null)",
+            name="ck_agent_mcp_tool_assignments_wildcard_shape",
+        ),
+        UniqueConstraint(
+            "server_assignment_id",
+            "tool_schema_id",
+            name="uq_agent_mcp_tool_assignments_server_tool_schema",
+        ),
+        Index(
+            "uq_agent_mcp_tool_assignments_server_wildcard",
+            "server_assignment_id",
+            unique=True,
+            postgresql_where=text("wildcard is true"),
+        ),
+    )
+
+    server_assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_mcp_server_assignments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tool_schema_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_server_tool_schemas.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    wildcard: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)

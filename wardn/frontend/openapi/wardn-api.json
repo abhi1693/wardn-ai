@@ -331,14 +331,74 @@
         "title": "AgentRead",
         "type": "object"
       },
-      "AgentToolAssignmentUpdate": {
+      "AgentServerToolAssignmentRead": {
         "properties": {
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
           "toolSchemaIds": {
             "items": {
-              "format": "uuid",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "const": "*",
+                  "type": "string"
+                }
+              ]
             },
             "title": "Toolschemaids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installationId",
+          "toolSchemaIds"
+        ],
+        "title": "AgentServerToolAssignmentRead",
+        "type": "object"
+      },
+      "AgentServerToolAssignmentUpdate": {
+        "properties": {
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "toolSchemaIds": {
+            "items": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "const": "*",
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Toolschemaids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installationId"
+        ],
+        "title": "AgentServerToolAssignmentUpdate",
+        "type": "object"
+      },
+      "AgentToolAssignmentUpdate": {
+        "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentServerToolAssignmentUpdate"
+            },
+            "title": "Servers",
             "type": "array"
           }
         },
@@ -347,6 +407,13 @@
       },
       "AgentToolListResponse": {
         "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentServerToolAssignmentRead"
+            },
+            "title": "Servers",
+            "type": "array"
+          },
           "tools": {
             "items": {
               "$ref": "#/components/schemas/AgentToolRead"

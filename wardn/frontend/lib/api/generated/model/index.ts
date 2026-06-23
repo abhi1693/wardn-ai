@@ -21,6 +21,8 @@ export * from './agentCreateScope';
 export * from './agentListResponse';
 export * from './agentRead';
 export * from './agentReadScope';
+export * from './agentServerToolAssignmentRead';
+export * from './agentServerToolAssignmentUpdate';
 export * from './agentToolAssignmentUpdate';
 export * from './agentToolListResponse';
 export * from './agentToolRead';

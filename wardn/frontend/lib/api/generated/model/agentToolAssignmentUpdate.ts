@@ -4,7 +4,8 @@
  * Wardn AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentServerToolAssignmentUpdate } from './agentServerToolAssignmentUpdate';
 
 export interface AgentToolAssignmentUpdate {
-  toolSchemaIds?: string[];
+  servers?: AgentServerToolAssignmentUpdate[];
 }

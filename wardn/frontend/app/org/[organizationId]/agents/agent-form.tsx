@@ -17,9 +17,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
 
-import type { AgentAvailableTool } from "./data";
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import { errorMessage } from "../tokens/token-form";
+import {
+  ALL_SERVER_TOOLS,
+  type AgentAvailableTool,
+  type AgentServerToolAssignment,
+} from "./tool-types";
 
 type AgentPayload = {
   name: string;
@@ -34,7 +38,7 @@ type AgentPayload = {
 
 type AgentFormProps = {
   agent?: AgentRead;
-  assignedToolSchemaIds?: string[];
+  assignedServerAssignments?: AgentServerToolAssignment[];
   availableTools?: AgentAvailableTool[];
   credentials: LlmCredentialRead[];
   organization: OrganizationRead;
@@ -44,6 +48,13 @@ type AgentFormProps = {
 type ProviderModel = {
   id: string;
   name: string;
+};
+
+type AvailableToolGroup = {
+  configName: string;
+  installationId: string;
+  serverName: string;
+  tools: AgentAvailableTool[];
 };
 
 function providerLabel(credential: LlmCredentialRead) {
@@ -58,7 +69,7 @@ function providerLabel(credential: LlmCredentialRead) {
 
 export function AgentForm({
   agent,
-  assignedToolSchemaIds = [],
+  assignedServerAssignments = [],
   availableTools = [],
   credentials,
   fixedWorkspaceId,
@@ -74,7 +85,14 @@ export function AgentForm({
   );
   const [modelName, setModelName] = useState(agent?.modelName ?? "");
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
-  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(assignedToolSchemaIds);
+  const [selectedServerTools, setSelectedServerTools] = useState<Record<string, string[]>>(
+    Object.fromEntries(
+      assignedServerAssignments.map((assignment) => [
+        assignment.installationId,
+        assignment.toolSchemaIds,
+      ])
+    )
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(Boolean(agent?.providerCredentialId));
@@ -159,11 +177,70 @@ export function AgentForm({
   const formBasePath = `/api/organizations/${organization.id}/workspaces/${fixedWorkspaceId}/agents`;
   const pageBasePath = `/org/${organization.id}/workspace/${fixedWorkspaceId}/agents`;
 
-  function toggleTool(toolSchemaId: string) {
-    setSelectedToolIds((current) =>
-      current.includes(toolSchemaId)
-        ? current.filter((entry) => entry !== toolSchemaId)
-        : [...current, toolSchemaId]
+  const availableToolGroups = useMemo(() => {
+    const groups = new Map<string, AvailableToolGroup>();
+    for (const tool of availableTools) {
+      const group = groups.get(tool.installationId);
+      if (group) {
+        group.tools.push(tool);
+      } else {
+        groups.set(tool.installationId, {
+          configName: tool.configName,
+          installationId: tool.installationId,
+          serverName: tool.serverName,
+          tools: [tool],
+        });
+      }
+    }
+    return Array.from(groups.values()).sort((left, right) =>
+      `${left.serverName}/${left.configName}`.localeCompare(
+        `${right.serverName}/${right.configName}`
+      )
+    );
+  }, [availableTools]);
+
+  const selectedToolCount = availableToolGroups.reduce((total, group) => {
+    const selected = selectedServerTools[group.installationId] ?? [];
+    if (selected.includes(ALL_SERVER_TOOLS)) {
+      return total + group.tools.length;
+    }
+    return total + selected.length;
+  }, 0);
+
+  function selectedToolsForServer(installationId: string) {
+    return selectedServerTools[installationId] ?? [];
+  }
+
+  function setServerSelection(installationId: string, toolSchemaIds: string[]) {
+    setSelectedServerTools((current) => {
+      const next = { ...current };
+      if (toolSchemaIds.length > 0) {
+        next[installationId] = toolSchemaIds;
+      } else {
+        delete next[installationId];
+      }
+      return next;
+    });
+  }
+
+  function toggleServerAll(installationId: string) {
+    const selected = selectedToolsForServer(installationId);
+    setServerSelection(
+      installationId,
+      selected.includes(ALL_SERVER_TOOLS) ? [] : [ALL_SERVER_TOOLS]
+    );
+  }
+
+  function toggleTool(installationId: string, toolSchemaId: string) {
+    const selected = selectedToolsForServer(installationId);
+    if (selected.includes(ALL_SERVER_TOOLS)) {
+      return;
+    }
+    setServerSelection(
+      installationId,
+      selected.includes(toolSchemaId)
+        ? selected.filter((entry) => entry !== toolSchemaId)
+        : [...selected, toolSchemaId]
     );
   }
 
@@ -202,10 +279,16 @@ export function AgentForm({
       }
       const savedAgentId = (data as { id?: string } | null)?.id ?? agent?.id;
       if (savedAgentId) {
+        const servers = Object.entries(selectedServerTools).map(
+          ([installationId, toolSchemaIds]) => ({
+            installationId,
+            toolSchemaIds,
+          })
+        );
         const toolsResponse = await fetch(`${formBasePath}/${savedAgentId}/tools`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ toolSchemaIds: selectedToolIds }),
+          body: JSON.stringify({ servers }),
         });
         const toolsData = (await toolsResponse.json().catch(() => null)) as unknown;
         if (!toolsResponse.ok) {
@@ -344,37 +427,67 @@ export function AgentForm({
               <div className="flex items-center justify-between gap-3">
                 <Label>Tools</Label>
                 <span className="text-xs text-[var(--on-surface-variant)]">
-                  {selectedToolIds.length} selected
+                  {selectedToolCount} selected
                 </span>
               </div>
-              {availableTools.length > 0 ? (
-                <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border border-[var(--outline-variant)] p-2">
-                  {availableTools.map((tool) => (
-                    <label
-                      className="flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm hover:bg-[var(--surface-container)]"
-                      key={tool.toolSchemaId}
-                    >
-                      <input
-                        checked={selectedToolIds.includes(tool.toolSchemaId)}
-                        className="mt-1 size-4 accent-primary"
-                        onChange={() => toggleTool(tool.toolSchemaId)}
-                        type="checkbox"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-medium">
-                          {tool.title || tool.toolName}
-                        </span>
-                        <span className="mt-1 block truncate text-xs text-[var(--on-surface-variant)]">
-                          {tool.serverName} / {tool.configName} / {tool.toolName}
-                        </span>
-                        {tool.description ? (
-                          <span className="mt-1 block text-xs leading-5 text-[var(--on-surface-variant)]">
-                            {tool.description}
+              {availableToolGroups.length > 0 ? (
+                <div className="max-h-96 space-y-3 overflow-y-auto rounded-md border border-[var(--outline-variant)] p-2">
+                  {availableToolGroups.map((group) => {
+                    const selected = selectedToolsForServer(group.installationId);
+                    const allSelected = selected.includes(ALL_SERVER_TOOLS);
+                    return (
+                      <div
+                        className="rounded-md border border-[var(--outline-variant)]"
+                        key={group.installationId}
+                      >
+                        <label className="flex cursor-pointer items-start gap-3 px-3 py-3 text-sm hover:bg-[var(--surface-container)]">
+                          <input
+                            checked={allSelected}
+                            className="mt-1 size-4 accent-primary"
+                            onChange={() => toggleServerAll(group.installationId)}
+                            type="checkbox"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium">{group.configName}</span>
+                            <span className="mt-1 block truncate text-xs text-[var(--on-surface-variant)]">
+                              {group.serverName} / all tools
+                            </span>
                           </span>
-                        ) : null}
-                      </span>
-                    </label>
-                  ))}
+                        </label>
+                        <div className="border-t border-[var(--outline-variant)] py-1">
+                          {group.tools.map((tool) => (
+                            <label
+                              className="flex cursor-pointer items-start gap-3 px-8 py-2 text-sm hover:bg-[var(--surface-container)]"
+                              key={tool.toolSchemaId}
+                            >
+                              <input
+                                checked={allSelected || selected.includes(tool.toolSchemaId)}
+                                className="mt-1 size-4 accent-primary"
+                                disabled={allSelected}
+                                onChange={() =>
+                                  toggleTool(group.installationId, tool.toolSchemaId)
+                                }
+                                type="checkbox"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-medium">
+                                  {tool.title || tool.toolName}
+                                </span>
+                                <span className="mt-1 block truncate text-xs text-[var(--on-surface-variant)]">
+                                  {tool.toolName}
+                                </span>
+                                {tool.description ? (
+                                  <span className="mt-1 block text-xs leading-5 text-[var(--on-surface-variant)]">
+                                    {tool.description}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed border-[var(--outline-variant)] px-3 py-6 text-sm text-[var(--on-surface-variant)]">

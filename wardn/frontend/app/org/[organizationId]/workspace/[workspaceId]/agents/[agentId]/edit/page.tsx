@@ -58,7 +58,7 @@ export default async function EditWorkspaceAgentPage({ params }: EditWorkspaceAg
     >
       <AgentForm
         agent={agent}
-        assignedToolSchemaIds={assignedTools.map((tool) => tool.toolSchemaId)}
+        assignedServerAssignments={assignedTools.servers}
         availableTools={availableTools}
         credentials={credentials}
         fixedWorkspaceId={workspaceId}
