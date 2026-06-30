@@ -15,7 +15,7 @@ import {
   workspaceMcpRegistryPath,
 } from "@/lib/workspace-context";
 
-import { RegistryListClient } from "./registry-list-client";
+import { CatalogListClient } from "./registry-list-client";
 
 async function getInitialServers(context: WorkspaceContext) {
   const path = organizationMcpRegistryPath(context, "/servers?limit=50&version=latest");
@@ -58,11 +58,11 @@ async function getInitialInstallations(context: WorkspaceContext) {
   }
 }
 
-type RegistryPageViewProps = {
+type CatalogPageViewProps = {
   workspaceContext: WorkspaceContext;
 };
 
-export async function RegistryPageView({ workspaceContext }: RegistryPageViewProps) {
+export async function CatalogPageView({ workspaceContext }: CatalogPageViewProps) {
   const organizationId = workspaceContext.selectedOrganization?.id;
   const [serverList, installations] = await Promise.all([
     getInitialServers(workspaceContext),
@@ -71,20 +71,20 @@ export async function RegistryPageView({ workspaceContext }: RegistryPageViewPro
 
   return (
     <AppShell
-      active="registry"
+      active="catalog"
       actions={
         <Button asChild size="sm">
-          <Link href={organizationId ? `/org/${encodeURIComponent(organizationId)}/registry/new` : "/org"}>
+          <Link href={organizationId ? `/org/${encodeURIComponent(organizationId)}/catalog/new` : "/org"}>
             <Plus className="size-4" />
             Add server
           </Link>
         </Button>
       }
-      eyebrow="MCP Registry"
-      title="Servers"
+      eyebrow="MCP Catalog"
+      title="Catalog"
       workspaceContext={workspaceContext}
     >
-      <RegistryListClient
+      <CatalogListClient
         initialInstallations={installations}
         initialMetadata={serverList.metadata}
         initialServers={serverList.servers}

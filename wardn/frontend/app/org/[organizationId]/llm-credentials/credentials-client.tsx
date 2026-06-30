@@ -126,11 +126,6 @@ export function CredentialsClient({
                   <TableCell>
                     <div className="min-w-48">
                       <div className="font-medium">{credential.name}</div>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {credential.isDefault ? (
-                          <Badge variant="outline">Default</Badge>
-                        ) : null}
-                      </div>
                     </div>
                   </TableCell>
                   <TableCell>

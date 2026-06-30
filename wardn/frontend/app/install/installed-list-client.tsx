@@ -9,7 +9,6 @@ import {
   McpTableCard,
   RuntimeBadge,
   ServerIdentityCell,
-  mcpServerDetailUrl,
   responseErrorMessage,
   runtimeDisplayName,
   serverIconUrlFromIcons,
@@ -28,7 +27,6 @@ import type { MCPServerInstallationRead } from "@/lib/api/generated/model";
 type InstalledListClientProps = {
   basePath: string;
   initialInstallations: MCPServerInstallationRead[];
-  organizationId: string;
 };
 
 function editInstallUrl(basePath: string, installationId: string) {
@@ -38,7 +36,6 @@ function editInstallUrl(basePath: string, installationId: string) {
 export function InstalledListClient({
   basePath,
   initialInstallations,
-  organizationId,
 }: InstalledListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
@@ -109,11 +106,7 @@ export function InstalledListClient({
                   <TableRow key={installation.id}>
                     <TableCell>
                       <ServerIdentityCell
-                        href={mcpServerDetailUrl(
-                          organizationId,
-                          installation.serverName,
-                          installation.installedVersion
-                        )}
+                        href={editInstallUrl(basePath, installation.id)}
                         iconUrl={iconUrl}
                         name={installation.serverName}
                         title={installation.server.title || installation.serverName}

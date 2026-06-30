@@ -9,6 +9,8 @@
     "web:api:generate": "npm run api:openapi && npm --workspace wardn/frontend run api:generate",
     "web:dev": "npm --workspace wardn/frontend run dev",
     "web:build": "npm --workspace wardn/frontend run build",
-    "web:lint": "npm --workspace wardn/frontend run lint"
+    "web:lint": "npm --workspace wardn/frontend run lint",
+    "web:e2e": "npm --workspace wardn/frontend run e2e",
+    "web:e2e:update": "npm --workspace wardn/frontend run e2e:update"
   }
 }

@@ -30,8 +30,8 @@ function encodedServerName(serverName: string) {
   return serverName.split("/").map(encodeURIComponent).join("/");
 }
 
-function registryServerPath(organizationId: string, serverName: string, version: string) {
-  return `/org/${encodeURIComponent(organizationId)}/registry/${encodedServerName(
+function catalogServerPath(organizationId: string, serverName: string, version: string) {
+  return `/org/${encodeURIComponent(organizationId)}/catalog/${encodedServerName(
     serverName
   )}?version=${encodeURIComponent(version)}`;
 }
@@ -79,7 +79,7 @@ export function ServerVersionSelector({
       <CardContent className="space-y-3 text-sm">
         <Select
           onValueChange={(version) =>
-            router.push(registryServerPath(organizationId, serverName, version))
+            router.push(catalogServerPath(organizationId, serverName, version))
           }
           value={currentVersion}
         >

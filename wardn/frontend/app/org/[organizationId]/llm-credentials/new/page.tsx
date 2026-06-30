@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
+import { getOrganization, getSecretStores, getWorkspaces } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -16,10 +16,11 @@ type NewLlmCredentialPageProps = {
 
 export default async function NewLlmCredentialPage({ params }: NewLlmCredentialPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces, currentUser] = await Promise.all([
+  const [workspaceContext, organization, workspaces, secretStores, currentUser] = await Promise.all([
     getWorkspaceContext({ organizationId }),
     getOrganization(organizationId),
     getWorkspaces(organizationId),
+    getSecretStores(organizationId),
     getCurrentUser(),
   ]);
 
@@ -45,6 +46,7 @@ export default async function NewLlmCredentialPage({ params }: NewLlmCredentialP
       <CredentialForm
         currentUser={currentUser}
         organization={organization}
+        secretStores={secretStores}
         workspaces={workspaces}
       />
     </AppShell>

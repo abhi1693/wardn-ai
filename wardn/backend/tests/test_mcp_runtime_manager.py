@@ -27,7 +27,7 @@ def test_secret_environment_includes_custom_headers_json() -> None:
         installed_version="1.0.0",
         status="enabled",
         install_type="uvx",
-        secret_config={
+        secret_references={
             "environment": {"WEATHER_TOKEN": "secret"},
             "headers": {"X-Workspace": "prod"},
         },
@@ -86,7 +86,7 @@ def test_package_runtime_materializes_secret_files_from_db(tmp_path, monkeypatch
             "cwd": str(tmp_path),
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
         },
-        secret_config={
+        secret_references={
             "files": {
                 "KUBECONFIG": {
                     "key": "KUBECONFIG",
@@ -183,7 +183,7 @@ def test_runtime_fingerprint_changes_when_secret_config_changes() -> None:
             "kind": RUNTIME_KIND_REMOTE,
             "transport": {"url": "https://example.test/mcp"},
         },
-        secret_config={"headers": {"Authorization": "Bearer first-secret"}},
+        secret_references={"headers": {"Authorization": "Bearer first-secret"}},
     )
     first.id = installation_id
     second = MCPServerInstallation(
@@ -195,7 +195,7 @@ def test_runtime_fingerprint_changes_when_secret_config_changes() -> None:
             "kind": RUNTIME_KIND_REMOTE,
             "transport": {"url": "https://example.test/mcp"},
         },
-        secret_config={"headers": {"Authorization": "Bearer second-secret"}},
+        secret_references={"headers": {"Authorization": "Bearer second-secret"}},
     )
     second.id = installation_id
     manager = DefaultMCPRuntimeManager()

@@ -6,36 +6,40 @@ import { AppShell } from "@/app/components/app-shell";
 import { getOrganization, getWorkspaces } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { MCPRegistryServerListResponse } from "@/lib/api/generated/model";
 import {
   backendCookieHeader,
   backendPath,
   getWorkspaceContext,
-  organizationMcpRegistryPath,
   type WorkspaceContext,
 } from "@/lib/workspace-context";
+import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
 
 type OrganizationDashboardPageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
-async function getRegistryServerCount(context: WorkspaceContext) {
-  const path = organizationMcpRegistryPath(context, "/servers?limit=1&version=latest");
-  if (!path) {
+async function getCatalogSourceCount(context: WorkspaceContext) {
+  const organizationId = context.selectedOrganization?.id;
+  if (!organizationId) {
     return 0;
   }
 
   try {
     const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
+    const response = await fetch(
+      backendPath(
+        `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
+      ),
+      {
+        cache: "no-store",
+        headers: cookie ? { cookie } : {},
+      }
+    );
     if (!response.ok) {
       return 0;
     }
-    const payload = (await response.json()) as MCPRegistryServerListResponse;
-    return payload.metadata.count;
+    const payload = (await response.json()) as MCPCatalogSourceListResponse;
+    return payload.sources.length;
   } catch {
     return 0;
   }
@@ -55,7 +59,7 @@ export default async function OrganizationDashboardPage({
     notFound();
   }
 
-  const registryServerCount = await getRegistryServerCount(workspaceContext);
+  const catalogSourceCount = await getCatalogSourceCount(workspaceContext);
   const activeWorkspaces = workspaces.filter((workspace) => workspace.status === "active").length;
   const overviewCards = [
     {
@@ -71,9 +75,9 @@ export default async function OrganizationDashboardPage({
       icon: Boxes,
     },
     {
-      label: "Registry servers",
-      value: registryServerCount.toString(),
-      detail: "Latest versions",
+      label: "Catalog sources",
+      value: catalogSourceCount.toString(),
+      detail: "Upstream URLs",
       icon: BookOpen,
     },
   ];
@@ -130,8 +134,8 @@ export default async function OrganizationDashboardPage({
                 </Link>
               </Button>
               <Button asChild size="sm">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/registry`}>
-                  View registry
+                <Link href={`/org/${encodeURIComponent(organization.id)}/catalog`}>
+                  View catalog
                 </Link>
               </Button>
             </div>

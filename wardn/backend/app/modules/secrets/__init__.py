@@ -1,0 +1,1 @@
+"""External secret store integration."""

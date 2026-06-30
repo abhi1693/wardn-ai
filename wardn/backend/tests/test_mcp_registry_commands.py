@@ -203,6 +203,54 @@ def test_load_supported_servers_reads_pulsemcp_registry_payload() -> None:
     assert servers[0].meta["com.pulsemcp/server-version"]["isLatest"] is True
 
 
+def test_load_supported_servers_reads_wardn_hub_catalog_payload() -> None:
+    payload = {
+        "servers": [
+            {
+                "name": "io.github.example/weather",
+                "title": "Weather",
+                "description": "Weather tools for forecasts",
+                "documentation": "# Weather",
+                "websiteUrl": "https://example.com",
+                "repository": {"url": "https://github.com/example/weather"},
+                "icons": [{"src": "https://example.com/icon.png"}],
+                "versions": [
+                    {
+                        "version": "1.0.0",
+                        "qualityScore": 95,
+                        "packages": [
+                            {
+                                "registryType": "npm",
+                                "identifier": "@example/weather-mcp",
+                                "version": "1.0.0",
+                                "transport": {"type": "stdio"},
+                            }
+                        ],
+                        "remotes": [],
+                        "status": "active",
+                        "statusMessage": "",
+                        "isLatest": True,
+                        "publishedAt": "2026-06-21T00:00:00Z",
+                        "statusChangedAt": "2026-06-21T00:00:00Z",
+                        "createdAt": "2026-06-21T00:00:00Z",
+                        "updatedAt": "2026-06-22T00:00:00Z",
+                    }
+                ],
+            }
+        ],
+        "metadata": {"page": 1, "perPage": 20, "total": 1, "pages": 1},
+    }
+
+    servers = commands.load_supported_servers_from_payload(payload)
+
+    assert len(servers) == 1
+    assert servers[0].name == "io.github.example/weather"
+    assert servers[0].version == "1.0.0"
+    assert servers[0].packages[0]["identifier"] == "@example/weather-mcp"
+    assert servers[0].meta["io.modelcontextprotocol.registry/official"]["isLatest"] is True
+    assert servers[0].meta["dev.wardnai.hub/catalog"]["qualityScore"] == 95
+
+
 def test_registry_url_loader_strips_unsupported_mcpb_packages(monkeypatch) -> None:
     payload = {
         "servers": [
@@ -468,6 +516,79 @@ def test_url_with_query_params_adds_incremental_and_latest_params() -> None:
         "https://api.pulsemcp.com/v0.1/servers?"
         "limit=100&updated_since=2026-06-22T00%3A00%3A00Z&version=latest"
     )
+
+
+def test_url_with_query_params_sets_page() -> None:
+    url = commands.url_with_query_params("https://hub.wardnai.dev/api/v1/mcp/catalog", page=2)
+
+    assert url == "https://hub.wardnai.dev/api/v1/mcp/catalog?page=2"
+
+
+def test_registry_url_loader_supports_wardn_hub_page_pagination(monkeypatch) -> None:
+    fetched_urls = []
+
+    def fetch_registry_payload(url, headers=None):
+        fetched_urls.append(url)
+        if url.endswith("page=1"):
+            return {
+                "servers": [
+                    {
+                        "name": "io.github.example/weather",
+                        "description": "Weather tools",
+                        "versions": [
+                            {
+                                "version": "1.0.0",
+                                "status": "active",
+                                "isLatest": True,
+                                "publishedAt": "2026-06-21T00:00:00Z",
+                                "statusChangedAt": "2026-06-21T00:00:00Z",
+                                "createdAt": "2026-06-21T00:00:00Z",
+                                "updatedAt": "2026-06-21T00:00:00Z",
+                            }
+                        ],
+                    }
+                ],
+                "metadata": {"page": 1, "perPage": 20, "total": 2, "pages": 2},
+            }
+        return {
+            "servers": [
+                {
+                    "name": "io.github.example/calendar",
+                    "description": "Calendar tools",
+                    "versions": [
+                        {
+                            "version": "1.0.0",
+                            "status": "active",
+                            "isLatest": True,
+                            "publishedAt": "2026-06-21T00:00:00Z",
+                            "statusChangedAt": "2026-06-21T00:00:00Z",
+                            "createdAt": "2026-06-21T00:00:00Z",
+                            "updatedAt": "2026-06-21T00:00:00Z",
+                        }
+                    ],
+                }
+            ],
+            "metadata": {"page": 2, "perPage": 20, "total": 2, "pages": 2},
+        }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", fetch_registry_payload)
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://hub.wardnai.dev/api/v1/mcp/catalog",
+        limit=100,
+        max_pages=None,
+        headers={"Authorization": "Bearer token"},
+        pagination="page",
+    )
+
+    assert [server.name for server in servers] == [
+        "io.github.example/weather",
+        "io.github.example/calendar",
+    ]
+    assert fetched_urls == [
+        "https://hub.wardnai.dev/api/v1/mcp/catalog?page=1",
+        "https://hub.wardnai.dev/api/v1/mcp/catalog?page=2",
+    ]
 
 
 def test_pulsemcp_registry_source_uses_default_url_and_auth_headers() -> None:

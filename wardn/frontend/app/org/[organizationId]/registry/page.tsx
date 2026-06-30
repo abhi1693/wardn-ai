@@ -1,15 +1,12 @@
-import { RegistryPageView } from "@/app/registry/registry-page-view";
-import { getWorkspaceContext } from "@/lib/workspace-context";
+import { redirect } from "next/navigation";
 
-type OrganizationRegistryPageProps = {
+type OrganizationRegistryRedirectPageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
-export default async function OrganizationRegistryPage({
+export default async function OrganizationRegistryRedirectPage({
   params,
-}: OrganizationRegistryPageProps) {
+}: OrganizationRegistryRedirectPageProps) {
   const { organizationId } = await params;
-  const workspaceContext = await getWorkspaceContext({ organizationId });
-
-  return <RegistryPageView workspaceContext={workspaceContext} />;
+  redirect(`/org/${encodeURIComponent(organizationId)}/catalog`);
 }

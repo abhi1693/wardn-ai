@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, KeyRound, Loader2, PlugZap } from "lucide-react";
+import { Check, CheckCircle2, Copy, KeyRound, Loader2, PlugZap, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
@@ -15,6 +15,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import { errorMessage } from "../tokens/token-form";
@@ -79,13 +86,17 @@ function authMethodForProvider(provider: CredentialProvider) {
 }
 
 function shellQuote(value: string) {
-  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export function CredentialForm({
   credential,
   currentUser,
   organization,
+  secretStores,
   workspaces,
 }: CredentialFormProps) {
   const router = useRouter();
@@ -98,43 +109,108 @@ export function CredentialForm({
     credential?.visibility ?? "organization"
   );
   const [workspaceId, setWorkspaceId] = useState(credential?.workspaceId ?? "");
-  const [secret, setSecret] = useState("");
-  const [isDefault, setIsDefault] = useState(credential?.isDefault ?? false);
+  const [apiKey, setApiKey] = useState("");
+  const [selectedSecretStoreId, setSelectedSecretStoreId] = useState("");
   const [isActive, setIsActive] = useState(credential?.isActive ?? true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const activeWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.status === "active"),
     [workspaces]
   );
+  const isChatgptConnectorCreate = provider === "openai_chatgpt" && !isEditing;
+  const availableSecretStores = useMemo(() => {
+    const activeStores = secretStores.filter((store) => store.isActive);
+    if (visibility === "workspace" && workspaceId) {
+      return activeStores.filter(
+        (store) => !store.workspaceId || store.workspaceId === workspaceId
+      );
+    }
+    return activeStores.filter((store) => !store.workspaceId);
+  }, [secretStores, visibility, workspaceId]);
+  const preferredSecretStore = useMemo(() => {
+    if (visibility === "workspace" && workspaceId) {
+      return (
+        availableSecretStores.find((store) => store.workspaceId === workspaceId) ??
+        availableSecretStores.find((store) => !store.workspaceId) ??
+        availableSecretStores[0] ??
+        null
+      );
+    }
+    return (
+      availableSecretStores.find((store) => !store.workspaceId) ??
+      availableSecretStores[0] ??
+      null
+    );
+  }, [availableSecretStores, visibility, workspaceId]);
+  const effectiveSecretStoreId =
+    selectedSecretStoreId &&
+    availableSecretStores.some((store) => store.id === selectedSecretStoreId)
+      ? selectedSecretStoreId
+      : preferredSecretStore?.id ?? availableSecretStores[0]?.id ?? "";
+  const hasCredentialName = name.trim().length > 0;
 
   const canSave =
-    name.trim().length > 0 &&
+    hasCredentialName &&
     !isSubmitting &&
-    (isEditing || provider !== "openai_chatgpt") &&
     (visibility !== "workspace" || workspaceId.length > 0) &&
-    (isEditing || authMethodForProvider(provider) !== "api_key" || secret.trim().length > 0);
-  const cliName = name.trim() || "OpenAI ChatGPT";
-  const cliWorkspaceId =
-    visibility === "workspace" ? workspaceId || "<workspace-id>" : "";
-  const cliUserEmail = currentUser?.email ?? "<user-email>";
-  const chatgptCommand = [
-    "python -m app.manage connectchatgpt",
-    "--organization-id",
-    shellQuote(organization.id),
-    "--user-email",
-    shellQuote(cliUserEmail),
-    "--name",
-    shellQuote(cliName),
-    "--visibility",
-    shellQuote(visibility),
-    ...(visibility === "workspace" ? ["--workspace-id", shellQuote(cliWorkspaceId)] : []),
-    ...(isDefault ? ["--default"] : []),
-  ].join(" ");
+    (provider === "openai"
+      ? isEditing
+        ? true
+        : apiKey.trim().length > 0 && effectiveSecretStoreId.length > 0
+      : !isChatgptConnectorCreate);
+
+  const chatgptCommand = useMemo(() => {
+    if (provider !== "openai_chatgpt") {
+      return "";
+    }
+    if (!hasCredentialName) {
+      return "";
+    }
+
+    const command = [
+      "cd wardn/backend",
+      "&&",
+      "../../.venv/bin/python",
+      "-m",
+      "app.manage",
+      "connectchatgpt",
+      "--organization-id",
+      shellQuote(organization.id),
+      "--user-email",
+      shellQuote(currentUser?.email ?? "<user-email>"),
+      "--secret-store-id",
+      shellQuote(effectiveSecretStoreId || "<secret-store-id>"),
+      "--name",
+      shellQuote(name.trim()),
+      "--visibility",
+      shellQuote(visibility),
+    ];
+
+    if (visibility === "workspace") {
+      command.push("--workspace-id", shellQuote(workspaceId || "<workspace-id>"));
+    }
+    return command.join(" ");
+  }, [
+    currentUser?.email,
+    hasCredentialName,
+    name,
+    organization.id,
+    provider,
+    effectiveSecretStoreId,
+    visibility,
+    workspaceId,
+  ]);
 
   async function copyChatgptCommand() {
+    if (!chatgptCommand) {
+      return;
+    }
+
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(chatgptCommand);
     } else {
@@ -149,7 +225,7 @@ export function CredentialForm({
       document.body.removeChild(field);
     }
     setCopiedCommand(true);
-    window.setTimeout(() => setCopiedCommand(false), 1600);
+    window.setTimeout(() => setCopiedCommand(false), 1500);
   }
 
   async function submitCredential(event: FormEvent<HTMLFormElement>) {
@@ -170,15 +246,15 @@ export function CredentialForm({
         authMethod: authMethodForProvider(provider),
         baseUrl: "",
         extraHeaders: {},
-        isDefault,
         ...(isEditing ? { isActive } : {}),
       };
 
       if (provider === "openai") {
-        if (secret.trim()) {
-          payload.secret = secret;
+        if (!isEditing) {
+          payload.apiKeySecretStoreId = effectiveSecretStoreId;
+          payload.apiKey = apiKey.trim();
         }
-      } else {
+      } else if (!isEditing) {
         payload.oauthProvider = "chatgpt";
       }
 
@@ -201,6 +277,40 @@ export function CredentialForm({
       setError(caught instanceof Error ? caught.message : "Credential could not be saved.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function validateCredential() {
+    if (!credential || isValidating) {
+      return;
+    }
+
+    setIsValidating(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch(
+        `/api/organizations/${organization.id}/llm/provider-credentials/${credential.id}/validate`,
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "Credential validation failed."));
+      }
+      const result = data as { ok?: unknown; message?: unknown };
+      const message =
+        typeof result.message === "string" && result.message.trim().length > 0
+          ? result.message
+          : "Credential validation failed.";
+      if (result.ok !== true) {
+        throw new Error(message);
+      }
+      setNotice(message);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Credential validation failed.");
+    } finally {
+      setIsValidating(false);
     }
   }
 
@@ -252,43 +362,103 @@ export function CredentialForm({
             </div>
 
             {provider === "openai" ? (
-              <div className="space-y-2">
-                <Label htmlFor="credential-secret">API key</Label>
-                <Input
-                  autoComplete="off"
-                  id="credential-secret"
-                  onChange={(event) => setSecret(event.target.value)}
-                  placeholder={isEditing ? "Leave blank to keep current key" : ""}
-                  required={!isEditing}
-                  type="password"
-                  value={secret}
-                />
-              </div>
-            ) : (
-              <div className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
-                <div className="text-sm text-[var(--on-surface-variant)]">
-                  {isEditing
-                    ? "This credential is connected through local ChatGPT OAuth."
-                    : "Run this command locally on the Wardn backend host to connect ChatGPT."}
+              isEditing ? null : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="credential-api-key-secret-store">Secret backend</Label>
+                    {availableSecretStores.length > 0 ? (
+                      <Select
+                        onValueChange={setSelectedSecretStoreId}
+                        value={effectiveSecretStoreId}
+                      >
+                        <SelectTrigger id="credential-api-key-secret-store">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableSecretStores.map((store) => (
+                            <SelectItem key={store.id} value={store.id}>
+                              {store.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        disabled
+                        id="credential-api-key-secret-store"
+                        placeholder="Connect a secret backend first"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="credential-api-key">API key</Label>
+                    <Input
+                      autoComplete="off"
+                      id="credential-api-key"
+                      onChange={(event) => setApiKey(event.target.value)}
+                      required
+                      type="password"
+                      value={apiKey}
+                    />
+                  </div>
                 </div>
+              )
+            ) : (
+              <div className="space-y-4">
                 {!isEditing ? (
-                  <div className="flex gap-2">
-                    <code className="block min-h-10 flex-1 rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2 font-mono text-xs leading-5 text-[var(--on-surface)]">
-                      {chatgptCommand}
-                    </code>
-                    <Button
-                      aria-label="Copy ChatGPT command"
-                      onClick={copyChatgptCommand}
-                      size="icon"
-                      type="button"
-                      variant="outline"
-                    >
-                      {copiedCommand ? (
-                        <Check className="size-4" />
+                  <div className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="credential-chatgpt-secret-store">
+                        Secret backend
+                      </Label>
+                      {availableSecretStores.length > 0 ? (
+                        <Select
+                          onValueChange={setSelectedSecretStoreId}
+                          value={effectiveSecretStoreId}
+                        >
+                          <SelectTrigger id="credential-chatgpt-secret-store">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableSecretStores.map((store) => (
+                              <SelectItem key={store.id} value={store.id}>
+                                {store.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       ) : (
-                        <Copy className="size-4" />
+                        <Input
+                          disabled
+                          id="credential-chatgpt-secret-store"
+                          placeholder="Connect an organization secret backend first"
+                        />
                       )}
-                    </Button>
+                    </div>
+                    {hasCredentialName ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label htmlFor="credential-chatgpt-command">
+                            ChatGPT connector command
+                          </Label>
+                          <Button
+                            onClick={copyChatgptCommand}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {copiedCommand ? <Check /> : <Copy />}
+                            {copiedCommand ? "Copied" : "Copy"}
+                          </Button>
+                        </div>
+                        <pre
+                          className="max-h-36 overflow-x-auto rounded-md border border-[var(--outline-variant)] bg-white p-3 text-xs leading-5 text-[var(--on-surface)]"
+                          id="credential-chatgpt-command"
+                        >
+                          <code>{chatgptCommand}</code>
+                        </pre>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -347,17 +517,8 @@ export function CredentialForm({
               </div>
             ) : null}
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="flex min-h-10 items-center gap-3 rounded-md border border-[var(--outline-variant)] px-3 text-sm">
-                <input
-                  checked={isDefault}
-                  className="size-4 accent-primary"
-                  onChange={(event) => setIsDefault(event.target.checked)}
-                  type="checkbox"
-                />
-                Default credential
-              </label>
-              {isEditing ? (
+            {isEditing ? (
+              <div className="grid gap-3 md:grid-cols-2">
                 <label className="flex min-h-10 items-center gap-3 rounded-md border border-[var(--outline-variant)] px-3 text-sm">
                   <input
                     checked={isActive}
@@ -367,12 +528,18 @@ export function CredentialForm({
                   />
                   Active
                 </label>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
 
             {error ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
+              </div>
+            ) : null}
+            {notice ? (
+              <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                <CheckCircle2 className="size-4" />
+                {notice}
               </div>
             ) : null}
 
@@ -380,7 +547,22 @@ export function CredentialForm({
               <Button asChild type="button" variant="outline">
                 <Link href={`/org/${organization.id}/llm-credentials`}>Cancel</Link>
               </Button>
-              {provider === "openai_chatgpt" && !isEditing ? null : (
+              {isEditing ? (
+                <Button
+                  disabled={isValidating}
+                  onClick={validateCredential}
+                  type="button"
+                  variant="outline"
+                >
+                  {isValidating ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-4" />
+                  )}
+                  {isValidating ? "Validating" : "Validate"}
+                </Button>
+              ) : null}
+              {isChatgptConnectorCreate ? null : (
                 <Button disabled={!canSave} type="submit">
                   {isSubmitting ? (
                     <Loader2 className="size-4 animate-spin" />

@@ -6,13 +6,14 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.commands.registry import CommandRegistry
 from app.db.session import AsyncSessionLocal
+from app.modules.llm_providers import repository as llm_repository
 from app.modules.llm_providers.exceptions import (
     DuplicateLLMProviderCredentialError,
     InvalidLLMProviderCredentialAuthError,
@@ -36,6 +37,9 @@ from app.modules.organizations.exceptions import (
     WorkspaceAccessDeniedError,
     WorkspaceNotFoundError,
 )
+from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets.schemas import SecretHandleCreate
+from app.modules.secrets.service import create_secret_handle, write_secret_values
 from app.modules.users import repository as user_repository
 
 CALLBACK_HOST = "localhost"
@@ -57,10 +61,17 @@ def configure_connectchatgpt_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--workspace-id", default="", help="Workspace UUID for workspace scope.")
     parser.add_argument(
-        "--default",
-        action="store_true",
-        dest="is_default",
-        help="Mark this as the default OpenAI ChatGPT credential for the selected scope.",
+        "--secret-store-id",
+        required=True,
+        help="Secret store UUID where ChatGPT OAuth tokens will be written.",
+    )
+    parser.add_argument(
+        "--secret-path",
+        default="",
+        help=(
+            "External secret path for the OAuth token document. Defaults to a generated "
+            "wardn/orgs/<org>/.../chatgpt/<uuid> path."
+        ),
     )
     parser.add_argument(
         "--no-browser",
@@ -141,13 +152,63 @@ async def get_command_user(session, *, user_id: str, user_email: str):
     return user
 
 
+def safe_secret_path_component(value: str) -> str:
+    component = "".join(
+        character.lower() if character.isalnum() else "-"
+        for character in value.strip()
+    )
+    return "-".join(part for part in component.split("-") if part) or "chatgpt"
+
+
+def chatgpt_secret_path(
+    *,
+    organization_id: UUID,
+    workspace_id: UUID | None,
+    user_id: UUID,
+    name: str,
+) -> str:
+    scope = f"workspaces/{workspace_id}" if workspace_id else f"users/{user_id}"
+    return (
+        f"wardn/orgs/{organization_id}/{scope}/llm/chatgpt/"
+        f"{safe_secret_path_component(name)}-{uuid4()}"
+    )
+
+
+def credential_name(value: str) -> str:
+    return " ".join(value.strip().split()) or "OpenAI ChatGPT"
+
+
+def handle_display_name(name: str, suffix: str, run_id: str) -> str:
+    base = " ".join(name.strip().split()) or "OpenAI ChatGPT"
+    value = f"{base} {suffix} {run_id}"
+    if len(value) <= 100:
+        return value
+    suffix_with_space = f" {suffix} {run_id}"
+    return f"{base[: 100 - len(suffix_with_space)].rstrip()}{suffix_with_space}"
+
+
 async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
     organization_id = UUID(args.organization_id)
     workspace_id = UUID(args.workspace_id) if args.workspace_id else None
+    secret_store_id = UUID(args.secret_store_id)
+    name = credential_name(args.name)
     if args.visibility == "workspace" and workspace_id is None:
         raise ValueError("--workspace-id is required when --visibility workspace")
     if args.visibility != "workspace" and workspace_id is not None:
         raise ValueError("--workspace-id is only valid for workspace visibility")
+
+    async with AsyncSessionLocal() as session:
+        user = await get_command_user(
+            session,
+            user_id=args.user_id,
+            user_email=args.user_email,
+        )
+        if await llm_repository.get_credential_by_name(
+            session,
+            organization_id=organization_id,
+            name=name,
+        ):
+            raise DuplicateLLMProviderCredentialError("provider credential name already exists")
 
     verifier, challenge = generate_pkce_pair()
     state = generate_oauth_state()
@@ -187,28 +248,85 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
             user_id=args.user_id,
             user_email=args.user_email,
         )
+        if await llm_repository.get_credential_by_name(
+            session,
+            organization_id=organization_id,
+            name=name,
+        ):
+            raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+        handle_workspace_id = workspace_id if args.visibility == "workspace" else None
+        external_ref = (
+            args.secret_path.strip().strip("/")
+            or chatgpt_secret_path(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                user_id=user.id,
+                name=name,
+            )
+        )
+        run_id = uuid4().hex[:8]
+        await write_secret_values(
+            session,
+            user,
+            organization_id,
+            secret_store_id,
+            workspace_id=handle_workspace_id,
+            external_ref=external_ref,
+            values={
+                "access_token": token_payload["access_token"],
+                "refresh_token": token_payload["refresh_token"],
+            },
+            purpose="oauth_token",
+        )
+        access_handle = await create_secret_handle(
+            session,
+            user,
+            organization_id,
+            SecretHandleCreate(
+                storeId=secret_store_id,
+                workspaceId=handle_workspace_id,
+                purpose="oauth_token",
+                displayName=handle_display_name(name, "access token", run_id),
+                externalRef=external_ref,
+                keyName="access_token",
+                metadata={"provider": "chatgpt", "credentialName": name},
+            ),
+        )
+        refresh_handle = await create_secret_handle(
+            session,
+            user,
+            organization_id,
+            SecretHandleCreate(
+                storeId=secret_store_id,
+                workspaceId=handle_workspace_id,
+                purpose="oauth_token",
+                displayName=handle_display_name(name, "refresh token", run_id),
+                externalRef=external_ref,
+                keyName="refresh_token",
+                metadata={"provider": "chatgpt", "credentialName": name},
+            ),
+        )
         credential = await create_provider_credential(
             session,
             user,
             organization_id,
             LLMProviderCredentialCreate(
-                name=args.name,
+                name=name,
                 provider=OPENAI_CHATGPT_PROVIDER,
                 visibility=args.visibility,
                 workspaceId=workspace_id,
                 authMethod="oauth",
                 oauthProvider="chatgpt",
-                oauthAccessToken=SecretStr(token_payload["access_token"]),
-                oauthRefreshToken=SecretStr(token_payload["refresh_token"]),
+                oauthAccessTokenSecretHandleId=access_handle.id,
+                oauthRefreshTokenSecretHandleId=refresh_handle.id,
                 oauthExpiresAt=expires_at_from_seconds(token_payload.get("expires_in")),
                 oauthScopes=CHATGPT_OAUTH_SCOPE.split(),
                 oauthMetadata=chatgpt_oauth_metadata(token_payload["access_token"]),
-                isDefault=args.is_default,
             ),
         )
         await session.commit()
+        print(f"ChatGPT tokens written to secret store path: {external_ref}")
         print(f"ChatGPT credential connected: {credential.name} ({credential.id})")
-
 
 def handle_connectchatgpt(args: argparse.Namespace) -> int:
     try:
@@ -224,6 +342,7 @@ def handle_connectchatgpt(args: argparse.Namespace) -> int:
         OrganizationNotFoundError,
         WorkspaceAccessDeniedError,
         WorkspaceNotFoundError,
+        SecretsError,
         ValidationError,
         ValueError,
     ) as exc:

@@ -2,7 +2,11 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 
-import { getOrganization, getWorkspace, getWorkspaceContext } from "../../../../data";
+import {
+  getOrganization,
+  getWorkspace,
+  getWorkspaceContext,
+} from "../../../../data";
 import { WorkspaceForm } from "../../../../workspace-form";
 
 type WorkspaceSettingsPageProps = {

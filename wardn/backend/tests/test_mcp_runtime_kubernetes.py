@@ -781,7 +781,7 @@ def test_kubernetes_runtime_manifest_keeps_secret_values_only_in_secret(
             "cwd": str(tmp_path),
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
         },
-        secret_config={
+        secret_references={
             "environment": {"WEATHER_TOKEN": secret_value},
             "headers": {"Authorization": f"Bearer {secret_value}"},
         },
@@ -843,7 +843,7 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
             "cwd": str(tmp_path),
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
         },
-        secret_config={"environment": {"WEATHER_TOKEN": "secret"}},
+        secret_references={"environment": {"WEATHER_TOKEN": "secret"}},
     )
     installation.id = uuid.uuid4()
     runtime_session = MCPRuntimeSession(
@@ -1180,7 +1180,7 @@ def test_kubernetes_runtime_manifest_runs_oci_image_directly(
             "cwd": str(tmp_path),
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
         },
-        secret_config={"environment": {"GRAFANA_URL": "https://grafana.example.com"}},
+        secret_references={"environment": {"GRAFANA_URL": "https://grafana.example.com"}},
     )
     installation.id = uuid.uuid4()
     runtime_session = MCPRuntimeSession(
@@ -1257,7 +1257,7 @@ def test_kubernetes_runtime_manifest_mounts_runtime_files(
             ],
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
         },
-        secret_config={
+        secret_references={
             "environment": {"GRAFANA_URL": "https://grafana.example.com"},
             "files": {
                 "GRAFANA_CLI_TLS_CA_FILE": {

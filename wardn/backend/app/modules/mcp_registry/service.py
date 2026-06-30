@@ -1,12 +1,17 @@
+import asyncio
 import re
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository, tool_repository
 from app.modules.mcp_registry.exceptions import (
+    DuplicateMCPCatalogSourceError,
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
+    MCPCatalogSourceNotFoundError,
     MCPServerInstallationNotFoundError,
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
@@ -19,14 +24,24 @@ from app.modules.mcp_registry.installer import (
     install_server_runtime,
     remove_installation_artifacts,
 )
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_registry.models import (
+    MCPCatalogSource,
+    MCPServerInstallation,
+    MCPServerVersion,
+)
 from app.modules.mcp_registry.schemas import (
+    MCPCatalogSourceCreate,
+    MCPCatalogSourceListResponse,
+    MCPCatalogSourceRead,
+    MCPCatalogSourceSyncResponse,
+    MCPCatalogSourceUpdate,
     MCPPulseServerVersionMetadata,
     MCPRegistryListMetadata,
     MCPRegistryOfficialMetadata,
     MCPRegistryResponseMeta,
     MCPRegistryServerListResponse,
     MCPRegistryServerResponse,
+    MCPSecretHandleConfigValue,
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
     MCPServerDocument,
@@ -41,10 +56,17 @@ from app.modules.mcp_registry.schemas import (
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations import repository as organization_repository
+from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets.schemas import SecretHandleCreate
+from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
+from app.modules.users.models import User
 
 OFFICIAL_REGISTRY_META_KEY = "io.modelcontextprotocol.registry/official"
 PULSE_SERVER_VERSION_META_KEY = "com.pulsemcp/server-version"
 VERSION_PREFIX_PATTERN = re.compile(r"^\s*v?(\d+(?:[._-]\d+)*)", re.IGNORECASE)
+CATALOG_SYNC_PAGE_SIZE = 100
+WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
+CATALOG_SOURCE_TOKEN_KEY = "api_token"
 
 
 async def default_workspace_id(session) -> uuid.UUID:
@@ -168,21 +190,98 @@ def server_values(payload: MCPServerCreate, *, is_latest: bool) -> dict:
     return values
 
 
-def install_config_values_from_secret_config(secret_config: dict | None) -> ConfigValues:
+SECRET_HANDLE_REF_TYPE = "secret_handle"
+
+
+def secret_handle_ref(handle_id: uuid.UUID | str) -> dict[str, str]:
+    return {"type": SECRET_HANDLE_REF_TYPE, "secretHandleId": str(handle_id)}
+
+
+def secret_handle_id_from_value(value) -> uuid.UUID | None:
+    if isinstance(value, MCPSecretHandleConfigValue):
+        return value.secret_handle_id
+    mapping = config_value_mapping(value)
+    if mapping.get("type") != SECRET_HANDLE_REF_TYPE:
+        return None
+    raw_handle_id = mapping.get("secretHandleId") or mapping.get("secret_handle_id")
+    if not raw_handle_id:
+        return None
+    return uuid.UUID(str(raw_handle_id))
+
+
+async def resolve_install_config_values(
+    session,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    config_values: ConfigValues,
+) -> tuple[ConfigValues, dict[str, uuid.UUID]]:
+    resolved: ConfigValues = {}
+    handle_refs: dict[str, uuid.UUID] = {}
+    for key, value in config_values.items():
+        handle_id = secret_handle_id_from_value(value)
+        mapping = config_value_mapping(value)
+        content_handle_id = None
+        if handle_id is None and mapping.get("type") == "file":
+            content_handle_id = secret_handle_id_from_value(mapping.get("content"))
+        if handle_id is None and content_handle_id is None:
+            resolved[key] = value
+            continue
+        if content_handle_id is not None:
+            handle_id = content_handle_id
+        try:
+            secret = await resolve_secret(
+                session,
+                organization_id,
+                handle_id,
+                workspace_id=workspace_id,
+            )
+        except SecretsError as exc:
+            raise MCPServerInstallationNotFoundError(str(exc)) from exc
+        if content_handle_id is not None:
+            resolved[key] = {**mapping, "content": secret.value}
+        else:
+            resolved[key] = secret.value
+        handle_refs[key] = handle_id
+    return resolved, handle_refs
+
+
+def secret_references_from_runtime_secret_config(
+    secret_config: dict | None,
+    handle_refs: dict[str, uuid.UUID],
+) -> dict:
     if not secret_config:
+        return {}
+    references = deepcopy(secret_config)
+    for namespace in ("headers", "environment", "packageArguments"):
+        namespace_values = references.get(namespace)
+        if not isinstance(namespace_values, dict):
+            continue
+        for key in list(namespace_values):
+            if key in handle_refs:
+                namespace_values[key] = secret_handle_ref(handle_refs[key])
+    files = references.get("files")
+    if isinstance(files, dict):
+        for key, detail in files.items():
+            if key in handle_refs and isinstance(detail, dict):
+                detail["content"] = secret_handle_ref(handle_refs[key])
+    return references
+
+
+def install_config_values_from_secret_references(secret_references: dict | None) -> ConfigValues:
+    if not secret_references:
         return {}
     values: ConfigValues = {}
     for namespace in ("headers", "environment", "packageArguments"):
-        namespace_values = secret_config.get(namespace)
+        namespace_values = secret_references.get(namespace)
         if isinstance(namespace_values, dict):
             values.update(
                 {
-                    str(key): str(value)
+                    str(key): value
                     for key, value in namespace_values.items()
                     if value is not None
                 }
             )
-    files = secret_config.get("files")
+    files = secret_references.get("files")
     if isinstance(files, dict):
         for name, detail in files.items():
             if not isinstance(detail, dict):
@@ -193,7 +292,7 @@ def install_config_values_from_secret_config(secret_config: dict | None) -> Conf
             values[str(name)] = {
                 "type": "file",
                 "filename": str(detail.get("filename") or ""),
-                "content": str(content),
+                "content": content,
             }
     return values
 
@@ -240,7 +339,7 @@ def public_configured_values(
     installation: MCPServerInstallation,
 ) -> dict[str, str]:
     visible_names = visible_config_field_names(server, installation)
-    stored_values = install_config_values_from_secret_config(installation.secret_config)
+    stored_values = install_config_values_from_secret_references(installation.secret_references)
     return {
         key: public_config_value(value)
         for key, value in stored_values.items()
@@ -252,8 +351,8 @@ def merged_install_config_values(
     existing: MCPServerInstallation | None,
     new_values: ConfigValues,
 ) -> ConfigValues:
-    merged = install_config_values_from_secret_config(
-        existing.secret_config if existing else None
+    merged = install_config_values_from_secret_references(
+        existing.secret_references if existing else None
     )
     merged.update({key: value for key, value in new_values.items() if config_value_present(value)})
     return merged
@@ -285,6 +384,353 @@ def server_response(server: MCPServerVersion) -> MCPRegistryServerResponse:
                 is_latest=server.is_latest,
             )
         ),
+    )
+
+
+def catalog_source_response(source: MCPCatalogSource) -> MCPCatalogSourceRead:
+    return MCPCatalogSourceRead(
+        id=source.id,
+        organizationId=source.organization_id,
+        name=source.name,
+        provider=source.provider,
+        baseUrl=source.base_url,
+        tenantId=source.tenant_id,
+        syncMode=source.sync_mode,
+        lastSuccessAt=source.last_success_at,
+        lastSyncedUpdatedSince=source.last_synced_updated_since,
+        lastError=source.last_error,
+        isEnabled=source.is_enabled,
+        hasAuthToken=source.auth_secret_handle_id is not None,
+        createdAt=source.created_at,
+        updatedAt=source.updated_at,
+    )
+
+
+async def list_catalog_sources(
+    session,
+    organization_id: uuid.UUID,
+) -> MCPCatalogSourceListResponse:
+    sources = await repository.list_catalog_sources(session, organization_id)
+    return MCPCatalogSourceListResponse(
+        sources=[catalog_source_response(source) for source in sources]
+    )
+
+
+async def create_catalog_source(
+    session,
+    user: User,
+    organization_id: uuid.UUID,
+    payload: MCPCatalogSourceCreate,
+) -> MCPCatalogSourceRead:
+    base_url = catalog_source_stored_base_url(payload.provider, payload.base_url)
+    if await repository.get_catalog_source_by_name(session, organization_id, payload.name):
+        raise DuplicateMCPCatalogSourceError("catalog source name already exists")
+    if await repository.get_catalog_source_by_url(session, organization_id, base_url):
+        raise DuplicateMCPCatalogSourceError("catalog source URL already exists")
+    auth_secret_handle_id = await create_catalog_source_token_handle(
+        session,
+        user,
+        organization_id,
+        name=payload.name,
+        api_token=payload.api_token,
+        secret_store_id=payload.api_token_secret_store_id,
+        required=payload.provider == "wardn_hub",
+    )
+
+    source = MCPCatalogSource(
+        organization_id=organization_id,
+        name=payload.name,
+        provider=payload.provider,
+        base_url=base_url,
+        tenant_id=payload.tenant_id,
+        sync_mode=payload.sync_mode,
+        auth_secret_handle_id=auth_secret_handle_id,
+        is_enabled=payload.is_enabled,
+        last_error="",
+    )
+    session.add(source)
+    await session.flush()
+    await session.refresh(source)
+    return catalog_source_response(source)
+
+
+async def get_catalog_source(
+    session,
+    organization_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> MCPCatalogSourceRead:
+    source = await repository.get_catalog_source(
+        session,
+        source_id,
+        organization_id=organization_id,
+    )
+    if source is None:
+        raise MCPCatalogSourceNotFoundError("catalog source not found")
+    return catalog_source_response(source)
+
+
+async def update_catalog_source(
+    session,
+    user: User,
+    organization_id: uuid.UUID,
+    source_id: uuid.UUID,
+    payload: MCPCatalogSourceUpdate,
+) -> MCPCatalogSourceRead:
+    source = await repository.get_catalog_source(
+        session,
+        source_id,
+        organization_id=organization_id,
+    )
+    if source is None:
+        raise MCPCatalogSourceNotFoundError("catalog source not found")
+
+    values = payload.model_dump(exclude_unset=True, by_alias=False)
+    next_provider = values.get("provider", source.provider)
+    if "base_url" in values:
+        values["base_url"] = catalog_source_stored_base_url(
+            next_provider,
+            values["base_url"],
+        )
+    next_name = values.get("name")
+    if next_name and next_name != source.name:
+        existing = await repository.get_catalog_source_by_name(
+            session,
+            organization_id,
+            next_name,
+        )
+        if existing is not None and existing.id != source.id:
+            raise DuplicateMCPCatalogSourceError("catalog source name already exists")
+    next_url = values.get("base_url")
+    if next_url and next_url != source.base_url:
+        existing = await repository.get_catalog_source_by_url(
+            session,
+            organization_id,
+            next_url,
+        )
+        if existing is not None and existing.id != source.id:
+            raise DuplicateMCPCatalogSourceError("catalog source URL already exists")
+    token_handle_id = await create_catalog_source_token_handle(
+        session,
+        user,
+        organization_id,
+        name=values.get("name", source.name),
+        api_token=payload.api_token,
+        secret_store_id=payload.api_token_secret_store_id,
+        required=next_provider == "wardn_hub" and source.auth_secret_handle_id is None,
+    )
+
+    for key, value in values.items():
+        if key in {"api_token", "api_token_secret_store_id"}:
+            continue
+        setattr(source, key, value)
+    if token_handle_id is not None:
+        source.auth_secret_handle_id = token_handle_id
+
+    await session.flush()
+    await session.refresh(source)
+    return catalog_source_response(source)
+
+
+async def delete_catalog_source(
+    session,
+    organization_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> None:
+    source = await repository.get_catalog_source(
+        session,
+        source_id,
+        organization_id=organization_id,
+    )
+    if source is None:
+        raise MCPCatalogSourceNotFoundError("catalog source not found")
+    await session.delete(source)
+    await session.flush()
+
+
+def registry_source_type(provider: str) -> str:
+    if provider == "pulsemcp":
+        return "pulsemcp"
+    if provider == "official":
+        return "official"
+    return "custom"
+
+
+def catalog_source_urls(source: MCPCatalogSource) -> list[str]:
+    if source.provider != "wardn_hub":
+        return [source.base_url.rstrip("/")]
+    return [wardn_hub_catalog_url(source.base_url)]
+
+
+def catalog_source_stored_base_url(provider: str, base_url: str) -> str:
+    base_url = base_url.strip().rstrip("/")
+    if provider != "wardn_hub":
+        return base_url
+    split_url = urlsplit(base_url)
+    return f"{split_url.scheme}://{split_url.netloc}"
+
+
+def wardn_hub_catalog_url(base_url: str) -> str:
+    split_url = urlsplit(base_url.strip().rstrip("/"))
+    return f"{split_url.scheme}://{split_url.netloc}{WARDN_HUB_CATALOG_PATH}"
+
+
+def catalog_source_token_path(
+    *,
+    organization_id: uuid.UUID,
+    name: str,
+    run_id: str,
+) -> str:
+    name_part = "-".join(
+        part
+        for part in "".join(
+            character.lower() if character.isalnum() else "-"
+            for character in name.strip()
+        ).split("-")
+        if part
+    ) or "catalog-source"
+    return f"wardn/orgs/{organization_id}/catalog/{name_part}-{run_id}"
+
+
+def catalog_source_token_display_name(name: str, run_id: str) -> str:
+    base = " ".join(name.strip().split()) or "Catalog source"
+    suffix = f" API token {run_id}"
+    value = f"{base}{suffix}"
+    if len(value) <= 100:
+        return value
+    return f"{base[: 100 - len(suffix)].rstrip()}{suffix}"
+
+
+async def create_catalog_source_token_handle(
+    session,
+    user: User,
+    organization_id: uuid.UUID,
+    *,
+    name: str,
+    api_token,
+    secret_store_id: uuid.UUID | None,
+    required: bool,
+) -> uuid.UUID | None:
+    token = api_token.get_secret_value().strip() if api_token is not None else ""
+    if not token:
+        if required:
+            raise ValueError("Wardn Hub catalog sources require an API token")
+        return None
+    if secret_store_id is None:
+        raise ValueError("API token secret backend is required")
+
+    run_id = uuid.uuid4().hex[:8]
+    external_ref = catalog_source_token_path(
+        organization_id=organization_id,
+        name=name,
+        run_id=run_id,
+    )
+    await write_secret_values(
+        session,
+        user,
+        organization_id,
+        secret_store_id,
+        workspace_id=None,
+        external_ref=external_ref,
+        values={CATALOG_SOURCE_TOKEN_KEY: token},
+        purpose="catalog_source",
+    )
+    handle = await create_secret_handle(
+        session,
+        user,
+        organization_id,
+        SecretHandleCreate(
+            storeId=secret_store_id,
+            workspaceId=None,
+            purpose="catalog_source",
+            displayName=catalog_source_token_display_name(name, run_id),
+            externalRef=external_ref,
+            keyName=CATALOG_SOURCE_TOKEN_KEY,
+            metadata={"provider": "mcp_catalog", "catalogSourceName": name},
+        ),
+    )
+    return handle.id
+
+
+async def catalog_source_auth_headers(
+    session,
+    organization_id: uuid.UUID,
+    source: MCPCatalogSource,
+) -> dict[str, str]:
+    if source.auth_secret_handle_id is None:
+        if source.provider == "wardn_hub":
+            raise ValueError("Wardn Hub catalog source API token is not configured")
+        return {}
+    secret = await resolve_secret(session, organization_id, source.auth_secret_handle_id)
+    token = secret.value.strip()
+    if not token:
+        raise ValueError("catalog source API token is empty")
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-API-Key": token,
+    }
+
+
+async def sync_catalog_source(
+    session,
+    organization_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> MCPCatalogSourceSyncResponse:
+    source = await repository.get_catalog_source(
+        session,
+        source_id,
+        organization_id=organization_id,
+    )
+    if source is None:
+        raise MCPCatalogSourceNotFoundError("catalog source not found")
+    if not source.is_enabled:
+        raise ValueError("catalog source is disabled")
+
+    from app.modules.mcp_registry.commands import (
+        load_supported_servers_from_registry_url,
+        registry_headers,
+    )
+
+    source_type = registry_source_type(source.provider)
+    version = "latest" if source.sync_mode == "latest_only" else None
+
+    try:
+        headers = registry_headers(source_type, api_key=None, tenant_id=source.tenant_id or None)
+        headers.update(await catalog_source_auth_headers(session, organization_id, source))
+        last_error: Exception | None = None
+        servers = None
+        for source_url in catalog_source_urls(source):
+            try:
+                servers = await asyncio.to_thread(
+                    load_supported_servers_from_registry_url,
+                    source_url,
+                    limit=CATALOG_SYNC_PAGE_SIZE,
+                    max_pages=None,
+                    headers=headers,
+                    version=version,
+                    pagination="page" if source.provider == "wardn_hub" else "cursor",
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+        if servers is None:
+            raise ValueError(
+                f"no supported catalog API found at {source.base_url}: {last_error}"
+            )
+        count = await sync_supported_servers(session, servers, organization_id=organization_id)
+    except Exception as exc:
+        source.last_error = str(exc)
+        await session.flush()
+        raise ValueError(f"catalog sync failed: {exc}") from exc
+
+    now = datetime.now(UTC)
+    source.last_success_at = now
+    source.last_synced_updated_since = now
+    source.last_error = ""
+    await session.flush()
+    await session.refresh(source)
+    return MCPCatalogSourceSyncResponse(
+        source=catalog_source_response(source),
+        syncedCount=count,
     )
 
 
@@ -773,12 +1219,22 @@ async def install_server_version(
         workspace_id,
     )
     config_values = merged_install_config_values(installation, payload.config_values)
+    resolved_config_values, handle_refs = await resolve_install_config_values(
+        session,
+        organization_id,
+        workspace_id,
+        config_values,
+    )
     runtime_install = install_server_runtime(
         server,
-        config_values=config_values,
+        config_values=resolved_config_values,
         install_target=payload.install_target,
         config_name=payload.config_name,
         workspace_id=str(workspace_id),
+    )
+    secret_references = secret_references_from_runtime_secret_config(
+        runtime_install.secret_config,
+        handle_refs,
     )
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
@@ -791,7 +1247,7 @@ async def install_server_version(
             install_type=runtime_install.install_type,
             install_path=runtime_install.install_path,
             runtime_config=runtime_install.runtime_config,
-            secret_config=runtime_install.secret_config,
+            secret_references=secret_references,
             install_error=runtime_install.install_error,
         )
         session.add(installation)
@@ -801,7 +1257,7 @@ async def install_server_version(
         installation.install_type = runtime_install.install_type
         installation.install_path = runtime_install.install_path
         installation.runtime_config = runtime_install.runtime_config
-        installation.secret_config = runtime_install.secret_config
+        installation.secret_references = secret_references
         installation.install_error = runtime_install.install_error
 
     if previous_install_path and previous_install_path != runtime_install.install_path:
@@ -869,12 +1325,25 @@ async def update_installed_servers(
             raise MCPServerNotFoundError("latest server version not found")
         for installation in installations:
             install_target = "remote" if installation.install_type == "remote" else "package"
+            config_values = install_config_values_from_secret_references(
+                installation.secret_references
+            )
+            resolved_config_values, handle_refs = await resolve_install_config_values(
+                session,
+                organization_id,
+                workspace_id,
+                config_values,
+            )
             runtime_install = install_server_runtime(
                 latest,
-                config_values=install_config_values_from_secret_config(installation.secret_config),
+                config_values=resolved_config_values,
                 install_target=install_target,
                 config_name=installation.config_name,
                 workspace_id=str(workspace_id),
+            )
+            secret_references = secret_references_from_runtime_secret_config(
+                runtime_install.secret_config,
+                handle_refs,
             )
             previous_install_path = installation.install_path
             installation.installed_version = latest.version
@@ -882,7 +1351,7 @@ async def update_installed_servers(
             installation.install_type = runtime_install.install_type
             installation.install_path = runtime_install.install_path
             installation.runtime_config = runtime_install.runtime_config
-            installation.secret_config = runtime_install.secret_config
+            installation.secret_references = secret_references
             installation.install_error = runtime_install.install_error
             if previous_install_path and previous_install_path != runtime_install.install_path:
                 remove_installation_artifacts(previous_install_path)

@@ -10,20 +10,19 @@ import type { LLMProviderCredentialReadOauthMetadata } from './lLMProviderCreden
 import type { LLMProviderCredentialReadVisibility } from './lLMProviderCredentialReadVisibility';
 
 export interface LLMProviderCredentialRead {
+  apiKeySecretHandleId?: string | null;
   authMethod: LLMProviderCredentialReadAuthMethod;
   baseUrl: string;
   createdAt: string;
   extraHeaders: LLMProviderCredentialReadExtraHeaders;
-  hasOauthAccessToken: boolean;
-  hasOauthRefreshToken: boolean;
-  hasSecret: boolean;
   id: string;
   isActive: boolean;
-  isDefault: boolean;
   name: string;
+  oauthAccessTokenSecretHandleId?: string | null;
   oauthExpiresAt?: string | null;
   oauthMetadata: LLMProviderCredentialReadOauthMetadata;
   oauthProvider: string;
+  oauthRefreshTokenSecretHandleId?: string | null;
   oauthScopes: string[];
   organizationId: string;
   provider: string;

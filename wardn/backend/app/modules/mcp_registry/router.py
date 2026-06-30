@@ -9,8 +9,10 @@ from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry.exceptions import (
+    DuplicateMCPCatalogSourceError,
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
+    MCPCatalogSourceNotFoundError,
     MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
     MCPServerInstallationUnsupportedError,
@@ -18,6 +20,11 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.schemas import (
+    MCPCatalogSourceCreate,
+    MCPCatalogSourceListResponse,
+    MCPCatalogSourceRead,
+    MCPCatalogSourceSyncResponse,
+    MCPCatalogSourceUpdate,
     MCPRegistryServerListResponse,
     MCPRegistryServerResponse,
     MCPServerBulkUpdateRequest,
@@ -30,17 +37,23 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallRequest,
 )
 from app.modules.mcp_registry.service import (
+    create_catalog_source,
     create_server_version,
+    delete_catalog_source,
     delete_server_version,
+    get_catalog_source,
     get_version,
     install_server_version,
+    list_catalog_sources,
     list_installation_tools,
     list_installations,
     list_servers,
     list_versions,
     set_default_server_version,
+    sync_catalog_source,
     uninstall_installation,
     uninstall_server,
+    update_catalog_source,
     update_installed_servers,
     update_server_version,
     validate_installation_tool,
@@ -57,6 +70,7 @@ from app.modules.organizations.service import (
     require_workspace_admin,
     require_workspace_member,
 )
+from app.modules.secrets.exceptions import SecretsError
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
 
@@ -64,6 +78,10 @@ router = APIRouter(prefix="/mcp/registry", tags=["mcp-registry"])
 organization_router = APIRouter(
     prefix="/organizations/{organization_id}/mcp/registry",
     tags=["organization-mcp-registry"],
+)
+organization_catalog_router = APIRouter(
+    prefix="/organizations/{organization_id}/mcp/catalog",
+    tags=["organization-mcp-catalog"],
 )
 workspace_router = APIRouter(
     prefix="/organizations/{organization_id}/workspaces/{workspace_id}/mcp/registry",
@@ -123,6 +141,145 @@ async def require_organization_admin_or_404(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except OrganizationAccessDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@organization_catalog_router.get(
+    "/sources",
+    response_model=MCPCatalogSourceListResponse,
+    operation_id="organization_mcp_catalog_list_sources",
+)
+async def list_organization_mcp_catalog_sources(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPCatalogSourceListResponse:
+    await require_organization_member_or_404(session, current_user, organization_id)
+    return await list_catalog_sources(session, organization_id)
+
+
+@organization_catalog_router.post(
+    "/sources",
+    response_model=MCPCatalogSourceRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="organization_mcp_catalog_create_source",
+    responses={status.HTTP_409_CONFLICT: {"model": ErrorResponse}},
+)
+async def create_organization_mcp_catalog_source(
+    organization_id: UUID,
+    payload: MCPCatalogSourceCreate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPCatalogSourceRead:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    try:
+        response = await create_catalog_source(session, current_user, organization_id, payload)
+    except DuplicateMCPCatalogSourceError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (SecretsError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await session.commit()
+    return response
+
+
+@organization_catalog_router.get(
+    "/sources/{source_id}",
+    response_model=MCPCatalogSourceRead,
+    operation_id="organization_mcp_catalog_get_source",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_organization_mcp_catalog_source(
+    organization_id: UUID,
+    source_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPCatalogSourceRead:
+    await require_organization_member_or_404(session, current_user, organization_id)
+    try:
+        return await get_catalog_source(session, organization_id, source_id)
+    except MCPCatalogSourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@organization_catalog_router.patch(
+    "/sources/{source_id}",
+    response_model=MCPCatalogSourceRead,
+    operation_id="organization_mcp_catalog_update_source",
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+    },
+)
+async def update_organization_mcp_catalog_source(
+    organization_id: UUID,
+    source_id: UUID,
+    payload: MCPCatalogSourceUpdate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPCatalogSourceRead:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    try:
+        response = await update_catalog_source(
+            session,
+            current_user,
+            organization_id,
+            source_id,
+            payload,
+        )
+    except MCPCatalogSourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DuplicateMCPCatalogSourceError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (SecretsError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await session.commit()
+    return response
+
+
+@organization_catalog_router.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="organization_mcp_catalog_delete_source",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def delete_organization_mcp_catalog_source(
+    organization_id: UUID,
+    source_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    try:
+        await delete_catalog_source(session, organization_id, source_id)
+    except MCPCatalogSourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+
+
+@organization_catalog_router.post(
+    "/sources/{source_id}/sync",
+    response_model=MCPCatalogSourceSyncResponse,
+    operation_id="organization_mcp_catalog_sync_source",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def sync_organization_mcp_catalog_source(
+    organization_id: UUID,
+    source_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPCatalogSourceSyncResponse:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    try:
+        response = await sync_catalog_source(session, organization_id, source_id)
+    except MCPCatalogSourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await session.commit()
+    return response
 
 
 @organization_router.get(

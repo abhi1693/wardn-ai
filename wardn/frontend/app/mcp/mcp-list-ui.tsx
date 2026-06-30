@@ -6,13 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-export function mcpServerDetailUrl(organizationId: string, serverName: string, version: string) {
-  return `/org/${encodeURIComponent(organizationId)}/registry/${serverName
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}?version=${encodeURIComponent(version)}`;
-}
-
 export async function responseErrorMessage(response: Response, fallback: string) {
   try {
     const payload = (await response.json()) as { detail?: string };

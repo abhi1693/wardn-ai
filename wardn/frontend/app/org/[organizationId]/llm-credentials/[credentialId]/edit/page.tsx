@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
+import { getOrganization, getSecretStores, getWorkspaces } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -19,10 +19,18 @@ export default async function EditLlmCredentialPage({
   params,
 }: EditLlmCredentialPageProps) {
   const { organizationId, credentialId } = await params;
-  const [workspaceContext, organization, workspaces, credentials, currentUser] = await Promise.all([
+  const [
+    workspaceContext,
+    organization,
+    workspaces,
+    secretStores,
+    credentials,
+    currentUser,
+  ] = await Promise.all([
     getWorkspaceContext({ organizationId }),
     getOrganization(organizationId),
     getWorkspaces(organizationId),
+    getSecretStores(organizationId),
     getLlmCredentials(organizationId),
     getCurrentUser(),
   ]);
@@ -51,6 +59,7 @@ export default async function EditLlmCredentialPage({
         credential={credential}
         currentUser={currentUser}
         organization={organization}
+        secretStores={secretStores}
         workspaces={workspaces}
       />
     </AppShell>

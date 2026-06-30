@@ -10,6 +10,7 @@ import {
   Replace,
   ServerCog,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -35,9 +36,9 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       icon: Boxes,
     },
     {
-      label: "Registry",
-      href: organizationId ? `/org/${organizationId}/registry` : "/org",
-      activeKey: "registry",
+      label: "Catalog",
+      href: organizationId ? `/org/${organizationId}/catalog` : "/org",
+      activeKey: "catalog",
       icon: BookOpen,
     },
     {
@@ -51,6 +52,12 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/tokens` : "/org",
       activeKey: "agent-tokens",
       icon: KeyRound,
+    },
+    {
+      label: "Secret Backends",
+      href: organizationId ? `/org/${organizationId}/secret-backends` : "/org",
+      activeKey: "secret-backends",
+      icon: ShieldCheck,
     },
     ...(organizationId
       ? [
@@ -102,6 +109,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: Bot,
     },
     {
+      label: "Secret Backends",
+      href: `${workspaceBasePath}/secret-backends`,
+      activeKey: "workspace-secret-backends",
+      icon: ShieldCheck,
+    },
+    {
       label: "Settings",
       href: `/organizations/${encodeURIComponent(
         organizationId
@@ -121,10 +134,12 @@ type AppShellProps = {
     | "organization-settings"
     | "workspace-settings"
     | "workspace-dashboard"
-    | "registry"
+    | "catalog"
     | "llm-credentials"
+    | "secret-backends"
     | "agents"
     | "workspace-agents"
+    | "workspace-secret-backends"
     | "agent-tokens"
     | "runtime"
     | "install";
@@ -148,6 +163,7 @@ export function AppShell({
     active === "install" ||
     active === "runtime" ||
     active === "workspace-agents" ||
+    active === "workspace-secret-backends" ||
     active === "workspace-settings";
   const navigationItems = isWorkspaceScope
     ? workspaceNavItems(workspaceContext)
@@ -176,8 +192,8 @@ export function AppShell({
 
   return (
     <main className="min-h-screen bg-[var(--surface)] text-foreground">
-      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[260px] flex-col border-r border-[var(--on-primary-container)]/20 bg-[var(--primary-container)] px-4 py-6 text-[var(--inverse-on-surface)] max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0">
-        <div className="mb-10 px-2">
+      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[260px] flex-col border-r border-[var(--on-primary-container)]/20 bg-[var(--primary-container)] px-4 py-6 text-[var(--inverse-on-surface)] max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
+        <div className="mb-10 px-2 max-lg:mb-3">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--primary-fixed-dim)] text-[var(--primary-container)]">
               <Layers3 className="size-5" />
@@ -190,13 +206,16 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="flex-1 space-y-2" aria-label="Primary">
+        <nav
+          className="flex-1 space-y-2 max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
+          aria-label="Primary"
+        >
           {primaryNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <Link
                 className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white",
+                  "flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white max-lg:min-w-fit max-lg:px-3",
                   item.active &&
                     "bg-[#d5e3fd] font-semibold text-[#131b2e] hover:bg-[#d5e3fd] hover:text-[#131b2e]"
                 )}
@@ -210,7 +229,7 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="mt-auto border-t border-[var(--on-primary-container)]/10 pt-6 max-lg:mt-6">
+        <div className="mt-auto border-t border-[var(--on-primary-container)]/10 pt-6 max-lg:hidden">
           <Link
             className="flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white"
             href={contextSwitchHref}
@@ -240,10 +259,12 @@ export function AppShell({
             <div className="flex min-w-0 items-center gap-4">
               {showBreadcrumbParent ? (
                 <>
-                  <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)]">
+                  <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)] max-md:hidden">
                     {breadcrumbLabel}
                   </span>
-                  <span className="text-sm leading-5 text-[var(--on-surface-variant)]">/</span>
+                  <span className="text-sm leading-5 text-[var(--on-surface-variant)] max-md:hidden">
+                    /
+                  </span>
                 </>
               ) : null}
               <h1 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">

@@ -3,6 +3,7 @@ import hashlib
 import json
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -23,6 +24,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
     LLMProviderCredentialUpdate,
+    LLMProviderCredentialValidationResponse,
     LLMProviderModelListResponse,
     LLMProviderModelRead,
 )
@@ -31,6 +33,9 @@ from app.modules.organizations.service import (
     require_organization_member,
     require_workspace_admin,
 )
+from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets.schemas import SecretHandleCreate
+from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
 
 SUPPORTED_OAUTH_PROVIDERS = {"chatgpt"}
@@ -55,12 +60,56 @@ OPENAI_CHATGPT_MODEL_IDS = (
 )
 
 
+@dataclass(frozen=True)
+class ResolvedLLMCredentialSecrets:
+    api_key: str = ""
+    oauth_access_token: str = ""
+    oauth_refresh_token: str = ""
+
+
 def normalize_provider(value: str) -> str:
     return value.strip().casefold()
 
 
 def normalize_name(value: str) -> str:
     return " ".join(value.strip().split())
+
+
+def safe_secret_path_component(value: str) -> str:
+    component = "".join(
+        character.lower() if character.isalnum() else "-"
+        for character in value.strip()
+    )
+    return "-".join(part for part in component.split("-") if part) or "credential"
+
+
+def llm_secret_path(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    user_id: uuid.UUID | None,
+    provider: str,
+    name: str,
+) -> str:
+    if workspace_id is not None:
+        scope = f"workspaces/{workspace_id}"
+    elif user_id is not None:
+        scope = f"users/{user_id}"
+    else:
+        scope = "organization"
+    return (
+        f"wardn/orgs/{organization_id}/{scope}/llm/{safe_secret_path_component(provider)}/"
+        f"{safe_secret_path_component(name)}-{uuid.uuid4()}"
+    )
+
+
+def secret_handle_display_name(name: str, suffix: str) -> str:
+    base = normalize_name(name) or "LLM credential"
+    value = f"{base} {suffix}"
+    if len(value) <= 100:
+        return value
+    suffix_with_space = f" {suffix}"
+    return f"{base[: 100 - len(suffix_with_space)].rstrip()}{suffix_with_space}"
 
 
 def normalize_oauth_provider(value: str | None) -> str:
@@ -361,12 +410,72 @@ async def validate_provider_credential(
     )
 
 
+async def resolve_llm_secret(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    handle_id: uuid.UUID | None,
+    *,
+    workspace_id: uuid.UUID | None,
+    label: str,
+) -> str:
+    if handle_id is None:
+        raise InvalidLLMProviderCredentialAuthError(f"{label} secret handle is required")
+    try:
+        resolved = await resolve_secret(
+            session,
+            organization_id,
+            handle_id,
+            workspace_id=workspace_id,
+        )
+    except SecretsError as exc:
+        raise InvalidLLMProviderCredentialAuthError(str(exc)) from exc
+    if not resolved.value:
+        raise InvalidLLMProviderCredentialAuthError(f"{label} secret handle resolved empty")
+    return resolved.value
+
+
+async def resolve_credential_secrets(
+    session: AsyncSession,
+    credential: LLMProviderCredential,
+) -> ResolvedLLMCredentialSecrets:
+    if credential.auth_method == "api_key":
+        return ResolvedLLMCredentialSecrets(
+            api_key=await resolve_llm_secret(
+                session,
+                credential.organization_id,
+                credential.api_key_secret_handle_id,
+                workspace_id=credential.workspace_id,
+                label="apiKey",
+            )
+        )
+    if credential.auth_method == "oauth":
+        return ResolvedLLMCredentialSecrets(
+            oauth_access_token=await resolve_llm_secret(
+                session,
+                credential.organization_id,
+                credential.oauth_access_token_secret_handle_id,
+                workspace_id=credential.workspace_id,
+                label="oauthAccessToken",
+            ),
+            oauth_refresh_token=await resolve_llm_secret(
+                session,
+                credential.organization_id,
+                credential.oauth_refresh_token_secret_handle_id,
+                workspace_id=credential.workspace_id,
+                label="oauthRefreshToken",
+            ),
+        )
+    raise InvalidLLMProviderCredentialAuthError("invalid credential auth method")
+
+
 async def list_models_for_credential(
+    session: AsyncSession,
     credential: LLMProviderCredential,
 ) -> LLMProviderModelListResponse:
+    secrets = await resolve_credential_secrets(session, credential)
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
         return LLMProviderModelListResponse(
-            models=await fetch_openai_models(credential.secret_value)
+            models=await fetch_openai_models(secrets.api_key)
         )
     if (
         credential.provider == OPENAI_CHATGPT_PROVIDER
@@ -374,8 +483,8 @@ async def list_models_for_credential(
         and credential.oauth_provider == "chatgpt"
     ):
         validate_chatgpt_oauth_credential(
-            oauth_access_token=credential.oauth_access_token,
-            oauth_refresh_token=credential.oauth_refresh_token,
+            oauth_access_token=secrets.oauth_access_token,
+            oauth_refresh_token=secrets.oauth_refresh_token,
             oauth_expires_at=credential.oauth_expires_at,
         )
         return LLMProviderModelListResponse(models=openai_chatgpt_models())
@@ -400,17 +509,53 @@ async def list_provider_credential_models(
         raise LLMProviderCredentialNotFoundError("provider credential not found")
     if not user_can_see_credential(user, credential):
         raise LLMProviderCredentialNotFoundError("provider credential not found")
-    return await list_models_for_credential(credential)
+    return await list_models_for_credential(session, credential)
+
+
+async def validate_provider_credential_by_id(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    credential_id: uuid.UUID,
+) -> LLMProviderCredentialValidationResponse:
+    await require_organization_member(session, user, organization_id)
+    credential = await repository.get_credential(
+        session,
+        organization_id=organization_id,
+        credential_id=credential_id,
+    )
+    if credential is None or not credential.is_active:
+        raise LLMProviderCredentialNotFoundError("provider credential not found")
+    if not user_can_see_credential(user, credential):
+        raise LLMProviderCredentialNotFoundError("provider credential not found")
+    try:
+        secrets = await resolve_credential_secrets(session, credential)
+        await validate_provider_credential(
+            provider=credential.provider,
+            auth_method=credential.auth_method,
+            secret_value=secrets.api_key,
+            oauth_provider=credential.oauth_provider,
+            oauth_access_token=secrets.oauth_access_token,
+            oauth_refresh_token=secrets.oauth_refresh_token,
+            oauth_expires_at=credential.oauth_expires_at,
+        )
+    except InvalidLLMProviderCredentialAuthError as exc:
+        return LLMProviderCredentialValidationResponse(ok=False, message=str(exc))
+    return LLMProviderCredentialValidationResponse(
+        ok=True,
+        message="Credential validation passed.",
+    )
 
 
 async def credential_supports_model(
+    session: AsyncSession,
     credential: LLMProviderCredential,
     model_name: str,
 ) -> bool:
     normalized_model = model_name.strip()
     if not normalized_model:
         return False
-    models = await list_models_for_credential(credential)
+    models = await list_models_for_credential(session, credential)
     return any(model.id == normalized_model for model in models.models)
 
 
@@ -424,17 +569,16 @@ def credential_response(credential: LLMProviderCredential) -> LLMProviderCredent
         provider=credential.provider,
         visibility=credential.visibility,
         authMethod=credential.auth_method,
+        apiKeySecretHandleId=credential.api_key_secret_handle_id,
         baseUrl=credential.base_url,
         extraHeaders=credential.extra_headers or {},
         oauthProvider=credential.oauth_provider,
+        oauthAccessTokenSecretHandleId=credential.oauth_access_token_secret_handle_id,
+        oauthRefreshTokenSecretHandleId=credential.oauth_refresh_token_secret_handle_id,
         oauthExpiresAt=credential.oauth_expires_at,
         oauthScopes=credential.oauth_scopes or [],
         oauthMetadata=credential.oauth_metadata or {},
-        isDefault=credential.is_default,
         isActive=credential.is_active,
-        hasSecret=bool(credential.secret_value),
-        hasOauthAccessToken=bool(credential.oauth_access_token),
-        hasOauthRefreshToken=bool(credential.oauth_refresh_token),
         createdAt=credential.created_at,
         updatedAt=credential.updated_at,
     )
@@ -513,65 +657,112 @@ async def create_provider_credential(
     ):
         raise DuplicateLLMProviderCredentialError("provider credential name already exists")
     auth_method = payload.auth_method
-    secret_value = payload.secret.get_secret_value() if payload.secret is not None else ""
     oauth_provider = normalize_oauth_provider(payload.oauth_provider)
-    oauth_access_token = (
-        payload.oauth_access_token.get_secret_value()
-        if payload.oauth_access_token is not None
-        else ""
-    )
-    oauth_refresh_token = (
-        payload.oauth_refresh_token.get_secret_value()
-        if payload.oauth_refresh_token is not None
-        else ""
-    )
     provider = normalize_credential_provider(
         payload.provider,
         auth_method=auth_method,
         oauth_provider=oauth_provider,
     )
-    await validate_provider_credential(
-        provider=provider,
-        auth_method=auth_method,
-        secret_value=secret_value,
-        oauth_provider=oauth_provider,
-        oauth_access_token=oauth_access_token,
-        oauth_refresh_token=oauth_refresh_token,
-        oauth_expires_at=payload.oauth_expires_at,
-    )
+    api_key_secret_handle_id = payload.api_key_secret_handle_id
+    user_id = user.id if payload.visibility == "user" else None
+    api_key_value = payload.api_key.get_secret_value().strip() if payload.api_key else ""
+    if auth_method == "api_key" and payload.api_key is not None and not api_key_value:
+        raise InvalidLLMProviderCredentialAuthError("OpenAI API key is required")
+    if auth_method == "api_key" and api_key_value:
+        await validate_provider_credential(
+            provider=provider,
+            auth_method=auth_method,
+            secret_value=api_key_value,
+            oauth_provider=oauth_provider,
+            oauth_access_token="",
+            oauth_refresh_token="",
+            oauth_expires_at=payload.oauth_expires_at,
+        )
+        external_ref = llm_secret_path(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            provider=provider,
+            name=name,
+        )
+        handle_workspace_id = workspace_id if payload.visibility == "workspace" else None
+        await write_secret_values(
+            session,
+            user,
+            organization_id,
+            payload.api_key_secret_store_id,
+            workspace_id=handle_workspace_id,
+            external_ref=external_ref,
+            values={"api_key": api_key_value},
+            purpose="llm_credential",
+        )
+        api_key_handle = await create_secret_handle(
+            session,
+            user,
+            organization_id,
+            SecretHandleCreate(
+                storeId=payload.api_key_secret_store_id,
+                workspaceId=handle_workspace_id,
+                purpose="llm_credential",
+                displayName=secret_handle_display_name(name, "API key"),
+                externalRef=external_ref,
+                keyName="api_key",
+                metadata={"provider": provider, "credentialName": name},
+            ),
+        )
+        api_key_secret_handle_id = api_key_handle.id
+    else:
+        probe_credential = LLMProviderCredential(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            name=name,
+            provider=provider,
+            visibility=payload.visibility,
+            auth_method=auth_method,
+            api_key_secret_handle_id=api_key_secret_handle_id,
+            oauth_provider=oauth_provider,
+            oauth_access_token_secret_handle_id=payload.oauth_access_token_secret_handle_id,
+            oauth_refresh_token_secret_handle_id=payload.oauth_refresh_token_secret_handle_id,
+            oauth_expires_at=payload.oauth_expires_at,
+            oauth_scopes=payload.oauth_scopes,
+            oauth_metadata=payload.oauth_metadata,
+            base_url=payload.base_url.strip(),
+            extra_headers={key.strip(): value for key, value in payload.extra_headers.items()},
+            is_active=True,
+        )
+        resolved_secrets = await resolve_credential_secrets(session, probe_credential)
+        await validate_provider_credential(
+            provider=provider,
+            auth_method=auth_method,
+            secret_value=resolved_secrets.api_key,
+            oauth_provider=oauth_provider,
+            oauth_access_token=resolved_secrets.oauth_access_token,
+            oauth_refresh_token=resolved_secrets.oauth_refresh_token,
+            oauth_expires_at=payload.oauth_expires_at,
+        )
 
     credential = LLMProviderCredential(
         organization_id=organization_id,
         workspace_id=workspace_id,
-        user_id=user.id if payload.visibility == "user" else None,
+        user_id=user_id,
         name=name,
         provider=provider,
         visibility=payload.visibility,
         auth_method=auth_method,
-        secret_value=secret_value,
+        api_key_secret_handle_id=api_key_secret_handle_id,
         oauth_provider=oauth_provider,
-        oauth_access_token=oauth_access_token,
-        oauth_refresh_token=oauth_refresh_token,
+        oauth_access_token_secret_handle_id=payload.oauth_access_token_secret_handle_id,
+        oauth_refresh_token_secret_handle_id=payload.oauth_refresh_token_secret_handle_id,
         oauth_expires_at=payload.oauth_expires_at,
         oauth_scopes=payload.oauth_scopes,
         oauth_metadata=payload.oauth_metadata,
         base_url=payload.base_url.strip(),
         extra_headers={key.strip(): value for key, value in payload.extra_headers.items()},
-        is_default=payload.is_default,
         is_active=True,
     )
     session.add(credential)
     await session.flush()
-    if credential.is_default:
-        await repository.clear_default_credentials(
-            session,
-            organization_id=organization_id,
-            provider=credential.provider,
-            visibility=credential.visibility,
-            workspace_id=credential.workspace_id,
-            user_id=credential.user_id,
-            exclude_id=credential.id,
-        )
     await session.refresh(credential)
     return credential_response(credential)
 
@@ -624,14 +815,18 @@ async def update_provider_credential(
         credential.user_id = user.id if visibility == "user" else None
     if payload.auth_method is not None:
         credential.auth_method = payload.auth_method
-    if payload.secret is not None:
-        credential.secret_value = payload.secret.get_secret_value()
+    if "api_key_secret_handle_id" in payload.model_fields_set:
+        credential.api_key_secret_handle_id = payload.api_key_secret_handle_id
     if payload.oauth_provider is not None:
         credential.oauth_provider = normalize_oauth_provider(payload.oauth_provider)
-    if payload.oauth_access_token is not None:
-        credential.oauth_access_token = payload.oauth_access_token.get_secret_value()
-    if payload.oauth_refresh_token is not None:
-        credential.oauth_refresh_token = payload.oauth_refresh_token.get_secret_value()
+    if "oauth_access_token_secret_handle_id" in payload.model_fields_set:
+        credential.oauth_access_token_secret_handle_id = (
+            payload.oauth_access_token_secret_handle_id
+        )
+    if "oauth_refresh_token_secret_handle_id" in payload.model_fields_set:
+        credential.oauth_refresh_token_secret_handle_id = (
+            payload.oauth_refresh_token_secret_handle_id
+        )
     if "oauth_expires_at" in payload.model_fields_set:
         credential.oauth_expires_at = payload.oauth_expires_at
     if payload.oauth_scopes is not None:
@@ -641,26 +836,24 @@ async def update_provider_credential(
     if next_auth_method == "api_key":
         credential.auth_method = "api_key"
         credential.oauth_provider = ""
-        credential.oauth_access_token = ""
-        credential.oauth_refresh_token = ""
+        credential.oauth_access_token_secret_handle_id = None
+        credential.oauth_refresh_token_secret_handle_id = None
         credential.oauth_expires_at = None
         credential.oauth_scopes = []
         credential.oauth_metadata = {}
     else:
         credential.auth_method = "oauth"
-        if payload.secret is not None:
+        if payload.api_key_secret_handle_id is not None:
             raise InvalidLLMProviderCredentialAuthError(
-                "secret is only valid for api_key credentials"
+                "apiKeySecretHandleId is only valid for api_key credentials"
             )
-        credential.secret_value = ""
+        credential.api_key_secret_handle_id = None
     if payload.base_url is not None:
         credential.base_url = payload.base_url.strip()
     if payload.extra_headers is not None:
         credential.extra_headers = {
             key.strip(): value for key, value in payload.extra_headers.items()
         }
-    if payload.is_default is not None:
-        credential.is_default = payload.is_default
     if payload.is_active is not None:
         credential.is_active = payload.is_active
 
@@ -670,27 +863,18 @@ async def update_provider_credential(
         oauth_provider=credential.oauth_provider,
     )
 
+    resolved_secrets = await resolve_credential_secrets(session, credential)
     await validate_provider_credential(
         provider=credential.provider,
         auth_method=credential.auth_method,
-        secret_value=credential.secret_value,
+        secret_value=resolved_secrets.api_key,
         oauth_provider=credential.oauth_provider,
-        oauth_access_token=credential.oauth_access_token,
-        oauth_refresh_token=credential.oauth_refresh_token,
+        oauth_access_token=resolved_secrets.oauth_access_token,
+        oauth_refresh_token=resolved_secrets.oauth_refresh_token,
         oauth_expires_at=credential.oauth_expires_at,
     )
 
     await session.flush()
-    if credential.is_default:
-        await repository.clear_default_credentials(
-            session,
-            organization_id=organization_id,
-            provider=credential.provider,
-            visibility=credential.visibility,
-            workspace_id=credential.workspace_id,
-            user_id=credential.user_id,
-            exclude_id=credential.id,
-        )
     await session.refresh(credential)
     return credential_response(credential)
 

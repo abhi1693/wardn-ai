@@ -28,6 +28,13 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/llm/provider-credentials"
             "/{credential_id}/models"
         ),
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/{credential_id}/validate"
+        ),
+        "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
+        "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
+        "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
         (
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
@@ -41,6 +48,12 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
             "/{server_name}/versions/{version}/default"
         ),
+        "/api/v1/organizations/{organization_id}/secrets/handles",
+        "/api/v1/organizations/{organization_id}/secrets/handles/{handle_id}",
+        "/api/v1/organizations/{organization_id}/secrets/handles/{handle_id}/validate",
+        "/api/v1/organizations/{organization_id}/secrets/stores",
+        "/api/v1/organizations/{organization_id}/secrets/stores/{store_id}",
+        "/api/v1/organizations/{organization_id}/secrets/stores/{store_id}/validate",
         "/api/v1/organizations/{organization_id}/workspaces",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",

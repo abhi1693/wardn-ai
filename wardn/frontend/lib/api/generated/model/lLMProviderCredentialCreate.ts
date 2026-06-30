@@ -10,28 +10,29 @@ import type { LLMProviderCredentialCreateOauthMetadata } from './lLMProviderCred
 import type { LLMProviderCredentialCreateVisibility } from './lLMProviderCredentialCreateVisibility';
 
 export interface LLMProviderCredentialCreate {
+  apiKey?: string | null;
+  apiKeySecretHandleId?: string | null;
+  apiKeySecretStoreId?: string | null;
   authMethod?: LLMProviderCredentialCreateAuthMethod;
   /** @maxLength 2048 */
   baseUrl?: string;
   extraHeaders?: LLMProviderCredentialCreateExtraHeaders;
-  isDefault?: boolean;
   /**
      * @minLength 1
      * @maxLength 100
      */
   name: string;
-  oauthAccessToken?: string | null;
+  oauthAccessTokenSecretHandleId?: string | null;
   oauthExpiresAt?: string | null;
   oauthMetadata?: LLMProviderCredentialCreateOauthMetadata;
   oauthProvider?: 'chatgpt' | null;
-  oauthRefreshToken?: string | null;
+  oauthRefreshTokenSecretHandleId?: string | null;
   oauthScopes?: string[];
   /**
      * @minLength 1
      * @maxLength 50
      */
   provider: string;
-  secret?: string | null;
   visibility?: LLMProviderCredentialCreateVisibility;
   workspaceId?: string | null;
 }

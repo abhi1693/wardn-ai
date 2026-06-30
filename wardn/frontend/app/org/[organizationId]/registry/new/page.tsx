@@ -1,33 +1,12 @@
-import { AppShell } from "@/app/components/app-shell";
-import {
-  getWorkspaceContext,
-  workspaceInstallPath,
-} from "@/lib/workspace-context";
+import { redirect } from "next/navigation";
 
-import { ServerForm } from "@/app/registry/server-form";
-
-type NewOrganizationRegistryServerPageProps = {
+type NewRegistryServerRedirectPageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
-export default async function NewOrganizationRegistryServerPage({
+export default async function NewRegistryServerRedirectPage({
   params,
-}: NewOrganizationRegistryServerPageProps) {
+}: NewRegistryServerRedirectPageProps) {
   const { organizationId } = await params;
-  const workspaceContext = await getWorkspaceContext({ organizationId });
-
-  return (
-    <AppShell
-      active="registry"
-      eyebrow="MCP Registry"
-      title="Add server"
-      workspaceContext={workspaceContext}
-    >
-      <ServerForm
-        createSuccessPath={`/org/${encodeURIComponent(organizationId)}/registry`}
-        installBasePath={workspaceInstallPath(workspaceContext)}
-        mode="create"
-      />
-    </AppShell>
-  );
+  redirect(`/org/${encodeURIComponent(organizationId)}/catalog/new`);
 }

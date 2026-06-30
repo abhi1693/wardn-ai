@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from pydantic import SecretStr
 
 from app.modules.llm_providers import service
 from app.modules.llm_providers.exceptions import (
@@ -47,6 +47,14 @@ class FakeSession:
         self.deleted.append(instance)
 
 
+def patch_resolved_secrets(monkeypatch, values: dict) -> None:
+    async def resolve_secret(*args, **kwargs):
+        handle_id = args[2]
+        return SimpleNamespace(value=values[handle_id])
+
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+
+
 @pytest.mark.asyncio
 async def test_org_admin_can_create_provider_credential(monkeypatch) -> None:
     organization_id = uuid4()
@@ -73,10 +81,11 @@ async def test_org_admin_can_create_provider_credential(monkeypatch) -> None:
     async def no_duplicate(*args, **kwargs):
         return None
 
-    async def clear_defaults(*args, **kwargs):
-        return None
-
     validated_secrets: list[str] = []
+    secret_handle_id = uuid4()
+    secret_store_id = uuid4()
+    secret_write_calls: list[dict] = []
+    secret_handle_calls: list[object] = []
 
     async def validate_openai_api_key(secret_value: str):
         validated_secrets.append(secret_value)
@@ -92,33 +101,49 @@ async def test_org_admin_can_create_provider_credential(monkeypatch) -> None:
         get_organization_membership,
     )
     monkeypatch.setattr(service.repository, "get_credential_by_name", no_duplicate)
-    monkeypatch.setattr(service.repository, "clear_default_credentials", clear_defaults)
     monkeypatch.setattr(service, "validate_openai_api_key", validate_openai_api_key)
+
+    async def write_secret_values(*args, **kwargs):
+        secret_write_calls.append({"args": args, "kwargs": kwargs})
+
+    async def create_secret_handle(*args, **kwargs):
+        payload = args[3]
+        secret_handle_calls.append(payload)
+        return SimpleNamespace(id=secret_handle_id)
+
+    monkeypatch.setattr(service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
 
     session = FakeSession()
     response = await service.create_provider_credential(
         session,
         user,
         organization_id,
-        LLMProviderCredentialCreate(
-            name=" Primary OpenAI ",
-            provider=" OpenAI ",
-            secret=SecretStr("sk-test"),
-            isDefault=True,
-        ),
+            LLMProviderCredentialCreate(
+                name=" Primary OpenAI ",
+                provider=" OpenAI ",
+                apiKeySecretStoreId=secret_store_id,
+                apiKey="sk-test",
+            ),
     )
 
     credential = session.added[0]
     assert isinstance(credential, LLMProviderCredential)
     assert credential.name == "Primary OpenAI"
     assert credential.provider == "openai"
-    assert credential.secret_value == "sk-test"
+    assert credential.api_key_secret_handle_id == secret_handle_id
     assert credential.auth_method == "api_key"
     assert credential.visibility == "organization"
-    assert response.has_secret is True
+    assert response.api_key_secret_handle_id == secret_handle_id
     assert response.auth_method == "api_key"
-    assert response.is_default is True
     assert validated_secrets == ["sk-test"]
+    assert secret_write_calls[0]["args"][2] == organization_id
+    assert secret_write_calls[0]["args"][3] == secret_store_id
+    assert secret_write_calls[0]["kwargs"]["values"] == {"api_key": "sk-test"}
+    assert secret_write_calls[0]["kwargs"]["purpose"] == "llm_credential"
+    assert secret_handle_calls[0].store_id == secret_store_id
+    assert secret_handle_calls[0].key_name == "api_key"
+    assert secret_handle_calls[0].purpose == "llm_credential"
 
 
 @pytest.mark.asyncio
@@ -138,6 +163,8 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
         is_active=True,
     )
     expires_at = datetime(2026, 7, 1, tzinfo=UTC)
+    access_handle_id = uuid4()
+    refresh_handle_id = uuid4()
 
     async def get_organization_by_id(*args, **kwargs):
         return organization
@@ -159,6 +186,13 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
         get_organization_membership,
     )
     monkeypatch.setattr(service.repository, "get_credential_by_name", no_duplicate)
+    patch_resolved_secrets(
+        monkeypatch,
+        {
+            access_handle_id: "access-token",
+            refresh_handle_id: "refresh-token",
+        },
+    )
 
     session = FakeSession()
     response = await service.create_provider_credential(
@@ -168,11 +202,11 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
         LLMProviderCredentialCreate(
             name="ChatGPT OAuth",
             provider="openai_chatgpt",
-            authMethod="oauth",
-            oauthProvider="chatgpt",
-            oauthAccessToken=SecretStr("access-token"),
-            oauthRefreshToken=SecretStr("refresh-token"),
-            oauthExpiresAt=expires_at,
+                authMethod="oauth",
+                oauthProvider="chatgpt",
+                oauthAccessTokenSecretHandleId=access_handle_id,
+                oauthRefreshTokenSecretHandleId=refresh_handle_id,
+                oauthExpiresAt=expires_at,
             oauthScopes=["openid", "profile"],
             oauthMetadata={"tenant": "default"},
         ),
@@ -182,18 +216,18 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
     assert isinstance(credential, LLMProviderCredential)
     assert credential.provider == "openai_chatgpt"
     assert credential.auth_method == "oauth"
-    assert credential.secret_value == ""
+    assert credential.api_key_secret_handle_id is None
     assert credential.oauth_provider == "chatgpt"
-    assert credential.oauth_access_token == "access-token"
-    assert credential.oauth_refresh_token == "refresh-token"
+    assert credential.oauth_access_token_secret_handle_id == access_handle_id
+    assert credential.oauth_refresh_token_secret_handle_id == refresh_handle_id
     assert response.auth_method == "oauth"
     assert response.oauth_provider == "chatgpt"
     assert response.oauth_expires_at == expires_at
     assert response.oauth_scopes == ["openid", "profile"]
     assert response.oauth_metadata == {"tenant": "default"}
-    assert response.has_secret is False
-    assert response.has_oauth_access_token is True
-    assert response.has_oauth_refresh_token is True
+    assert response.api_key_secret_handle_id is None
+    assert response.oauth_access_token_secret_handle_id == access_handle_id
+    assert response.oauth_refresh_token_secret_handle_id == refresh_handle_id
 
 
 @pytest.mark.asyncio
@@ -224,6 +258,7 @@ async def test_create_provider_credential_rejects_invalid_openai_api_key(monkeyp
 
     async def reject_openai_api_key(*args, **kwargs):
         raise InvalidLLMProviderCredentialAuthError("OpenAI API key was rejected")
+    secret_handle_id = uuid4()
 
     monkeypatch.setattr(
         service.require_organization_admin.__globals__["repository"],
@@ -237,6 +272,7 @@ async def test_create_provider_credential_rejects_invalid_openai_api_key(monkeyp
     )
     monkeypatch.setattr(service.repository, "get_credential_by_name", no_duplicate)
     monkeypatch.setattr(service, "validate_openai_api_key", reject_openai_api_key)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-invalid"})
 
     session = FakeSession()
     with pytest.raises(InvalidLLMProviderCredentialAuthError):
@@ -244,11 +280,11 @@ async def test_create_provider_credential_rejects_invalid_openai_api_key(monkeyp
             session,
             user,
             organization_id,
-            LLMProviderCredentialCreate(
-                name="Primary OpenAI",
-                provider="openai",
-                secret=SecretStr("sk-invalid"),
-            ),
+                LLMProviderCredentialCreate(
+                    name="Primary OpenAI",
+                    provider="openai",
+                    apiKeySecretHandleId=secret_handle_id,
+                ),
         )
 
     assert session.added == []
@@ -260,6 +296,7 @@ async def test_update_provider_credential_validates_existing_openai_api_key(monk
     credential_id = uuid4()
     now = datetime(2026, 6, 23, tzinfo=UTC)
     user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
+    secret_handle_id = uuid4()
     existing = LLMProviderCredential(
         id=credential_id,
         organization_id=organization_id,
@@ -267,10 +304,9 @@ async def test_update_provider_credential_validates_existing_openai_api_key(monk
         provider="openai",
         visibility="organization",
         auth_method="api_key",
-        secret_value="sk-existing",
+        api_key_secret_handle_id=secret_handle_id,
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
         created_at=now,
         updated_at=now,
@@ -300,6 +336,7 @@ async def test_update_provider_credential_validates_existing_openai_api_key(monk
     monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
     monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
     monkeypatch.setattr(service, "validate_openai_api_key", validate_openai_api_key)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-existing"})
 
     response = await service.update_provider_credential(
         FakeSession(),
@@ -319,6 +356,7 @@ async def test_list_provider_credential_models_uses_credential_secret(monkeypatc
     organization_id = uuid4()
     credential_id = uuid4()
     user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    secret_handle_id = uuid4()
     credential = LLMProviderCredential(
         id=credential_id,
         organization_id=organization_id,
@@ -326,10 +364,9 @@ async def test_list_provider_credential_models_uses_credential_secret(monkeypatc
         provider="openai",
         visibility="organization",
         auth_method="api_key",
-        secret_value="sk-existing",
+        api_key_secret_handle_id=secret_handle_id,
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
     )
     organization = Organization(
@@ -368,6 +405,7 @@ async def test_list_provider_credential_models_uses_credential_secret(monkeypatc
     monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
     monkeypatch.setattr(service.repository, "get_credential", get_credential)
     monkeypatch.setattr(service, "fetch_openai_models", fetch_openai_models)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-existing"})
 
     response = await service.list_provider_credential_models(
         FakeSession(),
@@ -381,10 +419,137 @@ async def test_list_provider_credential_models_uses_credential_secret(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_validate_provider_credential_resolves_and_checks_secret(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    secret_handle_id = uuid4()
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        auth_method="api_key",
+        api_key_secret_handle_id=secret_handle_id,
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    validated_secrets: list[str] = []
+
+    async def validate_openai_api_key(secret_value: str):
+        validated_secrets.append(secret_value)
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "validate_openai_api_key", validate_openai_api_key)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-existing"})
+
+    response = await service.validate_provider_credential_by_id(
+        FakeSession(),
+        user,
+        organization_id,
+        credential_id,
+    )
+
+    assert response.ok is True
+    assert response.message == "Credential validation passed."
+    assert validated_secrets == ["sk-existing"]
+
+
+@pytest.mark.asyncio
+async def test_validate_provider_credential_returns_false_for_rejected_secret(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    secret_handle_id = uuid4()
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        auth_method="api_key",
+        api_key_secret_handle_id=secret_handle_id,
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    async def reject_openai_api_key(secret_value: str):
+        raise InvalidLLMProviderCredentialAuthError("OpenAI API key was rejected")
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "validate_openai_api_key", reject_openai_api_key)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-existing"})
+
+    response = await service.validate_provider_credential_by_id(
+        FakeSession(),
+        user,
+        organization_id,
+        credential_id,
+    )
+
+    assert response.ok is False
+    assert response.message == "OpenAI API key was rejected"
+
+
+@pytest.mark.asyncio
 async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch) -> None:
     organization_id = uuid4()
     credential_id = uuid4()
     user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    access_handle_id = uuid4()
+    refresh_handle_id = uuid4()
     credential = LLMProviderCredential(
         id=credential_id,
         organization_id=organization_id,
@@ -393,11 +558,10 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
         visibility="organization",
         auth_method="oauth",
         oauth_provider="chatgpt",
-        oauth_access_token="access-token",
-        oauth_refresh_token="refresh-token",
+        oauth_access_token_secret_handle_id=access_handle_id,
+        oauth_refresh_token_secret_handle_id=refresh_handle_id,
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
     )
     organization = Organization(
@@ -430,6 +594,13 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
     monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
     monkeypatch.setattr(service.repository, "get_credential", get_credential)
     monkeypatch.setattr(service, "fetch_openai_models", fail_openai_model_fetch)
+    patch_resolved_secrets(
+        monkeypatch,
+        {
+            access_handle_id: "access-token",
+            refresh_handle_id: "refresh-token",
+        },
+    )
 
     response = await service.list_provider_credential_models(
         FakeSession(),
@@ -464,7 +635,7 @@ async def test_workspace_credential_requires_workspace_id() -> None:
                 provider="openai",
                 visibility="workspace",
                 workspaceId=uuid4(),
-                secret=SecretStr("sk-test"),
+                apiKeySecretHandleId=uuid4(),
             ).model_copy(update={"workspace_id": None}),
         )
 
@@ -474,16 +645,16 @@ async def test_update_rejects_duplicate_provider_credential_name(monkeypatch) ->
     organization_id = uuid4()
     credential_id = uuid4()
     user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
+    secret_handle_id = uuid4()
     existing = LLMProviderCredential(
         id=credential_id,
         organization_id=organization_id,
         name="Primary",
         provider="openai",
         visibility="organization",
-        secret_value="sk-test",
+        api_key_secret_handle_id=secret_handle_id,
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
     )
     duplicate = LLMProviderCredential(
@@ -492,10 +663,9 @@ async def test_update_rejects_duplicate_provider_credential_name(monkeypatch) ->
         name="Duplicate",
         provider="openai",
         visibility="organization",
-        secret_value="sk-other",
+        api_key_secret_handle_id=uuid4(),
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
     )
 

@@ -18,7 +18,6 @@ import {
   McpTableCard,
   RuntimeBadge,
   ServerIdentityCell,
-  mcpServerDetailUrl,
   responseErrorMessage,
   runtimeDisplayName,
   serverIconUrlFromIcons,
@@ -96,7 +95,7 @@ function deliveryTargets(entry: MCPRegistryServerResponse) {
 }
 
 function editServerUrl(organizationId: string, serverName: string, version: string) {
-  return `/org/${encodeURIComponent(organizationId)}/registry/edit/${serverName
+  return `/org/${encodeURIComponent(organizationId)}/catalog/edit/${serverName
     .split("/")
     .map(encodeURIComponent)
     .join("/")}?version=${encodeURIComponent(version)}`;
@@ -104,7 +103,7 @@ function editServerUrl(organizationId: string, serverName: string, version: stri
 
 function newServerVersionUrl(organizationId: string, serverName: string, version: string) {
   const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
-  const basePath = `/org/${encodeURIComponent(organizationId)}/registry/new-version/${encodedName}`;
+  const basePath = `/org/${encodeURIComponent(organizationId)}/catalog/new-version/${encodedName}`;
   return `${basePath}?version=${encodeURIComponent(version)}`;
 }
 
@@ -114,19 +113,19 @@ function serverVersionUrl(serverName: string, version: string) {
     .join("/")}`;
 }
 
-type RegistryListClientProps = {
+type CatalogListClientProps = {
   initialInstallations: MCPServerInstallationRead[];
   initialMetadata: MCPRegistryListMetadata;
   initialServers: MCPRegistryServerResponse[];
   organizationId: string;
 };
 
-export function RegistryListClient({
+export function CatalogListClient({
   initialInstallations,
   initialMetadata,
   initialServers,
   organizationId,
-}: RegistryListClientProps) {
+}: CatalogListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
   const [servers, setServers] = useState<MCPRegistryServerResponse[]>(initialServers);
@@ -188,7 +187,7 @@ export function RegistryListClient({
         }),
       ]);
       if (!serversResponse.ok || !installationsResponse.ok) {
-        throw new Error("Failed to load registry");
+        throw new Error("Failed to load catalog");
       }
       const serversData = (await serversResponse.json()) as MCPRegistryServerListResponse;
       const installationsData =
@@ -206,7 +205,7 @@ export function RegistryListClient({
       if (searchRequestId.current !== requestId) {
         return;
       }
-      setError("Registry entries could not be loaded.");
+      setError("Catalog entries could not be loaded.");
     } finally {
       if (searchRequestId.current === requestId) {
         setIsLoading(false);
@@ -371,7 +370,7 @@ export function RegistryListClient({
                 <TableRow>
                   <TableCell colSpan={5} className="h-32 text-center text-[var(--on-surface-variant)]">
                     {isLoading
-                      ? "Loading registry entries"
+                      ? "Loading catalog entries"
                       : "No supported MCP servers are registered yet"}
                   </TableCell>
                 </TableRow>
@@ -390,11 +389,7 @@ export function RegistryListClient({
                     >
                       <TableCell className="px-6 py-4">
                         <ServerIdentityCell
-                          href={mcpServerDetailUrl(
-                            organizationId,
-                            entry.server.name,
-                            entry.server.version
-                          )}
+                          href={`/org/${encodeURIComponent(organizationId)}/catalog`}
                           iconUrl={iconUrl}
                           name={entry.server.name}
                           title={entry.server.title || entry.server.name}

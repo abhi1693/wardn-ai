@@ -17,26 +17,29 @@ class LLMProviderCredentialCreate(BaseModel):
     visibility: LLMProviderVisibility = "organization"
     workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
     auth_method: LLMProviderAuthMethod = Field(default="api_key", alias="authMethod")
-    secret: SecretStr | None = Field(default=None, min_length=1, max_length=20000)
-    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
-    oauth_access_token: SecretStr | None = Field(
+    api_key_secret_handle_id: uuid.UUID | None = Field(
         default=None,
-        alias="oauthAccessToken",
-        min_length=1,
-        max_length=20000,
+        alias="apiKeySecretHandleId",
     )
-    oauth_refresh_token: SecretStr | None = Field(
+    api_key_secret_store_id: uuid.UUID | None = Field(
         default=None,
-        alias="oauthRefreshToken",
-        min_length=1,
-        max_length=20000,
+        alias="apiKeySecretStoreId",
+    )
+    api_key: SecretStr | None = Field(default=None, alias="apiKey", min_length=1)
+    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
+    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="oauthAccessTokenSecretHandleId",
+    )
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="oauthRefreshTokenSecretHandleId",
     )
     oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
     oauth_scopes: list[str] = Field(default_factory=list, alias="oauthScopes")
     oauth_metadata: dict[str, Any] = Field(default_factory=dict, alias="oauthMetadata")
     base_url: str = Field(default="", alias="baseUrl", max_length=2048)
     extra_headers: dict[str, str] = Field(default_factory=dict, alias="extraHeaders")
-    is_default: bool = Field(default=False, alias="isDefault")
 
     @model_validator(mode="after")
     def validate_scope(self) -> "LLMProviderCredentialCreate":
@@ -45,15 +48,31 @@ class LLMProviderCredentialCreate(BaseModel):
         if self.visibility != "workspace" and self.workspace_id is not None:
             raise ValueError("workspaceId is only valid for workspace-scoped credentials")
         if self.auth_method == "api_key":
-            if self.secret is None:
-                raise ValueError("secret is required for api_key credentials")
+            if self.api_key is None and self.api_key_secret_handle_id is None:
+                raise ValueError(
+                    "apiKey or apiKeySecretHandleId is required for api_key credentials"
+                )
+            if self.api_key is not None and self.api_key_secret_store_id is None:
+                raise ValueError("apiKeySecretStoreId is required when apiKey is provided")
             if self.oauth_provider is not None:
                 raise ValueError("oauthProvider is only valid for oauth credentials")
         if self.auth_method == "oauth":
+            if self.api_key is not None or self.api_key_secret_store_id is not None:
+                raise ValueError(
+                    "apiKey and apiKeySecretStoreId are only valid for api_key credentials"
+                )
             if self.oauth_provider is None:
                 raise ValueError("oauthProvider is required for oauth credentials")
-            if self.secret is not None:
-                raise ValueError("secret is only valid for api_key credentials")
+            if self.api_key_secret_handle_id is not None:
+                raise ValueError("apiKeySecretHandleId is only valid for api_key credentials")
+            if (
+                self.oauth_access_token_secret_handle_id is None
+                or self.oauth_refresh_token_secret_handle_id is None
+            ):
+                raise ValueError(
+                    "oauthAccessTokenSecretHandleId and "
+                    "oauthRefreshTokenSecretHandleId are required for oauth credentials"
+                )
         return self
 
 
@@ -65,26 +84,24 @@ class LLMProviderCredentialUpdate(BaseModel):
     visibility: LLMProviderVisibility | None = None
     workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
     auth_method: LLMProviderAuthMethod | None = Field(default=None, alias="authMethod")
-    secret: SecretStr | None = Field(default=None, min_length=1, max_length=20000)
-    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
-    oauth_access_token: SecretStr | None = Field(
+    api_key_secret_handle_id: uuid.UUID | None = Field(
         default=None,
-        alias="oauthAccessToken",
-        min_length=1,
-        max_length=20000,
+        alias="apiKeySecretHandleId",
     )
-    oauth_refresh_token: SecretStr | None = Field(
+    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
+    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
         default=None,
-        alias="oauthRefreshToken",
-        min_length=1,
-        max_length=20000,
+        alias="oauthAccessTokenSecretHandleId",
+    )
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="oauthRefreshTokenSecretHandleId",
     )
     oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
     oauth_scopes: list[str] | None = Field(default=None, alias="oauthScopes")
     oauth_metadata: dict[str, Any] | None = Field(default=None, alias="oauthMetadata")
     base_url: str | None = Field(default=None, alias="baseUrl", max_length=2048)
     extra_headers: dict[str, str] | None = Field(default=None, alias="extraHeaders")
-    is_default: bool | None = Field(default=None, alias="isDefault")
     is_active: bool | None = Field(default=None, alias="isActive")
 
 
@@ -99,17 +116,25 @@ class LLMProviderCredentialRead(BaseModel):
     provider: str
     visibility: LLMProviderVisibility
     auth_method: LLMProviderAuthMethod = Field(alias="authMethod")
+    api_key_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="apiKeySecretHandleId",
+    )
     base_url: str = Field(alias="baseUrl")
     extra_headers: dict[str, str] = Field(alias="extraHeaders")
     oauth_provider: str = Field(alias="oauthProvider")
+    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="oauthAccessTokenSecretHandleId",
+    )
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
+        default=None,
+        alias="oauthRefreshTokenSecretHandleId",
+    )
     oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
     oauth_scopes: list[str] = Field(alias="oauthScopes")
     oauth_metadata: dict[str, Any] = Field(alias="oauthMetadata")
-    is_default: bool = Field(alias="isDefault")
     is_active: bool = Field(alias="isActive")
-    has_secret: bool = Field(alias="hasSecret")
-    has_oauth_access_token: bool = Field(alias="hasOauthAccessToken")
-    has_oauth_refresh_token: bool = Field(alias="hasOauthRefreshToken")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -125,3 +150,8 @@ class LLMProviderModelRead(BaseModel):
 
 class LLMProviderModelListResponse(BaseModel):
     models: list[LLMProviderModelRead]
+
+
+class LLMProviderCredentialValidationResponse(BaseModel):
+    ok: bool
+    message: str = ""

@@ -1,6 +1,7 @@
 import type {
   LLMProviderCredentialRead,
   OrganizationRead,
+  SecretStoreRead,
   UserRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
@@ -16,8 +17,6 @@ export type LlmCredentialRead = LLMProviderCredentialRead & {
   oauthExpiresAt?: string | null;
   oauthScopes?: string[];
   oauthMetadata?: Record<string, unknown>;
-  hasOauthAccessToken?: boolean;
-  hasOauthRefreshToken?: boolean;
 };
 
 export type CredentialPayload = {
@@ -26,16 +25,14 @@ export type CredentialPayload = {
   visibility: CredentialVisibility;
   workspaceId?: string | null;
   authMethod: CredentialAuthMethod;
-  secret?: string | null;
+  apiKeySecretStoreId?: string | null;
+  apiKey?: string | null;
   oauthProvider?: CredentialOAuthProvider | null;
-  oauthAccessToken?: string | null;
-  oauthRefreshToken?: string | null;
   oauthExpiresAt?: string | null;
   oauthScopes?: string[];
   oauthMetadata?: Record<string, unknown>;
   baseUrl?: string;
   extraHeaders?: Record<string, string>;
-  isDefault?: boolean;
   isActive?: boolean;
 };
 
@@ -44,5 +41,6 @@ export type CredentialFormProps = {
   credential?: LlmCredentialRead;
   currentUser: UserRead | null;
   organization: OrganizationRead;
+  secretStores: SecretStoreRead[];
   workspaces: WorkspaceRead[];
 };

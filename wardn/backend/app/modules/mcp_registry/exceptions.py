@@ -28,3 +28,11 @@ class MCPServerVersionInUseError(MCPRegistryError):
 
 class InvalidRegistryCursorError(MCPRegistryError):
     pass
+
+
+class MCPCatalogSourceNotFoundError(MCPRegistryError):
+    pass
+
+
+class DuplicateMCPCatalogSourceError(MCPRegistryError):
+    pass

@@ -598,7 +598,7 @@ export function ServerForm({
       setRemotes(metadataRemotes);
       setSourceImportMessage(
         metadata.source === "server.json"
-          ? "Registry document loaded."
+          ? "Catalog document loaded."
           : metadata.source === "mcp.json"
             ? "MCP client configuration loaded."
             : "Repository metadata loaded."

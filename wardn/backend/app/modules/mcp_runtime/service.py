@@ -1,6 +1,8 @@
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -25,6 +27,9 @@ from app.modules.mcp_runtime.schemas import (
     MCPRuntimeSummaryResponse,
     MCPRuntimeToolCallSummary,
 )
+from app.modules.organizations import repository as organization_repository
+from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets.service import resolve_secret
 
 RUNTIME_EVENT_SESSION_CREATED = "runtime_session_created"
 RUNTIME_EVENT_SESSION_REUSED = "runtime_session_reused"
@@ -39,6 +44,7 @@ RUNTIME_EVENT_SESSION_STOPPED = "runtime_session_stopped"
 RUNTIME_EVENT_REAPER_STOPPED = "runtime_reaper_stopped"
 RUNTIME_EVENT_SHUTDOWN_STOP_FAILED = "runtime_shutdown_stop_failed"
 RUNTIME_SUMMARY_RECENT_WINDOW = timedelta(hours=24)
+SECRET_HANDLE_REF_TYPE = "secret_handle"
 
 
 @dataclass(frozen=True)
@@ -156,6 +162,110 @@ def runtime_expires_at(now: datetime | None = None) -> datetime:
     return now + timedelta(seconds=settings.mcp_runtime_idle_timeout_seconds)
 
 
+def secret_handle_ref_id(value: Any) -> UUID | None:
+    if not isinstance(value, dict) or value.get("type") != SECRET_HANDLE_REF_TYPE:
+        return None
+    raw_handle_id = value.get("secretHandleId") or value.get("secret_handle_id")
+    if not raw_handle_id:
+        return None
+    return UUID(str(raw_handle_id))
+
+
+def has_secret_handle_refs(value: Any) -> bool:
+    if secret_handle_ref_id(value) is not None:
+        return True
+    if isinstance(value, dict):
+        return any(has_secret_handle_refs(item) for item in value.values())
+    if isinstance(value, list):
+        return any(has_secret_handle_refs(item) for item in value)
+    return False
+
+
+async def organization_id_for_workspace(
+    session: AsyncSession,
+    workspace_id: UUID | None,
+) -> UUID | None:
+    if workspace_id is None:
+        return None
+    workspace = await organization_repository.get_workspace_by_id(session, workspace_id)
+    return workspace.organization_id if workspace else None
+
+
+async def materialize_secret_value(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    value: Any,
+) -> Any:
+    handle_id = secret_handle_ref_id(value)
+    if handle_id is None:
+        return value
+    try:
+        resolved = await resolve_secret(
+            session,
+            organization_id,
+            handle_id,
+            workspace_id=workspace_id,
+        )
+    except SecretsError as exc:
+        raise ValueError(str(exc)) from exc
+    return resolved.value
+
+
+async def materialize_installation_secret_references(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+) -> Any:
+    secret_references = installation.secret_references or {}
+    if not has_secret_handle_refs(secret_references):
+        return installation
+    organization_id = await organization_id_for_workspace(session, installation.workspace_id)
+    if organization_id is None:
+        raise ValueError("installation workspace organization is not available")
+
+    materialized = deepcopy(secret_references)
+    for namespace in ("headers", "environment", "packageArguments"):
+        namespace_values = materialized.get(namespace)
+        if not isinstance(namespace_values, dict):
+            continue
+        for key, value in list(namespace_values.items()):
+            namespace_values[key] = await materialize_secret_value(
+                session,
+                organization_id=organization_id,
+                workspace_id=installation.workspace_id,
+                value=value,
+            )
+    files = materialized.get("files")
+    if isinstance(files, dict):
+        for detail in files.values():
+            if not isinstance(detail, dict):
+                continue
+            detail["content"] = await materialize_secret_value(
+                session,
+                organization_id=organization_id,
+                workspace_id=installation.workspace_id,
+                value=detail.get("content"),
+            )
+
+    return SimpleNamespace(
+        id=installation.id,
+        workspace_id=installation.workspace_id,
+        server_name=installation.server_name,
+        config_name=installation.config_name,
+        installed_version=installation.installed_version,
+        status=installation.status,
+        install_type=installation.install_type,
+        install_path=installation.install_path,
+        runtime_config=installation.runtime_config,
+        secret_references=materialized,
+        install_error=installation.install_error,
+        installed_at=installation.installed_at,
+        created_at=installation.created_at,
+        updated_at=installation.updated_at,
+    )
+
+
 async def ensure_runtime_session(
     session: AsyncSession,
     installation: MCPServerInstallation,
@@ -164,6 +274,7 @@ async def ensure_runtime_session(
     manager: MCPRuntimeManager,
     now: datetime | None = None,
 ) -> MCPRuntimeSession:
+    installation = await materialize_installation_secret_references(session, installation)
     now = now or datetime.now(UTC)
     runtime_spec = manager.runtime_spec(installation)
     config_fingerprint = runtime_spec.fingerprint()
@@ -251,6 +362,10 @@ async def warm_runtime_session(
     wait_ready: bool = True,
 ) -> MCPRuntimeSession:
     manager = manager or get_runtime_manager()
+    runtime_installation = await materialize_installation_secret_references(
+        session,
+        installation,
+    )
     now = now or datetime.now(UTC)
     server = MCPServerVersion(
         name=installation.server_name,
@@ -258,7 +373,7 @@ async def warm_runtime_session(
     )
     runtime_session = await ensure_runtime_session(
         session,
-        installation,
+        runtime_installation,
         server,
         manager=manager,
         now=now,
@@ -278,7 +393,7 @@ async def warm_runtime_session(
     try:
         health = await run_in_threadpool(
             manager.ensure_runtime,
-            installation,
+            runtime_installation,
             runtime_session=runtime_session,
             wait_ready=wait_ready,
         )
@@ -372,10 +487,14 @@ async def call_tool_with_tracking(
     manager: MCPRuntimeManager | None = None,
 ) -> dict[str, Any]:
     manager = manager or get_runtime_manager()
+    runtime_installation = await materialize_installation_secret_references(
+        session,
+        installation,
+    )
     now = datetime.now(UTC)
     runtime_session = await ensure_runtime_session(
         session,
-        installation,
+        runtime_installation,
         server,
         manager=manager,
         now=now,
@@ -407,7 +526,7 @@ async def call_tool_with_tracking(
     try:
         result = await run_in_threadpool(
             manager.call_tool,
-            installation,
+            runtime_installation,
             tool_name=tool_name,
             arguments=arguments,
             runtime_session=runtime_session,
@@ -463,10 +582,14 @@ async def list_tools_with_tracking(
     manager: MCPRuntimeManager | None = None,
 ) -> list[dict[str, Any]]:
     manager = manager or get_runtime_manager()
+    runtime_installation = await materialize_installation_secret_references(
+        session,
+        installation,
+    )
     now = datetime.now(UTC)
     runtime_session = await ensure_runtime_session(
         session,
-        installation,
+        runtime_installation,
         server,
         manager=manager,
         now=now,
@@ -486,7 +609,7 @@ async def list_tools_with_tracking(
     try:
         tools = await run_in_threadpool(
             manager.list_tools,
-            installation,
+            runtime_installation,
             runtime_session=runtime_session,
         )
     except Exception as exc:

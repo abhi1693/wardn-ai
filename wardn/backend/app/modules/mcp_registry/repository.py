@@ -4,7 +4,11 @@ from datetime import datetime
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_registry.models import (
+    MCPCatalogSource,
+    MCPServerInstallation,
+    MCPServerVersion,
+)
 from app.modules.organizations.models import Workspace
 
 
@@ -220,3 +224,56 @@ async def list_installations(
 
 async def delete_installation(session: AsyncSession, installation: MCPServerInstallation) -> None:
     await session.delete(installation)
+
+
+async def list_catalog_sources(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> list[MCPCatalogSource]:
+    statement = (
+        select(MCPCatalogSource)
+        .where(MCPCatalogSource.organization_id == organization_id)
+        .order_by(MCPCatalogSource.name.asc())
+    )
+    result = await session.execute(statement)
+    return list(result.scalars().all())
+
+
+async def get_catalog_source(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    *,
+    organization_id: uuid.UUID,
+) -> MCPCatalogSource | None:
+    statement = select(MCPCatalogSource).where(
+        MCPCatalogSource.id == source_id,
+        MCPCatalogSource.organization_id == organization_id,
+    )
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def get_catalog_source_by_name(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    name: str,
+) -> MCPCatalogSource | None:
+    statement = select(MCPCatalogSource).where(
+        MCPCatalogSource.organization_id == organization_id,
+        MCPCatalogSource.name == name,
+    )
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def get_catalog_source_by_url(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    base_url: str,
+) -> MCPCatalogSource | None:
+    statement = select(MCPCatalogSource).where(
+        MCPCatalogSource.organization_id == organization_id,
+        MCPCatalogSource.base_url == base_url,
+    )
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()

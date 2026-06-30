@@ -75,7 +75,12 @@ class MCPCatalogSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     tenant_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     sync_mode: Mapped[str] = mapped_column(String(50), default="latest_only", nullable=False)
-    secret_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    auth_secret_handle_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("secret_handles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_synced_updated_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -109,7 +114,7 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     install_type: Mapped[str] = mapped_column(String(32), default="metadata", nullable=False)
     install_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
     runtime_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
-    secret_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    secret_references: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     install_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
     installed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

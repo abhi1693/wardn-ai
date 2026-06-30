@@ -17,6 +17,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
     LLMProviderCredentialUpdate,
+    LLMProviderCredentialValidationResponse,
     LLMProviderModelListResponse,
 )
 from app.modules.llm_providers.service import (
@@ -25,6 +26,7 @@ from app.modules.llm_providers.service import (
     list_provider_credential_models,
     list_provider_credentials,
     update_provider_credential,
+    validate_provider_credential_by_id,
 )
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
@@ -163,6 +165,35 @@ async def list_provider_credential_models_route(
 ) -> LLMProviderModelListResponse:
     try:
         return await list_provider_credential_models(
+            session,
+            current_user,
+            organization_id,
+            credential_id,
+        )
+    except LLMProviderCredentialNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_access_error(exc)
+        raise
+
+
+@router.post(
+    "/{credential_id}/validate",
+    response_model=LLMProviderCredentialValidationResponse,
+    operation_id="llm_provider_credentials_validate",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def validate_provider_credential_route(
+    organization_id: UUID,
+    credential_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> LLMProviderCredentialValidationResponse:
+    try:
+        return await validate_provider_credential_by_id(
             session,
             current_user,
             organization_id,

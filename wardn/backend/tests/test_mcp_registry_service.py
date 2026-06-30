@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -12,18 +13,23 @@ from app.modules.mcp_registry.exceptions import (
 )
 from app.modules.mcp_registry.installer import MCPRuntimeInstall
 from app.modules.mcp_registry.models import (
+    MCPCatalogSource,
     MCPServerInstallation,
     MCPServerToolSchema,
     MCPServerVersion,
 )
 from app.modules.mcp_registry.schemas import (
+    MCPCatalogSourceCreate,
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
     MCPServerInstallationToolValidationRequest,
     MCPServerInstallRequest,
 )
+from app.modules.users.models import User
 
 WORKSPACE_ID = uuid4()
+ORGANIZATION_ID = uuid4()
+USER = User(id=uuid4(), email="owner@example.com", is_superuser=True)
 
 
 class FakeSession:
@@ -74,6 +80,21 @@ def registry_payload(version: str = "1.0.0") -> MCPServerCreate:
                 }
             ],
         }
+    )
+
+
+def catalog_source() -> MCPCatalogSource:
+    return MCPCatalogSource(
+        id=uuid4(),
+        organization_id=ORGANIZATION_ID,
+        name="Wardn Hub",
+        provider="wardn_hub",
+        base_url="https://hub.wardnai.dev",
+        auth_secret_handle_id=uuid4(),
+        tenant_id="",
+        sync_mode="latest_only",
+        is_enabled=True,
+        last_error="",
     )
 
 
@@ -246,6 +267,101 @@ async def test_sync_supported_servers_upserts_curated_entries(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_create_catalog_source_stores_source_url(monkeypatch) -> None:
+    handle_id = uuid4()
+    calls = {}
+
+    async def missing_source(*args, **kwargs):
+        return None
+
+    async def create_catalog_source_token_handle(*args, **kwargs):
+        calls["token"] = kwargs
+        return handle_id
+
+    monkeypatch.setattr(service.repository, "get_catalog_source_by_name", missing_source)
+    monkeypatch.setattr(service.repository, "get_catalog_source_by_url", missing_source)
+    monkeypatch.setattr(
+        service,
+        "create_catalog_source_token_handle",
+        create_catalog_source_token_handle,
+    )
+    session = FakeSession()
+
+    response = await service.create_catalog_source(
+        session,
+        USER,
+        ORGANIZATION_ID,
+        MCPCatalogSourceCreate(
+            name="Wardn Hub",
+            baseUrl="https://hub.wardnai.dev/",
+            provider="wardn_hub",
+            apiTokenSecretStoreId=uuid4(),
+            apiToken="hub-token",
+        ),
+    )
+
+    assert response.name == "Wardn Hub"
+    assert response.base_url == "https://hub.wardnai.dev"
+    assert response.has_auth_token is True
+    assert session.added[0].base_url == "https://hub.wardnai.dev"
+    assert session.added[0].auth_secret_handle_id == handle_id
+    assert calls["token"]["required"] is True
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeypatch) -> None:
+    source = catalog_source()
+    payload = registry_payload("1.0.0")
+    calls = {}
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def resolve_secret(*args, **kwargs):
+        return SimpleNamespace(value="hub-token")
+
+    def registry_headers(*args, **kwargs):
+        return {"x-test": "1"}
+
+    def load_supported_servers_from_registry_url(source_url, **kwargs):
+        calls["source_url"] = source_url
+        calls["kwargs"] = kwargs
+        return [payload]
+
+    async def sync_supported_servers(*args, **kwargs):
+        calls["servers"] = args[1]
+        calls["organization_id"] = kwargs["organization_id"]
+        return 1
+
+    from app.modules.mcp_registry import commands
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(commands, "registry_headers", registry_headers)
+    monkeypatch.setattr(
+        commands,
+        "load_supported_servers_from_registry_url",
+        load_supported_servers_from_registry_url,
+    )
+    monkeypatch.setattr(service, "sync_supported_servers", sync_supported_servers)
+    session = FakeSession()
+
+    response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
+
+    assert response.synced_count == 1
+    assert calls["source_url"] == "https://hub.wardnai.dev/api/v1/mcp/catalog"
+    assert calls["kwargs"]["version"] == "latest"
+    assert calls["kwargs"]["pagination"] == "page"
+    assert calls["kwargs"]["headers"]["Authorization"] == "Bearer hub-token"
+    assert calls["kwargs"]["headers"]["X-API-Key"] == "hub-token"
+    assert calls["servers"] == [payload]
+    assert calls["organization_id"] == ORGANIZATION_ID
+    assert source.last_success_at is not None
+    assert source.last_error == ""
+
+
+@pytest.mark.asyncio
 async def test_sync_supported_servers_uses_official_latest_metadata(monkeypatch) -> None:
     async def missing_server(*args, **kwargs):
         return None
@@ -373,7 +489,7 @@ def test_public_configured_values_omits_secret_fields() -> None:
         server_name="io.github.example/weather",
         installed_version="1.0.0",
         status="enabled",
-        secret_config={
+        secret_references={
             "environment": {
                 "WEATHER_URL": "https://weather.example.com",
                 "WEATHER_TOKEN": "secret-token",
@@ -560,7 +676,7 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
-        secret_config={
+        secret_references={
             "environment": {"WEATHER_TOKEN": "old-token", "WEATHER_URL": "old-url"},
             "packageArguments": {"LOG_LEVEL": "warn", "READ_ONLY": "true"},
         },
@@ -612,7 +728,7 @@ async def test_install_server_version_preserves_existing_file_config_values(monk
         config_name="default",
         installed_version="1.0.0",
         status="enabled",
-        secret_config={
+        secret_references={
             "packageArguments": {"KUBECONFIG": "/old/runtime-files/KUBECONFIG"},
             "files": {
                 "KUBECONFIG": {

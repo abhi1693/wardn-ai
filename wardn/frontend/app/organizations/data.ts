@@ -1,6 +1,8 @@
 import type {
   OrganizationListResponse,
   OrganizationRead,
+  SecretStoreListResponse,
+  SecretStoreRead,
   WorkspaceListResponse,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
@@ -80,6 +82,52 @@ export async function getWorkspace(organizationId: string, workspaceId: string) 
       return null;
     }
     return (await response.json()) as WorkspaceRead;
+  } catch {
+    return null;
+  }
+}
+
+export async function getSecretStores(organizationId: string, workspaceId?: string) {
+  const cookie = await backendCookieHeader();
+  const params = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
+  try {
+    const response = await fetch(
+      backendPath(
+        `/api/v1/organizations/${encodeURIComponent(organizationId)}/secrets/stores${params}`
+      ),
+      {
+        cache: "no-store",
+        headers: cookie ? { cookie } : {},
+      }
+    );
+    if (!response.ok) {
+      return [] as SecretStoreRead[];
+    }
+    const payload = (await response.json()) as SecretStoreListResponse;
+    return payload.stores;
+  } catch {
+    return [] as SecretStoreRead[];
+  }
+}
+
+export async function getSecretStore(organizationId: string, storeId: string) {
+  const cookie = await backendCookieHeader();
+  try {
+    const response = await fetch(
+      backendPath(
+        `/api/v1/organizations/${encodeURIComponent(
+          organizationId
+        )}/secrets/stores/${encodeURIComponent(storeId)}`
+      ),
+      {
+        cache: "no-store",
+        headers: cookie ? { cookie } : {},
+      }
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as SecretStoreRead;
   } catch {
     return null;
   }

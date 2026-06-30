@@ -56,8 +56,8 @@ export async function NewVersionPageView({
 
   return (
     <AppShell
-      active="registry"
-      eyebrow="MCP Registry"
+      active="catalog"
+      eyebrow="MCP Catalog"
       title="Add server version"
       workspaceContext={workspaceContext}
     >

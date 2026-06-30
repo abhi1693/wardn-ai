@@ -201,10 +201,9 @@ async def test_get_agent_model_for_run_allows_workspace_member(monkeypatch) -> N
         name="OpenAI",
         provider="openai",
         visibility="workspace",
-        secret_value="sk-test",
+        api_key_secret_handle_id=uuid4(),
         base_url="",
         extra_headers={},
-        is_default=False,
         is_active=True,
     )
     agent = Agent(
@@ -266,10 +265,9 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
         name="OpenAI",
         provider="openai",
         visibility="organization",
-        secret_value="sk-test",
+        api_key_secret_handle_id=uuid4(),
         base_url="",
         extra_headers={},
-        is_default=True,
         is_active=True,
     )
 
@@ -320,10 +318,9 @@ async def test_create_agent_rejects_model_unavailable_for_credential(monkeypatch
         name="OpenAI",
         provider="openai",
         visibility="organization",
-        secret_value="sk-test",
+        api_key_secret_handle_id=uuid4(),
         base_url="",
         extra_headers={},
-        is_default=True,
         is_active=True,
     )
 

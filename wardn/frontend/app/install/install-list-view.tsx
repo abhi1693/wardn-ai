@@ -61,7 +61,6 @@ export async function InstallListView({ workspaceContext }: InstallListViewProps
       <InstalledListClient
         basePath={basePath}
         initialInstallations={installations}
-        organizationId={workspaceContext.selectedOrganization?.id ?? ""}
       />
     </AppShell>
   );

@@ -141,6 +141,8 @@ def config_value_present(value: Any) -> bool:
     mapping = config_value_mapping(value)
     if not mapping:
         return bool(value)
+    if mapping.get("type") == "secret_handle":
+        return bool(mapping.get("secretHandleId") or mapping.get("secret_handle_id"))
     return any(
         bool(mapping.get(key))
         for key in ("content", "contentBase64", "content_base64", "path")
@@ -155,6 +157,8 @@ def config_value_text(value: Any) -> str:
     mapping = config_value_mapping(value)
     if not mapping:
         return str(value)
+    if mapping.get("type") == "secret_handle":
+        return ""
     for key in ("content", "contentBase64", "content_base64", "path"):
         configured = mapping.get(key)
         if configured:

@@ -117,7 +117,7 @@ def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
             "transport": {"type": "streamable-http", "url": "https://example.com/mcp"},
             "verification": {"toolCount": 3},
         },
-        secret_config={"headers": {"Authorization": "Bearer test"}},
+        secret_references={"headers": {"Authorization": "Bearer test"}},
     )
     installation.id = uuid.uuid4()
     installation.installed_at = now
@@ -177,7 +177,7 @@ def installed_package_server(tmp_path: Path) -> tuple[MCPServerInstallation, MCP
             "args": [],
             "cwd": f"{install_path}.tmp",
         },
-        secret_config={"environment": {"KUBECONFIG": "/tmp/kubeconfig"}},
+        secret_references={"environment": {"KUBECONFIG": "/tmp/kubeconfig"}},
     )
     installation.id = uuid.uuid4()
     installation.installed_at = now

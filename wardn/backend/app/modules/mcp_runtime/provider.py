@@ -175,7 +175,7 @@ def remote_url(installation: MCPServerInstallation) -> str:
 
 
 def secret_headers(installation: MCPServerInstallation) -> dict[str, str]:
-    secret_config = installation.secret_config or {}
+    secret_config = installation.secret_references or {}
     headers = secret_config.get("headers")
     if not isinstance(headers, dict):
         return {}
@@ -183,7 +183,7 @@ def secret_headers(installation: MCPServerInstallation) -> dict[str, str]:
 
 
 def secret_environment(installation: MCPServerInstallation) -> dict[str, str]:
-    secret_config = installation.secret_config or {}
+    secret_config = installation.secret_references or {}
     environment = secret_config.get("environment")
     values = {}
     if isinstance(environment, dict):
@@ -228,7 +228,7 @@ def base_runtime_spec(
         runtime_kind=runtime_kind(installation),
         transport=transport,
         runtime_config_fingerprint=fingerprint_payload(installation.runtime_config or {}),
-        secret_config_fingerprint=secret_fingerprint_payload(installation.secret_config or {}),
+        secret_config_fingerprint=secret_fingerprint_payload(installation.secret_references or {}),
         command=command,
         args=tuple(args),
         cwd=cwd,
@@ -250,7 +250,7 @@ def normalize_installed_path(value: Any, installation: MCPServerInstallation) ->
 
 
 def materialize_runtime_files(installation: MCPServerInstallation) -> None:
-    secret_config = installation.secret_config or {}
+    secret_config = installation.secret_references or {}
     files = secret_config.get("files")
     if not isinstance(files, dict):
         return

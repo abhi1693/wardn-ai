@@ -41,6 +41,7 @@ from app.modules.llm_providers.service import (
     OPENAI_CHATGPT_PROVIDER,
     credential_supports_model,
     read_record,
+    resolve_credential_secrets,
     validate_chatgpt_oauth_credential,
 )
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -168,6 +169,7 @@ async def validate_provider_credential(
 
 
 async def validate_agent_model(
+    session: AsyncSession,
     credential: LLMProviderCredential | None,
     model_name: str,
 ) -> str:
@@ -176,7 +178,7 @@ async def validate_agent_model(
         return normalized_model
     if not normalized_model:
         raise InvalidAgentScopeError("model is required when an LLM credential is selected")
-    if not await credential_supports_model(credential, normalized_model):
+    if not await credential_supports_model(session, credential, normalized_model):
         raise InvalidAgentScopeError("model is not available for the selected LLM credential")
     return normalized_model
 
@@ -309,7 +311,7 @@ async def create_agent(
         agent_workspace_id=workspace_id,
         provider_credential_id=payload.provider_credential_id,
     )
-    model_name = await validate_agent_model(provider_credential, payload.model_name)
+    model_name = await validate_agent_model(session, provider_credential, payload.model_name)
     agent = Agent(
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -761,12 +763,13 @@ async def run_agent_chat(
         "input": messages,
         "stream": True,
     }
+    credential_secrets = await resolve_credential_secrets(session, credential)
 
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
         async for text in stream_response_text(
             url=OPENAI_RESPONSES_URL,
             headers={
-                "Authorization": f"Bearer {credential.secret_value}",
+                "Authorization": f"Bearer {credential_secrets.api_key}",
                 "Content-Type": "application/json",
             },
             body=body,
@@ -780,8 +783,8 @@ async def run_agent_chat(
         and credential.oauth_provider == "chatgpt"
     ):
         validate_chatgpt_oauth_credential(
-            oauth_access_token=credential.oauth_access_token,
-            oauth_refresh_token=credential.oauth_refresh_token,
+            oauth_access_token=credential_secrets.oauth_access_token,
+            oauth_refresh_token=credential_secrets.oauth_refresh_token,
             oauth_expires_at=credential.oauth_expires_at,
         )
         account_id = chatgpt_account_id(credential)
@@ -791,7 +794,7 @@ async def run_agent_chat(
             session,
             agent,
             headers={
-                "Authorization": f"Bearer {credential.oauth_access_token}",
+                "Authorization": f"Bearer {credential_secrets.oauth_access_token}",
                 "ChatGPT-Account-ID": account_id,
                 "OpenAI-Beta": CHATGPT_CODEX_WEBSOCKET_BETA,
                 "originator": CODEX_COMPAT_ORIGINATOR,
@@ -919,9 +922,17 @@ async def update_agent(
             provider_credential_id=agent.provider_credential_id,
         )
     if payload.model_name is not None:
-        agent.model_name = await validate_agent_model(provider_credential, payload.model_name)
+        agent.model_name = await validate_agent_model(
+            session,
+            provider_credential,
+            payload.model_name,
+        )
     elif provider_credential_changed and provider_credential is not None:
-        agent.model_name = await validate_agent_model(provider_credential, agent.model_name)
+        agent.model_name = await validate_agent_model(
+            session,
+            provider_credential,
+            agent.model_name,
+        )
     if payload.is_active is not None:
         agent.is_active = payload.is_active
 

@@ -577,7 +577,7 @@ def runtime_file_secret_key(file_key: str) -> str:
 
 
 def runtime_file_secret_data(installation: MCPServerInstallation) -> dict[str, str]:
-    secret_config = installation.secret_config or {}
+    secret_config = installation.secret_references or {}
     files = secret_config.get("files")
     if not isinstance(files, dict):
         return {}
@@ -1915,7 +1915,7 @@ class KubernetesRuntimeProvider:
             transport=RUNTIME_TRANSPORT_STREAMABLE_HTTP,
             runtime_config_fingerprint=fingerprint_payload(provider_config),
             secret_config_fingerprint=secret_fingerprint_payload(
-                installation.secret_config or {}
+                installation.secret_references or {}
             ),
             command=command,
             args=tuple(args),

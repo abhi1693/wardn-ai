@@ -22,6 +22,7 @@ from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 
 DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 PULSE_REGISTRY_URL = "https://api.pulsemcp.com/v0.1/servers"
+WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
 CURATED_SERVERS = {
@@ -223,9 +224,54 @@ def _server_documents_from_payload(payload) -> list[dict]:
                 merged_metadata.update(metadata)
                 server["_meta"] = merged_metadata
             documents.append(server)
+        elif isinstance(item, dict) and isinstance(item.get("versions"), list):
+            documents.extend(_wardn_hub_catalog_documents(item))
         else:
             documents.append(item)
 
+    return documents
+
+
+def _wardn_hub_catalog_documents(server: dict) -> list[dict]:
+    documents = []
+    for version in server["versions"]:
+        if not isinstance(version, dict):
+            continue
+        server_json = version.get("serverJson")
+        document = dict(server_json) if isinstance(server_json, dict) else {}
+        document.setdefault(
+            "$schema",
+            "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        )
+        for key in (
+            "name",
+            "title",
+            "description",
+            "documentation",
+            "websiteUrl",
+            "repository",
+            "icons",
+        ):
+            if key not in document and key in server:
+                document[key] = server[key]
+        document["version"] = str(version.get("version") or document.get("version") or "").strip()
+        document["packages"] = version.get("packages", document.get("packages", [])) or []
+        document["remotes"] = version.get("remotes", document.get("remotes", [])) or []
+        metadata = dict(document.get("_meta") or {})
+        metadata["io.modelcontextprotocol.registry/official"] = {
+            "status": version.get("status") or "active",
+            "statusMessage": version.get("statusMessage") or "",
+            "statusChangedAt": version.get("statusChangedAt") or version.get("updatedAt"),
+            "publishedAt": version.get("publishedAt") or version.get("createdAt"),
+            "updatedAt": version.get("updatedAt") or version.get("publishedAt"),
+            "isLatest": bool(version.get("isLatest")),
+        }
+        metadata["dev.wardnai.hub/catalog"] = {
+            "qualityScore": version.get("qualityScore"),
+            "trustReport": version.get("trustReport"),
+        }
+        document["_meta"] = metadata
+        documents.append(document)
     return documents
 
 
@@ -472,6 +518,7 @@ def url_with_query_params(
     url: str,
     *,
     cursor: str | None = None,
+    page: int | None = None,
     limit: int | None = None,
     updated_since: str | None = None,
     version: str | None = None,
@@ -488,6 +535,8 @@ def url_with_query_params(
         query["cursor"] = cursor
     elif "cursor" in query:
         del query["cursor"]
+    if page is not None:
+        query["page"] = str(page)
     return urlunsplit(
         (
             split_url.scheme,
@@ -537,6 +586,7 @@ def load_supported_servers_from_registry_url(
     headers: dict[str, str] | None = None,
     updated_since: str | None = None,
     version: str | None = None,
+    pagination: str = "cursor",
     readme_descriptions: bool = False,
     github_token: str | None = None,
 ) -> list[MCPServerCreate]:
@@ -549,6 +599,7 @@ def load_supported_servers_from_registry_url(
     seen_server_versions: set[tuple[str, str]] = set()
     readme_cache: dict[tuple[str, str], str | None] = {}
     cursor = None
+    page = 1
     pages_fetched = 0
 
     logger.info("Loading supported MCP servers from registry: %s", source_url)
@@ -557,10 +608,11 @@ def load_supported_servers_from_registry_url(
         previous_cursor = cursor
         page_url = url_with_query_params(
             source_url,
-            cursor=cursor,
-            limit=limit,
-            updated_since=updated_since,
-            version=version,
+            cursor=cursor if pagination == "cursor" else None,
+            page=page if pagination == "page" else None,
+            limit=limit if pagination == "cursor" else None,
+            updated_since=updated_since if pagination == "cursor" else None,
+            version=version if pagination == "cursor" else None,
         )
         logger.debug("Fetching registry page %s, cursor=%s", pages_fetched + 1, cursor)
         if headers:
@@ -590,7 +642,7 @@ def load_supported_servers_from_registry_url(
         repeated_count = len(page_servers) - len(unique_page_servers)
 
         metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
-        cursor = metadata.get("nextCursor")
+        cursor = metadata.get("nextCursor") if pagination == "cursor" else None
         logger.debug(
             "Fetched registry page %s: %s entries, %s unique in fetch, %s repeated in fetch.",
             pages_fetched,
@@ -608,6 +660,16 @@ def load_supported_servers_from_registry_url(
         if max_pages is not None and pages_fetched >= max_pages:
             logger.info("Stopped after %s registry pages.", pages_fetched)
             break
+        if pagination == "page":
+            total_pages = metadata.get("pages")
+            if isinstance(total_pages, int) and page >= total_pages:
+                logger.info("Finished paged registry fetch after %s pages.", pages_fetched)
+                break
+            if not page_servers:
+                logger.info("Finished paged registry fetch after empty page %s.", page)
+                break
+            page += 1
+            continue
         if not cursor:
             logger.info("Finished registry fetch after %s pages.", pages_fetched)
             break

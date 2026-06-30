@@ -2,12 +2,14 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
 MCPServerInstallTarget = str
 MCPServerStatus = Literal["active", "deprecated", "deleted"]
 MCPServerValidationStatus = Literal["passed", "failed"]
+MCPCatalogSourceProvider = Literal["wardn_hub", "official", "pulsemcp", "custom"]
+MCPCatalogSyncMode = Literal["latest_only", "all_versions"]
 
 
 class MCPFileConfigValue(BaseModel):
@@ -20,7 +22,14 @@ class MCPFileConfigValue(BaseModel):
     path: str = Field(default="", max_length=4096)
 
 
-MCPConfigValue = str | MCPFileConfigValue
+class MCPSecretHandleConfigValue(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["secret_handle"] = "secret_handle"
+    secret_handle_id: UUID = Field(alias="secretHandleId")
+
+
+MCPConfigValue = str | MCPFileConfigValue | MCPSecretHandleConfigValue
 
 
 class MCPServerDocument(BaseModel):
@@ -190,3 +199,96 @@ class MCPServerInstallationToolsResponse(BaseModel):
     server_version: str = Field(alias="serverVersion")
     tools: list[MCPServerToolRead]
     cache: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPCatalogSourceCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(min_length=1, max_length=100)
+    provider: MCPCatalogSourceProvider = "wardn_hub"
+    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
+    tenant_id: str = Field(default="", alias="tenantId", max_length=255)
+    sync_mode: MCPCatalogSyncMode = Field(default="latest_only", alias="syncMode")
+    is_enabled: bool = Field(default=True, alias="isEnabled")
+    api_token_secret_store_id: UUID | None = Field(
+        default=None,
+        alias="apiTokenSecretStoreId",
+    )
+    api_token: SecretStr | None = Field(default=None, alias="apiToken")
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("Catalog URL must start with http:// or https://")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class MCPCatalogSourceUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    provider: MCPCatalogSourceProvider | None = None
+    base_url: str | None = Field(default=None, alias="baseUrl", min_length=1, max_length=2048)
+    tenant_id: str | None = Field(default=None, alias="tenantId", max_length=255)
+    sync_mode: MCPCatalogSyncMode | None = Field(default=None, alias="syncMode")
+    is_enabled: bool | None = Field(default=None, alias="isEnabled")
+    api_token_secret_store_id: UUID | None = Field(
+        default=None,
+        alias="apiTokenSecretStoreId",
+    )
+    api_token: SecretStr | None = Field(default=None, alias="apiToken")
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip().rstrip("/")
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("Catalog URL must start with http:// or https://")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
+class MCPCatalogSourceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    organization_id: UUID = Field(alias="organizationId")
+    name: str
+    provider: str
+    base_url: str = Field(alias="baseUrl")
+    tenant_id: str = Field(alias="tenantId")
+    sync_mode: str = Field(alias="syncMode")
+    last_success_at: datetime | None = Field(default=None, alias="lastSuccessAt")
+    last_synced_updated_since: datetime | None = Field(
+        default=None,
+        alias="lastSyncedUpdatedSince",
+    )
+    last_error: str = Field(alias="lastError")
+    is_enabled: bool = Field(alias="isEnabled")
+    has_auth_token: bool = Field(alias="hasAuthToken")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class MCPCatalogSourceListResponse(BaseModel):
+    sources: list[MCPCatalogSourceRead]
+
+
+class MCPCatalogSourceSyncResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: MCPCatalogSourceRead
+    synced_count: int = Field(alias="syncedCount")

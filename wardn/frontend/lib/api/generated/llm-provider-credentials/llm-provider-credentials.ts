@@ -11,6 +11,7 @@ import type {
   LLMProviderCredentialListResponse,
   LLMProviderCredentialRead,
   LLMProviderCredentialUpdate,
+  LLMProviderCredentialValidationResponse,
   LLMProviderModelListResponse
 } from '../model';
 
@@ -340,6 +341,67 @@ export const llmProviderCredentialsListModels = async (organizationId: string,
 
   const data: llmProviderCredentialsListModelsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as llmProviderCredentialsListModelsResponse
+}
+
+
+export type llmProviderCredentialsValidateResponse200 = {
+  data: LLMProviderCredentialValidationResponse
+  status: 200
+}
+
+export type llmProviderCredentialsValidateResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type llmProviderCredentialsValidateResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type llmProviderCredentialsValidateResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type llmProviderCredentialsValidateResponseSuccess = (llmProviderCredentialsValidateResponse200) & {
+  headers: Headers;
+};
+export type llmProviderCredentialsValidateResponseError = (llmProviderCredentialsValidateResponse403 | llmProviderCredentialsValidateResponse404 | llmProviderCredentialsValidateResponse422) & {
+  headers: Headers;
+};
+
+export type llmProviderCredentialsValidateResponse = (llmProviderCredentialsValidateResponseSuccess | llmProviderCredentialsValidateResponseError)
+
+export const getLlmProviderCredentialsValidateUrl = (organizationId: string,
+    credentialId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/validate`
+}
+
+/**
+ * @summary Validate Provider Credential Route
+ */
+export const llmProviderCredentialsValidate = async (organizationId: string,
+    credentialId: string, options?: RequestInit): Promise<llmProviderCredentialsValidateResponse> => {
+
+  const res = await fetch(getLlmProviderCredentialsValidateUrl(organizationId,credentialId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: llmProviderCredentialsValidateResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsValidateResponse
 }
 
 

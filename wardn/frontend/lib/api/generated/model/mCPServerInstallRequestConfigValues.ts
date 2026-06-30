@@ -5,5 +5,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MCPFileConfigValue } from './mCPFileConfigValue';
+import type { MCPSecretHandleConfigValue } from './mCPSecretHandleConfigValue';
 
-export type MCPServerInstallRequestConfigValues = {[key: string]: string | MCPFileConfigValue};
+export type MCPServerInstallRequestConfigValues = {[key: string]: string | MCPFileConfigValue | MCPSecretHandleConfigValue};
