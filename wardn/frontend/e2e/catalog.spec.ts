@@ -65,7 +65,7 @@ test.describe("catalog source management", () => {
     const productionHubRow = page.getByRole("row").filter({ hasText: "Production Hub" });
     await expect(productionHubRow).toBeVisible();
     await expect(productionHubRow).toContainText("https://hub.wardnai.dev");
-    await expect(productionHubRow).toContainText("Token stored");
+    await expect(productionHubRow).not.toContainText("Token stored");
 
     const createRequest = (await backendRequests(request)).find(
       (entry) =>

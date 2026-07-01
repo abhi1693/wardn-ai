@@ -172,9 +172,6 @@ export function CatalogSourcesClient({
                         <Badge variant={source.isEnabled ? "success" : "outline"}>
                           {source.isEnabled ? "Active" : "Inactive"}
                         </Badge>
-                        <Badge variant={source.hasAuthToken ? "secondary" : "outline"}>
-                          {source.hasAuthToken ? "Token stored" : "No token"}
-                        </Badge>
                       </div>
                     </TableCell>
                     <TableCell>

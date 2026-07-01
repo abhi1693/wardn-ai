@@ -25,6 +25,7 @@ PULSE_REGISTRY_URL = "https://api.pulsemcp.com/v0.1/servers"
 WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
+REGISTRY_SYNC_USER_AGENT = "Wardn/0.1 (+https://wardnai.dev)"
 CURATED_SERVERS = {
     "grafana": {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
@@ -549,7 +550,10 @@ def url_with_query_params(
 
 
 def fetch_registry_payload(url: str, headers: dict[str, str] | None = None):
-    request_headers = {"Accept": "application/json"}
+    request_headers = {
+        "Accept": "application/json",
+        "User-Agent": REGISTRY_SYNC_USER_AGENT,
+    }
     if headers:
         request_headers.update(headers)
     request = Request(url, headers=request_headers)

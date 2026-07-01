@@ -251,6 +251,62 @@ def test_load_supported_servers_reads_wardn_hub_catalog_payload() -> None:
     assert servers[0].meta["dev.wardnai.hub/catalog"]["qualityScore"] == 95
 
 
+def test_fetch_registry_payload_sends_default_user_agent(monkeypatch) -> None:
+    captured_headers = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b'{"servers":[],"metadata":{"count":0}}'
+
+    def urlopen(request, timeout):
+        captured_headers.update(dict(request.header_items()))
+        assert timeout == 30
+        return FakeResponse()
+
+    monkeypatch.setattr(commands, "urlopen", urlopen)
+
+    payload = commands.fetch_registry_payload("https://hub.wardnai.dev/api/v1/mcp/catalog")
+
+    assert payload["servers"] == []
+    assert captured_headers["Accept"] == "application/json"
+    assert captured_headers["User-agent"] == commands.REGISTRY_SYNC_USER_AGENT
+
+
+def test_fetch_registry_payload_allows_user_agent_override(monkeypatch) -> None:
+    captured_headers = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b'{"servers":[],"metadata":{"count":0}}'
+
+    def urlopen(request, timeout):
+        captured_headers.update(dict(request.header_items()))
+        return FakeResponse()
+
+    monkeypatch.setattr(commands, "urlopen", urlopen)
+
+    commands.fetch_registry_payload(
+        "https://hub.wardnai.dev/api/v1/mcp/catalog",
+        headers={"User-Agent": "Custom/1.0"},
+    )
+
+    assert captured_headers["User-agent"] == "Custom/1.0"
+
+
 def test_registry_url_loader_strips_unsupported_mcpb_packages(monkeypatch) -> None:
     payload = {
         "servers": [
