@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -8,7 +9,9 @@ from app.modules.mcp_registry import service, tool_repository, tool_service
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
+    MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
+    MCPServerInstallationUnsupportedError,
     MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.installer import MCPRuntimeInstall
@@ -530,6 +533,26 @@ def test_public_configured_values_omits_secret_fields() -> None:
     }
 
 
+def test_persist_install_secret_references_overwrites_local_manifest(tmp_path) -> None:
+    secret_path = tmp_path / "runtime.secrets.json"
+    secret_path.write_text('{"environment":{"WEATHER_TOKEN":"raw-token"}}', encoding="utf-8")
+
+    service.persist_install_secret_references(
+        str(tmp_path),
+        {
+            "environment": {
+                "WEATHER_TOKEN": {
+                    "type": "secret_handle",
+                    "secretHandleId": str(uuid4()),
+                }
+            }
+        },
+    )
+
+    stored = json.loads(secret_path.read_text(encoding="utf-8"))
+    assert stored["environment"]["WEATHER_TOKEN"]["type"] == "secret_handle"
+
+
 @pytest.mark.asyncio
 async def test_update_server_version_preserves_latest_marker(monkeypatch) -> None:
     server = server_version("1.0.0", is_latest=True)
@@ -795,6 +818,286 @@ async def test_install_server_version_preserves_existing_file_config_values(monk
         },
         "LOG_LEVEL": "debug",
     }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_writes_raw_secrets_to_backend(monkeypatch) -> None:
+    store_id = uuid4()
+    handle_id = uuid4()
+    secret_values_by_handle: dict[object, str] = {}
+    write_calls: list[dict[str, object]] = []
+    handle_calls: list[object] = []
+    seen: dict[str, object] = {}
+
+    server = server_version("1.0.0", is_latest=True)
+    server.packages = [
+        {
+            "registryType": "oci",
+            "identifier": "ghcr.io/example/weather",
+            "environmentVariables": [
+                {"name": "WEATHER_TOKEN", "isSecret": True},
+                {"name": "WEATHER_URL"},
+            ],
+        }
+    ]
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    async def write_secret_values(*args, **kwargs):
+        write_calls.append({"args": args, "kwargs": kwargs})
+
+    async def create_secret_handle(*args, **kwargs):
+        payload = args[3]
+        handle_calls.append(payload)
+        secret_values_by_handle[handle_id] = "raw-token"
+        return SimpleNamespace(id=handle_id)
+
+    async def resolve_secret(*args, **kwargs):
+        requested_handle_id = args[2]
+        return SimpleNamespace(value=secret_values_by_handle[requested_handle_id])
+
+    def install_runtime(_server, **kwargs):
+        seen["config_values"] = kwargs["config_values"]
+        return MCPRuntimeInstall(
+            install_type="package",
+            install_path="/tmp/wardn/mcp/weather/1.0.0",
+            runtime_config={"kind": "package"},
+            secret_config={
+                "environment": {
+                    "WEATHER_TOKEN": kwargs["config_values"]["WEATHER_TOKEN"],
+                    "WEATHER_URL": kwargs["config_values"]["WEATHER_URL"],
+                }
+            },
+            status="enabled",
+        )
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
+    monkeypatch.setattr(service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        service,
+        "get_runtime_manager",
+        lambda: SimpleNamespace(provider_name=lambda installation: "local"),
+    )
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            configSecretStoreId=store_id,
+            configValues={
+                "WEATHER_TOKEN": "raw-token",
+                "WEATHER_URL": "https://weather.example.com",
+            },
+            installTarget="package",
+        ),
+        workspace_id=WORKSPACE_ID,
+        user=USER,
+    )
+
+    assert seen["config_values"] == {
+        "WEATHER_TOKEN": "raw-token",
+        "WEATHER_URL": "https://weather.example.com",
+    }
+    assert write_calls[0]["args"][3] == store_id
+    assert write_calls[0]["kwargs"]["workspace_id"] == WORKSPACE_ID
+    assert write_calls[0]["kwargs"]["values"] == {"WEATHER_TOKEN": "raw-token"}
+    assert handle_calls[0].store_id == store_id
+    assert handle_calls[0].workspace_id == WORKSPACE_ID
+    assert handle_calls[0].purpose == "mcp_env"
+    installation = session.added[0]
+    assert installation.secret_references == {
+        "environment": {
+            "WEATHER_TOKEN": {
+                "type": "secret_handle",
+                "secretHandleId": str(handle_id),
+            },
+            "WEATHER_URL": "https://weather.example.com",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_rejects_raw_secrets_without_backend(monkeypatch) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    server.packages = [
+        {
+            "registryType": "oci",
+            "identifier": "ghcr.io/example/weather",
+            "environmentVariables": [{"name": "WEATHER_TOKEN", "isSecret": True}],
+        }
+    ]
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
+
+    with pytest.raises(MCPServerInstallationUnsupportedError, match="secret backend is required"):
+        await service.install_server_version(
+            FakeSession(),
+            "io.github.example/weather",
+            MCPServerInstallRequest(
+                configValues={"WEATHER_TOKEN": "raw-token"},
+                installTarget="package",
+            ),
+            workspace_id=WORKSPACE_ID,
+            user=USER,
+        )
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_validates_kubernetes_package_runtime(monkeypatch) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    server.packages = [
+        {
+            "registryType": "oci",
+            "identifier": "ghcr.io/example/weather",
+            "transport": {"type": "stdio"},
+        }
+    ]
+    seen: dict[str, object] = {}
+
+    class FakeRuntimeManager:
+        def provider_name(self, installation):
+            seen["provider_installation"] = installation
+            return service.RUNTIME_PROVIDER_KUBERNETES
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        seen["refresh_session"] = args[0]
+        seen["refresh_installation"] = kwargs["installation"]
+        seen["refresh_server"] = kwargs["server"]
+        seen["refresh_manager"] = kwargs["runtime_manager"]
+
+    def install_runtime(_server, **kwargs):
+        return MCPRuntimeInstall(
+            install_type="package",
+            install_path="/tmp/wardn/mcp/weather/1.0.0",
+            runtime_config={"kind": "package"},
+            secret_config={},
+            status="enabled",
+        )
+
+    manager = FakeRuntimeManager()
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
+    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(service, "get_runtime_manager", lambda: manager)
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(installTarget="package"),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    installation = session.added[0]
+    assert seen["provider_installation"] is installation
+    assert seen["refresh_session"] is session
+    assert seen["refresh_installation"] is installation
+    assert seen["refresh_server"] is server
+    assert seen["refresh_manager"] is manager
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_surfaces_kubernetes_package_validation_error(
+    monkeypatch,
+) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    server.packages = [
+        {
+            "registryType": "oci",
+            "identifier": "ghcr.io/example/weather",
+            "transport": {"type": "stdio"},
+        }
+    ]
+    removed_paths: list[str] = []
+
+    class FakeRuntimeManager:
+        def provider_name(self, installation):
+            return service.RUNTIME_PROVIDER_KUBERNETES
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        raise RuntimeError("pod crashed: missing executable github-mcp-server")
+
+    def install_runtime(_server, **kwargs):
+        return MCPRuntimeInstall(
+            install_type="package",
+            install_path="/tmp/wardn/mcp/weather/1.0.0",
+            runtime_config={"kind": "package"},
+            secret_config={},
+            status="enabled",
+        )
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
+    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(service, "get_runtime_manager", lambda: FakeRuntimeManager())
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+    monkeypatch.setattr(service, "remove_installation_artifacts", removed_paths.append)
+
+    with pytest.raises(
+        MCPServerInstallationFailedError,
+        match="pod crashed: missing executable github-mcp-server",
+    ):
+        await service.install_server_version(
+            FakeSession(),
+            "io.github.example/weather",
+            MCPServerInstallRequest(installTarget="package"),
+            workspace_id=WORKSPACE_ID,
+        )
+
+    assert removed_paths == ["/tmp/wardn/mcp/weather/1.0.0"]
 
 
 @pytest.mark.asyncio

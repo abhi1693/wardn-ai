@@ -31,7 +31,7 @@ export function WorkspacesOverviewClient({
     router.push(
       `/org/${encodeURIComponent(workspace.organizationId)}/workspace/${encodeURIComponent(
         workspace.id
-      )}/dashboard`
+      )}/chat`
     );
     router.refresh();
   }

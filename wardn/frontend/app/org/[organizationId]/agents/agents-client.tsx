@@ -2,6 +2,7 @@
 
 import { Bot, Loader2, MessageSquare, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +22,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
+import type {
+  AgentConversationResponse,
+  AgentRead,
+  OrganizationRead,
+} from "@/lib/api/generated/model";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import { errorMessage } from "../tokens/token-form";
@@ -35,7 +40,7 @@ type AgentsClientProps = {
 
 function credentialName(credentials: LlmCredentialRead[], credentialId?: string | null) {
   if (!credentialId) {
-    return "Default routing";
+    return "No credential";
   }
   const credential = credentials.find((entry) => entry.id === credentialId);
   if (!credential) {
@@ -56,11 +61,47 @@ export function AgentsClient({
   organization,
   workspaceId,
 }: AgentsClientProps) {
+  const router = useRouter();
   const [agents, setAgents] = useState(initialAgents);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
+  const [isStartingChat, setIsStartingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const basePath = `/org/${organization.id}/workspace/${workspaceId}/agents`;
   const apiBasePath = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents`;
+  const hasCredentials = credentials.length > 0;
+
+  async function startChat() {
+    if (!hasCredentials) {
+      return;
+    }
+    setIsStartingChat(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBasePath}/quick-start`, {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "Workspace chat could not be started."));
+      }
+      const bundle = data as AgentConversationResponse;
+      const agent = bundle.agent;
+      setAgents((current) => {
+        const existingIndex = current.findIndex((entry) => entry.id === agent.id);
+        if (existingIndex === -1) {
+          return [...current, agent];
+        }
+        return current.map((entry) => (entry.id === agent.id ? agent : entry));
+      });
+      router.push(
+        `/org/${organization.id}/workspace/${workspaceId}/chat/${bundle.conversation.id}`
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Workspace chat could not be started.");
+    } finally {
+      setIsStartingChat(false);
+    }
+  }
 
   async function deleteAgent(agent: AgentRead) {
     if (!window.confirm(`Delete ${agent.name}?`)) {
@@ -87,11 +128,35 @@ export function AgentsClient({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Agents</CardTitle>
-        <CardDescription>
-          Internal agents configured to use organization LLM credentials.
-        </CardDescription>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <CardTitle>Agents</CardTitle>
+          <CardDescription>
+            Chat with a workspace assistant or configure advanced agents.
+          </CardDescription>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={isStartingChat || !hasCredentials}
+            onClick={startChat}
+            size="sm"
+            title={hasCredentials ? undefined : "Add an LLM credential before starting chat"}
+            type="button"
+          >
+            {isStartingChat ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MessageSquare className="size-4" />
+            )}
+            Chat
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href={`${basePath}/new`}>
+              <Plus className="size-4" />
+              Advanced
+            </Link>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
@@ -107,7 +172,7 @@ export function AgentsClient({
                 <TableHead>Name</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead>Credential</TableHead>
-                <TableHead>Tools</TableHead>
+                <TableHead>MCP</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-28 text-right">Actions</TableHead>
               </TableRow>
@@ -131,7 +196,12 @@ export function AgentsClient({
                       {credentialName(credentials, agent.providerCredentialId)}
                     </span>
                   </TableCell>
-                  <TableCell>{agent.toolCount}</TableCell>
+                  <TableCell>
+                    <div className="text-sm">{agent.serverCount} servers</div>
+                    <div className="text-xs text-[var(--on-surface-variant)]">
+                      {agent.toolCount} tools
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={agent.isActive ? "success" : "secondary"}>
                       {agent.isActive ? "Active" : "Inactive"}
@@ -184,16 +254,31 @@ export function AgentsClient({
             <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
               <Bot className="size-5" />
             </div>
-            <h3 className="text-base font-semibold">No agents</h3>
+            <h3 className="text-base font-semibold">
+              {hasCredentials ? "No agents" : "No LLM credentials"}
+            </h3>
             <p className="mt-1 text-sm text-[var(--on-surface-variant)]">
-              Create an agent and assign an LLM credential to start validating the setup.
+              {hasCredentials
+                ? "Start chatting now. Wardn will create a workspace assistant with an available LLM credential and workspace MCP servers."
+                : "Add one LLM credential, then start workspace chat without configuring an agent first."}
             </p>
-            <Button asChild className="mt-4" size="sm">
-              <Link href={`${basePath}/new`}>
-                <Plus className="size-4" />
-                New agent
-              </Link>
-            </Button>
+            {hasCredentials ? (
+              <Button className="mt-4" disabled={isStartingChat} onClick={startChat} size="sm">
+                {isStartingChat ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <MessageSquare className="size-4" />
+                )}
+                Chat
+              </Button>
+            ) : (
+              <Button asChild className="mt-4" size="sm">
+                <Link href={`/org/${organization.id}/llm-credentials/new`}>
+                  <Plus className="size-4" />
+                  Add credential
+                </Link>
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

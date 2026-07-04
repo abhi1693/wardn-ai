@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/app-shell";
 import { AgentChatClient } from "@/app/org/[organizationId]/agents/[agentId]/agent-chat-client";
 import { getWorkspaceAgents } from "@/app/org/[organizationId]/agents/data";
+import { getLlmCredentials } from "@/app/org/[organizationId]/llm-credentials/data";
 import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
@@ -15,10 +16,11 @@ type WorkspaceAgentChatPageProps = {
 
 export default async function WorkspaceAgentChatPage({ params }: WorkspaceAgentChatPageProps) {
   const { organizationId, workspaceId, agentId } = await params;
-  const [workspaceContext, organization, agents] = await Promise.all([
+  const [workspaceContext, organization, agents, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId, workspaceId }),
     getOrganization(organizationId),
     getWorkspaceAgents(organizationId, workspaceId),
+    getLlmCredentials(organizationId),
   ]);
   const agent = agents.find((entry) => entry.id === agentId);
 
@@ -28,13 +30,13 @@ export default async function WorkspaceAgentChatPage({ params }: WorkspaceAgentC
 
   return (
     <AppShell
-      active="workspace-agents"
+      active="workspace-chat"
       actions={
         <div className="flex gap-2">
           <Button asChild size="sm" variant="outline">
-            <Link href={`/org/${organization.id}/workspace/${workspaceId}/agents`}>
+            <Link href={`/org/${organization.id}/workspace/${workspaceId}/chat`}>
               <ArrowLeft className="size-4" />
-              Agents
+              Chat
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
@@ -47,11 +49,16 @@ export default async function WorkspaceAgentChatPage({ params }: WorkspaceAgentC
           </Button>
         </div>
       }
-      eyebrow="Agents"
+      eyebrow="Chat"
       title={agent.name}
       workspaceContext={workspaceContext}
     >
-      <AgentChatClient agent={agent} organization={organization} workspaceId={workspaceId} />
+      <AgentChatClient
+        agent={agent}
+        credentials={credentials}
+        organization={organization}
+        workspaceId={workspaceId}
+      />
     </AppShell>
   );
 }

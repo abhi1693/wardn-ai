@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -162,7 +162,7 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
         role="owner",
         is_active=True,
     )
-    expires_at = datetime(2026, 7, 1, tzinfo=UTC)
+    expires_at = service.utc_now() + timedelta(hours=1)
     access_handle_id = uuid4()
     refresh_handle_id = uuid4()
 

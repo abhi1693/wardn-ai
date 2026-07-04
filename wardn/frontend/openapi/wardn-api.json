@@ -1,8 +1,55 @@
 {
   "components": {
     "schemas": {
+      "AgentAvailableServerRead": {
+        "properties": {
+          "configName": {
+            "title": "Configname",
+            "type": "string"
+          },
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "installedVersion": {
+            "title": "Installedversion",
+            "type": "string"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installationId",
+          "workspaceId",
+          "serverName",
+          "configName",
+          "installedVersion",
+          "status"
+        ],
+        "title": "AgentAvailableServerRead",
+        "type": "object"
+      },
       "AgentAvailableToolListResponse": {
         "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAvailableServerRead"
+            },
+            "title": "Servers",
+            "type": "array"
+          },
           "tools": {
             "items": {
               "$ref": "#/components/schemas/AgentAvailableToolRead"
@@ -139,6 +186,29 @@
           }
         },
         "title": "AgentChatRequest",
+        "type": "object"
+      },
+      "AgentConversationResponse": {
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentRead"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/WorkspaceConversationRead"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationMessageRead"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "conversation"
+        ],
+        "title": "AgentConversationResponse",
         "type": "object"
       },
       "AgentCreate": {
@@ -293,6 +363,10 @@
             "title": "Scope",
             "type": "string"
           },
+          "serverCount": {
+            "title": "Servercount",
+            "type": "integer"
+          },
           "toolCount": {
             "title": "Toolcount",
             "type": "integer"
@@ -324,6 +398,7 @@
           "scope",
           "modelName",
           "isActive",
+          "serverCount",
           "toolCount",
           "createdAt",
           "updatedAt"
@@ -658,6 +733,66 @@
           "password"
         ],
         "title": "BootstrapUserCreate",
+        "type": "object"
+      },
+      "ConversationMessageRead": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "conversationId": {
+            "format": "uuid",
+            "title": "Conversationid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "role",
+          "content",
+          "sequence",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ConversationMessageRead",
         "type": "object"
       },
       "ErrorResponse": {
@@ -2452,6 +2587,18 @@
             "title": "Configname",
             "type": "string"
           },
+          "configSecretStoreId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configsecretstoreid"
+          },
           "configValues": {
             "additionalProperties": {
               "anyOf": [
@@ -3767,6 +3914,72 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceConversationRead": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdById": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdbyid"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "isActive": {
+            "title": "Isactive",
+            "type": "boolean"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "title": "Organizationid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organizationId",
+          "workspaceId",
+          "agentId",
+          "title",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "WorkspaceConversationRead",
         "type": "object"
       },
       "WorkspaceCreate": {
@@ -8210,6 +8423,204 @@
           }
         },
         "summary": "List Workspace Agent Available Tools Route",
+        "tags": [
+          "workspace-agents"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "workspace_agents_get_conversation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Conversation Route",
+        "tags": [
+          "workspace-agents"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/quick-start": {
+      "post": {
+        "operationId": "workspace_agents_quick_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quick Start Workspace Agent Route",
         "tags": [
           "workspace-agents"
         ]

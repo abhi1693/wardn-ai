@@ -18,6 +18,7 @@ export interface AgentRead {
   organizationId: string;
   providerCredentialId?: string | null;
   scope: AgentReadScope;
+  serverCount: number;
   toolCount: number;
   updatedAt: string;
   workspaceId?: string | null;

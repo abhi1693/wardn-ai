@@ -9,9 +9,15 @@ from app.modules.agents.exceptions import (
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
-from app.modules.agents.models import Agent, AgentMCPServerAssignment, AgentMCPToolAssignment
+from app.modules.agents.models import (
+    Agent,
+    AgentMCPServerAssignment,
+    AgentMCPToolAssignment,
+    WorkspaceConversation,
+)
 from app.modules.agents.schemas import AgentChatMessage, AgentCreate, AgentToolAssignmentUpdate
 from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerToolSchema
 from app.modules.organizations.models import Organization, OrganizationMembership, Workspace
 from app.modules.users.models import User
@@ -217,6 +223,8 @@ async def test_get_agent_model_for_run_allows_workspace_member(monkeypatch) -> N
         scope="workspace",
         model_name="gpt-4o-mini",
         is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
     )
     calls: list[str] = []
 
@@ -380,6 +388,323 @@ async def test_create_agent_rejects_duplicate_name(monkeypatch) -> None:
             organization_id,
             AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
         )
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_agent_allows_same_name_in_different_workspace(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        return None, None, None
+
+    async def existing_by_name(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return None
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", existing_by_name)
+
+    session = FakeSession()
+    response = await service.create_workspace_agent(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
+    )
+
+    agent = session.added[0]
+    assert isinstance(agent, Agent)
+    assert agent.name == "SRE Agent"
+    assert agent.workspace_id == workspace_id
+    assert response.workspace_id == workspace_id
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_agent_rejects_duplicate_name_in_same_workspace(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        return None, None, None
+
+    async def duplicate(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return Agent(
+            id=uuid4(),
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            name="SRE Agent",
+            instructions="Existing",
+            scope="workspace",
+        )
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", duplicate)
+
+    with pytest.raises(DuplicateAgentError):
+        await service.create_workspace_agent(
+            FakeSession(),
+            user,
+            organization_id,
+            workspace_id,
+            AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
+        )
+
+
+@pytest.mark.asyncio
+async def test_quick_start_workspace_agent_creates_default_agent(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    organization_credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Org OpenAI",
+        provider="openai",
+        visibility="organization",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    workspace_credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace OpenAI",
+        provider="openai",
+        visibility="workspace",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    enabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/enabled",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    disabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/disabled",
+        config_name="default",
+        installed_version="1.0.0",
+        status="disabled",
+    )
+    assigned_servers = []
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def get_agent_by_name(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        assert kwargs["name"] == service.QUICK_START_AGENT_NAME
+        return None
+
+    async def list_credentials(*args, **kwargs):
+        return [organization_credential, workspace_credential]
+
+    async def list_models_for_credential(*args, **kwargs):
+        credential = args[1]
+        assert credential is workspace_credential
+        return LLMProviderModelListResponse(
+            models=[LLMProviderModelRead(id="gpt-4o-mini", name="GPT-4o mini")]
+        )
+
+    async def list_installations(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return [disabled_installation, enabled_installation]
+
+    async def replace_agent_tools(*args, **kwargs):
+        assigned_servers.extend(kwargs["server_assignments"])
+
+    async def count_agent_tools(*args, **kwargs):
+        return 4
+
+    async def count_agent_servers(*args, **kwargs):
+        return 1
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service.llm_provider_repository, "list_credentials", list_credentials)
+    monkeypatch.setattr(service, "list_models_for_credential", list_models_for_credential)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    session = FakeSession()
+    response = await service.quick_start_workspace_agent(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+    )
+
+    agent = session.added[0]
+    assert isinstance(agent, Agent)
+    assert agent.name == service.QUICK_START_AGENT_NAME
+    assert agent.workspace_id == workspace_id
+    assert agent.provider_credential_id == workspace_credential.id
+    assert agent.model_name == "gpt-4o-mini"
+    assert response.agent.tool_count == 4
+    assert response.agent.server_count == 1
+    assert response.agent.id == agent.id
+    assert response.conversation.agent_id == agent.id
+    assert response.conversation.workspace_id == workspace_id
+    assert response.messages == []
+    assert assigned_servers == [(enabled_installation, True, [])]
+
+
+@pytest.mark.asyncio
+async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        provider_credential_id=credential.id,
+        name=service.QUICK_START_AGENT_NAME,
+        description="Existing assistant",
+        instructions="Existing instructions.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+    sync_calls = []
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def get_agent_by_name(*args, **kwargs):
+        return agent
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    async def credential_supports_model(*args, **kwargs):
+        return True
+
+    async def list_installations(*args, **kwargs):
+        return []
+
+    async def replace_agent_tools(*args, **kwargs):
+        sync_calls.append(kwargs["agent_id"])
+
+    async def count_agent_tools(*args, **kwargs):
+        return 0
+
+    async def count_agent_servers(*args, **kwargs):
+        return 0
+
+    async def list_credentials(*args, **kwargs):
+        raise AssertionError("valid existing quick-start agent should keep its credential")
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
+    monkeypatch.setattr(service.llm_provider_repository, "list_credentials", list_credentials)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    session = FakeSession()
+    response = await service.quick_start_workspace_agent(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+    )
+
+    assert response.agent.id == agent.id
+    assert response.agent.provider_credential_id == credential.id
+    assert response.agent.model_name == "gpt-4o-mini"
+    assert isinstance(session.added[0], WorkspaceConversation)
+    assert response.conversation.agent_id == agent.id
+    assert response.messages == []
+    assert sync_calls == [agent.id]
+
+
+@pytest.mark.asyncio
+async def test_list_available_agent_tools_includes_enabled_servers_without_tools(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    enabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/enabled",
+        config_name="personal",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    disabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/disabled",
+        config_name="default",
+        installed_version="1.0.0",
+        status="disabled",
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def list_installations(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return [disabled_installation, enabled_installation]
+
+    async def list_workspace_available_tools(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return []
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(
+        service.repository,
+        "list_workspace_available_tools",
+        list_workspace_available_tools,
+    )
+
+    response = await service.list_available_agent_tools(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+    )
+
+    assert response.tools == []
+    assert len(response.servers) == 1
+    assert response.servers[0].installation_id == enabled_installation.id
+    assert response.servers[0].config_name == "personal"
 
 
 @pytest.mark.asyncio

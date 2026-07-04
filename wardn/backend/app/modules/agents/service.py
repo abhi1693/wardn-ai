@@ -18,13 +18,15 @@ from app.modules.agents.exceptions import (
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
-from app.modules.agents.models import Agent
+from app.modules.agents.models import Agent, ConversationMessage, WorkspaceConversation
 from app.modules.agents.schemas import (
     TOOL_ASSIGNMENT_WILDCARD,
+    AgentAvailableServerRead,
     AgentAvailableToolListResponse,
     AgentAvailableToolRead,
     AgentChatMessage,
     AgentChatRequest,
+    AgentConversationResponse,
     AgentCreate,
     AgentListResponse,
     AgentRead,
@@ -33,6 +35,8 @@ from app.modules.agents.schemas import (
     AgentToolListResponse,
     AgentToolRead,
     AgentUpdate,
+    ConversationMessageRead,
+    WorkspaceConversationRead,
 )
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
@@ -40,11 +44,14 @@ from app.modules.llm_providers.service import (
     OPENAI_API_KEY_PROVIDER,
     OPENAI_CHATGPT_PROVIDER,
     credential_supports_model,
+    list_models_for_credential,
     read_record,
     resolve_credential_secrets,
+    user_can_see_credential,
     validate_chatgpt_oauth_credential,
 )
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.mcp_registry import repository as mcp_registry_repository
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -74,6 +81,12 @@ AGENT_CHAT_TIMEOUT_SECONDS = 120.0
 CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS = 32_000
 AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
+QUICK_START_AGENT_NAME = "Workspace Assistant"
+QUICK_START_AGENT_DESCRIPTION = "Default assistant for workspace chat."
+QUICK_START_AGENT_INSTRUCTIONS = (
+    "You are a workspace assistant. Use available tools when they help answer accurately. "
+    "Ask before destructive actions."
+)
 
 
 class AgentChatProviderError(Exception):
@@ -183,7 +196,7 @@ async def validate_agent_model(
     return normalized_model
 
 
-def agent_response(agent: Agent, *, tool_count: int) -> AgentRead:
+def agent_response(agent: Agent, *, server_count: int, tool_count: int) -> AgentRead:
     return AgentRead(
         id=agent.id,
         organizationId=agent.organization_id,
@@ -196,10 +209,42 @@ def agent_response(agent: Agent, *, tool_count: int) -> AgentRead:
         scope=agent.scope,
         modelName=agent.model_name,
         isActive=agent.is_active,
+        serverCount=server_count,
         toolCount=tool_count,
         createdAt=agent.created_at,
         updatedAt=agent.updated_at,
     )
+
+
+def conversation_response(conversation: WorkspaceConversation) -> WorkspaceConversationRead:
+    return WorkspaceConversationRead(
+        id=conversation.id,
+        organizationId=conversation.organization_id,
+        workspaceId=conversation.workspace_id,
+        agentId=conversation.agent_id,
+        createdById=conversation.created_by_id,
+        title=conversation.title,
+        isActive=conversation.is_active,
+        createdAt=conversation.created_at,
+        updatedAt=conversation.updated_at,
+    )
+
+
+def conversation_message_response(message: ConversationMessage) -> ConversationMessageRead:
+    return ConversationMessageRead(
+        id=message.id,
+        conversationId=message.conversation_id,
+        role=message.role,
+        content=message.content,
+        parts=message.parts or text_parts(message.content),
+        sequence=message.sequence,
+        createdAt=message.created_at,
+        updatedAt=message.updated_at,
+    )
+
+
+def text_parts(content: str) -> list[dict[str, str]]:
+    return [{"type": "text", "text": content}]
 
 
 async def list_agents(
@@ -220,7 +265,10 @@ async def list_agents(
         is_superuser=user.is_superuser,
     )
     return AgentListResponse(
-        agents=[agent_response(agent, tool_count=tool_count) for agent, tool_count in rows]
+        agents=[
+            agent_response(agent, server_count=server_count, tool_count=tool_count)
+            for agent, server_count, tool_count in rows
+        ]
     )
 
 
@@ -243,7 +291,11 @@ async def get_agent(
     )
     if agent is None:
         raise AgentNotFoundError("agent not found")
-    return agent_response(agent, tool_count=await repository.count_agent_tools(session, agent.id))
+    return agent_response(
+        agent,
+        server_count=await repository.count_agent_servers(session, agent.id),
+        tool_count=await repository.count_agent_tools(session, agent.id),
+    )
 
 
 async def get_agent_model_for_run(
@@ -302,7 +354,12 @@ async def create_agent(
         scope=payload.scope,
         workspace_id=payload.workspace_id,
     )
-    if await repository.get_agent_by_name(session, organization_id=organization_id, name=name):
+    if await repository.get_agent_by_name(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name=name,
+    ):
         raise DuplicateAgentError("agent name already exists")
     provider_credential = await validate_provider_credential(
         session,
@@ -327,7 +384,7 @@ async def create_agent(
     session.add(agent)
     await session.flush()
     await session.refresh(agent)
-    return agent_response(agent, tool_count=0)
+    return agent_response(agent, server_count=0, tool_count=0)
 
 
 async def create_workspace_agent(
@@ -342,6 +399,210 @@ async def create_workspace_agent(
         user,
         organization_id,
         payload.model_copy(update={"scope": "workspace", "workspace_id": workspace_id}),
+    )
+
+
+def credential_visible_for_workspace_quick_start(
+    user: User,
+    credential: LLMProviderCredential,
+    workspace_id: uuid.UUID,
+) -> bool:
+    if not credential.is_active or not user_can_see_credential(user, credential):
+        return False
+    if credential.visibility == "workspace":
+        return credential.workspace_id == workspace_id
+    return credential.workspace_id is None
+
+
+def quick_start_credential_sort_key(credential: LLMProviderCredential) -> tuple[int, str, str]:
+    scope_rank = {"workspace": 0, "organization": 1, "user": 2}.get(credential.visibility, 3)
+    return (scope_rank, credential.provider, credential.name.casefold())
+
+
+async def select_quick_start_credential_and_model(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> tuple[LLMProviderCredential, str]:
+    credentials = await llm_provider_repository.list_credentials(
+        session,
+        organization_id=organization_id,
+    )
+    candidates = sorted(
+        (
+            credential
+            for credential in credentials
+            if credential_visible_for_workspace_quick_start(user, credential, workspace_id)
+        ),
+        key=quick_start_credential_sort_key,
+    )
+    for credential in candidates:
+        try:
+            models = await list_models_for_credential(session, credential)
+        except Exception:
+            continue
+        first_model = next((model for model in models.models if model.id.strip()), None)
+        if first_model is not None:
+            return credential, first_model.id
+    raise InvalidAgentScopeError("no usable LLM credential is available for workspace chat")
+
+
+async def quick_start_agent_needs_model_selection(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    agent: Agent,
+) -> bool:
+    if agent.provider_credential_id is None or not agent.model_name:
+        return True
+    try:
+        credential = await validate_provider_credential(
+            session,
+            user,
+            organization_id,
+            agent_workspace_id=agent.workspace_id,
+            provider_credential_id=agent.provider_credential_id,
+        )
+        await validate_agent_model(session, credential, agent.model_name)
+    except InvalidAgentScopeError:
+        return True
+    return False
+
+
+async def sync_quick_start_agent_tools(
+    session: AsyncSession,
+    agent: Agent,
+    workspace_id: uuid.UUID,
+) -> None:
+    installations = await mcp_registry_repository.list_installations(
+        session,
+        workspace_id=workspace_id,
+    )
+    enabled_installations = [
+        installation for installation in installations if installation.status == "enabled"
+    ]
+    await repository.replace_agent_tools(
+        session,
+        agent_id=agent.id,
+        server_assignments=[(installation, True, []) for installation in enabled_installations],
+    )
+
+
+async def quick_start_workspace_agent(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> AgentConversationResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    agent = await repository.get_agent_by_name(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name=QUICK_START_AGENT_NAME,
+    )
+    if agent is None:
+        credential, model_name = await select_quick_start_credential_and_model(
+            session,
+            user,
+            organization_id,
+            workspace_id,
+        )
+        agent = Agent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            created_by_id=user.id,
+            provider_credential_id=credential.id,
+            name=QUICK_START_AGENT_NAME,
+            description=QUICK_START_AGENT_DESCRIPTION,
+            instructions=QUICK_START_AGENT_INSTRUCTIONS,
+            scope="workspace",
+            model_name=model_name,
+            is_active=True,
+        )
+        session.add(agent)
+        await session.flush()
+        await session.refresh(agent)
+    else:
+        changed = False
+        if await quick_start_agent_needs_model_selection(
+            session,
+            user,
+            organization_id,
+            agent,
+        ):
+            credential, model_name = await select_quick_start_credential_and_model(
+                session,
+                user,
+                organization_id,
+                workspace_id,
+            )
+            agent.provider_credential_id = credential.id
+            agent.model_name = model_name
+            changed = True
+        if not agent.instructions.strip():
+            agent.instructions = QUICK_START_AGENT_INSTRUCTIONS
+            changed = True
+        if not agent.is_active:
+            agent.is_active = True
+            changed = True
+        if changed:
+            await session.flush()
+            await session.refresh(agent)
+    await sync_quick_start_agent_tools(session, agent, workspace_id)
+    server_count = await repository.count_agent_servers(session, agent.id)
+    tool_count = await repository.count_agent_tools(session, agent.id)
+    conversation = await repository.create_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        created_by_id=user.id,
+    )
+    return AgentConversationResponse(
+        agent=agent_response(agent, server_count=server_count, tool_count=tool_count),
+        conversation=conversation_response(conversation),
+        messages=[],
+    )
+
+
+async def get_workspace_conversation(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> AgentConversationResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    conversation = await repository.get_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+    )
+    if conversation is None:
+        raise AgentNotFoundError("conversation not found")
+    agent = await repository.get_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=conversation.agent_id,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+    messages = await repository.list_conversation_messages(
+        session,
+        conversation_id=conversation.id,
+    )
+    return AgentConversationResponse(
+        agent=agent_response(
+            agent,
+            server_count=await repository.count_agent_servers(session, agent.id),
+            tool_count=await repository.count_agent_tools(session, agent.id),
+        ),
+        conversation=conversation_response(conversation),
+        messages=[conversation_message_response(message) for message in messages],
     )
 
 
@@ -366,6 +627,17 @@ def available_tool_response(
     )
 
 
+def available_server_response(installation: MCPServerInstallation) -> AgentAvailableServerRead:
+    return AgentAvailableServerRead(
+        installationId=installation.id,
+        workspaceId=installation.workspace_id,
+        serverName=installation.server_name,
+        configName=installation.config_name,
+        installedVersion=installation.installed_version,
+        status=installation.status,
+    )
+
+
 async def list_available_agent_tools(
     session: AsyncSession,
     user: User,
@@ -373,8 +645,17 @@ async def list_available_agent_tools(
     workspace_id: uuid.UUID,
 ) -> AgentAvailableToolListResponse:
     await require_workspace_member(session, user, organization_id, workspace_id)
+    installations = await mcp_registry_repository.list_installations(
+        session,
+        workspace_id=workspace_id,
+    )
     rows = await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
     return AgentAvailableToolListResponse(
+        servers=[
+            available_server_response(installation)
+            for installation in installations
+            if installation.status == "enabled"
+        ],
         tools=[
             available_tool_response(tool_schema, installation)
             for tool_schema, installation in rows
@@ -809,6 +1090,64 @@ async def run_agent_chat(
     raise InvalidAgentScopeError("agent credential provider is not supported for chat")
 
 
+def conversation_id_from_payload(payload: AgentChatRequest) -> uuid.UUID | None:
+    if not payload.id:
+        return None
+    try:
+        return uuid.UUID(str(payload.id))
+    except ValueError as exc:
+        raise InvalidAgentScopeError("chat conversation id is invalid") from exc
+
+
+def latest_user_message(messages: list[AgentChatMessage]) -> AgentChatMessage | None:
+    return next((message for message in reversed(messages) if message.role == "user"), None)
+
+
+async def persist_chat_turn_user_message(
+    session: AsyncSession,
+    conversation: WorkspaceConversation,
+    payload: AgentChatRequest,
+) -> None:
+    message = latest_user_message(payload.messages)
+    if message is None:
+        return
+    content = text_from_chat_message(message)
+    if not content:
+        return
+    await repository.append_conversation_message(
+        session,
+        conversation_id=conversation.id,
+        role="user",
+        content=content,
+        parts=text_parts(content),
+    )
+    await session.commit()
+
+
+async def persisted_agent_chat_stream(
+    session: AsyncSession,
+    conversation: WorkspaceConversation | None,
+    stream: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    chunks: list[str] = []
+    async for text in stream:
+        chunks.append(text)
+        yield text
+    if conversation is None:
+        return
+    content = "".join(chunks).strip()
+    if not content:
+        return
+    await repository.append_conversation_message(
+        session,
+        conversation_id=conversation.id,
+        role="assistant",
+        content=content,
+        parts=text_parts(content),
+    )
+    await session.commit()
+
+
 async def stream_agent_chat(
     session: AsyncSession,
     user: User,
@@ -827,16 +1166,31 @@ async def stream_agent_chat(
     messages = provider_messages(payload.messages)
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
+    conversation = None
+    conversation_id = conversation_id_from_payload(payload)
+    if conversation_id is not None:
+        if workspace_id is None:
+            raise InvalidAgentScopeError("conversation chat requires a workspace")
+        conversation = await repository.get_workspace_conversation(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+        )
+        if conversation is None or conversation.agent_id != agent.id:
+            raise AgentNotFoundError("conversation not found")
+        await persist_chat_turn_user_message(session, conversation, payload)
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
     )
-    return run_agent_chat(
+    stream = run_agent_chat(
         session,
         agent,
         credential,
         AgentChatRequest(id=payload.id, messages=payload.messages),
         tools,
     )
+    return persisted_agent_chat_stream(session, conversation, stream)
 
 
 async def update_agent(
@@ -878,6 +1232,7 @@ async def update_agent(
         existing = await repository.get_agent_by_name(
             session,
             organization_id=organization_id,
+            workspace_id=target_workspace_id,
             name=name,
         )
         if existing is not None and existing.id != agent.id:
@@ -940,6 +1295,7 @@ async def update_agent(
     await session.refresh(agent)
     return agent_response(
         agent,
+        server_count=await repository.count_agent_servers(session, agent.id),
         tool_count=await repository.count_agent_tools(session, agent.id),
     )
 

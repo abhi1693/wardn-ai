@@ -2,10 +2,10 @@ import {
   BookOpen,
   Boxes,
   Activity,
-  Bot,
   Home,
   KeyRound,
   Layers3,
+  MessageSquare,
   PlugZap,
   Replace,
   ServerCog,
@@ -85,6 +85,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
 
   return [
     {
+      label: "Chat",
+      href: `${workspaceBasePath}/chat`,
+      activeKey: "workspace-chat",
+      icon: MessageSquare,
+    },
+    {
       label: "Dashboard",
       href: `${workspaceBasePath}/dashboard`,
       activeKey: "workspace-dashboard",
@@ -101,12 +107,6 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       href: `${workspaceBasePath}/runtime`,
       activeKey: "runtime",
       icon: Activity,
-    },
-    {
-      label: "Agents",
-      href: `${workspaceBasePath}/agents`,
-      activeKey: "workspace-agents",
-      icon: Bot,
     },
     {
       label: "Settings",
@@ -128,6 +128,7 @@ type AppShellProps = {
     | "organization-settings"
     | "workspace-settings"
     | "workspace-dashboard"
+    | "workspace-chat"
     | "catalog"
     | "llm-credentials"
     | "secret-backends"
@@ -153,6 +154,7 @@ export function AppShell({
 }: AppShellProps) {
   const isWorkspaceScope =
     active === "workspace-dashboard" ||
+    active === "workspace-chat" ||
     active === "install" ||
     active === "runtime" ||
     active === "workspace-agents" ||

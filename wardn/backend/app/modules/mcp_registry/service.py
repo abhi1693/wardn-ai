@@ -3,6 +3,7 @@ import re
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -12,17 +13,24 @@ from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
     MCPCatalogSourceNotFoundError,
+    MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
+    MCPServerInstallationUnsupportedError,
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
 )
 from app.modules.mcp_registry.installer import (
     ConfigValues,
+    config_file_content,
     config_value_mapping,
     config_value_present,
     config_value_text,
+    file_config_definition,
     install_server_runtime,
     remove_installation_artifacts,
+    safe_path_component,
+    selected_install_target,
+    write_secret_manifest,
 )
 from app.modules.mcp_registry.models import (
     MCPCatalogSource,
@@ -54,6 +62,7 @@ from app.modules.mcp_registry.schemas import (
     MCPServerToolRead,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
+from app.modules.mcp_runtime.manager import RUNTIME_PROVIDER_KUBERNETES, get_runtime_manager
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations import repository as organization_repository
 from app.modules.secrets.exceptions import SecretsError
@@ -67,6 +76,7 @@ VERSION_PREFIX_PATTERN = re.compile(r"^\s*v?(\d+(?:[._-]\d+)*)", re.IGNORECASE)
 CATALOG_SYNC_PAGE_SIZE = 100
 WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
 CATALOG_SOURCE_TOKEN_KEY = "api_token"
+MCP_INSTALL_SECRET_VALUE_KEY_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
 async def default_workspace_id(session) -> uuid.UUID:
@@ -209,6 +219,216 @@ def secret_handle_id_from_value(value) -> uuid.UUID | None:
     return uuid.UUID(str(raw_handle_id))
 
 
+def parse_install_target_value(
+    server: MCPServerVersion,
+    install_target: str | None,
+    config_values: ConfigValues,
+) -> tuple[str, int]:
+    raw_target = install_target or selected_install_target(server, config_values)
+    kind, _, raw_index = raw_target.partition(":")
+    kind = kind if kind in {"remote", "package"} else "package"
+    try:
+        index = int(raw_index or "0")
+    except ValueError:
+        index = 0
+    return kind, max(index, 0)
+
+
+def install_secret_key_name(field_name: str) -> str:
+    key = MCP_INSTALL_SECRET_VALUE_KEY_PATTERN.sub("_", field_name.strip()).strip("._-")
+    return key[:120] or "value"
+
+
+def install_secret_display_name(config_name: str, field_name: str, run_id: str) -> str:
+    label = field_name.removeprefix("headers.").replace("_", " ").strip()
+    display_name = f"MCP {config_name} {label} {run_id}"
+    return display_name[:100].strip()
+
+
+def install_secret_path(
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    server_name: str,
+    config_name: str,
+    run_id: str,
+) -> str:
+    return "/".join(
+        [
+            "wardn",
+            "organizations",
+            str(organization_id),
+            "workspaces",
+            str(workspace_id),
+            "mcp",
+            safe_path_component(server_name),
+            f"{safe_path_component(config_name)}-{run_id}",
+        ]
+    )
+
+
+def selected_install_secret_fields(
+    server: MCPServerVersion,
+    install_target: str | None,
+    config_values: ConfigValues,
+) -> dict[str, str]:
+    kind, index = parse_install_target_value(server, install_target, config_values)
+    fields: dict[str, str] = {}
+
+    if kind == "remote":
+        remote = (server.remotes or [])[index] if index < len(server.remotes or []) else {}
+        headers = remote.get("headers") if isinstance(remote, dict) else None
+        if isinstance(headers, list):
+            for header in headers:
+                if not isinstance(header, dict) or not header.get("isSecret"):
+                    continue
+                name = str(header.get("name") or "").strip()
+                if name:
+                    fields[name] = "mcp_header"
+    else:
+        package = (server.packages or [])[index] if index < len(server.packages or []) else {}
+        environment = package.get("environmentVariables") if isinstance(package, dict) else None
+        if isinstance(environment, list):
+            for env_var in environment:
+                if not isinstance(env_var, dict) or not env_var.get("isSecret"):
+                    continue
+                name = str(env_var.get("name") or "").strip()
+                if name:
+                    fields[name] = "mcp_env"
+        package_arguments = package.get("packageArguments") if isinstance(package, dict) else None
+        if isinstance(package_arguments, list):
+            for argument in package_arguments:
+                if not isinstance(argument, dict):
+                    continue
+                name = str(argument.get("name") or "").strip()
+                if not name:
+                    continue
+                if file_config_definition(argument):
+                    fields[name] = "mcp_file"
+                elif argument.get("isSecret"):
+                    fields[name] = "runtime_config"
+
+    for key, value in config_values.items():
+        if str(key).startswith("headers."):
+            fields[str(key)] = "mcp_header"
+        elif config_value_mapping(value).get("type") == "file":
+            fields[str(key)] = "mcp_file"
+    return fields
+
+
+def install_secret_value(value) -> tuple[str, dict | None]:
+    mapping = config_value_mapping(value)
+    if mapping.get("type") != "file":
+        return config_value_text(value), None
+
+    content = config_file_content(value)
+    replacement = {
+        key: item
+        for key, item in mapping.items()
+        if key not in {"content", "contentBase64", "content_base64", "path"}
+    }
+    replacement["type"] = "file"
+    replacement.setdefault("filename", "")
+    return content, replacement
+
+
+async def externalize_install_config_secrets(
+    session,
+    user: User | None,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    server: MCPServerVersion,
+    payload: MCPServerInstallRequest,
+    config_values: ConfigValues,
+) -> ConfigValues:
+    secret_fields = selected_install_secret_fields(server, payload.install_target, config_values)
+    raw_values: dict[str, str] = {}
+    replacements: dict[str, dict | None] = {}
+    field_key_names: dict[str, str] = {}
+
+    for field_name, purpose in secret_fields.items():
+        value = config_values.get(field_name)
+        if not config_value_present(value) or secret_handle_id_from_value(value):
+            continue
+        mapping = config_value_mapping(value)
+        if mapping.get("type") == "file" and secret_handle_id_from_value(mapping.get("content")):
+            continue
+        secret_value, replacement = install_secret_value(value)
+        if not secret_value:
+            continue
+        key_name = install_secret_key_name(field_name)
+        candidate = key_name
+        counter = 2
+        while candidate in raw_values:
+            candidate = f"{key_name}_{counter}"
+            counter += 1
+        raw_values[candidate] = secret_value
+        replacements[field_name] = replacement
+        field_key_names[field_name] = candidate
+
+    if not raw_values:
+        return config_values
+    if payload.config_secret_store_id is None:
+        raise MCPServerInstallationUnsupportedError("secret backend is required for MCP secrets")
+    if user is None:
+        raise MCPServerInstallationUnsupportedError("authenticated user is required for MCP secrets")
+
+    run_id = uuid.uuid4().hex[:8]
+    external_ref = install_secret_path(
+        organization_id,
+        workspace_id,
+        server.name,
+        payload.config_name,
+        run_id,
+    )
+    primary_purpose = next(iter(secret_fields.values()), "other")
+    try:
+        await write_secret_values(
+            session,
+            user,
+            organization_id,
+            payload.config_secret_store_id,
+            workspace_id=workspace_id,
+            external_ref=external_ref,
+            values=raw_values,
+            purpose=primary_purpose,
+        )
+    except SecretsError as exc:
+        raise MCPServerInstallationUnsupportedError(str(exc)) from exc
+
+    updated = dict(config_values)
+    for field_name, key_name in field_key_names.items():
+        purpose = secret_fields[field_name]
+        try:
+            handle = await create_secret_handle(
+                session,
+                user,
+                organization_id,
+                SecretHandleCreate(
+                    storeId=payload.config_secret_store_id,
+                    workspaceId=workspace_id,
+                    purpose=purpose,
+                    displayName=install_secret_display_name(payload.config_name, field_name, run_id),
+                    externalRef=external_ref,
+                    keyName=key_name,
+                    metadata={
+                        "serverName": server.name,
+                        "configName": payload.config_name,
+                        "configField": field_name,
+                        "installTarget": payload.install_target or "",
+                    },
+                ),
+            )
+        except SecretsError as exc:
+            raise MCPServerInstallationUnsupportedError(str(exc)) from exc
+
+        replacement = replacements[field_name]
+        if replacement is not None:
+            updated[field_name] = {**replacement, "content": secret_handle_ref(handle.id)}
+        else:
+            updated[field_name] = secret_handle_ref(handle.id)
+    return updated
+
+
 async def resolve_install_config_values(
     session,
     organization_id: uuid.UUID,
@@ -259,12 +479,50 @@ def secret_references_from_runtime_secret_config(
         for key in list(namespace_values):
             if key in handle_refs:
                 namespace_values[key] = secret_handle_ref(handle_refs[key])
+            elif namespace == "headers" and f"headers.{key}" in handle_refs:
+                namespace_values[key] = secret_handle_ref(handle_refs[f"headers.{key}"])
     files = references.get("files")
     if isinstance(files, dict):
         for key, detail in files.items():
             if key in handle_refs and isinstance(detail, dict):
                 detail["content"] = secret_handle_ref(handle_refs[key])
     return references
+
+
+def persist_install_secret_references(install_path: str, secret_references: dict) -> None:
+    if not secret_references or not install_path:
+        return
+    path = Path(install_path)
+    if path.exists():
+        write_secret_manifest(path, secret_references)
+
+
+async def validate_package_runtime_install(
+    session,
+    installation: MCPServerInstallation,
+    server: MCPServerVersion,
+) -> None:
+    if installation.install_type != "package":
+        return
+    manager = get_runtime_manager()
+    try:
+        provider_name = manager.provider_name(installation)
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        raise MCPServerInstallationFailedError(detail) from exc
+    if provider_name != RUNTIME_PROVIDER_KUBERNETES:
+        return
+
+    try:
+        await refresh_tool_schemas_for_installation(
+            session,
+            installation=installation,
+            server=server,
+            runtime_manager=manager,
+        )
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        raise MCPServerInstallationFailedError(detail) from exc
 
 
 def install_config_values_from_secret_references(secret_references: dict | None) -> ConfigValues:
@@ -1199,6 +1457,7 @@ async def install_server_version(
     name: str,
     payload: MCPServerInstallRequest,
     workspace_id: uuid.UUID | None = None,
+    user: User | None = None,
 ) -> MCPServerInstallationRead:
     workspace_id = workspace_id or await default_workspace_id(session)
     organization_id = await organization_id_for_workspace(session, workspace_id)
@@ -1219,6 +1478,16 @@ async def install_server_version(
         workspace_id,
     )
     config_values = merged_install_config_values(installation, payload.config_values)
+    if organization_id is not None:
+        config_values = await externalize_install_config_secrets(
+            session,
+            user,
+            organization_id,
+            workspace_id,
+            server,
+            payload,
+            config_values,
+        )
     resolved_config_values, handle_refs = await resolve_install_config_values(
         session,
         organization_id,
@@ -1236,6 +1505,8 @@ async def install_server_version(
         runtime_install.secret_config,
         handle_refs,
     )
+    persist_install_secret_references(runtime_install.install_path, secret_references)
+    is_new_installation = installation is None
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
         installation = MCPServerInstallation(
@@ -1260,11 +1531,18 @@ async def install_server_version(
         installation.secret_references = secret_references
         installation.install_error = runtime_install.install_error
 
+    await session.flush()
+    await session.refresh(installation)
+    try:
+        await validate_package_runtime_install(session, installation, server)
+    except MCPServerInstallationFailedError:
+        if is_new_installation or previous_install_path != runtime_install.install_path:
+            remove_installation_artifacts(runtime_install.install_path)
+        raise
+
     if previous_install_path and previous_install_path != runtime_install.install_path:
         remove_installation_artifacts(previous_install_path)
 
-    await session.flush()
-    await session.refresh(installation)
     return await installation_response(session, installation, organization_id=organization_id)
 
 
@@ -1345,6 +1623,7 @@ async def update_installed_servers(
                 runtime_install.secret_config,
                 handle_refs,
             )
+            persist_install_secret_references(runtime_install.install_path, secret_references)
             previous_install_path = installation.install_path
             installation.installed_version = latest.version
             installation.status = runtime_install.status

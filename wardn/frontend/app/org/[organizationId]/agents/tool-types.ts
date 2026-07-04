@@ -16,6 +16,20 @@ export type AgentAvailableTool = {
   workspaceId: string;
 };
 
+export type AgentAvailableServer = {
+  configName: string;
+  installationId: string;
+  installedVersion: string;
+  serverName: string;
+  status: string;
+  workspaceId: string;
+};
+
+export type AgentAvailableAssignments = {
+  servers: AgentAvailableServer[];
+  tools: AgentAvailableTool[];
+};
+
 export type AgentServerToolAssignment = {
   installationId: string;
   toolSchemaIds: string[];

@@ -58,7 +58,7 @@ export function WorkspaceSelector({ context }: WorkspaceSelectorProps) {
         router.push(
           `/org/${encodeURIComponent(workspace.organizationId)}/workspace/${encodeURIComponent(
             workspace.id
-          )}/dashboard`
+          )}/chat`
         );
         router.refresh();
       }}

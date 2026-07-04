@@ -17,8 +17,8 @@ export async function responseErrorMessage(response: Response, fallback: string)
 
 export function runtimeDisplayName(value: string) {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "remote") {
-    return "Remote endpoint";
+  if (normalized === "remote" || normalized === "streamable-http" || normalized === "sse") {
+    return "Remote API";
   }
   if (normalized === "uvx") {
     return "UVX";
@@ -31,12 +31,6 @@ export function runtimeDisplayName(value: string) {
   }
   if (normalized === "oci") {
     return "OCI";
-  }
-  if (normalized === "streamable-http") {
-    return "Streamable HTTP";
-  }
-  if (normalized === "sse") {
-    return "SSE";
   }
   return value || "Package";
 }

@@ -27,6 +27,7 @@ import type {
   MCPRegistryServerResponse,
   MCPServerInstallRequestConfigValues,
   MCPServerInstallationRead,
+  SecretStoreRead,
 } from "@/lib/api/generated/model";
 
 type InstallTarget = string;
@@ -72,6 +73,7 @@ type InstallFormClientProps = {
   initialSelectedServer?: MCPRegistryServerResponse | null;
   initialServerNextCursor?: string;
   initialServers?: MCPRegistryServerResponse[];
+  secretStores: SecretStoreRead[];
 };
 
 const SERVER_PICKER_PAGE_SIZE = 10;
@@ -109,6 +111,9 @@ function displayHost(url: string) {
 
 function runtimeDisplayName(value: string) {
   const normalized = value.trim().toLowerCase();
+  if (normalized === "remote" || normalized === "streamable-http" || normalized === "sse") {
+    return "Remote API";
+  }
   if (normalized === "uvx") {
     return "UVX";
   }
@@ -121,13 +126,18 @@ function runtimeDisplayName(value: string) {
   if (normalized === "oci") {
     return "OCI";
   }
+  return value || "Package";
+}
+
+function runtimeDetailName(value: string) {
+  const normalized = value.trim().toLowerCase();
   if (normalized === "streamable-http") {
     return "Streamable HTTP";
   }
   if (normalized === "sse") {
     return "SSE";
   }
-  return value || "Package";
+  return runtimeDisplayName(value);
 }
 
 function deliveryDetails(entry: MCPRegistryServerResponse) {
@@ -151,34 +161,35 @@ function deliveryDetails(entry: MCPRegistryServerResponse) {
 }
 
 function packageDescription(packageDefinition: Record<string, unknown>) {
-  return stringValue(packageDefinition.identifier) || "Run this MCP server from a package or image.";
+  const registryType = stringValue(packageDefinition.registryType) || "package";
+  const identifier = stringValue(packageDefinition.identifier);
+  return [runtimeDetailName(registryType), identifier].filter(Boolean).join(" · ");
 }
 
 function remoteDescription(remote: Record<string, unknown>) {
+  const type = stringValue(remote.type) || "remote";
   const url = stringValue(remote.url);
-  return url ? displayHost(url) : "Connect to an existing MCP endpoint.";
+  return url ? `${runtimeDetailName(type)} · ${displayHost(url)}` : runtimeDetailName(type);
 }
 
 function installTargetOptions(entry: MCPRegistryServerResponse): InstallTargetOption[] {
   const packageOptions = (entry.server.packages ?? []).map((packageDefinition, index) => {
     const packageRecord = packageDefinition as Record<string, unknown>;
-    const registryType = stringValue(packageRecord.registryType) || "package";
     return {
       value: `package:${index}`,
       kind: "package" as const,
       index,
-      label: runtimeDisplayName(registryType),
+      label: "Run in Kubernetes",
       description: packageDescription(packageRecord),
     };
   });
   const remoteOptions = (entry.server.remotes ?? []).map((remote, index) => {
     const remoteRecord = remote as Record<string, unknown>;
-    const type = stringValue(remoteRecord.type) || "remote";
     return {
       value: `remote:${index}`,
       kind: "remote" as const,
       index,
-      label: runtimeDisplayName(type),
+      label: "Remote API",
       description: remoteDescription(remoteRecord),
     };
   });
@@ -301,7 +312,7 @@ function selectedInstallTargetOption(
     value: target,
     kind: installTargetKind(target),
     index: installTargetIndex(target),
-    label: installTargetKind(target) === "remote" ? "Remote endpoint" : "Local runtime",
+    label: installTargetKind(target) === "remote" ? "Remote API" : "Run in Kubernetes",
     description: "",
   };
 }
@@ -570,6 +581,7 @@ export function InstallFormClient({
   initialSelectedServer = null,
   initialServerNextCursor = "",
   initialServers = [],
+  secretStores,
 }: InstallFormClientProps) {
   const router = useRouter();
   const isEdit = Boolean(initialInstallation);
@@ -634,6 +646,11 @@ export function InstallFormClient({
       : defaultInstallValues(initialFields)
   );
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
+  const activeSecretStores = useMemo(
+    () => secretStores.filter((store) => store.isActive && !store.workspaceId),
+    [secretStores]
+  );
+  const [configSecretStoreId, setConfigSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const customHeaderId = useRef(0);
   const hasInitializedServerSearch = useRef(false);
   const serverSearchRequestId = useRef(0);
@@ -645,6 +662,9 @@ export function InstallFormClient({
   const selectedFields = selectedServer ? installFields(selectedServer, selectedInstallTarget) : [];
   const connectionFields = selectedFields.filter((field) => field.section === "connection");
   const runtimeFields = selectedFields.filter((field) => field.section === "runtime");
+  const needsSecretBackend =
+    selectedFields.some((field) => field.secret || field.format === "file") ||
+    customHeaders.some((header) => header.name.trim() || header.value.trim());
   const existingConfiguredFields = useMemo(() => configuredFieldNames(initialInstallation), [initialInstallation]);
   const selectedServerName = selectedServer?.server.name ?? "";
   const versionOptions = useMemo(() => {
@@ -907,19 +927,27 @@ export function InstallFormClient({
       setError("Custom headers require both a key and a value.");
       return;
     }
+    if (needsSecretBackend && !configSecretStoreId) {
+      setError("Secret backend is required for MCP secrets.");
+      return;
+    }
 
     setIsMutating(true);
     setError("");
     try {
+      const body: Record<string, unknown> = {
+        version: selectedServer.server.version,
+        configName: trimmedConfigName,
+        installTarget: installTargetPayloadValue(selectedInstallTarget),
+        configValues: installPayloadValues(),
+      };
+      if (needsSecretBackend) {
+        body.configSecretStoreId = configSecretStoreId;
+      }
       const response = await fetch(installUrl(selectedServer.server.name), {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          version: selectedServer.server.version,
-          configName: trimmedConfigName,
-          installTarget: installTargetPayloadValue(selectedInstallTarget),
-          configValues: installPayloadValues(),
-        }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         throw new Error(await responseErrorMessage(response, isEdit ? "Failed to save instance." : "Failed to add instance."));
@@ -1119,9 +1147,32 @@ export function InstallFormClient({
                     </SelectContent>
                   </Select>
                 </div>
+                {needsSecretBackend ? (
+                  <div className="grid gap-2 md:col-span-2">
+                    <Label htmlFor="install-secret-backend">Secret backend</Label>
+                    {activeSecretStores.length > 0 ? (
+                      <Select onValueChange={setConfigSecretStoreId} value={configSecretStoreId}>
+                        <SelectTrigger id="install-secret-backend">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeSecretStores.map((store) => (
+                            <SelectItem key={store.id} value={store.id}>
+                              {store.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="flex min-h-9 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                        No active secret backend
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {isEdit ? (
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Runtime target</Label>
+                    <Label>Install target</Label>
                     <div className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm">
                       {selectedInstallTargetDetails?.kind === "remote" ? (
                         <Network className="size-4 text-muted-foreground" />
@@ -1130,7 +1181,7 @@ export function InstallFormClient({
                       )}
                       <span className="min-w-0">
                         <span className="block font-medium">
-                          {selectedInstallTargetDetails?.label ?? "Local runtime"}
+                          {selectedInstallTargetDetails?.label ?? "Run in Kubernetes"}
                         </span>
                         {selectedInstallTargetDetails?.description ? (
                           <span className="block truncate text-xs text-muted-foreground">
@@ -1142,7 +1193,7 @@ export function InstallFormClient({
                   </div>
                 ) : availableInstallTargets.length > 1 ? (
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Runtime target</Label>
+                    <Label>Install target</Label>
                     <div className="grid gap-2 md:grid-cols-2">
                       {availableInstallTargets.map((option) => {
                         const Icon = option.kind === "remote" ? Network : Package;

@@ -14,6 +14,7 @@ from app.modules.agents.exceptions import (
     InvalidAgentToolAssignmentError,
 )
 from app.modules.agents.schemas import (
+    AgentConversationResponse,
     AgentAvailableToolListResponse,
     AgentChatRequest,
     AgentCreate,
@@ -28,9 +29,11 @@ from app.modules.agents.service import (
     create_workspace_agent,
     delete_agent,
     get_agent,
+    get_workspace_conversation,
     list_agent_tools,
     list_agents,
     list_available_agent_tools,
+    quick_start_workspace_agent,
     replace_agent_tools,
     stream_agent_chat,
     update_agent,
@@ -131,6 +134,68 @@ async def create_workspace_agent_route(
         raise
     await session.commit()
     return response
+
+
+@workspace_router.post(
+    "/quick-start",
+    response_model=AgentConversationResponse,
+    operation_id="workspace_agents_quick_start",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def quick_start_workspace_agent_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentConversationResponse:
+    try:
+        response = await quick_start_workspace_agent(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+        )
+    except Exception as exc:
+        raise_access_error(exc)
+        raise
+    await session.commit()
+    return response
+
+
+@workspace_router.get(
+    "/conversations/{conversation_id}",
+    response_model=AgentConversationResponse,
+    operation_id="workspace_agents_get_conversation",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def get_workspace_conversation_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    conversation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentConversationResponse:
+    try:
+        return await get_workspace_conversation(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+            conversation_id,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_access_error(exc)
+        raise
+
 
 @workspace_router.get(
     "/available-tools",

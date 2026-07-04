@@ -67,6 +67,14 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/conversations/{conversation_id}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/quick-start"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}"
         ),
         (
@@ -264,6 +272,18 @@ def test_workspace_agents_openapi_contract() -> None:
             "/agents/available-tools"
         )
     ]
+    quick_start = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/quick-start"
+        )
+    ]
+    conversation = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/conversations/{conversation_id}"
+        )
+    ]
     agent = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -301,6 +321,14 @@ def test_workspace_agents_openapi_contract() -> None:
     assert available_tools["get"]["operationId"] == "workspace_agents_list_available_tools"
     assert available_tools["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentAvailableToolListResponse"
+    }
+    assert quick_start["post"]["operationId"] == "workspace_agents_quick_start"
+    assert quick_start["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentConversationResponse"
+    }
+    assert conversation["get"]["operationId"] == "workspace_agents_get_conversation"
+    assert conversation["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentConversationResponse"
     }
     assert agent["get"]["operationId"] == "workspace_agents_get"
     assert agent["patch"]["operationId"] == "workspace_agents_update"

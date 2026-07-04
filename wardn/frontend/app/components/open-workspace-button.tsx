@@ -29,7 +29,7 @@ export function OpenWorkspaceButton({ organizationId, workspaceId }: OpenWorkspa
         router.push(
           `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
             workspaceId
-          )}/dashboard`
+          )}/chat`
         );
         router.refresh();
       }}

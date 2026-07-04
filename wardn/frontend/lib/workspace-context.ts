@@ -115,7 +115,7 @@ export function workspaceBasePath(context: WorkspaceContext) {
 
 export function workspaceDashboardPath(context: WorkspaceContext) {
   const basePath = workspaceBasePath(context);
-  return basePath ? `${basePath}/dashboard` : "/";
+  return basePath ? `${basePath}/chat` : "/";
 }
 
 export function workspaceInstallPath(context: WorkspaceContext) {

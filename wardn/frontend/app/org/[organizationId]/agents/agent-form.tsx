@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, Loader2 } from "lucide-react";
+import { Bot, Check, Loader2, Server } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -21,6 +21,7 @@ import type { LlmCredentialRead } from "../llm-credentials/types";
 import { errorMessage } from "../tokens/token-form";
 import {
   ALL_SERVER_TOOLS,
+  type AgentAvailableServer,
   type AgentAvailableTool,
   type AgentServerToolAssignment,
 } from "./tool-types";
@@ -39,6 +40,7 @@ type AgentPayload = {
 type AgentFormProps = {
   agent?: AgentRead;
   assignedServerAssignments?: AgentServerToolAssignment[];
+  availableServers?: AgentAvailableServer[];
   availableTools?: AgentAvailableTool[];
   credentials: LlmCredentialRead[];
   organization: OrganizationRead;
@@ -57,6 +59,8 @@ type AvailableToolGroup = {
   tools: AgentAvailableTool[];
 };
 
+type ServerBindingMode = "none" | "server" | "tools";
+
 function providerLabel(credential: LlmCredentialRead) {
   if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
     return "OpenAI ChatGPT";
@@ -70,6 +74,7 @@ function providerLabel(credential: LlmCredentialRead) {
 export function AgentForm({
   agent,
   assignedServerAssignments = [],
+  availableServers = [],
   availableTools = [],
   credentials,
   fixedWorkspaceId,
@@ -77,28 +82,6 @@ export function AgentForm({
 }: AgentFormProps) {
   const router = useRouter();
   const isEditing = Boolean(agent);
-  const [name, setName] = useState(agent?.name ?? "");
-  const [description, setDescription] = useState(agent?.description ?? "");
-  const [instructions, setInstructions] = useState(agent?.instructions ?? "");
-  const [providerCredentialId, setProviderCredentialId] = useState(
-    agent?.providerCredentialId ?? ""
-  );
-  const [modelName, setModelName] = useState(agent?.modelName ?? "");
-  const [isActive, setIsActive] = useState(agent?.isActive ?? true);
-  const [selectedServerTools, setSelectedServerTools] = useState<Record<string, string[]>>(
-    Object.fromEntries(
-      assignedServerAssignments.map((assignment) => [
-        assignment.installationId,
-        assignment.toolSchemaIds,
-      ])
-    )
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(Boolean(agent?.providerCredentialId));
-  const [modelError, setModelError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const availableCredentials = useMemo(
     () =>
       credentials.filter((credential) => {
@@ -112,6 +95,32 @@ export function AgentForm({
       }),
     [credentials, fixedWorkspaceId]
   );
+  const initialProviderCredentialId =
+    agent?.providerCredentialId &&
+    availableCredentials.some((credential) => credential.id === agent.providerCredentialId)
+      ? agent.providerCredentialId
+      : availableCredentials[0]?.id ?? "";
+  const [name, setName] = useState(agent?.name ?? "");
+  const [description, setDescription] = useState(agent?.description ?? "");
+  const [instructions, setInstructions] = useState(agent?.instructions ?? "");
+  const [providerCredentialId, setProviderCredentialId] = useState(initialProviderCredentialId);
+  const [modelName, setModelName] = useState(
+    initialProviderCredentialId === agent?.providerCredentialId ? agent?.modelName ?? "" : ""
+  );
+  const [isActive, setIsActive] = useState(agent?.isActive ?? true);
+  const [selectedServerTools, setSelectedServerTools] = useState<Record<string, string[]>>(
+    Object.fromEntries(
+      assignedServerAssignments.map((assignment) => [
+        assignment.installationId,
+        assignment.toolSchemaIds,
+      ])
+    )
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(Boolean(initialProviderCredentialId));
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const effectiveProviderCredentialId =
     providerCredentialId &&
@@ -172,13 +181,22 @@ export function AgentForm({
     !isLoadingModels &&
     !modelError &&
     !selectedModelUnavailable &&
-    (!effectiveProviderCredentialId || modelName.trim().length > 0);
+    Boolean(effectiveProviderCredentialId) &&
+    modelName.trim().length > 0;
 
   const formBasePath = `/api/organizations/${organization.id}/workspaces/${fixedWorkspaceId}/agents`;
   const pageBasePath = `/org/${organization.id}/workspace/${fixedWorkspaceId}/agents`;
 
   const availableToolGroups = useMemo(() => {
     const groups = new Map<string, AvailableToolGroup>();
+    for (const server of availableServers) {
+      groups.set(server.installationId, {
+        configName: server.configName,
+        installationId: server.installationId,
+        serverName: server.serverName,
+        tools: [],
+      });
+    }
     for (const tool of availableTools) {
       const group = groups.get(tool.installationId);
       if (group) {
@@ -197,9 +215,12 @@ export function AgentForm({
         `${right.serverName}/${right.configName}`
       )
     );
-  }, [availableTools]);
+  }, [availableServers, availableTools]);
 
-  const selectedToolCount = availableToolGroups.reduce((total, group) => {
+  const selectedServerCount = availableToolGroups.filter(
+    (group) => (selectedServerTools[group.installationId] ?? []).length > 0
+  ).length;
+  const exposedToolCount = availableToolGroups.reduce((total, group) => {
     const selected = selectedServerTools[group.installationId] ?? [];
     if (selected.includes(ALL_SERVER_TOOLS)) {
       return total + group.tools.length;
@@ -209,6 +230,14 @@ export function AgentForm({
 
   function selectedToolsForServer(installationId: string) {
     return selectedServerTools[installationId] ?? [];
+  }
+
+  function serverBindingMode(installationId: string): ServerBindingMode {
+    const selected = selectedToolsForServer(installationId);
+    if (selected.includes(ALL_SERVER_TOOLS)) {
+      return "server";
+    }
+    return selected.length > 0 ? "tools" : "none";
   }
 
   function setServerSelection(installationId: string, toolSchemaIds: string[]) {
@@ -223,12 +252,26 @@ export function AgentForm({
     });
   }
 
-  function toggleServerAll(installationId: string) {
-    const selected = selectedToolsForServer(installationId);
-    setServerSelection(
-      installationId,
-      selected.includes(ALL_SERVER_TOOLS) ? [] : [ALL_SERVER_TOOLS]
-    );
+  function setServerBindingMode(group: AvailableToolGroup, mode: ServerBindingMode) {
+    if (mode === "server") {
+      setServerSelection(group.installationId, [ALL_SERVER_TOOLS]);
+      return;
+    }
+    if (mode === "tools") {
+      const selected = selectedToolsForServer(group.installationId).filter(
+        (entry) => entry !== ALL_SERVER_TOOLS
+      );
+      if (group.tools.length === 0) {
+        setServerSelection(group.installationId, [ALL_SERVER_TOOLS]);
+        return;
+      }
+      setServerSelection(
+        group.installationId,
+        selected.length > 0 ? selected : group.tools.map((tool) => tool.toolSchemaId)
+      );
+      return;
+    }
+    setServerSelection(group.installationId, []);
   }
 
   function toggleTool(installationId: string, toolSchemaId: string) {
@@ -259,8 +302,8 @@ export function AgentForm({
       instructions: instructions.trim(),
       scope: "workspace",
       workspaceId: fixedWorkspaceId,
-      providerCredentialId: effectiveProviderCredentialId || null,
-      modelName: effectiveProviderCredentialId ? modelName.trim() : "",
+      providerCredentialId: effectiveProviderCredentialId,
+      modelName: modelName.trim(),
       ...(isEditing ? { isActive } : {}),
     };
 
@@ -357,7 +400,8 @@ export function AgentForm({
             <div className="space-y-2">
               <Label htmlFor="agent-credential">LLM credential</Label>
               <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={availableCredentials.length === 0}
                 id="agent-credential"
                 onChange={(event) => {
                   const nextCredentialId = event.target.value;
@@ -369,7 +413,9 @@ export function AgentForm({
                 }}
                 value={providerCredentialId}
               >
-                <option value="">Use default routing</option>
+                {availableCredentials.length === 0 ? (
+                  <option value="">No LLM credentials available</option>
+                ) : null}
                 {availableCredentials.map((credential) => (
                   <option key={credential.id} value={credential.id}>
                     {credential.name} ({providerLabel(credential)})
@@ -425,45 +471,79 @@ export function AgentForm({
 
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <Label>Tools</Label>
+                <Label>MCP servers</Label>
                 <span className="text-xs text-[var(--on-surface-variant)]">
-                  {selectedToolCount} selected
+                  {selectedServerCount} bound / {exposedToolCount} tools
                 </span>
               </div>
               {availableToolGroups.length > 0 ? (
                 <div className="max-h-96 space-y-3 overflow-y-auto rounded-md border border-[var(--outline-variant)] p-2">
                   {availableToolGroups.map((group) => {
                     const selected = selectedToolsForServer(group.installationId);
-                    const allSelected = selected.includes(ALL_SERVER_TOOLS);
+                    const mode = serverBindingMode(group.installationId);
                     return (
                       <div
-                        className="rounded-md border border-[var(--outline-variant)]"
+                        className="rounded-md border border-[var(--outline-variant)] bg-white"
                         key={group.installationId}
                       >
-                        <label className="flex cursor-pointer items-start gap-3 px-3 py-3 text-sm hover:bg-[var(--surface-container)]">
-                          <input
-                            checked={allSelected}
-                            className="mt-1 size-4 accent-primary"
-                            onChange={() => toggleServerAll(group.installationId)}
-                            type="checkbox"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block font-medium">{group.configName}</span>
-                            <span className="mt-1 block truncate text-xs text-[var(--on-surface-variant)]">
-                              {group.serverName} / all tools
-                            </span>
-                          </span>
-                        </label>
-                        <div className="border-t border-[var(--outline-variant)] py-1">
+                        <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[var(--surface-container)] text-primary">
+                              <Server className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">
+                                {group.configName}
+                              </div>
+                              <div className="mt-1 truncate text-xs text-[var(--on-surface-variant)]">
+                                {group.serverName}
+                              </div>
+                            </div>
+                          </div>
+                          <fieldset className="grid gap-2 text-sm sm:grid-cols-3">
+                            <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--outline-variant)] px-3 py-2">
+                              <input
+                                checked={mode === "none"}
+                                className="size-4 accent-primary"
+                                name={`server-binding-${group.installationId}`}
+                                onChange={() => setServerBindingMode(group, "none")}
+                                type="radio"
+                              />
+                              Not bound
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--outline-variant)] px-3 py-2">
+                              <input
+                                checked={mode === "server"}
+                                className="size-4 accent-primary"
+                                name={`server-binding-${group.installationId}`}
+                                onChange={() => setServerBindingMode(group, "server")}
+                                type="radio"
+                              />
+                              Entire server
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--outline-variant)] px-3 py-2">
+                              <input
+                                checked={mode === "tools"}
+                                className="size-4 accent-primary"
+                                disabled={group.tools.length === 0}
+                                name={`server-binding-${group.installationId}`}
+                                onChange={() => setServerBindingMode(group, "tools")}
+                                type="radio"
+                              />
+                              Selected tools
+                            </label>
+                          </fieldset>
+                        </div>
+                        {mode === "tools" ? (
+                          <div className="border-t border-[var(--outline-variant)] py-1">
                           {group.tools.map((tool) => (
                             <label
-                              className="flex cursor-pointer items-start gap-3 px-8 py-2 text-sm hover:bg-[var(--surface-container)]"
+                              className="flex cursor-pointer items-start gap-3 px-4 py-2 text-sm hover:bg-[var(--surface-container)]"
                               key={tool.toolSchemaId}
                             >
                               <input
-                                checked={allSelected || selected.includes(tool.toolSchemaId)}
+                                checked={selected.includes(tool.toolSchemaId)}
                                 className="mt-1 size-4 accent-primary"
-                                disabled={allSelected}
                                 onChange={() =>
                                   toggleTool(group.installationId, tool.toolSchemaId)
                                 }
@@ -485,13 +565,14 @@ export function AgentForm({
                             </label>
                           ))}
                         </div>
+                        ) : null}
                       </div>
                     );
                   })}
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed border-[var(--outline-variant)] px-3 py-6 text-sm text-[var(--on-surface-variant)]">
-                  No MCP tools are available in this workspace yet.
+                  No MCP servers are available in this workspace yet.
                 </div>
               )}
             </div>

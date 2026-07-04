@@ -556,7 +556,13 @@ async def install_workspace_mcp_server_version(
 ) -> MCPServerInstallationRead:
     await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
     try:
-        response = await install_server_version(session, server_name, payload, workspace_id)
+        response = await install_server_version(
+            session,
+            server_name,
+            payload,
+            workspace_id,
+            user=current_user,
+        )
     except MCPServerNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

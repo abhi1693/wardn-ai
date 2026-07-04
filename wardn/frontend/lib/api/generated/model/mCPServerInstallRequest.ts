@@ -12,6 +12,7 @@ export interface MCPServerInstallRequest {
      * @maxLength 100
      */
   configName?: string;
+  configSecretStoreId?: string | null;
   configValues?: MCPServerInstallRequestConfigValues;
   installTarget?: string | null;
   /**

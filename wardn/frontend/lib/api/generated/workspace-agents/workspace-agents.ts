@@ -7,6 +7,7 @@
 import type {
   AgentAvailableToolListResponse,
   AgentChatRequest,
+  AgentConversationResponse,
   AgentCreate,
   AgentListResponse,
   AgentRead,
@@ -209,6 +210,135 @@ export const workspaceAgentsListAvailableTools = async (organizationId: string,
 
   const data: workspaceAgentsListAvailableToolsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as workspaceAgentsListAvailableToolsResponse
+}
+
+
+export type workspaceAgentsGetConversationResponse200 = {
+  data: AgentConversationResponse
+  status: 200
+}
+
+export type workspaceAgentsGetConversationResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type workspaceAgentsGetConversationResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type workspaceAgentsGetConversationResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type workspaceAgentsGetConversationResponseSuccess = (workspaceAgentsGetConversationResponse200) & {
+  headers: Headers;
+};
+export type workspaceAgentsGetConversationResponseError = (workspaceAgentsGetConversationResponse403 | workspaceAgentsGetConversationResponse404 | workspaceAgentsGetConversationResponse422) & {
+  headers: Headers;
+};
+
+export type workspaceAgentsGetConversationResponse = (workspaceAgentsGetConversationResponseSuccess | workspaceAgentsGetConversationResponseError)
+
+export const getWorkspaceAgentsGetConversationUrl = (organizationId: string,
+    workspaceId: string,
+    conversationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/conversations/${conversationId}`
+}
+
+/**
+ * @summary Get Workspace Conversation Route
+ */
+export const workspaceAgentsGetConversation = async (organizationId: string,
+    workspaceId: string,
+    conversationId: string, options?: RequestInit): Promise<workspaceAgentsGetConversationResponse> => {
+
+  const res = await fetch(getWorkspaceAgentsGetConversationUrl(organizationId,workspaceId,conversationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: workspaceAgentsGetConversationResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as workspaceAgentsGetConversationResponse
+}
+
+
+export type workspaceAgentsQuickStartResponse200 = {
+  data: AgentConversationResponse
+  status: 200
+}
+
+export type workspaceAgentsQuickStartResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type workspaceAgentsQuickStartResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type workspaceAgentsQuickStartResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type workspaceAgentsQuickStartResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type workspaceAgentsQuickStartResponseSuccess = (workspaceAgentsQuickStartResponse200) & {
+  headers: Headers;
+};
+export type workspaceAgentsQuickStartResponseError = (workspaceAgentsQuickStartResponse400 | workspaceAgentsQuickStartResponse403 | workspaceAgentsQuickStartResponse404 | workspaceAgentsQuickStartResponse422) & {
+  headers: Headers;
+};
+
+export type workspaceAgentsQuickStartResponse = (workspaceAgentsQuickStartResponseSuccess | workspaceAgentsQuickStartResponseError)
+
+export const getWorkspaceAgentsQuickStartUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/quick-start`
+}
+
+/**
+ * @summary Quick Start Workspace Agent Route
+ */
+export const workspaceAgentsQuickStart = async (organizationId: string,
+    workspaceId: string, options?: RequestInit): Promise<workspaceAgentsQuickStartResponse> => {
+
+  const res = await fetch(getWorkspaceAgentsQuickStartUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: workspaceAgentsQuickStartResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as workspaceAgentsQuickStartResponse
 }
 
 

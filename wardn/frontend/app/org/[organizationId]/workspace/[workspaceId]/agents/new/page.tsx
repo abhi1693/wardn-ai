@@ -44,7 +44,8 @@ export default async function NewWorkspaceAgentPage({ params }: NewWorkspaceAgen
       workspaceContext={workspaceContext}
     >
       <AgentForm
-        availableTools={availableTools}
+        availableServers={availableTools.servers}
+        availableTools={availableTools.tools}
         credentials={credentials}
         fixedWorkspaceId={workspaceId}
         organization={organization}

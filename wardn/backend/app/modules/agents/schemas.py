@@ -63,6 +63,7 @@ class AgentRead(BaseModel):
     scope: AgentScope
     model_name: str = Field(alias="modelName")
     is_active: bool = Field(alias="isActive")
+    server_count: int = Field(alias="serverCount")
     tool_count: int = Field(alias="toolCount")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
@@ -70,6 +71,39 @@ class AgentRead(BaseModel):
 
 class AgentListResponse(BaseModel):
     agents: list[AgentRead]
+
+
+class WorkspaceConversationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID = Field(alias="organizationId")
+    workspace_id: uuid.UUID = Field(alias="workspaceId")
+    agent_id: uuid.UUID = Field(alias="agentId")
+    created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
+    title: str
+    is_active: bool = Field(alias="isActive")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class ConversationMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    conversation_id: uuid.UUID = Field(alias="conversationId")
+    role: Literal["system", "user", "assistant"]
+    content: str
+    parts: list[dict[str, Any]] = Field(default_factory=list)
+    sequence: int
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class AgentConversationResponse(BaseModel):
+    agent: AgentRead
+    conversation: WorkspaceConversationRead
+    messages: list[ConversationMessageRead] = Field(default_factory=list)
 
 
 TOOL_ASSIGNMENT_WILDCARD = "*"
@@ -146,7 +180,19 @@ class AgentAvailableToolRead(BaseModel):
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentAvailableServerRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    installation_id: uuid.UUID = Field(alias="installationId")
+    workspace_id: uuid.UUID = Field(alias="workspaceId")
+    server_name: str = Field(alias="serverName")
+    config_name: str = Field(alias="configName")
+    installed_version: str = Field(alias="installedVersion")
+    status: str
+
+
 class AgentAvailableToolListResponse(BaseModel):
+    servers: list[AgentAvailableServerRead] = Field(default_factory=list)
     tools: list[AgentAvailableToolRead]
 
 

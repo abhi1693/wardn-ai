@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
+import { getSecretStores } from "@/app/organizations/data";
 import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
@@ -42,7 +43,11 @@ type EditInstallViewProps = {
 };
 
 export async function EditInstallView({ installationId, workspaceContext }: EditInstallViewProps) {
-  const installations = await getInitialInstallations(workspaceContext);
+  const organizationId = workspaceContext.selectedOrganization?.id ?? "";
+  const [installations, secretStores] = await Promise.all([
+    getInitialInstallations(workspaceContext),
+    organizationId ? getSecretStores(organizationId) : [],
+  ]);
   const installation: MCPServerInstallationRead | undefined = installations.find(
     (item) => item.id === installationId
   );
@@ -62,6 +67,7 @@ export async function EditInstallView({ installationId, workspaceContext }: Edit
         basePath={workspaceInstallPath(workspaceContext)}
         initialInstallation={installation}
         initialInstallations={installations}
+        secretStores={secretStores}
       />
     </AppShell>
   );

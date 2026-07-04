@@ -1,4 +1,5 @@
 import { AppShell } from "@/app/components/app-shell";
+import { getSecretStores } from "@/app/organizations/data";
 import type {
   MCPRegistryServerListResponse,
   MCPServerInstallationListResponse,
@@ -102,10 +103,12 @@ type NewInstallViewProps = {
 
 export async function NewInstallView({ searchParams, workspaceContext }: NewInstallViewProps) {
   const { serverName = "", version = "latest" } = searchParams;
-  const [installations, serverList, selectedServer] = await Promise.all([
+  const organizationId = workspaceContext.selectedOrganization?.id ?? "";
+  const [installations, serverList, selectedServer, secretStores] = await Promise.all([
     getInitialInstallations(workspaceContext),
     getInitialServers(workspaceContext),
     getServer(workspaceContext, serverName, version),
+    organizationId ? getSecretStores(organizationId) : [],
   ]);
 
   return (
@@ -121,6 +124,7 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
         initialSelectedServer={selectedServer}
         initialServerNextCursor={serverList.metadata.nextCursor ?? ""}
         initialServers={selectedServer ? [selectedServer, ...serverList.servers] : serverList.servers}
+        secretStores={secretStores}
       />
     </AppShell>
   );

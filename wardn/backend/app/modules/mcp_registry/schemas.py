@@ -122,6 +122,7 @@ class MCPServerInstallRequest(BaseModel):
     version: str = Field(default="latest", min_length=1, max_length=255)
     config_name: str = Field(default="default", alias="configName", min_length=1, max_length=100)
     config_values: dict[str, MCPConfigValue] = Field(default_factory=dict, alias="configValues")
+    config_secret_store_id: UUID | None = Field(default=None, alias="configSecretStoreId")
     install_target: MCPServerInstallTarget | None = Field(
         default=None,
         alias="installTarget",

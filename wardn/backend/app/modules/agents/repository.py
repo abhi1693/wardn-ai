@@ -1,9 +1,15 @@
 import uuid
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents.models import Agent, AgentMCPServerAssignment, AgentMCPToolAssignment
+from app.modules.agents.models import (
+    Agent,
+    AgentMCPServerAssignment,
+    AgentMCPToolAssignment,
+    ConversationMessage,
+    WorkspaceConversation,
+)
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -42,11 +48,16 @@ async def get_agent_by_name(
     session: AsyncSession,
     *,
     organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
     name: str,
 ) -> Agent | None:
+    workspace_filter = (
+        Agent.workspace_id.is_(None) if workspace_id is None else Agent.workspace_id == workspace_id
+    )
     result = await session.execute(
         select(Agent).where(
             Agent.organization_id == organization_id,
+            workspace_filter,
             Agent.name == name,
         )
     )
@@ -61,7 +72,7 @@ async def list_agents(
     is_superuser: bool,
     workspace_id: uuid.UUID | None = None,
     include_inactive: bool = False,
-) -> list[tuple[Agent, int]]:
+) -> list[tuple[Agent, int, int]]:
     statement = (
         select(Agent)
         .where(Agent.organization_id == organization_id)
@@ -99,7 +110,96 @@ async def list_agents(
         )
     result = await session.execute(statement)
     agents = list(result.scalars().all())
-    return [(agent, await count_agent_tools(session, agent.id)) for agent in agents]
+    return [
+        (
+            agent,
+            await count_agent_servers(session, agent.id),
+            await count_agent_tools(session, agent.id),
+        )
+        for agent in agents
+    ]
+
+
+async def create_workspace_conversation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    created_by_id: uuid.UUID | None,
+    title: str = "New chat",
+) -> WorkspaceConversation:
+    conversation = WorkspaceConversation(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        created_by_id=created_by_id,
+        title=title,
+        is_active=True,
+    )
+    session.add(conversation)
+    await session.flush()
+    await session.refresh(conversation)
+    return conversation
+
+
+async def get_workspace_conversation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    include_inactive: bool = False,
+) -> WorkspaceConversation | None:
+    statement = select(WorkspaceConversation).where(
+        WorkspaceConversation.id == conversation_id,
+        WorkspaceConversation.organization_id == organization_id,
+        WorkspaceConversation.workspace_id == workspace_id,
+    )
+    if not include_inactive:
+        statement = statement.where(WorkspaceConversation.is_active.is_(True))
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def list_conversation_messages(
+    session: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+) -> list[ConversationMessage]:
+    result = await session.execute(
+        select(ConversationMessage)
+        .where(ConversationMessage.conversation_id == conversation_id)
+        .order_by(ConversationMessage.sequence.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def append_conversation_message(
+    session: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    role: str,
+    content: str,
+    parts: list[dict],
+) -> ConversationMessage:
+    result = await session.execute(
+        select(func.max(ConversationMessage.sequence)).where(
+            ConversationMessage.conversation_id == conversation_id
+        )
+    )
+    sequence = (result.scalar_one_or_none() or 0) + 1
+    message = ConversationMessage(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        parts=parts,
+        sequence=sequence,
+    )
+    session.add(message)
+    await session.flush()
+    await session.refresh(message)
+    return message
 
 
 async def list_workspace_available_tools(
@@ -131,6 +231,15 @@ async def list_workspace_available_tools(
 async def count_agent_tools(session: AsyncSession, agent_id: uuid.UUID) -> int:
     rows = await list_agent_tools(session, agent_id=agent_id)
     return len({tool_schema.id for _assignment, tool_schema, _installation in rows})
+
+
+async def count_agent_servers(session: AsyncSession, agent_id: uuid.UUID) -> int:
+    result = await session.execute(
+        select(func.count()).select_from(AgentMCPServerAssignment).where(
+            AgentMCPServerAssignment.agent_id == agent_id
+        )
+    )
+    return int(result.scalar_one())
 
 
 async def get_installations_by_ids(
