@@ -65,12 +65,12 @@ export async function ValidateInstallView({
         <Button asChild size="sm" variant="outline">
           <Link href={installPath}>
             <ArrowLeft className="size-4" />
-            Installations
+            MCP Servers
           </Link>
         </Button>
       }
       eyebrow="MCP Runtime"
-      title="Validate tool"
+      title="Validate MCP server"
       workspaceContext={workspaceContext}
     >
       <ValidateInstallClient installation={installation} />

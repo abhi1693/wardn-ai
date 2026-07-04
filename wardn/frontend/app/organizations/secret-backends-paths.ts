@@ -3,10 +3,7 @@ export type SecretBackendScope = {
   workspaceId?: string;
 };
 
-export function secretBackendsPath({ organizationId, workspaceId }: SecretBackendScope) {
-  if (workspaceId) {
-    return `/org/${organizationId}/workspace/${workspaceId}/secret-backends`;
-  }
+export function secretBackendsPath({ organizationId }: SecretBackendScope) {
   return `/org/${organizationId}/secret-backends`;
 }
 

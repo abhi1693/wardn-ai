@@ -1163,7 +1163,7 @@ export function ServerForm({
                   <div>
                     <div className="text-sm font-medium">Runtime Arguments</div>
                     <div className="text-xs text-muted-foreground">
-                      Define static process arguments or user-configurable flags shown during installation.
+                      Define static process arguments or user-configurable flags shown during setup.
                     </div>
                   </div>
                   <Button

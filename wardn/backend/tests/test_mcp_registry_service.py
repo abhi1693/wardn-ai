@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.mcp_registry import service, tool_service
+from app.modules.mcp_registry import service, tool_repository, tool_service
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
@@ -61,6 +61,29 @@ class FakeSession:
         if hasattr(instance, "installed_at"):
             instance.installed_at = now
         self.refreshed.append(instance)
+
+
+class FakeScalarResult:
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+
+    def scalars(self):
+        return self
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def all(self) -> list[object]:
+        return self.values
+
+
+class FakeToolRepositorySession(FakeSession):
+    def __init__(self, existing: list[object] | None = None) -> None:
+        super().__init__()
+        self.existing = existing or []
+
+    async def execute(self, *args, **kwargs) -> FakeScalarResult:
+        return FakeScalarResult(self.existing)
 
 
 def registry_payload(version: str = "1.0.0") -> MCPServerCreate:
@@ -992,6 +1015,43 @@ async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> 
     assert response.cache == {"mode": "live-refresh", "refreshed": True}
     assert response.tools[0].tool_name == "list_servers"
     assert refreshed == {"installation": installation, "server": server}
+
+
+@pytest.mark.asyncio
+async def test_upsert_tool_schemas_creates_installation_scoped_tool() -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+    session = FakeToolRepositorySession()
+
+    count = await tool_repository.upsert_tool_schemas(
+        session,
+        installation=installation,
+        server=server,
+        tools=[
+            {
+                "name": "get_forecast",
+                "title": "Get forecast",
+                "description": "Get weather forecast",
+                "inputSchema": {"type": "object"},
+            }
+        ],
+    )
+
+    assert count == 1
+    assert session.flushed is True
+    assert len(session.added) == 1
+    cached_tool = session.added[0]
+    assert isinstance(cached_tool, MCPServerToolSchema)
+    assert cached_tool.workspace_id == WORKSPACE_ID
+    assert cached_tool.installation_id == installation.id
+    assert cached_tool.tool_name == "get_forecast"
 
 
 @pytest.mark.asyncio

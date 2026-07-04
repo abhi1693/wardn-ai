@@ -358,7 +358,7 @@ export function CatalogListClient({
                   Version
                 </TableHead>
                 <TableHead className="w-[150px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-                  Installations
+                  Workspace servers
                 </TableHead>
                 <TableHead className="w-[180px] bg-transparent px-6 py-4 text-right text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
                   Actions

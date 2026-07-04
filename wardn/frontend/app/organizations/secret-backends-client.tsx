@@ -34,8 +34,7 @@ import {
 } from "./secret-backends-paths";
 
 type SecretBackendsClientProps = SecretBackendScope & {
-  inheritedStore?: SecretStoreRead | null;
-  scopeLabel: "Organization" | "Workspace";
+  scopeLabel: "Organization";
   stores: SecretStoreRead[];
 };
 
@@ -59,16 +58,14 @@ function authMethod(store: SecretStoreRead) {
 }
 
 export function SecretBackendsClient({
-  inheritedStore,
   organizationId,
   scopeLabel,
   stores: initialStores,
-  workspaceId,
 }: SecretBackendsClientProps) {
   const [validatingStoreId, setValidatingStoreId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const scope = { organizationId, workspaceId };
+  const scope = { organizationId };
 
   async function validateStore(store: SecretStoreRead) {
     setValidatingStoreId(store.id);
@@ -105,21 +102,6 @@ export function SecretBackendsClient({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {workspaceId ? (
-          <div className="rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-3 py-2 text-sm text-[var(--on-surface-variant)]">
-            {inheritedStore ? (
-              <span>
-                Organization fallback:{" "}
-                <span className="font-medium text-[var(--on-surface)]">
-                  {inheritedStore.name}
-                </span>
-              </span>
-            ) : (
-              <span>Connect an organization backend before adding workspace backends.</span>
-            )}
-          </div>
-        ) : null}
-
         {error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}

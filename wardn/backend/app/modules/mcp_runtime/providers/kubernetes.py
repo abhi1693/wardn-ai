@@ -32,6 +32,7 @@ from app.modules.mcp_runtime.provider import (
     runtime_kind,
     secret_environment,
     secret_fingerprint_payload,
+    secret_headers,
 )
 
 KUBERNETES_LABEL_APP_NAME = "app.kubernetes.io/name"
@@ -915,6 +916,36 @@ def has_flag(args: list[str], names: set[str]) -> bool:
     return any(arg in names or any(arg.startswith(f"{name}=") for name in names) for arg in args)
 
 
+def package_argument_definitions(runtime_config: dict[str, Any]) -> list[dict[str, Any]]:
+    package = runtime_config.get("package")
+    if not isinstance(package, dict):
+        return []
+    package_arguments = package.get("packageArguments")
+    if not isinstance(package_arguments, list):
+        return []
+    return [item for item in package_arguments if isinstance(item, dict)]
+
+
+def oci_native_http_container_args(runtime_config: dict[str, Any], *, port: int) -> list[str]:
+    definitions = package_argument_definitions(runtime_config)
+    has_http_command = any(str(item.get("value") or "").strip() == "http" for item in definitions)
+    if not has_http_command:
+        return []
+
+    flags = {str(item.get("flag") or "").strip() for item in definitions}
+    args = ["http"]
+    if "--listen-host" in flags:
+        args.extend(["--listen-host", "0.0.0.0"])
+    elif "--host" in flags:
+        args.extend(["--host", "0.0.0.0"])
+
+    if "--port" in flags:
+        args.extend(["--port", str(port)])
+    elif "-p" in flags and "--publish" not in flags:
+        args.extend(["-p", str(port)])
+    return args
+
+
 def oci_runtime_container_args(runtime_config: dict[str, Any], *, port: int) -> list[str]:
     configured_args = runtime_config.get("containerArgs")
     if isinstance(configured_args, list):
@@ -926,6 +957,11 @@ def oci_runtime_container_args(runtime_config: dict[str, Any], *, port: int) -> 
         else:
             _, args = parse_docker_run_image_and_args([str(arg) for arg in docker_args])
 
+    if not args:
+        native_http_args = oci_native_http_container_args(runtime_config, port=port)
+        if native_http_args:
+            return rewrite_runtime_file_paths(native_http_args, runtime_config)
+
     if has_flag(args, {"--port"}):
         return rewrite_runtime_file_paths(args, runtime_config)
     if not replace_flag_value(args, {"-t", "--transport"}, "streamable-http"):
@@ -935,6 +971,18 @@ def oci_runtime_container_args(runtime_config: dict[str, Any], *, port: int) -> 
     if not has_flag(args, {"-endpoint-path", "--endpoint-path"}):
         args.extend(["-endpoint-path", KUBERNETES_SUPERGATEWAY_MCP_PATH])
     return rewrite_runtime_file_paths(args, runtime_config)
+
+
+def runtime_request_headers(installation: MCPServerInstallation) -> dict[str, str]:
+    headers = secret_headers(installation)
+    if "Authorization" in headers:
+        return headers
+
+    environment = secret_environment(installation)
+    github_token = environment.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
 
 
 def build_namespace_manifest(
@@ -1946,7 +1994,7 @@ class KubernetesRuntimeProvider:
         )
         return mcp_client.list_tools(
             runtime_session.endpoint_url,
-            {},
+            runtime_request_headers(installation),
             verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
         )
 
@@ -1974,7 +2022,7 @@ class KubernetesRuntimeProvider:
         )
         return mcp_client.call_tool(
             runtime_session.endpoint_url,
-            {},
+            runtime_request_headers(installation),
             tool_name=tool_name,
             arguments=arguments,
             verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,

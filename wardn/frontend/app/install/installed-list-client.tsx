@@ -134,7 +134,7 @@ export function InstalledListClient({
                           <Link
                             aria-label={`Edit ${installation.configName}`}
                             href={editInstallUrl(basePath, installation.id)}
-                            title="Edit installation"
+                            title="Edit MCP server"
                           >
                             <Edit2 className="size-4" />
                           </Link>
@@ -153,7 +153,7 @@ export function InstalledListClient({
                           onClick={() => removeInstallation(installation)}
                           aria-label={`Delete ${installation.configName}`}
                           size="icon"
-                          title="Delete installation"
+                          title="Delete MCP server"
                           type="button"
                           variant="outline"
                         >

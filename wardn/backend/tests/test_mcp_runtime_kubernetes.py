@@ -37,6 +37,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     runtime_object_identity,
     runtime_object_names,
     runtime_object_names_for_session,
+    runtime_request_headers,
     safe_kubernetes_name,
 )
 
@@ -1223,6 +1224,95 @@ def test_kubernetes_runtime_manifest_runs_oci_image_directly(
     assert manifest.pod.spec.init_containers is None
     assert manifest.health_path is None
     assert not hasattr(container, "readiness_probe")
+
+
+def test_kubernetes_runtime_manifest_uses_oci_native_http_command(
+    tmp_path,
+) -> None:
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.github/github-mcp-server",
+        installed_version="1.5.0",
+        status="enabled",
+        install_type="oci",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "oci",
+            "command": "/usr/bin/docker",
+            "containerImage": "ghcr.io/github/github-mcp-server",
+            "containerArgs": [],
+            "args": ["run", "--rm", "-i", "ghcr.io/github/github-mcp-server"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "package": {
+                "registryType": "oci",
+                "identifier": "ghcr.io/github/github-mcp-server",
+                "packageArguments": [
+                    {"name": "http command", "value": "http", "includeInLaunch": False},
+                    {"flag": "--listen-host", "includeInLaunch": False},
+                    {"flag": "--port", "default": "8082", "includeInLaunch": False},
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    container = manifest.pod.spec.containers[0]
+    assert container.image == "ghcr.io/github/github-mcp-server"
+    assert container.args == ["http", "--listen-host", "0.0.0.0", "--port", "8000"]
+    assert manifest.health_path is None
+
+
+def test_kubernetes_runtime_request_headers_use_github_token() -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.github/github-mcp-server",
+        installed_version="1.5.0",
+        status="enabled",
+        install_type="oci",
+        secret_references={"environment": {"GITHUB_PERSONAL_ACCESS_TOKEN": "token"}},
+    )
+
+    assert runtime_request_headers(installation) == {"Authorization": "Bearer token"}
+
+
+def test_kubernetes_runtime_request_headers_preserve_explicit_authorization() -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.github/github-mcp-server",
+        installed_version="1.5.0",
+        status="enabled",
+        install_type="oci",
+        secret_references={
+            "headers": {"Authorization": "Bearer explicit"},
+            "environment": {"GITHUB_PERSONAL_ACCESS_TOKEN": "token"},
+        },
+    )
+
+    assert runtime_request_headers(installation) == {"Authorization": "Bearer explicit"}
 
 
 def test_kubernetes_runtime_manifest_mounts_runtime_files(

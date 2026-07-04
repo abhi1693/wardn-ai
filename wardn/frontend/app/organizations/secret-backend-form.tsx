@@ -35,7 +35,6 @@ const backendType = "openbao";
 const tlsHttpError = "Verify TLS requires an HTTPS OpenBao URL.";
 
 type SecretBackendFormProps = SecretBackendScope & {
-  inheritedStore?: SecretStoreRead | null;
   mode: "create" | "edit";
   store?: SecretStoreRead;
 };
@@ -79,17 +78,14 @@ function buildInitialForm(store?: SecretStoreRead) {
 }
 
 export function SecretBackendForm({
-  inheritedStore,
   mode,
   organizationId,
   store,
-  workspaceId,
 }: SecretBackendFormProps) {
   const router = useRouter();
   const initialForm = buildInitialForm(store);
-  const listPath = secretBackendsPath({ organizationId, workspaceId });
+  const listPath = secretBackendsPath({ organizationId });
   const isEditing = mode === "edit";
-  const requiresOrganizationBackend = Boolean(workspaceId) && !inheritedStore;
 
   const [name, setName] = useState(initialForm.name);
   const [baseUrl, setBaseUrl] = useState(initialForm.baseUrl);
@@ -112,7 +108,6 @@ export function SecretBackendForm({
     name.trim().length > 0 &&
     baseUrl.trim().length > 0 &&
     !tlsUrlMismatch &&
-    !requiresOrganizationBackend &&
     !saving &&
     (authMethod === "kubernetes"
       ? kubernetesRole.trim().length > 0 && serviceAccountTokenPath.trim().length > 0
@@ -153,7 +148,6 @@ export function SecretBackendForm({
     const payload = {
       name: name.trim(),
       provider: "openbao",
-      ...(workspaceId ? { workspaceId } : {}),
       config,
       authConfig,
       ...(isEditing ? { isActive } : {}),
@@ -236,21 +230,6 @@ export function SecretBackendForm({
       </CardHeader>
       <CardContent>
         <form className="space-y-6" onSubmit={submit}>
-          {workspaceId ? (
-            <div className="rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-3 py-2 text-sm text-[var(--on-surface-variant)]">
-              {inheritedStore ? (
-                <span>
-                  Uses <span className="font-medium text-[var(--on-surface)]">{inheritedStore.name}</span>{" "}
-                  as the organization fallback.
-                </span>
-              ) : (
-                <span>
-                  Connect an organization secret backend before adding workspace backends.
-                </span>
-              )}
-            </div>
-          ) : null}
-
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Backend type</Label>

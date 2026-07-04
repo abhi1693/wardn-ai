@@ -1121,7 +1121,7 @@ export function InstallFormClient({
                 </div>
                 {isEdit ? (
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Installation target</Label>
+                    <Label>Runtime target</Label>
                     <div className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm">
                       {selectedInstallTargetDetails?.kind === "remote" ? (
                         <Network className="size-4 text-muted-foreground" />
@@ -1142,7 +1142,7 @@ export function InstallFormClient({
                   </div>
                 ) : availableInstallTargets.length > 1 ? (
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Installation target</Label>
+                    <Label>Runtime target</Label>
                     <div className="grid gap-2 md:grid-cols-2">
                       {availableInstallTargets.map((option) => {
                         const Icon = option.kind === "remote" ? Network : Package;

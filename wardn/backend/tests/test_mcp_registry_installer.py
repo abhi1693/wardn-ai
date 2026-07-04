@@ -404,6 +404,79 @@ def test_install_server_runtime_adds_configured_oci_package_arguments(
     }
 
 
+def test_install_server_runtime_strips_docker_wrapper_args_from_oci_container_args(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "oci",
+                "identifier": "ghcr.io/github/github-mcp-server",
+                "version": "1.5.0",
+                "transport": {
+                    "type": "stdio",
+                    "command": "docker",
+                    "args": [
+                        "run",
+                        "-i",
+                        "--rm",
+                        "-p",
+                        "127.0.0.1:8085:8085",
+                        "-e",
+                        "GITHUB_OAUTH_CALLBACK_PORT",
+                        "ghcr.io/github/github-mcp-server",
+                    ],
+                },
+                "packageArguments": [
+                    {"flag": "run", "includeInLaunch": True},
+                    {"flag": "-i", "includeInLaunch": True},
+                    {"flag": "--rm", "includeInLaunch": True},
+                    {
+                        "flag": "-p",
+                        "value": "127.0.0.1:8085:8085",
+                        "includeInLaunch": True,
+                    },
+                    {
+                        "flag": "-e",
+                        "value": "GITHUB_OAUTH_CALLBACK_PORT",
+                        "includeInLaunch": True,
+                    },
+                    {
+                        "name": "Docker image",
+                        "value": "ghcr.io/github/github-mcp-server",
+                        "includeInLaunch": True,
+                    },
+                    {
+                        "name": "list-scopes output format",
+                        "flag": "--output",
+                        "default": "text",
+                        "includeInLaunch": False,
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.shutil.which",
+        lambda name: "/bin/docker",
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+
+    install = install_server_runtime(server, install_target="package", install_root=tmp_path)
+
+    assert install.runtime_config["containerArgs"] == []
+    assert install.runtime_config["args"] == [
+        "run",
+        "--rm",
+        "-i",
+        "ghcr.io/github/github-mcp-server",
+    ]
+
+
 def test_install_server_runtime_materializes_file_package_arguments(
     tmp_path,
     monkeypatch,

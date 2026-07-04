@@ -55,7 +55,7 @@ export async function InstallListView({ workspaceContext }: InstallListViewProps
         </Button>
       }
       eyebrow="MCP Runtime"
-      title="Install"
+      title="MCP Servers"
       workspaceContext={workspaceContext}
     >
       <InstalledListClient

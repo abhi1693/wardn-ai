@@ -160,7 +160,7 @@ export async function WorkspaceDashboardView({ workspaceContext }: WorkspaceDash
                 <div className="text-sm font-medium">Runtime status</div>
                 <div className="text-sm text-muted-foreground">
                   {attentionCount === 0
-                    ? "No installation errors are currently reported."
+                    ? "No MCP server errors are currently reported."
                     : "One or more server instances need review."}
                 </div>
               </div>
@@ -229,7 +229,7 @@ export async function WorkspaceDashboardView({ workspaceContext }: WorkspaceDash
                 <Button asChild variant="outline">
                   <Link href={installPath}>
                     <ServerCog className="size-4" />
-                    Manage installations
+                    Manage MCP servers
                   </Link>
                 </Button>
               </div>

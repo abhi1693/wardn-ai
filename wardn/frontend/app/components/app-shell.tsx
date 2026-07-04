@@ -91,7 +91,7 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: Home,
     },
     {
-      label: "Installations",
+      label: "MCP Servers",
       href: `${workspaceBasePath}/install`,
       activeKey: "install",
       icon: ServerCog,
@@ -107,12 +107,6 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       href: `${workspaceBasePath}/agents`,
       activeKey: "workspace-agents",
       icon: Bot,
-    },
-    {
-      label: "Secret Backends",
-      href: `${workspaceBasePath}/secret-backends`,
-      activeKey: "workspace-secret-backends",
-      icon: ShieldCheck,
     },
     {
       label: "Settings",
@@ -139,7 +133,6 @@ type AppShellProps = {
     | "secret-backends"
     | "agents"
     | "workspace-agents"
-    | "workspace-secret-backends"
     | "agent-tokens"
     | "runtime"
     | "install";
@@ -163,7 +156,6 @@ export function AppShell({
     active === "install" ||
     active === "runtime" ||
     active === "workspace-agents" ||
-    active === "workspace-secret-backends" ||
     active === "workspace-settings";
   const navigationItems = isWorkspaceScope
     ? workspaceNavItems(workspaceContext)

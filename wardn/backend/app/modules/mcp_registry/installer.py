@@ -193,6 +193,8 @@ def configured_package_arguments(
     args = []
     file_paths = file_paths or {}
     for definition in definitions:
+        if definition.get("includeInLaunch") is False:
+            continue
         static_value = definition.get("value")
         name = definition.get("name")
         flag = definition.get("flag")
@@ -219,6 +221,51 @@ def configured_package_arguments(
             args.append(str(flag))
         args.append(file_paths.get(name) or raw_value)
     return args
+
+
+def oci_container_argument_definitions(
+    definitions: list[dict[str, Any]],
+    *,
+    image: str,
+) -> list[dict[str, Any]]:
+    docker_wrapper_flags = {
+        "run",
+        "-i",
+        "--interactive",
+        "--rm",
+        "--init",
+        "--pull",
+    }
+    docker_wrapper_value_flags = {
+        "-e",
+        "--env",
+        "--env-file",
+        "-p",
+        "--publish",
+        "-v",
+        "--volume",
+        "--name",
+        "--network",
+        "--user",
+        "-u",
+        "--workdir",
+        "-w",
+        "--entrypoint",
+        "--add-host",
+    }
+    filtered = []
+    for definition in definitions:
+        if definition.get("includeInLaunch") is False:
+            continue
+        name = str(definition.get("name") or "").strip()
+        flag = str(definition.get("flag") or "").strip()
+        value = str(definition.get("value") or "").strip()
+        if not name and flag in docker_wrapper_flags | docker_wrapper_value_flags:
+            continue
+        if name.casefold() == "docker image" and value == image:
+            continue
+        filtered.append(definition)
+    return filtered
 
 
 def custom_header_values(config_values: ConfigValues) -> dict[str, str]:
@@ -956,8 +1003,12 @@ def build_oci_install(
         install_path,
     )
     configured_env = configured_values(env_vars, config_values, file_paths=file_paths)
-    configured_args = configured_package_arguments(
+    container_package_args = oci_container_argument_definitions(
         package_args,
+        image=identifier,
+    )
+    configured_args = configured_package_arguments(
+        container_package_args,
         config_values,
         file_paths=file_paths,
     )

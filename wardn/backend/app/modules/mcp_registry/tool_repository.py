@@ -214,8 +214,6 @@ async def upsert_tool_schemas(
         else:
             session.add(
                 MCPServerToolSchema(
-                    workspace_id=installation.workspace_id,
-                    installation_id=installation.id,
                     server_name=server.name,
                     server_version=server.version,
                     tool_name=tool_name,
