@@ -93,6 +93,7 @@ models/
 
 # Local research / planning notes
 docs/research/
+.codex/
 
 # IDEs / editors
 .idea/
