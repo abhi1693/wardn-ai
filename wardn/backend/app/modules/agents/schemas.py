@@ -92,6 +92,7 @@ class ConversationMessageRead(BaseModel):
 
     id: uuid.UUID
     conversation_id: uuid.UUID = Field(alias="conversationId")
+    agent_run_id: uuid.UUID | None = Field(default=None, alias="agentRunId")
     role: Literal["system", "user", "assistant"]
     content: str
     parts: list[dict[str, Any]] = Field(default_factory=list)
@@ -104,6 +105,51 @@ class AgentConversationResponse(BaseModel):
     agent: AgentRead
     conversation: WorkspaceConversationRead
     messages: list[ConversationMessageRead] = Field(default_factory=list)
+
+
+class AgentRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID = Field(alias="organizationId")
+    workspace_id: uuid.UUID = Field(alias="workspaceId")
+    agent_id: uuid.UUID = Field(alias="agentId")
+    conversation_id: uuid.UUID | None = Field(default=None, alias="conversationId")
+    triggered_by_id: uuid.UUID | None = Field(default=None, alias="triggeredById")
+    trigger_type: str = Field(alias="triggerType")
+    status: str
+    started_at: datetime = Field(alias="startedAt")
+    finished_at: datetime | None = Field(default=None, alias="finishedAt")
+    error: str
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class AgentRunStepRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    agent_run_id: uuid.UUID = Field(alias="agentRunId")
+    mcp_tool_invocation_id: uuid.UUID | None = Field(
+        default=None,
+        alias="mcpToolInvocationId",
+    )
+    sequence: int
+    step_type: str = Field(alias="stepType")
+    status: str
+    title: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class AgentRunListResponse(BaseModel):
+    runs: list[AgentRunRead]
+
+
+class AgentRunDetailResponse(BaseModel):
+    run: AgentRunRead
+    steps: list[AgentRunStepRead]
 
 
 TOOL_ASSIGNMENT_WILDCARD = "*"

@@ -1,8 +1,10 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -118,10 +120,85 @@ class ConversationMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     parts: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_runs"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    triggered_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trigger_type: Mapped[str] = mapped_column(String(32), default="chat", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="running", nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class AgentRunStep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_run_steps"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_run_id",
+            "sequence",
+            name="uq_agent_run_steps_run_sequence",
+        ),
+    )
+
+    agent_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    mcp_tool_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_tool_invocations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class AgentMCPServerAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

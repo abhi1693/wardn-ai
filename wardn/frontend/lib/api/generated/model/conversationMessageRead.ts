@@ -8,6 +8,7 @@ import type { ConversationMessageReadPartsItem } from './conversationMessageRead
 import type { ConversationMessageReadRole } from './conversationMessageReadRole';
 
 export interface ConversationMessageRead {
+  agentRunId?: string | null;
   content: string;
   conversationId: string;
   createdAt: string;

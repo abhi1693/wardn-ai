@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   Info,
+  ListTree,
   Loader2,
   Pencil,
   Send,
@@ -61,6 +62,7 @@ type MessagePart = UIMessage["parts"][number];
 type ToolActivityData = {
   arguments?: unknown;
   error?: string;
+  result?: unknown;
   status?: string;
   toolName?: string;
 };
@@ -94,6 +96,7 @@ function uiMessageParts(message: ConversationMessageRead): UIMessage["parts"] {
 function uiMessages(messages: ConversationMessageRead[] = []): UIMessage[] {
   return messages.map((message) => ({
     id: message.id,
+    metadata: { agentRunId: message.agentRunId },
     role: message.role,
     parts: uiMessageParts(message),
   }));
@@ -291,7 +294,30 @@ function toolActivitySummary(activities: ToolActivityPart[]) {
   return `${activities.length} running`;
 }
 
-function ToolActivity({ activities }: { activities: ToolActivityPart[] }) {
+function toolActivityResult(activity: ToolActivityPart) {
+  const result = activity.data?.result;
+  if (result === undefined || result === null || result === "") {
+    return "";
+  }
+  return typeof result === "string" ? result : JSON.stringify(result, null, 2);
+}
+
+function agentRunIdFromMessage(message: UIMessage) {
+  const metadata = "metadata" in message ? message.metadata : null;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+  const value = (metadata as { agentRunId?: unknown }).agentRunId;
+  return typeof value === "string" && value ? value : null;
+}
+
+function ToolActivity({
+  activities,
+  traceHref,
+}: {
+  activities: ToolActivityPart[];
+  traceHref?: string;
+}) {
   if (activities.length === 0) {
     return null;
   }
@@ -302,7 +328,18 @@ function ToolActivity({ activities }: { activities: ToolActivityPart[] }) {
           <Wrench className="size-3.5 shrink-0" />
           <span>Tool activity</span>
         </span>
-        <Badge variant="outline">{toolActivitySummary(activities)}</Badge>
+        <span className="flex items-center gap-2">
+          {traceHref ? (
+            <Link
+              className="inline-flex items-center gap-1 rounded-sm border border-[var(--outline-variant)] bg-white px-2 py-0.5 text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)]"
+              href={traceHref}
+            >
+              <ListTree className="size-3" />
+              Trace
+            </Link>
+          ) : null}
+          <Badge variant="outline">{toolActivitySummary(activities)}</Badge>
+        </span>
       </summary>
       <div className="border-t border-[var(--outline-variant)] px-3 py-2">
         <div className="space-y-1.5">
@@ -310,26 +347,39 @@ function ToolActivity({ activities }: { activities: ToolActivityPart[] }) {
             const status = activity.data?.status ?? "running";
             const isDone = status === "completed";
             const isFailed = status === "failed";
+            const result = toolActivityResult(activity);
             return (
               <div
-                className="flex items-start gap-2 rounded-md bg-white px-2.5 py-2 text-xs"
+                className="rounded-md bg-white px-2.5 py-2 text-xs"
                 key={activity.id ?? `${activity.data?.toolName}-${status}`}
               >
-                {isDone ? (
-                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                ) : isFailed ? (
-                  <Square className="mt-0.5 size-3.5 shrink-0 text-red-600" />
-                ) : (
-                  <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-[var(--on-surface-variant)]" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-[var(--on-surface)]">
-                    {activity.data?.toolName ?? "MCP tool"}
-                  </div>
-                  <div className="mt-0.5 text-[var(--on-surface-variant)]">
-                    {isFailed ? activity.data?.error ?? "Failed" : status}
+                <div className="flex items-start gap-2">
+                  {isDone ? (
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                  ) : isFailed ? (
+                    <Square className="mt-0.5 size-3.5 shrink-0 text-red-600" />
+                  ) : (
+                    <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-[var(--on-surface-variant)]" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-[var(--on-surface)]">
+                      {activity.data?.toolName ?? "MCP tool"}
+                    </div>
+                    <div className="mt-0.5 text-[var(--on-surface-variant)]">
+                      {isFailed ? activity.data?.error ?? "Failed" : status}
+                    </div>
                   </div>
                 </div>
+                {result ? (
+                  <details className="mt-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
+                    <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                      Result
+                    </summary>
+                    <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                      {result}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             );
           })}
@@ -537,6 +587,10 @@ export function AgentChatClient({
                 const text = messageText(message.parts);
                 const activities = toolActivities(message.parts);
                 const isUser = message.role === "user";
+                const agentRunId = agentRunIdFromMessage(message);
+                const traceHref = agentRunId
+                  ? `/org/${organization.id}/workspace/${workspaceId}/agent-runs/${agentRunId}`
+                  : undefined;
                 return (
                   <div
                     className={cn("group flex gap-3", isUser ? "justify-end" : "justify-start")}
@@ -565,7 +619,9 @@ export function AgentChatClient({
                             : "rounded-lg border-[var(--outline-variant)] bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)]"
                         )}
                       >
-                        {!isUser ? <ToolActivity activities={activities} /> : null}
+                        {!isUser ? (
+                          <ToolActivity activities={activities} traceHref={traceHref} />
+                        ) : null}
                         {text ? <MessageMarkdown role={message.role} text={text} /> : null}
                       </div>
                     </div>

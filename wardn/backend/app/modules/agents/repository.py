@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,8 @@ from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
     AgentMCPToolAssignment,
+    AgentRun,
+    AgentRunStep,
     ConversationMessage,
     WorkspaceConversation,
 )
@@ -182,6 +185,7 @@ async def append_conversation_message(
     role: str,
     content: str,
     parts: list[dict],
+    agent_run_id: uuid.UUID | None = None,
 ) -> ConversationMessage:
     result = await session.execute(
         select(func.max(ConversationMessage.sequence)).where(
@@ -191,6 +195,7 @@ async def append_conversation_message(
     sequence = (result.scalar_one_or_none() or 0) + 1
     message = ConversationMessage(
         conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
         role=role,
         content=content,
         parts=parts,
@@ -200,6 +205,130 @@ async def append_conversation_message(
     await session.flush()
     await session.refresh(message)
     return message
+
+
+async def create_agent_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+    triggered_by_id: uuid.UUID | None,
+    trigger_type: str = "chat",
+    now: datetime | None = None,
+) -> AgentRun:
+    now = now or datetime.now(UTC)
+    agent_run = AgentRun(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        triggered_by_id=triggered_by_id,
+        trigger_type=trigger_type,
+        status="running",
+        started_at=now,
+        finished_at=None,
+        error="",
+    )
+    session.add(agent_run)
+    await session.flush()
+    await session.refresh(agent_run)
+    return agent_run
+
+
+async def append_agent_run_step(
+    session: AsyncSession,
+    *,
+    agent_run_id: uuid.UUID,
+    step_type: str,
+    status: str = "",
+    title: str = "",
+    payload: dict | None = None,
+    mcp_tool_invocation_id: uuid.UUID | None = None,
+) -> AgentRunStep:
+    result = await session.execute(
+        select(func.max(AgentRunStep.sequence)).where(AgentRunStep.agent_run_id == agent_run_id)
+    )
+    sequence = (result.scalar_one_or_none() or 0) + 1
+    step = AgentRunStep(
+        agent_run_id=agent_run_id,
+        mcp_tool_invocation_id=mcp_tool_invocation_id,
+        sequence=sequence,
+        step_type=step_type,
+        status=status,
+        title=title,
+        payload=payload or {},
+    )
+    session.add(step)
+    await session.flush()
+    await session.refresh(step)
+    return step
+
+
+async def finish_agent_run(
+    session: AsyncSession,
+    agent_run: AgentRun,
+    *,
+    status: str,
+    error: str = "",
+    now: datetime | None = None,
+) -> AgentRun:
+    agent_run.status = status
+    agent_run.error = error
+    agent_run.finished_at = now or datetime.now(UTC)
+    await session.flush()
+    await session.refresh(agent_run)
+    return agent_run
+
+
+async def list_agent_runs(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    limit: int = 50,
+) -> list[AgentRun]:
+    result = await session.execute(
+        select(AgentRun)
+        .where(
+            AgentRun.organization_id == organization_id,
+            AgentRun.workspace_id == workspace_id,
+        )
+        .order_by(AgentRun.started_at.desc(), AgentRun.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_agent_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> AgentRun | None:
+    result = await session.execute(
+        select(AgentRun).where(
+            AgentRun.id == agent_run_id,
+            AgentRun.organization_id == organization_id,
+            AgentRun.workspace_id == workspace_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_agent_run_steps(
+    session: AsyncSession,
+    *,
+    agent_run_id: uuid.UUID,
+) -> list[AgentRunStep]:
+    result = await session.execute(
+        select(AgentRunStep)
+        .where(AgentRunStep.agent_run_id == agent_run_id)
+        .order_by(AgentRunStep.sequence.asc())
+    )
+    return list(result.scalars().all())
 
 
 async def list_workspace_available_tools(

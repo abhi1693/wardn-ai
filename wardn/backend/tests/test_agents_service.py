@@ -125,6 +125,7 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
             id="tool-call-1",
             tool_name="resolve-library-id",
             status="completed",
+            result="Resolved /vercel/next.js",
         )
         yield service.AgentChatTextEvent(text="Final answer")
 
@@ -162,6 +163,7 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
     assert chunks[2]["data"] == {
         "toolName": "resolve-library-id",
         "status": "completed",
+        "result": "Resolved /vercel/next.js",
     }
     assert chunks[4]["delta"] == "Final answer"
     assert persisted == [
@@ -169,6 +171,7 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
             "conversation_id": conversation.id,
             "role": "assistant",
             "content": "Final answer",
+            "agent_run_id": None,
             "parts": [
                 {
                     "type": "data-tool-activity",
@@ -176,6 +179,7 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
                     "data": {
                         "toolName": "resolve-library-id",
                         "status": "completed",
+                        "result": "Resolved /vercel/next.js",
                     },
                 },
                 {"type": "text", "text": "Final answer"},
@@ -183,6 +187,23 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
         }
     ]
     assert session.commits == 1
+
+
+def test_sanitize_run_payload_redacts_sensitive_keys_and_truncates_long_text() -> None:
+    payload = {
+        "apiKey": "secret-value",
+        "nested": {"authorization": "Bearer token", "safe": "visible"},
+        "long": "x" * (service.AGENT_RUN_PAYLOAD_STRING_MAX_CHARS + 1),
+        "text": "please use token=abc123 and sk-abc123456789xyz",
+    }
+
+    sanitized = service.sanitize_run_payload(payload)
+
+    assert sanitized["apiKey"] == "[redacted]"
+    assert sanitized["nested"]["authorization"] == "[redacted]"
+    assert sanitized["nested"]["safe"] == "visible"
+    assert sanitized["long"].endswith("\n[truncated]")
+    assert sanitized["text"] == "please use [redacted] and [redacted]"
 
 
 def test_text_delta_from_openai_event_supports_responses_and_chat_chunks() -> None:

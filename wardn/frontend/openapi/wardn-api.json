@@ -406,6 +406,212 @@
         "title": "AgentRead",
         "type": "object"
       },
+      "AgentRunDetailResponse": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AgentRunRead"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRunStepRead"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run",
+          "steps"
+        ],
+        "title": "AgentRunDetailResponse",
+        "type": "object"
+      },
+      "AgentRunListResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRunRead"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "AgentRunListResponse",
+        "type": "object"
+      },
+      "AgentRunRead": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "title": "Organizationid",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "title": "Startedat",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "triggerType": {
+            "title": "Triggertype",
+            "type": "string"
+          },
+          "triggeredById": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggeredbyid"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organizationId",
+          "workspaceId",
+          "agentId",
+          "triggerType",
+          "status",
+          "startedAt",
+          "error",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "AgentRunRead",
+        "type": "object"
+      },
+      "AgentRunStepRead": {
+        "properties": {
+          "agentRunId": {
+            "format": "uuid",
+            "title": "Agentrunid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mcpToolInvocationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcptoolinvocationid"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stepType": {
+            "title": "Steptype",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentRunId",
+          "sequence",
+          "stepType",
+          "status",
+          "title",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "AgentRunStepRead",
+        "type": "object"
+      },
       "AgentServerToolAssignmentRead": {
         "properties": {
           "installationId": {
@@ -737,6 +943,18 @@
       },
       "ConversationMessageRead": {
         "properties": {
+          "agentRunId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentrunid"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -8130,6 +8348,194 @@
         "summary": "Update Workspace Route",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agent-runs": {
+      "get": {
+        "operationId": "workspace_agent_runs_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Agent Runs Route",
+        "tags": [
+          "workspace-agent-runs"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agent-runs/{agent_run_id}": {
+      "get": {
+        "operationId": "workspace_agent_runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Agent Run Route",
+        "tags": [
+          "workspace-agent-runs"
         ]
       }
     },

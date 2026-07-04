@@ -1,14 +1,15 @@
 # Wardn AI
 
-Wardn AI is an enterprise-focused platform for managing Model Context Protocol
-(MCP) servers behind a unified registry and gateway. The current implementation
-focuses on a backend-first foundation: local user authentication, a verified MCP
-server catalog, installable server configurations, runtime validation, and a
-gateway that lets agents discover and call enabled MCP tools through one entry
-point.
+Wardn AI is an enterprise MCP control plane and agent execution gateway. It lets
+organizations connect MCP servers, expose them through a governed gateway, and
+give agents safe access to tools with auditability, guardrails, scheduled work,
+memory, and retrieval over workspace knowledge.
 
-Future product areas such as guardrails, unified chat, and RAG are intentionally
-deferred until the MCP gateway and registry foundation are stable.
+The product goal is not only to catalog MCP servers. Wardn should become the app
+where teams decide which MCP servers are trusted, which agents can use them,
+what policies apply before tools run, what scheduled tasks agents perform, and
+how every tool call is traced back to a user, workspace, runtime, and policy
+decision.
 
 ## Current Capabilities
 
@@ -22,6 +23,13 @@ deferred until the MCP gateway and registry foundation are stable.
   invoking selected MCP tools.
 - Installed-server tool validation to distinguish endpoint discovery from
   credential-level tool execution.
+- Organization-scoped secret backend connections for external secret stores.
+- LLM provider credentials and workspace agent chat with persisted
+  conversations.
+- Agent MCP server/tool binding, including entire-server binding.
+- Kubernetes/k3s runtime support for package and OCI MCP servers.
+- Agent run tracing foundation for chat turns and future scheduled tasks,
+  guardrails, memory, and RAG.
 - Next.js frontend using shadcn-style UI primitives and generated API types.
 
 ## Repository Layout
@@ -39,6 +47,9 @@ wardn/
         mcp_registry/      MCP catalog, install metadata, registry APIs
         mcp_gateway/       Unified MCP gateway JSON-RPC endpoint
         mcp_runtime/       Runtime sessions and tool invocation tracking
+        secrets/           External secret store integration
+        llm_providers/     LLM credential and model access
+        agents/            Agent, chat, conversation, and run tracing
       openapi.py           OpenAPI export command
     tests/                 Pytest suite
   frontend/                Monolithic Next.js application
@@ -174,17 +185,34 @@ npm run web:build
 
 ## MCP Workflow
 
-1. Add or edit a verified MCP server in the registry.
-2. Define runtime targets, environment variables, headers, and package
-   arguments in the server metadata.
-3. Install a server configuration from the Install page.
-4. Validate representative tool execution from the installed configuration.
-5. Use the unified MCP gateway to search enabled servers, inspect tool schemas,
-   and invoke selected tools.
+1. Connect catalog sources such as Wardn Hub.
+2. Add or sync verified MCP servers into the organization catalog.
+3. Install MCP server configurations into a workspace.
+4. Store required credentials in the configured secret backend.
+5. Validate representative tool execution from the installed configuration.
+6. Bind installed MCP servers or selected tools to workspace agents.
+7. Chat with an agent or run a scheduled task through the governed MCP gateway.
+8. Inspect agent runs, tool calls, runtime events, and future guardrail
+   decisions from trace views.
 
 Endpoint verification confirms that an MCP server initializes and exposes tools.
 Tool validation confirms that the configured credentials can run a specific tool
 with specific arguments.
+
+## Product Roadmap
+
+Wardn is organized around five product layers:
+
+- MCP gateway and runtime: trusted catalog, installation, validation, runtime
+  isolation, tool invocation, and traceability.
+- Agents and conversations: workspace assistants that use bound MCP servers
+  through Wardn rather than direct client-side tool access.
+- Guardrails: policy checks before tool execution, including allow/deny rules,
+  confirmation requirements, sensitive argument checks, and audit records.
+- Scheduled tasks: recurring or one-off agent runs that use the same gateway,
+  guardrails, traces, and secrets as chat.
+- Knowledge and memory: workspace knowledge bases, agent memory, and RAG
+  retrieval recorded as run steps.
 
 ## Configuration and Secrets
 

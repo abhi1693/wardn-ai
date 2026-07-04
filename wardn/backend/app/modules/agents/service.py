@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from app.modules.agents.exceptions import (
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
-from app.modules.agents.models import Agent, ConversationMessage, WorkspaceConversation
+from app.modules.agents.models import Agent, AgentRun, ConversationMessage, WorkspaceConversation
 from app.modules.agents.schemas import (
     TOOL_ASSIGNMENT_WILDCARD,
     AgentAvailableServerRead,
@@ -30,6 +31,10 @@ from app.modules.agents.schemas import (
     AgentCreate,
     AgentListResponse,
     AgentRead,
+    AgentRunDetailResponse,
+    AgentRunListResponse,
+    AgentRunRead,
+    AgentRunStepRead,
     AgentServerToolAssignmentRead,
     AgentToolAssignmentUpdate,
     AgentToolListResponse,
@@ -82,6 +87,15 @@ AGENT_CHAT_TIMEOUT_SECONDS = 120.0
 CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS = 32_000
 AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
+AGENT_RUN_PAYLOAD_STRING_MAX_CHARS = 4_000
+SENSITIVE_TEXT_PATTERNS = (
+    re.compile(
+        r"(?i)\b(api[_-]?key|authorization|client[_-]?secret|password|refresh[_-]?token|secret|token)"
+        r"\s*[:=]\s*['\"]?[^'\"\s,}]+"
+    ),
+    re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]+"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
+)
 QUICK_START_AGENT_NAME = "Workspace Assistant"
 QUICK_START_AGENT_DESCRIPTION = "Default assistant for workspace chat."
 QUICK_START_AGENT_INSTRUCTIONS = (
@@ -124,6 +138,7 @@ class AgentChatToolActivityEvent:
     status: str
     arguments: dict[str, Any] | None = None
     error: str | None = None
+    result: str | None = None
 
 
 AgentChatStreamEvent = AgentChatTextEvent | AgentChatToolActivityEvent
@@ -252,6 +267,7 @@ def conversation_message_response(message: ConversationMessage) -> ConversationM
     return ConversationMessageRead(
         id=message.id,
         conversationId=message.conversation_id,
+        agentRunId=message.agent_run_id,
         role=message.role,
         content=message.content,
         parts=message.parts or text_parts(message.content),
@@ -261,12 +277,82 @@ def conversation_message_response(message: ConversationMessage) -> ConversationM
     )
 
 
+def agent_run_response(agent_run: AgentRun) -> AgentRunRead:
+    return AgentRunRead(
+        id=agent_run.id,
+        organizationId=agent_run.organization_id,
+        workspaceId=agent_run.workspace_id,
+        agentId=agent_run.agent_id,
+        conversationId=agent_run.conversation_id,
+        triggeredById=agent_run.triggered_by_id,
+        triggerType=agent_run.trigger_type,
+        status=agent_run.status,
+        startedAt=agent_run.started_at,
+        finishedAt=agent_run.finished_at,
+        error=agent_run.error,
+        createdAt=agent_run.created_at,
+        updatedAt=agent_run.updated_at,
+    )
+
+
+def agent_run_step_response(step) -> AgentRunStepRead:
+    return AgentRunStepRead(
+        id=step.id,
+        agentRunId=step.agent_run_id,
+        mcpToolInvocationId=step.mcp_tool_invocation_id,
+        sequence=step.sequence,
+        stepType=step.step_type,
+        status=step.status,
+        title=step.title,
+        payload=step.payload,
+        createdAt=step.created_at,
+        updatedAt=step.updated_at,
+    )
+
+
 def text_parts(content: str) -> list[dict[str, str]]:
     return [{"type": "text", "text": content}]
 
 
 def ui_message_sse_chunk(chunk: dict[str, Any]) -> str:
     return f"data: {json.dumps(chunk, separators=(',', ':'), default=str)}\n\n"
+
+
+def is_sensitive_key(key: str) -> bool:
+    normalized = key.replace("-", "_").casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "api_key",
+            "apikey",
+            "authorization",
+            "bearer",
+            "client_secret",
+            "cookie",
+            "password",
+            "refresh_token",
+            "secret",
+            "token",
+        )
+    )
+
+
+def sanitize_run_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): "[redacted]" if is_sensitive_key(str(key)) else sanitize_run_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_run_payload(item) for item in value]
+    if isinstance(value, str):
+        sanitized = value
+        for pattern in SENSITIVE_TEXT_PATTERNS:
+            sanitized = pattern.sub("[redacted]", sanitized)
+        if len(sanitized) > AGENT_RUN_PAYLOAD_STRING_MAX_CHARS:
+            return sanitized[:AGENT_RUN_PAYLOAD_STRING_MAX_CHARS] + "\n[truncated]"
+        return sanitized
+    return value
 
 
 async def list_agents(
@@ -625,6 +711,44 @@ async def get_workspace_conversation(
         ),
         conversation=conversation_response(conversation),
         messages=[conversation_message_response(message) for message in messages],
+    )
+
+
+async def list_workspace_agent_runs(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> AgentRunListResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    runs = await repository.list_agent_runs(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    return AgentRunListResponse(runs=[agent_run_response(agent_run) for agent_run in runs])
+
+
+async def get_workspace_agent_run(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> AgentRunDetailResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    agent_run = await repository.get_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+    )
+    if agent_run is None:
+        raise AgentNotFoundError("agent run not found")
+    steps = await repository.list_agent_run_steps(session, agent_run_id=agent_run.id)
+    return AgentRunDetailResponse(
+        run=agent_run_response(agent_run),
+        steps=[agent_run_step_response(step) for step in steps],
     )
 
 
@@ -1045,6 +1169,7 @@ async def stream_chatgpt_codex_response_text(
                         tool_name=tool_name,
                         status="failed" if output.startswith(failed_prefix) else "completed",
                         error=output if output.startswith(failed_prefix) else None,
+                        result=None if output.startswith(failed_prefix) else output,
                     )
                     input_items.append(
                         {
@@ -1143,6 +1268,7 @@ async def persist_chat_turn_user_message(
     session: AsyncSession,
     conversation: WorkspaceConversation,
     payload: AgentChatRequest,
+    agent_run: AgentRun | None = None,
 ) -> None:
     message = latest_user_message(payload.messages)
     if message is None:
@@ -1156,14 +1282,15 @@ async def persist_chat_turn_user_message(
         role="user",
         content=content,
         parts=text_parts(content),
+        agent_run_id=agent_run.id if agent_run else None,
     )
-    await session.commit()
 
 
 async def persisted_agent_chat_stream(
     session: AsyncSession,
     conversation: WorkspaceConversation | None,
     stream: AsyncGenerator[AgentChatStreamEvent, None],
+    agent_run: AgentRun | None = None,
 ) -> AsyncGenerator[str, None]:
     message_id = str(uuid.uuid4())
     text_id = f"text-{message_id}"
@@ -1171,33 +1298,64 @@ async def persisted_agent_chat_stream(
     text_started = False
     activity_parts: dict[str, dict[str, Any]] = {}
     yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
-    async for event in stream:
-        if isinstance(event, AgentChatTextEvent):
-            if not event.text:
+    try:
+        async for event in stream:
+            if isinstance(event, AgentChatTextEvent):
+                if not event.text:
+                    continue
+                if not text_started:
+                    text_started = True
+                    yield ui_message_sse_chunk({"type": "text-start", "id": text_id})
+                chunks.append(event.text)
+                yield ui_message_sse_chunk(
+                    {"type": "text-delta", "id": text_id, "delta": event.text}
+                )
                 continue
-            if not text_started:
-                text_started = True
-                yield ui_message_sse_chunk({"type": "text-start", "id": text_id})
-            chunks.append(event.text)
-            yield ui_message_sse_chunk(
-                {"type": "text-delta", "id": text_id, "delta": event.text}
+            data: dict[str, Any] = {
+                "toolName": event.tool_name,
+                "status": event.status,
+            }
+            if event.arguments is not None:
+                data["arguments"] = sanitize_run_payload(event.arguments)
+            if event.error:
+                data["error"] = event.error
+            if event.result:
+                data["result"] = sanitize_run_payload(event.result)
+            activity_part = {
+                "type": "data-tool-activity",
+                "id": event.id,
+                "data": data,
+            }
+            activity_parts[event.id] = activity_part
+            if agent_run is not None:
+                await repository.append_agent_run_step(
+                    session,
+                    agent_run_id=agent_run.id,
+                    step_type="tool_call" if event.status == "running" else "tool_result",
+                    status=event.status,
+                    title=event.tool_name,
+                    payload=sanitize_run_payload(data),
+                )
+                await session.commit()
+            yield ui_message_sse_chunk(activity_part)
+    except Exception as exc:
+        if agent_run is not None:
+            await repository.append_agent_run_step(
+                session,
+                agent_run_id=agent_run.id,
+                step_type="error",
+                status="failed",
+                title=exc.__class__.__name__,
+                payload={"message": str(exc)},
             )
-            continue
-        data: dict[str, Any] = {
-            "toolName": event.tool_name,
-            "status": event.status,
-        }
-        if event.arguments is not None:
-            data["arguments"] = event.arguments
-        if event.error:
-            data["error"] = event.error
-        activity_part = {
-            "type": "data-tool-activity",
-            "id": event.id,
-            "data": data,
-        }
-        activity_parts[event.id] = activity_part
-        yield ui_message_sse_chunk(activity_part)
+            await repository.finish_agent_run(
+                session,
+                agent_run,
+                status="failed",
+                error=str(exc),
+            )
+            await session.commit()
+        raise
     if text_started:
         yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
     yield ui_message_sse_chunk({"type": "finish", "finishReason": "stop"})
@@ -1209,13 +1367,25 @@ async def persisted_agent_chat_stream(
         parts.append({"type": "text", "text": content})
     if not parts:
         return
+    if agent_run is not None and content:
+        await repository.append_agent_run_step(
+            session,
+            agent_run_id=agent_run.id,
+            step_type="model_output",
+            status="succeeded",
+            title="Assistant response",
+            payload={"content": sanitize_run_payload(content)},
+        )
     await repository.append_conversation_message(
         session,
         conversation_id=conversation.id,
         role="assistant",
         content=content,
         parts=parts,
+        agent_run_id=agent_run.id if agent_run else None,
     )
+    if agent_run is not None:
+        await repository.finish_agent_run(session, agent_run, status="succeeded")
     await session.commit()
 
 
@@ -1258,6 +1428,7 @@ async def stream_agent_chat(
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
     conversation = None
+    agent_run = None
     conversation_id = conversation_id_from_payload(payload)
     if conversation_id is not None:
         if workspace_id is None:
@@ -1270,7 +1441,31 @@ async def stream_agent_chat(
         )
         if conversation is None or conversation.agent_id != agent.id:
             raise AgentNotFoundError("conversation not found")
-        await persist_chat_turn_user_message(session, conversation, payload)
+        agent_run = await repository.create_agent_run(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            conversation_id=conversation.id,
+            triggered_by_id=user.id,
+            trigger_type="chat",
+        )
+        latest_message = latest_user_message(payload.messages)
+        await repository.append_agent_run_step(
+            session,
+            agent_run_id=agent_run.id,
+            step_type="model_input",
+            status="submitted",
+            title="User message",
+            payload={
+                "message": sanitize_run_payload(text_from_chat_message(latest_message))
+                if latest_message
+                else "",
+                "messageCount": len(payload.messages),
+            },
+        )
+        await persist_chat_turn_user_message(session, conversation, payload, agent_run)
+        await session.commit()
     await refresh_wildcard_agent_server_tools(session, agent.id)
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
@@ -1282,7 +1477,7 @@ async def stream_agent_chat(
         AgentChatRequest(id=payload.id, messages=payload.messages),
         tools,
     )
-    return persisted_agent_chat_stream(session, conversation, stream)
+    return persisted_agent_chat_stream(session, conversation, stream, agent_run)
 
 
 async def update_agent(

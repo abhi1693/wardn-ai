@@ -81,13 +81,21 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}/chat"
         ),
-        (
-            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
-            "/agents/{agent_id}/tools"
-        ),
-        (
-            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
-            "/mcp/runtime/sessions"
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/agents/{agent_id}/tools"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/agent-runs"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/agent-runs/{agent_run_id}"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/sessions"
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -284,6 +292,18 @@ def test_workspace_agents_openapi_contract() -> None:
             "/agents/conversations/{conversation_id}"
         )
     ]
+    runs = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agent-runs"
+        )
+    ]
+    run = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agent-runs/{agent_run_id}"
+        )
+    ]
     agent = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -329,6 +349,14 @@ def test_workspace_agents_openapi_contract() -> None:
     assert conversation["get"]["operationId"] == "workspace_agents_get_conversation"
     assert conversation["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentConversationResponse"
+    }
+    assert runs["get"]["operationId"] == "workspace_agent_runs_list"
+    assert runs["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRunListResponse"
+    }
+    assert run["get"]["operationId"] == "workspace_agent_runs_get"
+    assert run["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRunDetailResponse"
     }
     assert agent["get"]["operationId"] == "workspace_agents_get"
     assert agent["patch"]["operationId"] == "workspace_agents_update"
