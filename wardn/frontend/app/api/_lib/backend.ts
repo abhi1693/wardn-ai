@@ -21,12 +21,21 @@ export async function proxyBackend(
     },
   });
   const hasBody = ![204, 205, 304].includes(response.status);
+  const headers: Record<string, string> = {};
+  const contentType = response.headers.get("content-type");
+  headers["content-type"] = contentType ?? "application/json";
+  for (const headerName of [
+    "cache-control",
+    "x-accel-buffering",
+    "x-vercel-ai-ui-message-stream",
+  ]) {
+    const value = response.headers.get(headerName);
+    if (value) {
+      headers[headerName] = value;
+    }
+  }
   return new NextResponse(hasBody ? response.body : null, {
     status: response.status,
-    headers: hasBody
-      ? {
-          "content-type": response.headers.get("content-type") ?? "application/json",
-        }
-      : undefined,
+    headers: hasBody ? headers : undefined,
   });
 }

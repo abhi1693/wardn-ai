@@ -340,7 +340,7 @@ def test_workspace_agents_openapi_contract() -> None:
     assert chat["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentChatRequest"
     }
-    assert chat["post"]["responses"]["200"]["content"]["text/plain"]["schema"] == {
+    assert chat["post"]["responses"]["200"]["content"]["text/event-stream"]["schema"] == {
         "type": "string"
     }
     assert chat["post"]["responses"]["502"]["content"]["application/json"]["schema"] == {

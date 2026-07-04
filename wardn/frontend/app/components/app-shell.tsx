@@ -141,6 +141,9 @@ type AppShellProps = {
   title: string;
   actions?: ReactNode;
   workspaceContext?: WorkspaceContext;
+  sectionClassName?: string;
+  contentClassName?: string;
+  contentInnerClassName?: string;
   children: ReactNode;
 };
 
@@ -150,6 +153,9 @@ export function AppShell({
   title,
   actions,
   workspaceContext,
+  sectionClassName,
+  contentClassName,
+  contentInnerClassName,
   children,
 }: AppShellProps) {
   const isWorkspaceScope =
@@ -247,7 +253,12 @@ export function AppShell({
         </div>
       </aside>
 
-      <section className="min-h-screen min-w-0 bg-[var(--surface-bright)] pl-[260px] max-lg:pl-0">
+      <section
+        className={cn(
+          "min-h-screen min-w-0 bg-[var(--surface-bright)] pl-[260px] max-lg:pl-0",
+          sectionClassName
+        )}
+      >
         <header className="fixed right-0 top-0 z-40 flex h-16 w-[calc(100%-260px)] items-center border-b border-[var(--outline-variant)] bg-[var(--surface)] max-lg:static max-lg:w-full">
           <div className="flex w-full items-center justify-between gap-4 px-8 max-md:px-4">
             <div className="flex min-w-0 items-center gap-4">
@@ -272,8 +283,13 @@ export function AppShell({
           </div>
         </header>
 
-        <div className="mx-auto min-h-screen w-full max-w-[1440px] px-8 pb-8 pt-24 max-lg:pt-8 max-md:px-4 max-md:pb-4">
-          <div className="space-y-6">{children}</div>
+        <div
+          className={cn(
+            "mx-auto min-h-screen w-full max-w-[1440px] px-8 pb-8 pt-24 max-lg:pt-8 max-md:px-4 max-md:pb-4",
+            contentClassName
+          )}
+        >
+          <div className={cn("space-y-6", contentInnerClassName)}>{children}</div>
         </div>
       </section>
     </main>

@@ -57,6 +57,7 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
+from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations.service import (
@@ -109,6 +110,23 @@ class AgentToolCall:
     name: str
     call_id: str
     arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AgentChatTextEvent:
+    text: str
+
+
+@dataclass(frozen=True)
+class AgentChatToolActivityEvent:
+    id: str
+    tool_name: str
+    status: str
+    arguments: dict[str, Any] | None = None
+    error: str | None = None
+
+
+AgentChatStreamEvent = AgentChatTextEvent | AgentChatToolActivityEvent
 
 
 def normalize_name(value: str) -> str:
@@ -245,6 +263,10 @@ def conversation_message_response(message: ConversationMessage) -> ConversationM
 
 def text_parts(content: str) -> list[dict[str, str]]:
     return [{"type": "text", "text": content}]
+
+
+def ui_message_sse_chunk(chunk: dict[str, Any]) -> str:
+    return f"data: {json.dumps(chunk, separators=(',', ':'), default=str)}\n\n"
 
 
 async def list_agents(
@@ -882,11 +904,8 @@ def sse_payloads(buffer: str) -> tuple[list[dict[str, Any]], str]:
 
 
 def text_delta_from_openai_event(payload: dict[str, Any]) -> str:
-    delta = payload.get("delta")
-    if isinstance(delta, str):
-        return delta
-
     if payload.get("type") == "response.output_text.delta":
+        delta = payload.get("delta")
         return delta if isinstance(delta, str) else ""
 
     choices = payload.get("choices")
@@ -949,7 +968,7 @@ async def stream_chatgpt_codex_response_text(
     headers: dict[str, str],
     messages: list[AgentChatMessage],
     tools: dict[str, AgentRuntimeTool],
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
     try:
         async with websocket_connect(
             CHATGPT_CODEX_RESPONSES_WS_URL,
@@ -993,7 +1012,7 @@ async def stream_chatgpt_codex_response_text(
                         )
                     text = text_delta_from_openai_event(payload)
                     if text:
-                        yield text
+                        yield AgentChatTextEvent(text=text)
                     tool_calls.extend(tool_calls_from_event(payload))
                     response_id = response_id_from_event(payload)
                     if response_id:
@@ -1007,9 +1026,26 @@ async def stream_chatgpt_codex_response_text(
                 input_items = []
                 for tool_call in tool_calls:
                     tool = tools.get(tool_call.name)
-                    label = tool.tool_schema.tool_name if tool else tool_call.name
-                    yield f"\n\n[Running {label}]\n\n"
+                    tool_name = (
+                        tool.tool_schema.tool_name
+                        if tool is not None
+                        else tool_call.name
+                    )
+                    activity_id = f"tool-{tool_call.call_id}"
+                    yield AgentChatToolActivityEvent(
+                        id=activity_id,
+                        tool_name=tool_name,
+                        status="running",
+                        arguments=tool_call.arguments,
+                    )
                     output = await execute_agent_tool_call(session, tools, tool_call)
+                    failed_prefix = f"Tool {tool_name} failed:"
+                    yield AgentChatToolActivityEvent(
+                        id=activity_id,
+                        tool_name=tool_name,
+                        status="failed" if output.startswith(failed_prefix) else "completed",
+                        error=output if output.startswith(failed_prefix) else None,
+                    )
                     input_items.append(
                         {
                             "type": "function_call_output",
@@ -1018,7 +1054,7 @@ async def stream_chatgpt_codex_response_text(
                         }
                     )
 
-            yield "\n\nStopped after reaching the tool call limit."
+            yield AgentChatTextEvent(text="\n\nStopped after reaching the tool call limit.")
     except AgentChatProviderError:
         raise
     except WebSocketException as exc:
@@ -1033,7 +1069,7 @@ async def run_agent_chat(
     credential: LLMProviderCredential,
     payload: AgentChatRequest,
     tools: dict[str, AgentRuntimeTool],
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
     messages = provider_messages(payload.messages)
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
@@ -1055,7 +1091,7 @@ async def run_agent_chat(
             },
             body=body,
         ):
-            yield text
+            yield AgentChatTextEvent(text=text)
         return
 
     if (
@@ -1127,25 +1163,80 @@ async def persist_chat_turn_user_message(
 async def persisted_agent_chat_stream(
     session: AsyncSession,
     conversation: WorkspaceConversation | None,
-    stream: AsyncGenerator[str, None],
+    stream: AsyncGenerator[AgentChatStreamEvent, None],
 ) -> AsyncGenerator[str, None]:
+    message_id = str(uuid.uuid4())
+    text_id = f"text-{message_id}"
     chunks: list[str] = []
-    async for text in stream:
-        chunks.append(text)
-        yield text
+    text_started = False
+    activity_parts: dict[str, dict[str, Any]] = {}
+    yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
+    async for event in stream:
+        if isinstance(event, AgentChatTextEvent):
+            if not event.text:
+                continue
+            if not text_started:
+                text_started = True
+                yield ui_message_sse_chunk({"type": "text-start", "id": text_id})
+            chunks.append(event.text)
+            yield ui_message_sse_chunk(
+                {"type": "text-delta", "id": text_id, "delta": event.text}
+            )
+            continue
+        data: dict[str, Any] = {
+            "toolName": event.tool_name,
+            "status": event.status,
+        }
+        if event.arguments is not None:
+            data["arguments"] = event.arguments
+        if event.error:
+            data["error"] = event.error
+        activity_part = {
+            "type": "data-tool-activity",
+            "id": event.id,
+            "data": data,
+        }
+        activity_parts[event.id] = activity_part
+        yield ui_message_sse_chunk(activity_part)
+    if text_started:
+        yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
+    yield ui_message_sse_chunk({"type": "finish", "finishReason": "stop"})
     if conversation is None:
         return
     content = "".join(chunks).strip()
-    if not content:
+    parts = list(activity_parts.values())
+    if content:
+        parts.append({"type": "text", "text": content})
+    if not parts:
         return
     await repository.append_conversation_message(
         session,
         conversation_id=conversation.id,
         role="assistant",
         content=content,
-        parts=text_parts(content),
+        parts=parts,
     )
     await session.commit()
+
+
+async def refresh_wildcard_agent_server_tools(
+    session: AsyncSession,
+    agent_id: uuid.UUID,
+) -> None:
+    rows = await repository.list_agent_wildcard_server_version_rows(session, agent_id=agent_id)
+    for _assignment, installation, server in rows:
+        try:
+            await refresh_tool_schemas_for_installation(
+                session,
+                installation=installation,
+                server=server,
+            )
+        except Exception as exc:
+            raise InvalidAgentScopeError(
+                f"MCP server tools could not be loaded for {installation.config_name}: {exc}"
+            ) from exc
+    if rows:
+        await session.commit()
 
 
 async def stream_agent_chat(
@@ -1180,6 +1271,7 @@ async def stream_agent_chat(
         if conversation is None or conversation.agent_id != agent.id:
             raise AgentNotFoundError("conversation not found")
         await persist_chat_turn_user_message(session, conversation, payload)
+    await refresh_wildcard_agent_server_tools(session, agent.id)
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
     )

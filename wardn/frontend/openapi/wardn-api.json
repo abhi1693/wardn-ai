@@ -9006,7 +9006,7 @@
         "responses": {
           "200": {
             "content": {
-              "text/plain": {
+              "text/event-stream": {
                 "schema": {
                   "type": "string"
                 }

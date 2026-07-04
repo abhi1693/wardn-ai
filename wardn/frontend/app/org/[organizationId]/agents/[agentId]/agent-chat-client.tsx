@@ -1,10 +1,29 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { TextStreamChatTransport, type UIMessage } from "ai";
-import { Bot, Check, Copy, Info, Loader2, Pencil, Send, Square } from "lucide-react";
+import { DefaultChatTransport, type UIMessage } from "ai";
+import {
+  Bot,
+  Check,
+  CheckCircle2,
+  Copy,
+  Info,
+  Loader2,
+  Pencil,
+  Send,
+  Square,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 import Link from "next/link";
-import { type ComponentPropsWithoutRef, type FormEvent, useMemo, useState } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -38,10 +57,26 @@ type AgentChatClientProps = {
 };
 
 type MessageRole = UIMessage["role"];
+type MessagePart = UIMessage["parts"][number];
+type ToolActivityData = {
+  arguments?: unknown;
+  error?: string;
+  status?: string;
+  toolName?: string;
+};
+type ToolActivityPart = MessagePart & {
+  data?: ToolActivityData;
+  id?: string;
+  type: "data-tool-activity";
+};
 
-function messageText(parts: Array<{ type: string; text?: string }>) {
+function isTextPart(part: MessagePart): part is Extract<MessagePart, { type: "text" }> {
+  return part.type === "text" && typeof part.text === "string";
+}
+
+function messageText(parts: MessagePart[]) {
   return parts
-    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .filter(isTextPart)
     .map((part) => part.text)
     .join("");
 }
@@ -51,11 +86,9 @@ function textPart(text: string) {
 }
 
 function uiMessageParts(message: ConversationMessageRead): UIMessage["parts"] {
-  const parts = message.parts?.filter(
-    (part): part is { type: "text"; text: string } =>
-      part.type === "text" && typeof part.text === "string"
-  );
-  return parts?.length ? parts : [textPart(message.content)];
+  return message.parts?.length
+    ? (message.parts as UIMessage["parts"])
+    : ([textPart(message.content)] as UIMessage["parts"]);
 }
 
 function uiMessages(messages: ConversationMessageRead[] = []): UIMessage[] {
@@ -205,6 +238,107 @@ function MessageMarkdown({ role, text }: { role: MessageRole; text: string }) {
   );
 }
 
+function MessageAvatar({ role }: { role: MessageRole }) {
+  if (role === "user") {
+    return (
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-primary-foreground">
+        <UserRound className="size-4" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[var(--outline-variant)] bg-white text-primary">
+      <Bot className="size-4" />
+    </div>
+  );
+}
+
+function MessageLabel({ role }: { role: MessageRole }) {
+  if (role === "user") {
+    return "You";
+  }
+  if (role === "system") {
+    return "System";
+  }
+  return "Assistant";
+}
+
+function isToolActivityPart(part: MessagePart): part is ToolActivityPart {
+  return part.type === "data-tool-activity";
+}
+
+function toolActivities(parts: MessagePart[]) {
+  const activities = new Map<string, ToolActivityPart>();
+  for (const part of parts) {
+    if (!isToolActivityPart(part)) {
+      continue;
+    }
+    const key = part.id ?? `${part.data?.toolName ?? "tool"}-${activities.size}`;
+    activities.set(key, part);
+  }
+  return Array.from(activities.values());
+}
+
+function toolActivitySummary(activities: ToolActivityPart[]) {
+  const completed = activities.filter((activity) => activity.data?.status === "completed").length;
+  const failed = activities.filter((activity) => activity.data?.status === "failed").length;
+  if (failed > 0) {
+    return `${failed} failed`;
+  }
+  if (completed === activities.length) {
+    return `${completed} completed`;
+  }
+  return `${activities.length} running`;
+}
+
+function ToolActivity({ activities }: { activities: ToolActivityPart[] }) {
+  if (activities.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-[var(--on-surface-variant)]">
+        <span className="flex min-w-0 items-center gap-2">
+          <Wrench className="size-3.5 shrink-0" />
+          <span>Tool activity</span>
+        </span>
+        <Badge variant="outline">{toolActivitySummary(activities)}</Badge>
+      </summary>
+      <div className="border-t border-[var(--outline-variant)] px-3 py-2">
+        <div className="space-y-1.5">
+          {activities.map((activity) => {
+            const status = activity.data?.status ?? "running";
+            const isDone = status === "completed";
+            const isFailed = status === "failed";
+            return (
+              <div
+                className="flex items-start gap-2 rounded-md bg-white px-2.5 py-2 text-xs"
+                key={activity.id ?? `${activity.data?.toolName}-${status}`}
+              >
+                {isDone ? (
+                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                ) : isFailed ? (
+                  <Square className="mt-0.5 size-3.5 shrink-0 text-red-600" />
+                ) : (
+                  <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-[var(--on-surface-variant)]" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium text-[var(--on-surface)]">
+                    {activity.data?.toolName ?? "MCP tool"}
+                  </div>
+                  <div className="mt-0.5 text-[var(--on-surface-variant)]">
+                    {isFailed ? activity.data?.error ?? "Failed" : status}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function providerLabel(credential: LlmCredentialRead) {
   if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
     return "OpenAI ChatGPT";
@@ -239,7 +373,7 @@ export function AgentChatClient({
   const persistedMessages = useMemo(() => uiMessages(initialMessages), [initialMessages]);
   const transport = useMemo(
     () =>
-      new TextStreamChatTransport({
+      new DefaultChatTransport({
         api: chatApi,
       }),
     [chatApi]
@@ -250,6 +384,7 @@ export function AgentChatClient({
     transport,
   });
   const isRunning = status === "submitted" || status === "streaming";
+  const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const serverLabel = agent.serverCount === 1 ? "1 server" : `${agent.serverCount} servers`;
   const toolLabel = agent.toolCount === 1 ? "1 tool" : `${agent.toolCount} tools`;
   const editPath = `/org/${organization.id}/workspace/${workspaceId}/agents/${agent.id}/edit`;
@@ -264,176 +399,235 @@ export function AgentChatClient({
     await sendMessage({ text });
   }
 
+  useEffect(() => {
+    window.requestAnimationFrame(() => {
+      const viewport = transcriptViewportRef.current;
+      if (!viewport) {
+        return;
+      }
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+  }, [messages, status]);
+
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-140px)] w-full max-w-6xl flex-col">
-      <div className="sticky top-0 z-10 border-b border-[var(--outline-variant)] bg-[var(--background)]/95 py-3 backdrop-blur">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold">{agent.name}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{agent.modelName || "No model"}</Badge>
-              <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
-                {serverLabel}
-              </Badge>
-              <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>{toolLabel}</Badge>
-            </div>
-          </div>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button size="sm" type="button" variant="outline">
-                <Info className="size-4" />
-                Details
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
-              <DialogHeader className="border-b border-[var(--outline-variant)] px-5 py-4">
-                <DialogTitle>{agent.name}</DialogTitle>
-                <DialogDescription>Workspace chat details</DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5 text-sm">
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                    Model
-                  </h3>
-                  <div className="rounded-md border border-[var(--outline-variant)] px-3 py-2">
-                    <div className="font-mono text-sm">{agent.modelName || "No model"}</div>
-                  </div>
-                </section>
-
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                    Credential
-                  </h3>
-                  <div className="rounded-md border border-[var(--outline-variant)] px-3 py-2">
-                    <div className="truncate">
-                      {credentialLabel(credentials, agent.providerCredentialId)}
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                    MCP servers
-                  </h3>
-                  <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] px-3 py-2">
-                    <span>Bound to this chat</span>
+    <div className="flex h-[calc(100dvh-4rem)] min-h-0 w-full flex-col overflow-hidden bg-white max-lg:h-[calc(100dvh-11.75rem)]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-[var(--outline-variant)] bg-white px-8 py-4 max-md:px-4">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-primary-foreground">
+                  <Bot className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold leading-6">{agent.name}</h2>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Badge className="font-mono" variant="outline">
+                      {agent.modelName || "No model"}
+                    </Badge>
                     <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
                       {serverLabel}
                     </Badge>
-                  </div>
-                  <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] px-3 py-2">
-                    <span>Discovered tools</span>
                     <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
                       {toolLabel}
                     </Badge>
                   </div>
-                </section>
+                </div>
+              </div>
+            </div>
 
-                <section className="space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                    Agent settings
-                  </h3>
-                  <div className="space-y-3 rounded-md border border-[var(--outline-variant)] px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[var(--on-surface-variant)]">Status</span>
-                      <Badge variant={agent.isActive ? "success" : "secondary"}>
-                        {agent.isActive ? "Active" : "Inactive"}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button className="shrink-0" size="sm" type="button" variant="outline">
+                  <Info className="size-4" />
+                  Details
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
+                <DialogHeader className="border-b border-[var(--outline-variant)] px-5 py-4">
+                  <DialogTitle>{agent.name}</DialogTitle>
+                  <DialogDescription>Workspace chat details</DialogDescription>
+                </DialogHeader>
+                <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5 text-sm">
+                  <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                      Model
+                    </h3>
+                    <div className="rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
+                      <div className="font-mono text-sm">{agent.modelName || "No model"}</div>
+                    </div>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                      Credential
+                    </h3>
+                    <div className="rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
+                      <div className="truncate">
+                        {credentialLabel(credentials, agent.providerCredentialId)}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                      MCP servers
+                    </h3>
+                    <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
+                      <span>Bound to this chat</span>
+                      <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
+                        {serverLabel}
                       </Badge>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[var(--on-surface-variant)]">Scope</span>
-                      <span>{agent.scope}</span>
+                    <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
+                      <span>Discovered tools</span>
+                      <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
+                        {toolLabel}
+                      </Badge>
                     </div>
-                    <Button asChild className="w-full" size="sm" variant="outline">
-                      <Link href={editPath}>
-                        <Pencil className="size-4" />
-                        Edit agent
-                      </Link>
-                    </Button>
-                  </div>
-                </section>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
+                  </section>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-1 py-6">
-        <div className="flex-1 space-y-5 pb-6">
-          {messages.length === 0 ? (
-            <div className="flex min-h-80 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] text-center">
-              <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
-                <Bot className="size-5" />
-              </div>
-              <div className="text-sm font-medium">Start a conversation</div>
-            </div>
-          ) : (
-            messages.map((message) => {
-              const text = messageText(message.parts);
-              return (
-                <div
-                  className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
-                  key={message.id}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[88%] overflow-hidden rounded-lg border px-4 py-3 text-sm leading-6",
-                      message.role === "user"
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-[var(--outline-variant)] bg-white"
-                    )}
-                  >
-                    <MessageMarkdown role={message.role} text={text} />
-                  </div>
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                      Agent settings
+                    </h3>
+                    <div className="space-y-3 rounded-md border border-[var(--outline-variant)] bg-white px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--on-surface-variant)]">Status</span>
+                        <Badge variant={agent.isActive ? "success" : "secondary"}>
+                          {agent.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--on-surface-variant)]">Scope</span>
+                        <span>{agent.scope}</span>
+                      </div>
+                      <Button asChild className="w-full" size="sm" variant="outline">
+                        <Link href={editPath}>
+                          <Pencil className="size-4" />
+                          Edit agent
+                        </Link>
+                      </Button>
+                    </div>
+                  </section>
                 </div>
-              );
-            })
-          )}
-          {status === "submitted" ? (
-            <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm text-[var(--on-surface-variant)]">
-                <Loader2 className="size-4 animate-spin" />
-                Thinking
-              </div>
-            </div>
-          ) : null}
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
-        {error ? (
-          <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error.message}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="sticky bottom-0 border-t border-[var(--outline-variant)] bg-[var(--background)]/95 py-3 backdrop-blur">
-        <form
-          className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-lg border border-[var(--outline-variant)] bg-white p-2 shadow-[var(--shadow-card)]"
-          onSubmit={submitMessage}
+        <div
+          className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface-bright)]"
+          ref={transcriptViewportRef}
         >
-          <textarea
-            className="max-h-40 min-h-12 flex-1 resize-none rounded-md border-0 bg-transparent px-2 py-2 text-sm outline-none"
-            disabled={isRunning}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            placeholder="Message this workspace"
-            value={input}
-          />
-          {isRunning ? (
-            <Button aria-label="Stop response" onClick={stop} size="icon" type="button">
-              <Square className="size-4" />
-            </Button>
-          ) : (
-            <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
-              <Send className="size-4" />
-            </Button>
-          )}
-        </form>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-8 py-8 max-md:px-4">
+            {messages.length === 0 ? (
+              <div className="flex min-h-96 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] bg-white text-center shadow-[var(--shadow-card)]">
+                <div className="mb-3 flex size-10 items-center justify-center rounded-md bg-[var(--surface-container)] text-primary">
+                  <Bot className="size-5" />
+                </div>
+                <div className="text-sm font-semibold">Start a conversation</div>
+                <div className="mt-1 text-sm text-[var(--on-surface-variant)]">
+                  {serverLabel}
+                  {agent.serverCount > 0 ? " connected" : ""}
+                </div>
+              </div>
+            ) : (
+              messages.map((message) => {
+                const text = messageText(message.parts);
+                const activities = toolActivities(message.parts);
+                const isUser = message.role === "user";
+                return (
+                  <div
+                    className={cn("group flex gap-3", isUser ? "justify-end" : "justify-start")}
+                    key={message.id}
+                  >
+                    {!isUser ? <MessageAvatar role={message.role} /> : null}
+                    <div
+                      className={cn(
+                        "min-w-0",
+                        isUser ? "max-w-[720px]" : "max-w-[900px] flex-1"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "mb-1.5 text-xs font-medium text-[var(--on-surface-variant)]",
+                          isUser && "text-right"
+                        )}
+                      >
+                        <MessageLabel role={message.role} />
+                      </div>
+                      <div
+                        className={cn(
+                          "overflow-hidden border px-4 py-3 text-sm leading-6",
+                          isUser
+                            ? "rounded-md border-primary bg-primary text-primary-foreground shadow-[var(--shadow-card)]"
+                            : "rounded-lg border-[var(--outline-variant)] bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)]"
+                        )}
+                      >
+                        {!isUser ? <ToolActivity activities={activities} /> : null}
+                        {text ? <MessageMarkdown role={message.role} text={text} /> : null}
+                      </div>
+                    </div>
+                    {isUser ? <MessageAvatar role={message.role} /> : null}
+                  </div>
+                );
+              })
+            )}
+
+            {status === "submitted" ? (
+              <div className="flex items-center gap-3">
+                <MessageAvatar role="assistant" />
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm text-[var(--on-surface-variant)] shadow-[var(--shadow-card)]">
+                  <Loader2 className="size-4 animate-spin" />
+                  Thinking
+                </div>
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error.message}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t border-[var(--outline-variant)] bg-white px-8 py-4 max-md:px-4">
+          <form
+            className="mx-auto flex w-full max-w-5xl items-end gap-2 rounded-lg border border-[var(--outline-variant)] bg-white p-2 shadow-[0_8px_24px_rgb(15_23_42/0.08)] transition-colors focus-within:border-[var(--ring)] focus-within:ring-2 focus-within:ring-sky-100"
+            onSubmit={submitMessage}
+          >
+            <textarea
+              className="max-h-40 min-h-12 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-[var(--on-surface-variant)]"
+              disabled={isRunning}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="Message this workspace"
+              value={input}
+            />
+            {isRunning ? (
+              <Button
+                aria-label="Stop response"
+                onClick={stop}
+                size="icon"
+                type="button"
+                variant="secondary"
+              >
+                <Square className="size-4" />
+              </Button>
+            ) : (
+              <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
+                <Send className="size-4" />
+              </Button>
+            )}
+          </form>
+        </div>
       </div>
     </div>
   );

@@ -83,7 +83,10 @@ export default async function WorkspaceChatPage({ params }: WorkspaceChatPagePro
           </Link>
         </Button>
       }
+      contentClassName="h-screen min-h-0 max-w-none px-0 pb-0 pt-16 max-lg:h-auto max-lg:pt-0 max-md:px-0 max-md:pb-0"
+      contentInnerClassName="h-full space-y-0"
       eyebrow="Workspace"
+      sectionClassName="max-lg:min-h-0"
       title="Chat"
       workspaceContext={workspaceContext}
     >

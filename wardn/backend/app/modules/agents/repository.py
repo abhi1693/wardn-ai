@@ -433,3 +433,35 @@ async def list_agent_tool_runtime_rows(
         for assignment, tool_schema, installation in tool_rows
         if (installation.server_name, installation.installed_version) in versions
     ]
+
+
+async def list_agent_wildcard_server_version_rows(
+    session: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+) -> list[tuple[AgentMCPServerAssignment, MCPServerInstallation, MCPServerVersion]]:
+    result = await session.execute(
+        select(AgentMCPServerAssignment, MCPServerInstallation, MCPServerVersion)
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .join(
+            MCPServerVersion,
+            and_(
+                MCPServerVersion.name == MCPServerInstallation.server_name,
+                MCPServerVersion.version == MCPServerInstallation.installed_version,
+            ),
+        )
+        .where(
+            AgentMCPServerAssignment.agent_id == agent_id,
+            AgentMCPToolAssignment.wildcard.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+        .order_by(MCPServerInstallation.server_name.asc(), MCPServerInstallation.config_name.asc())
+    )
+    return list(result.all())

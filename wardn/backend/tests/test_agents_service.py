@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -18,7 +19,11 @@ from app.modules.agents.models import (
 from app.modules.agents.schemas import AgentChatMessage, AgentCreate, AgentToolAssignmentUpdate
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerToolSchema
+from app.modules.mcp_registry.models import (
+    MCPServerInstallation,
+    MCPServerToolSchema,
+    MCPServerVersion,
+)
 from app.modules.organizations.models import Organization, OrganizationMembership, Workspace
 from app.modules.users.models import User
 
@@ -26,6 +31,7 @@ from app.modules.users.models import User
 class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
+        self.commits = 0
 
     def add(self, instance: object) -> None:
         self.added.append(instance)
@@ -44,6 +50,9 @@ class FakeSession:
             instance.id = uuid4()
         instance.created_at = getattr(instance, "created_at", now)
         instance.updated_at = now
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 def test_provider_messages_keeps_text_user_and_assistant_messages() -> None:
@@ -78,6 +87,104 @@ def test_sse_payloads_parses_complete_json_blocks_and_preserves_tail() -> None:
     assert tail == 'data: {"partial":'
 
 
+def ui_stream_chunks(raw_chunks: list[str]) -> list[dict]:
+    chunks = []
+    for raw_chunk in raw_chunks:
+        for line in raw_chunk.splitlines():
+            if line.startswith("data: "):
+                chunks.append(json.loads(line.removeprefix("data: ")))
+    return chunks
+
+
+@pytest.mark.asyncio
+async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_parts(
+    monkeypatch,
+) -> None:
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        created_by_id=uuid4(),
+        title="Chat",
+        is_active=True,
+    )
+    persisted: list[dict] = []
+
+    async def append_conversation_message(*args, **kwargs):
+        persisted.append(kwargs)
+
+    async def provider_stream():
+        yield service.AgentChatToolActivityEvent(
+            id="tool-call-1",
+            tool_name="resolve-library-id",
+            status="running",
+            arguments={"query": "Next.js"},
+        )
+        yield service.AgentChatToolActivityEvent(
+            id="tool-call-1",
+            tool_name="resolve-library-id",
+            status="completed",
+        )
+        yield service.AgentChatTextEvent(text="Final answer")
+
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+
+    session = FakeSession()
+    raw_chunks = [
+        chunk
+        async for chunk in service.persisted_agent_chat_stream(
+            session,
+            conversation,
+            provider_stream(),
+        )
+    ]
+    chunks = ui_stream_chunks(raw_chunks)
+
+    assert [chunk["type"] for chunk in chunks] == [
+        "start",
+        "data-tool-activity",
+        "data-tool-activity",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert chunks[1]["data"] == {
+        "toolName": "resolve-library-id",
+        "status": "running",
+        "arguments": {"query": "Next.js"},
+    }
+    assert chunks[2]["data"] == {
+        "toolName": "resolve-library-id",
+        "status": "completed",
+    }
+    assert chunks[4]["delta"] == "Final answer"
+    assert persisted == [
+        {
+            "conversation_id": conversation.id,
+            "role": "assistant",
+            "content": "Final answer",
+            "parts": [
+                {
+                    "type": "data-tool-activity",
+                    "id": "tool-call-1",
+                    "data": {
+                        "toolName": "resolve-library-id",
+                        "status": "completed",
+                    },
+                },
+                {"type": "text", "text": "Final answer"},
+            ],
+        }
+    ]
+    assert session.commits == 1
+
+
 def test_text_delta_from_openai_event_supports_responses_and_chat_chunks() -> None:
     assert (
         service.text_delta_from_openai_event(
@@ -88,6 +195,28 @@ def test_text_delta_from_openai_event_supports_responses_and_chat_chunks() -> No
     assert (
         service.text_delta_from_openai_event({"choices": [{"delta": {"content": "world"}}]})
         == "world"
+    )
+
+
+def test_text_delta_from_openai_event_ignores_function_call_argument_deltas() -> None:
+    assert (
+        service.text_delta_from_openai_event(
+            {
+                "type": "response.function_call_arguments.delta",
+                "delta": '{"query":"latest Next.js docs"}',
+            }
+        )
+        == ""
+    )
+    assert (
+        service.text_delta_from_openai_event(
+            {
+                "type": "response.output_item.delta",
+                "item": {"type": "function_call"},
+                "delta": '{"query":"latest Next.js docs"}',
+            }
+        )
+        == ""
     )
 
 
@@ -168,6 +297,62 @@ def test_codex_compat_headers_use_current_default_version() -> None:
     assert service.CODEX_COMPAT_VERSION == service.DEFAULT_CODEX_COMPAT_VERSION
     assert service.CODEX_COMPAT_VERSION == "0.142.0"
     assert service.CODEX_COMPAT_USER_AGENT.startswith("codex_cli_rs/0.142.0 ")
+
+
+@pytest.mark.asyncio
+async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monkeypatch) -> None:
+    agent_id = uuid4()
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent_id,
+        installation_id=uuid4(),
+    )
+    installation = MCPServerInstallation(
+        id=assignment.installation_id,
+        workspace_id=uuid4(),
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Server",
+        server_json={
+            "$schema": "https://example.com/schema.json",
+            "name": installation.server_name,
+            "description": "Server",
+            "version": installation.installed_version,
+        },
+        is_latest=True,
+    )
+    refreshed = []
+
+    async def list_agent_wildcard_server_version_rows(*args, **kwargs):
+        assert kwargs["agent_id"] == agent_id
+        return [(assignment, installation, server)]
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        refreshed.append((kwargs["installation"], kwargs["server"]))
+
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_wildcard_server_version_rows",
+        list_agent_wildcard_server_version_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+
+    session = FakeSession()
+    await service.refresh_wildcard_agent_server_tools(session, agent_id)
+
+    assert refreshed == [(installation, server)]
+    assert session.commits == 1
 
 
 def patch_org_owner(monkeypatch, organization_id, user):

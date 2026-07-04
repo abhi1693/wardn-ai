@@ -329,7 +329,7 @@ async def delete_workspace_agent_route(
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {
-            "content": {"text/plain": {"schema": {"type": "string"}}},
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
             "description": "Successful Response",
         },
         status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
@@ -366,7 +366,16 @@ async def chat_workspace_agent_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    return StreamingResponse(stream, media_type="text/plain; charset=utf-8")
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Vercel-AI-UI-Message-Stream": "v1",
+        },
+    )
 
 
 @workspace_router.get(
