@@ -1,6 +1,5 @@
 import type {
   AgentAvailableToolListResponse,
-  AgentListResponse,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
   MCPServerInstallationListResponse,
@@ -9,12 +8,6 @@ import { backendCookieHeader, backendPath } from "@/lib/workspace-context";
 
 export type GuardrailPolicyRecord = {
   policy: GuardrailPolicyRead;
-};
-
-export type GuardrailAgentOption = {
-  id: string;
-  name: string;
-  workspaceId: string;
 };
 
 export type GuardrailServerOption = {
@@ -71,24 +64,19 @@ export async function getGuardrailPolicyRecords(
   return policies
     .map((policy) => ({ policy }))
     .sort((left, right) => {
-    const priorityCompare = left.policy.priority - right.policy.priority;
-    if (priorityCompare !== 0) {
-      return priorityCompare;
-    }
-    return left.policy.name.localeCompare(right.policy.name);
-  });
+      const priorityCompare = left.policy.priority - right.policy.priority;
+      if (priorityCompare !== 0) {
+        return priorityCompare;
+      }
+      return left.policy.name.localeCompare(right.policy.name);
+    });
 }
 
 export async function getGuardrailWorkspaceOptions(
   organizationId: string,
   workspaceId: string,
 ) {
-  const [agentsPayload, serversPayload, availableToolsPayload] = await Promise.all([
-    fetchBackend<AgentListResponse>(
-      `/api/v1/organizations/${encodeURIComponent(
-        organizationId
-      )}/workspaces/${encodeURIComponent(workspaceId)}/agents`
-    ),
+  const [serversPayload, availableToolsPayload] = await Promise.all([
     fetchBackend<MCPServerInstallationListResponse>(
       `/api/v1/organizations/${encodeURIComponent(
         organizationId
@@ -101,11 +89,6 @@ export async function getGuardrailWorkspaceOptions(
     ),
   ]);
 
-  const agents: GuardrailAgentOption[] = (agentsPayload?.agents ?? []).map((agent) => ({
-    id: agent.id,
-    name: agent.name,
-    workspaceId,
-  }));
   const servers: GuardrailServerOption[] = (serversPayload?.installations ?? []).map(
     (installation) => ({
       configName: installation.configName,
@@ -125,5 +108,5 @@ export async function getGuardrailWorkspaceOptions(
     workspaceId,
   }));
 
-  return { agents, servers, tools };
+  return { servers, tools };
 }

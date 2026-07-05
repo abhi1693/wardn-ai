@@ -58,7 +58,6 @@ export default async function EditGuardrailPage({ params }: EditGuardrailPagePro
       workspaceContext={workspaceContext}
     >
       <GuardrailForm
-        agents={options.agents}
         basePath={basePath}
         organization={organization}
         policy={record.policy}

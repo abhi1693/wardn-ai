@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents import repository as agents_repository
 from app.modules.guardrails import repository
 from app.modules.guardrails.exceptions import (
     DuplicateGuardrailPolicyError,
@@ -18,7 +17,6 @@ from app.modules.guardrails.schemas import (
     GuardrailPolicyRead,
     GuardrailPolicyUpdate,
 )
-from app.modules.mcp_registry import repository as mcp_registry_repository
 from app.modules.organizations.service import (
     require_workspace_admin,
     require_workspace_member,
@@ -29,6 +27,11 @@ GuardrailMode = Literal["allow", "deny", "require_confirmation"]
 GUARDRAIL_MODE_ALLOW = "allow"
 GUARDRAIL_MODE_DENY = "deny"
 GUARDRAIL_MODE_REQUIRE_CONFIRMATION = "require_confirmation"
+RULE_GROUP_OPERATORS = {"all", "any"}
+RULE_OPERATORS = {"equals", "not_equals", "contains", "in"}
+RULE_FIELDS = {"tool_schema_id", "tool_name"}
+MAX_POLICY_RULE_DEPTH = 3
+MAX_POLICY_RULES = 50
 
 
 @dataclass(frozen=True)
@@ -59,21 +62,11 @@ class GuardrailDecision:
         return self.mode == GUARDRAIL_MODE_ALLOW
 
 
-@dataclass(frozen=True)
-class PolicyTargets:
-    agent_id: uuid.UUID | None
-    installation_id: uuid.UUID | None
-    tool_schema_id: uuid.UUID | None
-
-
 def policy_response(policy: GuardrailPolicy) -> GuardrailPolicyRead:
     return GuardrailPolicyRead(
         id=policy.id,
         organizationId=policy.organization_id,
         workspaceId=policy.workspace_id,
-        agentId=policy.agent_id,
-        installationId=policy.installation_id,
-        toolSchemaId=policy.tool_schema_id,
         createdById=policy.created_by_id,
         name=policy.name,
         description=policy.description,
@@ -108,68 +101,112 @@ async def require_guardrail_scope_admin(
     await require_workspace_admin(session, user, organization_id, workspace_id)
 
 
-def ensure_conditions_not_enabled(conditions: dict[str, Any]) -> None:
-    if conditions:
-        raise InvalidGuardrailPolicyError("policy conditions are not supported yet")
+def guardrail_context_value(context: GuardrailEvaluationContext, field: str) -> Any:
+    if field == "tool_schema_id":
+        return str(context.tool_schema_id) if context.tool_schema_id else None
+    if field == "tool_name":
+        return context.tool_name
+    return None
 
 
-async def validate_policy_targets(
-    session: AsyncSession,
-    *,
-    organization_id: uuid.UUID,
-    workspace_id: uuid.UUID,
-    agent_id: uuid.UUID | None,
-    installation_id: uuid.UUID | None,
-    tool_schema_id: uuid.UUID | None,
-) -> PolicyTargets:
-    if agent_id is not None:
-        agent = await agents_repository.get_agent(
-            session,
-            organization_id=organization_id,
-            agent_id=agent_id,
-            include_inactive=True,
-        )
-        if agent is None:
-            raise InvalidGuardrailPolicyError("agent is not available in this organization")
-        if agent.workspace_id != workspace_id:
-            raise InvalidGuardrailPolicyError("agent does not belong to this workspace")
+def normalize_rule_value(value: Any) -> str:
+    return str(value).strip()
 
-    installation = None
-    if installation_id is not None:
-        installation = await mcp_registry_repository.get_installation_by_id(
-            session,
-            installation_id,
-            workspace_id=workspace_id,
-        )
-        if installation is None:
-            raise InvalidGuardrailPolicyError("MCP server is not installed in this workspace")
 
-    if tool_schema_id is not None:
-        tool_schema = await repository.get_tool_schema(
-            session,
-            tool_schema_id=tool_schema_id,
-            workspace_id=workspace_id,
-        )
-        if tool_schema is None:
-            raise InvalidGuardrailPolicyError("MCP tool is not available in this workspace")
-        if installation_id is not None and tool_schema.installation_id != installation_id:
-            raise InvalidGuardrailPolicyError("MCP tool does not belong to the selected server")
-        if installation_id is None:
-            installation_id = tool_schema.installation_id
-        if installation_id is not None and installation is None:
-            installation = await mcp_registry_repository.get_installation_by_id(
-                session,
-                installation_id,
-                workspace_id=workspace_id,
-            )
-            if installation is None:
-                raise InvalidGuardrailPolicyError("MCP server is not installed in this workspace")
+def values_equal(left: Any, right: Any) -> bool:
+    if left is None:
+        return right is None
+    return str(left) == normalize_rule_value(right)
 
-    return PolicyTargets(
-        agent_id=agent_id,
-        installation_id=installation_id,
-        tool_schema_id=tool_schema_id,
-    )
+
+def validate_rule_node(node: Any, *, depth: int = 0) -> int:
+    if not isinstance(node, dict):
+        raise InvalidGuardrailPolicyError("guardrail policy rule must be an object")
+    if depth > MAX_POLICY_RULE_DEPTH:
+        raise InvalidGuardrailPolicyError("guardrail policy rule nesting is too deep")
+    if "rules" in node:
+        operator = node.get("operator")
+        if operator not in RULE_GROUP_OPERATORS:
+            raise InvalidGuardrailPolicyError("guardrail policy group operator must be all or any")
+        rules = node.get("rules")
+        if not isinstance(rules, list):
+            raise InvalidGuardrailPolicyError("guardrail policy group rules must be a list")
+        if len(rules) > MAX_POLICY_RULES:
+            raise InvalidGuardrailPolicyError("guardrail policy has too many rules")
+        return sum(validate_rule_node(rule, depth=depth + 1) for rule in rules)
+
+    field = node.get("field")
+    operator = node.get("operator", "equals")
+    if field not in RULE_FIELDS:
+        raise InvalidGuardrailPolicyError("guardrail policy rule field is not supported")
+    if operator not in RULE_OPERATORS:
+        raise InvalidGuardrailPolicyError("guardrail policy rule operator is not supported")
+    if "value" not in node:
+        raise InvalidGuardrailPolicyError("guardrail policy rule value is required")
+    if operator == "in":
+        value = node.get("value")
+        if not isinstance(value, list) or not value:
+            raise InvalidGuardrailPolicyError("guardrail policy in rule requires values")
+    return 1
+
+
+def validate_policy_conditions(conditions: dict[str, Any]) -> dict[str, Any]:
+    if not conditions:
+        return {}
+    rule_count = validate_rule_node(conditions)
+    if rule_count > MAX_POLICY_RULES:
+        raise InvalidGuardrailPolicyError("guardrail policy has too many rules")
+    return conditions
+
+
+def rule_matches_context(
+    rule: dict[str, Any],
+    context: GuardrailEvaluationContext,
+) -> bool:
+    field = rule.get("field")
+    context_value = guardrail_context_value(context, str(field))
+    operator = rule.get("operator", "equals")
+    value = rule.get("value")
+    if operator == "equals":
+        return values_equal(context_value, value)
+    if operator == "not_equals":
+        return not values_equal(context_value, value)
+    if operator == "contains":
+        return context_value is not None and normalize_rule_value(value) in str(context_value)
+    if operator == "in":
+        return isinstance(value, list) and any(values_equal(context_value, item) for item in value)
+    return False
+
+
+def rule_group_matches_context(
+    node: dict[str, Any],
+    context: GuardrailEvaluationContext,
+) -> bool:
+    if "rules" not in node:
+        return rule_matches_context(node, context)
+    rules = node.get("rules")
+    if not isinstance(rules, list) or not rules:
+        return True
+    results = [
+        rule_group_matches_context(rule, context)
+        for rule in rules
+        if isinstance(rule, dict)
+    ]
+    if len(results) != len(rules):
+        return False
+    if node.get("operator") == "any":
+        return any(results)
+    return all(results)
+
+
+def policy_matches_context(
+    policy: GuardrailPolicy,
+    context: GuardrailEvaluationContext,
+) -> bool:
+    conditions = policy.conditions or {}
+    if not conditions:
+        return True
+    return rule_group_matches_context(conditions, context)
 
 
 async def ensure_unique_policy_name(
@@ -235,7 +272,7 @@ async def create_guardrail_policy(
     workspace_id: uuid.UUID,
 ) -> GuardrailPolicyRead:
     await require_guardrail_scope_admin(session, user, organization_id, workspace_id)
-    ensure_conditions_not_enabled(payload.conditions)
+    conditions = validate_policy_conditions(payload.conditions)
     name = normalize_name(payload.name)
     await ensure_unique_policy_name(
         session,
@@ -243,26 +280,15 @@ async def create_guardrail_policy(
         workspace_id=workspace_id,
         name=name,
     )
-    targets = await validate_policy_targets(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        agent_id=payload.agent_id,
-        installation_id=payload.installation_id,
-        tool_schema_id=payload.tool_schema_id,
-    )
     policy = GuardrailPolicy(
         organization_id=organization_id,
         workspace_id=workspace_id,
-        agent_id=targets.agent_id,
-        installation_id=targets.installation_id,
-        tool_schema_id=targets.tool_schema_id,
         created_by_id=user.id,
         name=name,
         description=payload.description,
         mode=payload.mode,
         priority=payload.priority,
-        conditions=payload.conditions,
+        conditions=conditions,
         is_active=payload.is_active,
     )
     session.add(policy)
@@ -293,7 +319,7 @@ async def update_guardrail_policy(
     update_fields = payload.model_fields_set
     name = normalize_name(payload.name) if "name" in update_fields and payload.name else policy.name
     conditions = payload.conditions if "conditions" in update_fields else policy.conditions
-    ensure_conditions_not_enabled(conditions or {})
+    conditions = validate_policy_conditions(conditions or {})
     await ensure_unique_policy_name(
         session,
         organization_id=organization_id,
@@ -301,21 +327,6 @@ async def update_guardrail_policy(
         name=name,
         existing_policy_id=policy.id,
     )
-    targets = await validate_policy_targets(
-        session,
-        organization_id=organization_id,
-        workspace_id=policy.workspace_id,
-        agent_id=payload.agent_id if "agent_id" in update_fields else policy.agent_id,
-        installation_id=(
-            payload.installation_id
-            if "installation_id" in update_fields
-            else policy.installation_id
-        ),
-        tool_schema_id=(
-            payload.tool_schema_id if "tool_schema_id" in update_fields else policy.tool_schema_id
-        ),
-    )
-
     policy.name = name
     if "description" in update_fields and payload.description is not None:
         policy.description = payload.description
@@ -324,14 +335,9 @@ async def update_guardrail_policy(
     if "priority" in update_fields and payload.priority is not None:
         policy.priority = payload.priority
     if "conditions" in update_fields:
-        policy.conditions = conditions or {}
+        policy.conditions = conditions
     if "is_active" in update_fields and payload.is_active is not None:
         policy.is_active = payload.is_active
-    if {"agent_id", "installation_id", "tool_schema_id"} & update_fields:
-        policy.agent_id = targets.agent_id
-        policy.installation_id = targets.installation_id
-        policy.tool_schema_id = targets.tool_schema_id
-
     await session.flush()
     await session.refresh(policy)
     return policy_response(policy)
@@ -394,16 +400,15 @@ def decision_for_policies(policies: list[GuardrailPolicy]) -> GuardrailDecision:
 async def evaluate_tool_call_guardrails(
     session: AsyncSession,
     context: GuardrailEvaluationContext,
-    *,
-    include_agent_scoped: bool = False,
 ) -> GuardrailDecision:
-    policies = await repository.list_matching_policies(
+    candidate_policies = await repository.list_matching_policies(
         session,
         organization_id=context.organization_id,
         workspace_id=context.workspace_id,
-        agent_id=context.agent_id,
-        installation_id=context.installation_id,
-        tool_schema_id=context.tool_schema_id,
-        include_agent_scoped=include_agent_scoped,
     )
+    policies = [
+        policy
+        for policy in candidate_policies
+        if policy_matches_context(policy, context)
+    ]
     return decision_for_policies(policies)

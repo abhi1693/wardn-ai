@@ -25,12 +25,6 @@ class GuardrailPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
         ),
         Index("ix_guardrail_policies_scope", "organization_id", "workspace_id", "is_active"),
-        Index(
-            "ix_guardrail_policies_targets",
-            "agent_id",
-            "installation_id",
-            "tool_schema_id",
-        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -43,24 +37,6 @@ class GuardrailPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
-    )
-    agent_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("agents.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    installation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("mcp_server_installations.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    tool_schema_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("mcp_server_tool_schemas.id", ondelete="CASCADE"),
-        nullable=True,
         index=True,
     )
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(

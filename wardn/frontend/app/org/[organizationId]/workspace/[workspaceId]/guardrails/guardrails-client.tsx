@@ -33,23 +33,20 @@ import type { GuardrailPolicyRead } from "@/lib/api/generated/model";
 
 import { errorMessage } from "../../../tokens/token-form";
 import type {
-  GuardrailAgentOption,
   GuardrailPolicyRecord,
-  GuardrailServerOption,
   GuardrailToolOption,
 } from "./data";
 
 type GuardrailsClientProps = {
-  agents: GuardrailAgentOption[];
   basePath: string;
   organizationId: string;
   policies: GuardrailPolicyRecord[];
-  servers: GuardrailServerOption[];
   tools: GuardrailToolOption[];
   workspaceId: string;
 };
 
 type GuardrailMode = "allow" | "deny" | "require_confirmation";
+type RuleGroupOperator = "all" | "any";
 
 const modeActions: Array<{
   icon: typeof CheckCircle2;
@@ -92,38 +89,83 @@ function policyEndpoint(organizationId: string, workspaceId: string, policy: Gua
   )}/guardrails/policies/${encodeURIComponent(policy.id)}`;
 }
 
-function targetLabel(
-  policy: GuardrailPolicyRead,
-  agents: GuardrailAgentOption[],
-  servers: GuardrailServerOption[],
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function ruleValueLabel(field: string, value: string, tools: GuardrailToolOption[]) {
+  if (field === "tool_schema_id") {
+    return tools.find((tool) => tool.toolSchemaId === value)?.label ?? "Selected tool";
+  }
+  if (field === "tool_name") {
+    return value;
+  }
+  return value;
+}
+
+function ruleFieldLabel(field: string) {
+  if (field === "tool_schema_id") {
+    return "Tool";
+  }
+  if (field === "tool_name") {
+    return "Tool name";
+  }
+  return "Rule";
+}
+
+function conditionsTargetLabel(
+  conditions: unknown,
   tools: GuardrailToolOption[],
 ) {
-  const parts = [];
-  if (policy.agentId) {
-    parts.push(
-      agents.find((agent) => agent.id === policy.agentId)?.name ?? "Selected agent"
-    );
+  if (!isRecord(conditions) || !Array.isArray(conditions.rules)) {
+    return "";
   }
-  if (policy.toolSchemaId) {
-    parts.push(
-      tools.find((tool) => tool.toolSchemaId === policy.toolSchemaId)?.label ??
-        "Selected tool"
-    );
-  } else if (policy.installationId) {
-    parts.push(
-      servers.find((server) => server.installationId === policy.installationId)?.label ??
-        "Selected MCP server"
-    );
+  const operator: RuleGroupOperator = conditions.operator === "any" ? "any" : "all";
+  const labels = conditions.rules
+    .filter(isRecord)
+    .flatMap((rule) => {
+      if (typeof rule.field !== "string") {
+        return [];
+      }
+      const field = rule.field;
+      if (typeof rule.value === "string") {
+        return [
+          `${ruleFieldLabel(field)} is ${ruleValueLabel(field, rule.value, tools)}`,
+        ];
+      }
+      if (Array.isArray(rule.value)) {
+        const values = rule.value.filter((value): value is string => typeof value === "string");
+        if (values.length === 0) {
+          return [];
+        }
+        return [
+          `${ruleFieldLabel(field)} is one of ${values
+            .map((value) => ruleValueLabel(field, value, tools))
+            .join(", ")}`,
+        ];
+      }
+      return [];
+    });
+  if (labels.length === 0) {
+    return "";
   }
-  return parts.length > 0 ? parts.join(" / ") : "All agent tool calls";
+  return `${operator === "any" ? "Any" : "All"}: ${labels.join(
+    operator === "any" ? " OR " : " AND "
+  )}`;
+}
+
+function targetLabel(policy: GuardrailPolicyRead, tools: GuardrailToolOption[]) {
+  const conditionLabel = conditionsTargetLabel(policy.conditions, tools);
+  if (conditionLabel) {
+    return conditionLabel;
+  }
+  return "All tool calls";
 }
 
 export function GuardrailsClient({
-  agents,
   basePath,
   organizationId,
   policies: initialPolicies,
-  servers,
   tools,
   workspaceId,
 }: GuardrailsClientProps) {
@@ -202,7 +244,7 @@ export function GuardrailsClient({
       <CardHeader>
         <CardTitle>Guardrail Policies</CardTitle>
         <CardDescription>
-          Control which MCP tool calls agents can run.
+          Control which workspace tool calls clients can run.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -272,7 +314,7 @@ export function GuardrailsClient({
                   </TableCell>
                   <TableCell>
                     <span className="block max-w-96 truncate text-sm">
-                      {targetLabel(record.policy, agents, servers, tools)}
+                      {targetLabel(record.policy, tools)}
                     </span>
                   </TableCell>
                   <TableCell>{record.policy.priority}</TableCell>

@@ -83,14 +83,51 @@ def test_guardrail_decision_requires_confirmation_when_no_deny() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_guardrail_policy_rejects_conditions(monkeypatch) -> None:
+async def test_create_guardrail_policy_accepts_rule_group_conditions(monkeypatch) -> None:
+    async def require_guardrail_scope_admin(*args, **kwargs):
+        return None
+
+    async def get_policy_by_name(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "require_guardrail_scope_admin", require_guardrail_scope_admin)
+    monkeypatch.setattr(repository, "get_policy_by_name", get_policy_by_name)
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    conditions = {
+        "operator": "all",
+        "rules": [
+            {"field": "tool_name", "operator": "contains", "value": "search"},
+        ],
+    }
+
+    session = FakeSession()
+    response = await service.create_guardrail_policy(
+        session,
+        user,
+        uuid4(),
+        GuardrailPolicyCreate(
+            name="Block GitHub search",
+            mode="deny",
+            conditions=conditions,
+        ),
+        workspace_id=uuid4(),
+    )
+
+    policy = session.added[0]
+    assert isinstance(policy, GuardrailPolicy)
+    assert policy.conditions == conditions
+    assert response.conditions == conditions
+
+
+@pytest.mark.asyncio
+async def test_create_guardrail_policy_rejects_invalid_rule_group(monkeypatch) -> None:
     async def require_guardrail_scope_admin(*args, **kwargs):
         return None
 
     monkeypatch.setattr(service, "require_guardrail_scope_admin", require_guardrail_scope_admin)
     user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
 
-    with pytest.raises(InvalidGuardrailPolicyError, match="conditions"):
+    with pytest.raises(InvalidGuardrailPolicyError, match="field"):
         await service.create_guardrail_policy(
             FakeSession(),
             user,
@@ -98,81 +135,77 @@ async def test_create_guardrail_policy_rejects_conditions(monkeypatch) -> None:
             GuardrailPolicyCreate(
                 name="Block writes",
                 mode="deny",
-                conditions={"tool": {"operation": "delete"}},
+                conditions={
+                    "operator": "all",
+                    "rules": [{"field": "unsupported", "operator": "equals", "value": "x"}],
+                },
             ),
             workspace_id=uuid4(),
         )
 
 
-@pytest.mark.asyncio
-async def test_create_workspace_tool_policy_derives_installation(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    installation_id = uuid4()
+def test_policy_rule_group_matches_all_expression() -> None:
     tool_schema_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-    tool_schema = MCPServerToolSchema(
-        id=tool_schema_id,
-        workspace_id=workspace_id,
-        installation_id=installation_id,
-        server_name="io.github.example/server",
-        server_version="1.0.0",
-        tool_name="search",
-        input_schema={"type": "object"},
-        annotations={},
-        is_active=True,
+    context = service.GuardrailEvaluationContext(
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        user_id=uuid4(),
+        agent_id=uuid4(),
+        conversation_id=None,
+        agent_run_id=None,
+        installation_id=uuid4(),
+        tool_schema_id=tool_schema_id,
+        server_name="io.github.github/github-mcp-server",
+        tool_name="search_repositories",
+        arguments={"query": "git-rank"},
     )
-    installation = MCPServerInstallation(
-        id=installation_id,
-        workspace_id=workspace_id,
-        server_name=tool_schema.server_name,
-        config_name="default",
-        installed_version="1.0.0",
-        status="enabled",
-        runtime_config={},
-        secret_references={},
+    policy = make_policy("deny", name="Block GitHub search")
+    policy.conditions = {
+        "operator": "all",
+        "rules": [
+            {"field": "tool_schema_id", "operator": "equals", "value": str(tool_schema_id)},
+            {"field": "tool_name", "operator": "equals", "value": "search_repositories"},
+        ],
+    }
+
+    assert service.policy_matches_context(policy, context)
+
+
+def test_policy_rule_group_matches_any_expression() -> None:
+    context = service.GuardrailEvaluationContext(
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        user_id=uuid4(),
+        agent_id=uuid4(),
+        conversation_id=None,
+        agent_run_id=None,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        server_name="io.github.upstash/context7",
+        tool_name="query_docs",
+        arguments={},
     )
+    policy = make_policy("deny", name="Block risky reads")
+    policy.conditions = {
+        "operator": "any",
+        "rules": [
+            {"field": "tool_name", "operator": "equals", "value": "delete_repo"},
+            {"field": "tool_name", "operator": "equals", "value": "query_docs"},
+        ],
+    }
 
-    async def require_guardrail_scope_admin(*args, **kwargs):
-        return None
+    assert service.policy_matches_context(policy, context)
 
-    async def get_policy_by_name(*args, **kwargs):
-        return None
 
-    async def get_tool_schema(*args, **kwargs):
-        return tool_schema
-
-    async def get_installation_by_id(*args, **kwargs):
-        return installation
-
-    monkeypatch.setattr(service, "require_guardrail_scope_admin", require_guardrail_scope_admin)
-    monkeypatch.setattr(repository, "get_policy_by_name", get_policy_by_name)
-    monkeypatch.setattr(repository, "get_tool_schema", get_tool_schema)
-    monkeypatch.setattr(
-        service.mcp_registry_repository,
-        "get_installation_by_id",
-        get_installation_by_id,
-    )
-
-    session = FakeSession()
-    response = await service.create_guardrail_policy(
-        session,
-        user,
-        organization_id,
-        GuardrailPolicyCreate(
-            name="Require confirmation for search",
-            mode="require_confirmation",
-            toolSchemaId=tool_schema_id,
-        ),
-        workspace_id=workspace_id,
-    )
-
-    policy = session.added[0]
-    assert isinstance(policy, GuardrailPolicy)
-    assert policy.workspace_id == workspace_id
-    assert policy.tool_schema_id == tool_schema_id
-    assert policy.installation_id == installation_id
-    assert response.installation_id == installation_id
+def test_guardrail_policy_rejects_agent_and_server_rule_fields() -> None:
+    for field in ("agent_id", "installation_id", "server_name"):
+        with pytest.raises(InvalidGuardrailPolicyError, match="field"):
+            service.validate_policy_conditions(
+                {
+                    "operator": "all",
+                    "rules": [{"field": field, "operator": "equals", "value": str(uuid4())}],
+                }
+            )
 
 
 @pytest.mark.asyncio

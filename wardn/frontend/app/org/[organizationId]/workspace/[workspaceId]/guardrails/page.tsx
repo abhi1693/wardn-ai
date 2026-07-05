@@ -53,11 +53,9 @@ export default async function GuardrailsPage({ params }: GuardrailsPageProps) {
       workspaceContext={workspaceContext}
     >
       <GuardrailsClient
-        agents={options.agents}
         basePath={basePath}
         organizationId={organization.id}
         policies={policies}
-        servers={options.servers}
         tools={options.tools}
         workspaceId={workspace.id}
       />

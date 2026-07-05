@@ -8,10 +8,8 @@ import type { GuardrailPolicyCreateConditions } from './guardrailPolicyCreateCon
 import type { GuardrailPolicyCreateMode } from './guardrailPolicyCreateMode';
 
 export interface GuardrailPolicyCreate {
-  agentId?: string | null;
   conditions?: GuardrailPolicyCreateConditions;
   description?: string;
-  installationId?: string | null;
   isActive?: boolean;
   mode: GuardrailPolicyCreateMode;
   /**
@@ -21,5 +19,4 @@ export interface GuardrailPolicyCreate {
   name: string;
   /** @minimum 0 */
   priority?: number;
-  toolSchemaId?: string | null;
 }

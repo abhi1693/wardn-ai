@@ -47,7 +47,6 @@ export default async function NewGuardrailPage({ params }: NewGuardrailPageProps
       workspaceContext={workspaceContext}
     >
       <GuardrailForm
-        agents={options.agents}
         basePath={basePath}
         organization={organization}
         servers={options.servers}

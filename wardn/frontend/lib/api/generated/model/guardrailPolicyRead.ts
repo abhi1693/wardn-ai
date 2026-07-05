@@ -7,19 +7,16 @@
 import type { GuardrailPolicyReadConditions } from './guardrailPolicyReadConditions';
 
 export interface GuardrailPolicyRead {
-  agentId?: string | null;
   conditions: GuardrailPolicyReadConditions;
   createdAt: string;
   createdById?: string | null;
   description: string;
   id: string;
-  installationId?: string | null;
   isActive: boolean;
   mode: string;
   name: string;
   organizationId: string;
   priority: number;
-  toolSchemaId?: string | null;
   updatedAt: string;
   workspaceId: string;
 }

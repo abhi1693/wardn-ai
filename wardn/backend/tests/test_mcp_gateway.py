@@ -889,7 +889,7 @@ async def test_mcp_gateway_guardrail_context_uses_workspace_and_tool_schema(monk
 
     async def evaluate_tool_call_guardrails(*args, **kwargs):
         captured["context"] = args[1]
-        captured["include_agent_scoped"] = kwargs["include_agent_scoped"]
+        captured["kwargs"] = kwargs
         return gateway_service.GuardrailDecision(mode="allow", message="allowed")
 
     monkeypatch.setattr(
@@ -926,7 +926,7 @@ async def test_mcp_gateway_guardrail_context_uses_workspace_and_tool_schema(monk
     assert context.server_name == server.name
     assert context.tool_name == "get_forecast"
     assert context.arguments == {"location": "Delhi"}
-    assert captured["include_agent_scoped"] is True
+    assert captured["kwargs"] == {}
 
 
 def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:

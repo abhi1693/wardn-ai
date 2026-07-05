@@ -620,7 +620,6 @@ async def evaluate_gateway_tool_guardrails(
             tool_name=tool_name,
             arguments=arguments,
         ),
-        include_agent_scoped=True,
     )
 
 

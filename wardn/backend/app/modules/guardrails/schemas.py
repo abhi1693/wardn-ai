@@ -10,9 +10,6 @@ GuardrailPolicyMode = Literal["allow", "deny", "require_confirmation"]
 class GuardrailPolicyCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    agent_id: uuid.UUID | None = Field(default=None, alias="agentId")
-    installation_id: uuid.UUID | None = Field(default=None, alias="installationId")
-    tool_schema_id: uuid.UUID | None = Field(default=None, alias="toolSchemaId")
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
     mode: GuardrailPolicyMode
@@ -30,9 +27,6 @@ class GuardrailPolicyCreate(BaseModel):
 class GuardrailPolicyUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    agent_id: uuid.UUID | None = Field(default=None, alias="agentId")
-    installation_id: uuid.UUID | None = Field(default=None, alias="installationId")
-    tool_schema_id: uuid.UUID | None = Field(default=None, alias="toolSchemaId")
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     mode: GuardrailPolicyMode | None = None
@@ -55,9 +49,6 @@ class GuardrailPolicyRead(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID = Field(alias="organizationId")
     workspace_id: uuid.UUID = Field(alias="workspaceId")
-    agent_id: uuid.UUID | None = Field(default=None, alias="agentId")
-    installation_id: uuid.UUID | None = Field(default=None, alias="installationId")
-    tool_schema_id: uuid.UUID | None = Field(default=None, alias="toolSchemaId")
     created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
     name: str
     description: str

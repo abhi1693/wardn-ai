@@ -1089,18 +1089,6 @@
       },
       "GuardrailPolicyCreate": {
         "properties": {
-          "agentId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agentid"
-          },
           "conditions": {
             "additionalProperties": true,
             "title": "Conditions",
@@ -1110,18 +1098,6 @@
             "default": "",
             "title": "Description",
             "type": "string"
-          },
-          "installationId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installationid"
           },
           "isActive": {
             "default": true,
@@ -1148,18 +1124,6 @@
             "minimum": 0.0,
             "title": "Priority",
             "type": "integer"
-          },
-          "toolSchemaId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Toolschemaid"
           }
         },
         "required": [
@@ -1187,18 +1151,6 @@
       },
       "GuardrailPolicyRead": {
         "properties": {
-          "agentId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agentid"
-          },
           "conditions": {
             "additionalProperties": true,
             "title": "Conditions",
@@ -1230,18 +1182,6 @@
             "title": "Id",
             "type": "string"
           },
-          "installationId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installationid"
-          },
           "isActive": {
             "title": "Isactive",
             "type": "boolean"
@@ -1262,18 +1202,6 @@
           "priority": {
             "title": "Priority",
             "type": "integer"
-          },
-          "toolSchemaId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Toolschemaid"
           },
           "updatedAt": {
             "format": "date-time",
@@ -1304,18 +1232,6 @@
       },
       "GuardrailPolicyUpdate": {
         "properties": {
-          "agentId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agentid"
-          },
           "conditions": {
             "anyOf": [
               {
@@ -1338,18 +1254,6 @@
               }
             ],
             "title": "Description"
-          },
-          "installationId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installationid"
           },
           "isActive": {
             "anyOf": [
@@ -1402,18 +1306,6 @@
               }
             ],
             "title": "Priority"
-          },
-          "toolSchemaId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Toolschemaid"
           }
         },
         "title": "GuardrailPolicyUpdate",

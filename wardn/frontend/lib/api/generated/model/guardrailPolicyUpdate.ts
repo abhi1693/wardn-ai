@@ -8,13 +8,10 @@ import type { GuardrailPolicyUpdateConditions } from './guardrailPolicyUpdateCon
 import type { GuardrailPolicyUpdateMode } from './guardrailPolicyUpdateMode';
 
 export interface GuardrailPolicyUpdate {
-  agentId?: string | null;
   conditions?: GuardrailPolicyUpdateConditions;
   description?: string | null;
-  installationId?: string | null;
   isActive?: boolean | null;
   mode?: GuardrailPolicyUpdateMode;
   name?: string | null;
   priority?: number | null;
-  toolSchemaId?: string | null;
 }
