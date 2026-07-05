@@ -5,6 +5,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Any, Protocol
 
 from app.core.config import get_settings
@@ -65,6 +66,8 @@ class MCPRuntimeProvider(Protocol):
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: MCPProgressCallback | None = None,
         runtime_session: "MCPRuntimeSession | None" = None,

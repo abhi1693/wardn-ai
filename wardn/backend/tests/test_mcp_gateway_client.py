@@ -1,4 +1,5 @@
 import sys
+from threading import Event
 
 import pytest
 
@@ -121,6 +122,50 @@ print(
 
     assert result == {"content": [{"type": "text", "text": "ok"}], "isError": False}
     assert progress_updates == [{"progressToken": 123, "progress": 1, "total": 2}]
+
+
+def test_call_stdio_tool_sends_cancelled_notification_when_cancelled() -> None:
+    script = r"""
+import json
+import sys
+
+initialize = json.loads(sys.stdin.readline())
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": initialize["id"],
+            "result": {"protocolVersion": "2025-11-25"},
+        }
+    ),
+    flush=True,
+)
+sys.stdin.readline()
+tool_request = json.loads(sys.stdin.readline())
+cancel_notification = json.loads(sys.stdin.readline())
+expected = {
+    "jsonrpc": "2.0",
+    "method": "notifications/cancelled",
+    "params": {"requestId": tool_request["id"], "reason": "user stopped chat"},
+}
+if cancel_notification != expected:
+    sys.stderr.write(f"unexpected cancellation: {cancel_notification}\n")
+    sys.exit(2)
+"""
+    cancel_event = Event()
+    cancel_event.set()
+
+    with pytest.raises(MCPGatewayUpstreamError, match="cancelled"):
+        call_stdio_tool(
+            sys.executable,
+            ["-c", script],
+            cwd="",
+            environment={},
+            tool_name="health",
+            arguments={},
+            cancel_event=cancel_event,
+            cancel_reason="user stopped chat",
+        )
 
 
 def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.client import HTTPException as HTTPClientException
 from pathlib import Path
+from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -2004,6 +2005,8 @@ class KubernetesRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: mcp_client.MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,

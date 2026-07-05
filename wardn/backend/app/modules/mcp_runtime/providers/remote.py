@@ -1,3 +1,4 @@
+from threading import Event
 from typing import Any
 
 from app.modules.mcp_gateway import client
@@ -45,6 +46,8 @@ class RemoteRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: client.MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,

@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -484,6 +485,8 @@ async def call_tool_with_tracking(
     *,
     tool_name: str,
     arguments: dict[str, Any],
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
     request_meta: dict[str, Any] | None = None,
     progress_callback=None,
     manager: MCPRuntimeManager | None = None,
@@ -531,6 +534,8 @@ async def call_tool_with_tracking(
             runtime_installation,
             tool_name=tool_name,
             arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
             progress_callback=progress_callback,
             runtime_session=runtime_session,

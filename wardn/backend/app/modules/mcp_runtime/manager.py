@@ -1,4 +1,5 @@
 import shutil
+from threading import Event
 from typing import Any, Protocol
 
 from app.core.config import get_settings
@@ -57,6 +58,8 @@ class MCPRuntimeManager(Protocol):
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
@@ -159,6 +162,8 @@ class DefaultMCPRuntimeManager:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
@@ -167,6 +172,8 @@ class DefaultMCPRuntimeManager:
             installation,
             tool_name=tool_name,
             arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
             progress_callback=progress_callback,
             runtime_session=runtime_session,

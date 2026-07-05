@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import re
+import threading
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -1143,6 +1144,8 @@ async def execute_agent_tool_call(
     conversation: WorkspaceConversation | None = None,
     agent_run: AgentRun | None = None,
     request_meta: dict[str, Any] | None = None,
+    cancel_event: threading.Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
     progress_callback=None,
 ) -> AgentToolExecutionResult:
     tool = tools.get(tool_call.name)
@@ -1238,6 +1241,8 @@ async def execute_agent_tool_call(
             tool.server,
             tool_name=tool.tool_schema.tool_name,
             arguments=tool_call.arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
             progress_callback=progress_callback,
         )
@@ -1324,6 +1329,7 @@ async def execute_agent_tool_call_with_progress(
     agent_run: AgentRun | None = None,
 ) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
     progress_token = f"agent-tool:{tool_call.call_id}"
+    cancel_event = threading.Event()
     progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
@@ -1342,24 +1348,31 @@ async def execute_agent_tool_call_with_progress(
             conversation=conversation,
             agent_run=agent_run,
             request_meta={"progressToken": progress_token},
+            cancel_event=cancel_event,
+            cancel_reason="App chat stream was cancelled.",
             progress_callback=progress_callback,
         )
     )
 
-    while not task.done():
-        progress_task = asyncio.create_task(progress_queue.get())
-        done, pending = await asyncio.wait(
-            {task, progress_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for pending_task in pending:
-            pending_task.cancel()
-        if progress_task in done:
-            yield progress_activity_event(
-                activity_id=activity_id,
-                tool_name=tool_name,
-                params=progress_task.result(),
+    try:
+        while not task.done():
+            progress_task = asyncio.create_task(progress_queue.get())
+            done, pending = await asyncio.wait(
+                {task, progress_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
+            for pending_task in pending:
+                pending_task.cancel()
+            if progress_task in done:
+                yield progress_activity_event(
+                    activity_id=activity_id,
+                    tool_name=tool_name,
+                    params=progress_task.result(),
+                )
+    except asyncio.CancelledError:
+        cancel_event.set()
+        task.cancel()
+        raise
 
     while not progress_queue.empty():
         yield progress_activity_event(

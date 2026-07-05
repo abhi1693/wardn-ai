@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import Lock
+from threading import Event, Lock
 from typing import Any
 
 from app.modules.mcp_gateway import client
@@ -72,6 +72,8 @@ class LocalProcessRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: client.MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
@@ -84,6 +86,8 @@ class LocalProcessRuntimeProvider:
                 managed,
                 tool_name=tool_name,
                 arguments=arguments,
+                cancel_event=cancel_event,
+                cancel_reason=cancel_reason,
                 request_meta=request_meta,
                 progress_callback=progress_callback,
             ),
@@ -228,6 +232,8 @@ class LocalProcessRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        cancel_event: Event | None = None,
+        cancel_reason: str = "Tool call cancelled.",
         request_meta: dict[str, Any] | None = None,
         progress_callback: client.MCPProgressCallback | None = None,
     ) -> dict[str, Any]:
@@ -238,6 +244,8 @@ class LocalProcessRuntimeProvider:
             request_id=request_id,
             tool_name=tool_name,
             arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
             progress_callback=progress_callback,
         )

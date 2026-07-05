@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -204,6 +205,25 @@ def send_stdio_message(session: MCPStdioSession, payload: dict[str, Any]) -> Non
         raise MCPGatewayUpstreamError("stdio MCP process closed stdin") from exc
 
 
+def send_stdio_cancelled(
+    session: MCPStdioSession,
+    request_id: int,
+    *,
+    reason: str = "Request cancelled.",
+) -> None:
+    send_stdio_message(
+        session,
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": request_id,
+                "reason": reason,
+            },
+        },
+    )
+
+
 def handle_stdio_peer_request(session: MCPStdioSession, payload: dict[str, Any]) -> bool:
     if payload.get("jsonrpc") != "2.0" or payload.get("method") != "ping" or "id" not in payload:
         return False
@@ -232,6 +252,8 @@ def read_stdio_response(
     session: MCPStdioSession,
     request_id: int,
     *,
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Request cancelled.",
     progress_callback: MCPProgressCallback | None = None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
@@ -242,14 +264,20 @@ def read_stdio_response(
     if timeout is None:
         timeout = get_settings().mcp_gateway_stdio_response_timeout_seconds
     deadline = time.monotonic() + timeout
+    cancellation_sent = False
     while time.monotonic() < deadline:
+        if cancel_event is not None and cancel_event.is_set():
+            if not cancellation_sent:
+                send_stdio_cancelled(session, request_id, reason=cancel_reason)
+                cancellation_sent = True
+            raise MCPGatewayUpstreamError("stdio MCP request was cancelled")
         if process.poll() is not None:
             detail = stderr_tail(process)
             suffix = f": {detail}" if detail else ""
             raise MCPGatewayUpstreamError(
                 f"stdio MCP process exited before response {request_id}{suffix}"
             )
-        remaining = max(0.1, deadline - time.monotonic())
+        remaining = max(0.1, min(0.25, deadline - time.monotonic()))
         readable, _, _ = select.select([process.stdout], [], [], remaining)
         if not readable:
             continue
@@ -455,6 +483,8 @@ def call_stdio_session_tool(
     request_id: int,
     tool_name: str,
     arguments: dict[str, Any],
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
     request_meta: dict[str, Any] | None = None,
     progress_callback: MCPProgressCallback | None = None,
 ) -> dict[str, Any]:
@@ -473,6 +503,8 @@ def call_stdio_session_tool(
     response = read_stdio_response(
         session,
         request_id,
+        cancel_event=cancel_event,
+        cancel_reason=cancel_reason,
         progress_callback=progress_callback,
     )
     if "error" in response:
@@ -491,6 +523,8 @@ def call_stdio_tool(
     environment: dict[str, str],
     tool_name: str,
     arguments: dict[str, Any],
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
     request_meta: dict[str, Any] | None = None,
     progress_callback: MCPProgressCallback | None = None,
 ) -> dict[str, Any]:
@@ -501,6 +535,8 @@ def call_stdio_tool(
             request_id=2,
             tool_name=tool_name,
             arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
             progress_callback=progress_callback,
         )
