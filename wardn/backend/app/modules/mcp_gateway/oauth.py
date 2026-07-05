@@ -10,13 +10,15 @@ from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import SecretStr, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import verify_session_token
+from app.core.security import create_session_token, verify_session_token
 from app.db.session import get_db_session
+from app.modules.organizations import repository as organizations_repository
+from app.modules.organizations.service import ORG_ADMIN_ROLES
 from app.modules.users import repository as users_repository
 from app.modules.users.exceptions import InvalidAPITokenScopeError, InvalidLoginError
 from app.modules.users.models import User
@@ -61,6 +63,10 @@ def token_endpoint(request: Request) -> str:
 
 def registration_endpoint(request: Request) -> str:
     return f"{public_base_url(request)}{get_settings().api_prefix}/oauth/register"
+
+
+def authorize_path() -> str:
+    return f"{get_settings().api_prefix}/oauth/authorize"
 
 
 def bearer_challenge(request: Request, *, error: str | None = None) -> str:
@@ -180,7 +186,7 @@ def html_page(title: str, body: str) -> HTMLResponse:
       color: #172033;
     }}
     label {{ display: block; margin: 1rem 0 .375rem; font-size: .875rem; font-weight: 600; }}
-    input {{
+    input, select {{
       width: 100%;
       box-sizing: border-box;
       border: 1px solid #cbd5e1;
@@ -202,6 +208,19 @@ def html_page(title: str, body: str) -> HTMLResponse:
 </head>
 <body>{body}</body>
 </html>"""
+    )
+
+
+def set_session_cookie(response: Response, user: User) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=create_session_token(user.id),
+        httponly=True,
+        secure=settings.environment != "local",
+        samesite="lax",
+        max_age=settings.session_ttl_seconds,
+        path="/",
     )
 
 
@@ -234,7 +253,134 @@ def validate_authorize_params(params: dict[str, str], *, expected_resource: str)
     validate_redirect_uri(params["client_id"], params["redirect_uri"])
 
 
-def authorization_code(user: User, params: dict[str, str]) -> str:
+async def mcp_scope_options(session: AsyncSession, user: User) -> list[dict[str, str]]:
+    if user.is_superuser:
+        organization_rows = await organizations_repository.list_organizations_for_user(
+            session, user.id
+        )
+    else:
+        organization_rows = await organizations_repository.list_joined_organizations_for_user(
+            session, user.id
+        )
+
+    options: list[dict[str, str]] = []
+    for organization, organization_membership in organization_rows:
+        if organization.status != "active":
+            continue
+        organization_label = organization.name or organization.slug
+        options.append(
+            {
+                "value": f"organization:{organization.id}",
+                "label": f"{organization_label} (organization)",
+                "kind": "organization",
+                "id": str(organization.id),
+                "name": organization_label,
+            }
+        )
+
+        workspace_rows = await organizations_repository.list_workspaces_for_user(
+            session,
+            organization.id,
+            user.id,
+        )
+        can_use_all_workspaces = (
+            user.is_superuser
+            or organization_membership is not None
+            and organization_membership.role in ORG_ADMIN_ROLES
+        )
+        for workspace, workspace_membership in workspace_rows:
+            if workspace.status != "active":
+                continue
+            if not can_use_all_workspaces and workspace_membership is None:
+                continue
+            workspace_label = workspace.name or workspace.slug
+            options.append(
+                {
+                    "value": f"workspace:{workspace.id}",
+                    "label": f"{organization_label} / {workspace_label} (workspace)",
+                    "kind": "workspace",
+                    "id": str(workspace.id),
+                    "name": workspace_label,
+                }
+            )
+    return options
+
+
+async def selected_mcp_scope(
+    session: AsyncSession,
+    user: User,
+    scope_target: str,
+) -> dict[str, str]:
+    options = await mcp_scope_options(session, user)
+    for option in options:
+        if option["value"] == scope_target:
+            return option
+    raise ValueError("selected organization or workspace is not available")
+
+
+def hidden_authorize_inputs(params: dict[str, str]) -> str:
+    return "\n".join(
+        (
+            f'<input type="hidden" name="{html.escape(key, quote=True)}" '
+            f'value="{html.escape(value, quote=True)}" />'
+        )
+        for key, value in params.items()
+        if key not in {"email", "password", "scopeTarget"}
+    )
+
+
+async def consent_form(
+    session: AsyncSession,
+    user: User,
+    params: dict[str, str],
+    *,
+    error: str = "",
+) -> HTMLResponse:
+    options = await mcp_scope_options(session, user)
+    if not options:
+        return html_page(
+            "Authorization error",
+            (
+                "<h1>Authorization error</h1>"
+                "<p>No active organizations or workspaces are available.</p>"
+            ),
+        )
+
+    selected = params.get("scopeTarget") or options[0]["value"]
+    option_html = "\n".join(
+        (
+            f'<option value="{html.escape(option["value"], quote=True)}"'
+            f'{" selected" if option["value"] == selected else ""}>'
+            f'{html.escape(option["label"])}</option>'
+        )
+        for option in options
+    )
+    error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
+    client_name = "MCP client"
+    try:
+        client_name = str(client_metadata(params["client_id"]).get("client_name") or client_name)
+    except (KeyError, ValueError):
+        pass
+
+    return html_page(
+        "Authorize Wardn MCP",
+        f"""
+<h1>Authorize Wardn MCP</h1>
+<p class="muted">{html.escape(client_name)} is requesting access to Wardn MCP tools.</p>
+{error_html}
+<form method="post" action="{authorize_path()}">
+  {hidden_authorize_inputs(params)}
+  <label for="scopeTarget">Access scope</label>
+  <select id="scopeTarget" name="scopeTarget" required>
+    {option_html}
+  </select>
+  <button type="submit">Authorize</button>
+</form>
+""",
+    )
+
+
+def authorization_code(user: User, params: dict[str, str], token_scope: dict[str, str]) -> str:
     now = int(time.time())
     return signed_payload(
         {
@@ -248,26 +394,25 @@ def authorization_code(user: User, params: dict[str, str]) -> str:
             "code_challenge": params["code_challenge"],
             "resource": params["resource"],
             "scope": params.get("scope") or MCP_OAUTH_SCOPE,
+            "token_scope_kind": token_scope["kind"],
+            "token_scope_id": token_scope["id"],
+            "token_scope_name": token_scope["name"],
         }
     )
 
 
-def authorize_redirect(user: User, params: dict[str, str]) -> RedirectResponse:
-    query = {"code": authorization_code(user, params)}
+def authorize_redirect(
+    user: User,
+    params: dict[str, str],
+    token_scope: dict[str, str],
+) -> RedirectResponse:
+    query = {"code": authorization_code(user, params, token_scope)}
     if params.get("state"):
         query["state"] = params["state"]
     return RedirectResponse(append_query(params["redirect_uri"], query), status_code=302)
 
 
 def login_form(params: dict[str, str], *, error: str = "") -> HTMLResponse:
-    hidden_inputs = "\n".join(
-        (
-            f'<input type="hidden" name="{html.escape(key, quote=True)}" '
-            f'value="{html.escape(value, quote=True)}" />'
-        )
-        for key, value in params.items()
-        if key not in {"email", "password"}
-    )
     error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
     client_name = "MCP client"
     try:
@@ -280,8 +425,8 @@ def login_form(params: dict[str, str], *, error: str = "") -> HTMLResponse:
 <h1>Authorize Wardn MCP</h1>
 <p class="muted">{html.escape(client_name)} is requesting access to Wardn MCP tools.</p>
 {error_html}
-<form method="post" action="/api/v1/oauth/authorize">
-  {hidden_inputs}
+<form method="post" action="{authorize_path()}">
+  {hidden_authorize_inputs(params)}
   <label for="email">Email</label>
   <input id="email" name="email" type="email" autocomplete="email" required />
   <label for="password">Password</label>
@@ -366,7 +511,7 @@ async def authorize(
 
     user = await current_session_user(request, session)
     if user is not None:
-        return authorize_redirect(user, params)
+        return await consent_form(session, user, params)
     return login_form(params)
 
 
@@ -377,14 +522,19 @@ async def authorize_with_password(
 ):
     raw_body = (await request.body()).decode("utf-8")
     form = {key: values[-1] for key, values in parse_qs(raw_body).items() if values}
+    session_user = await current_session_user(request, session)
 
     try:
         validate_authorize_params(form, expected_resource=mcp_resource_url(request))
-        login = LoginRequest(
-            email=form.get("email", ""),
-            password=SecretStr(form.get("password", "")),
-        )
-        user = await authenticate_local_user(session, login)
+        user = session_user
+        just_logged_in = False
+        if user is None:
+            login = LoginRequest(
+                email=form.get("email", ""),
+                password=SecretStr(form.get("password", "")),
+            )
+            user = await authenticate_local_user(session, login)
+            just_logged_in = True
     except (InvalidLoginError, ValidationError):
         return login_form(form, error="Invalid email or password.")
     except ValueError as exc:
@@ -393,8 +543,27 @@ async def authorize_with_password(
             f"<h1>Authorization error</h1><p>{html.escape(str(exc))}</p>",
         )
 
+    if not form.get("scopeTarget"):
+        response = await consent_form(session, user, form)
+        if just_logged_in:
+            set_session_cookie(response, user)
+            await session.commit()
+        return response
+
+    try:
+        token_scope = await selected_mcp_scope(session, user, form["scopeTarget"])
+    except ValueError as exc:
+        response = await consent_form(session, user, form, error=str(exc))
+        if just_logged_in:
+            set_session_cookie(response, user)
+            await session.commit()
+        return response
+
     await session.commit()
-    return authorize_redirect(user, form)
+    response = authorize_redirect(user, form, token_scope)
+    if just_logged_in:
+        set_session_cookie(response, user)
+    return response
 
 
 @oauth_router.post("/token")
@@ -432,14 +601,24 @@ async def exchange_token(
         raise HTTPException(status_code=400, detail="authorization user is no longer active")
 
     client = client_metadata(str(code["client_id"]))
+    token_scope_kind = str(code.get("token_scope_kind") or "")
+    token_scope_id = str(code.get("token_scope_id") or "")
+    token_scope_name = str(code.get("token_scope_name") or "Wardn")
+    if token_scope_kind not in {"organization", "workspace"} or not token_scope_id:
+        raise HTTPException(status_code=400, detail="authorization code is missing token scope")
+
     try:
+        organization_ids = [token_scope_id] if token_scope_kind == "organization" else []
+        workspace_ids = [token_scope_id] if token_scope_kind == "workspace" else []
         _record, access_token = await create_user_api_token(
             session,
             user.id,
             UserAPITokenCreate(
                 name=f"MCP OAuth: {client.get('client_name') or 'MCP client'}",
-                description="Issued by Wardn MCP OAuth authorization flow.",
+                description=f"Issued for {token_scope_kind} scope: {token_scope_name}.",
                 expires_at=datetime.now(UTC) + timedelta(days=30),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
             ),
         )
     except InvalidAPITokenScopeError as exc:

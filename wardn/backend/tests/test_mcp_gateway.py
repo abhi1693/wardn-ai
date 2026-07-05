@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.db.session import get_db_session
 from app.main import create_app
@@ -17,6 +18,7 @@ from app.modules.mcp_gateway import oauth as gateway_oauth
 from app.modules.mcp_gateway import repository
 from app.modules.mcp_gateway import router as gateway_router
 from app.modules.mcp_gateway import service as gateway_service
+from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
@@ -337,12 +339,22 @@ def test_mcp_oauth_token_exchange_issues_gateway_api_token(monkeypatch) -> None:
             "resource": "http://testserver/api/v1/mcp/gateway",
             "scope": "mcp:tools",
         },
+        {
+            "kind": "workspace",
+            "id": TEST_WORKSPACE_ID,
+            "name": "Default Workspace",
+            "value": f"workspace:{TEST_WORKSPACE_ID}",
+            "label": "Default / Default Workspace (workspace)",
+        },
     )
 
     async def get_user_by_id(*args, **kwargs):
         return user
 
+    seen_payloads = []
+
     async def create_api_token(*args, **kwargs):
+        seen_payloads.append(args[2])
         return (
             UserAPIToken(user_id=user_id, token_prefix="new", token_hash="hash"),
             "wardn_new.secret",
@@ -366,6 +378,24 @@ def test_mcp_oauth_token_exchange_issues_gateway_api_token(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["access_token"] == "wardn_new.secret"
     assert response.json()["token_type"] == "Bearer"
+    assert seen_payloads[0].organization_ids == []
+    assert seen_payloads[0].workspace_ids == [uuid.UUID(TEST_WORKSPACE_ID)]
+
+
+def test_tool_schema_scope_applies_workspace_token_scope_for_superuser() -> None:
+    statement = tool_repository.apply_gateway_scope(
+        select(MCPServerToolSchema),
+        GatewayScope(
+            user_id=uuid.uuid4(),
+            is_superuser=True,
+            workspace_ids=frozenset({uuid.UUID(TEST_WORKSPACE_ID)}),
+        ),
+    )
+
+    compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+    assert "mcp_server_installations.workspace_id IN" in compiled
+    assert uuid.UUID(TEST_WORKSPACE_ID).hex in compiled
 
 
 def test_mcp_gateway_ping_returns_empty_result() -> None:
