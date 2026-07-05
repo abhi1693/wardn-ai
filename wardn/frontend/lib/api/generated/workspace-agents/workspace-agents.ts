@@ -11,6 +11,8 @@ import type {
   AgentCreate,
   AgentListResponse,
   AgentRead,
+  AgentToolApprovalDecisionRequest,
+  AgentToolApprovalDecisionResponse,
   AgentToolAssignmentUpdate,
   AgentToolListResponse,
   AgentUpdate,
@@ -613,6 +615,77 @@ export const workspaceAgentsChat = async (organizationId: string,
 
   const data: workspaceAgentsChatResponse['data'] = body ? (contentType.includes('json') ? JSON.parse(body) : body) : {}
   return { data, status: res.status, headers: res.headers } as workspaceAgentsChatResponse
+}
+
+
+export type workspaceAgentsDecideToolApprovalResponse200 = {
+  data: AgentToolApprovalDecisionResponse
+  status: 200
+}
+
+export type workspaceAgentsDecideToolApprovalResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type workspaceAgentsDecideToolApprovalResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type workspaceAgentsDecideToolApprovalResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type workspaceAgentsDecideToolApprovalResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type workspaceAgentsDecideToolApprovalResponseSuccess = (workspaceAgentsDecideToolApprovalResponse200) & {
+  headers: Headers;
+};
+export type workspaceAgentsDecideToolApprovalResponseError = (workspaceAgentsDecideToolApprovalResponse400 | workspaceAgentsDecideToolApprovalResponse403 | workspaceAgentsDecideToolApprovalResponse404 | workspaceAgentsDecideToolApprovalResponse422) & {
+  headers: Headers;
+};
+
+export type workspaceAgentsDecideToolApprovalResponse = (workspaceAgentsDecideToolApprovalResponseSuccess | workspaceAgentsDecideToolApprovalResponseError)
+
+export const getWorkspaceAgentsDecideToolApprovalUrl = (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    approvalId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tool-approvals/${approvalId}`
+}
+
+/**
+ * @summary Decide Workspace Agent Tool Approval Route
+ */
+export const workspaceAgentsDecideToolApproval = async (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    approvalId: string,
+    agentToolApprovalDecisionRequest: AgentToolApprovalDecisionRequest, options?: RequestInit): Promise<workspaceAgentsDecideToolApprovalResponse> => {
+
+  const res = await fetch(getWorkspaceAgentsDecideToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentToolApprovalDecisionRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: workspaceAgentsDecideToolApprovalResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as workspaceAgentsDecideToolApprovalResponse
 }
 
 

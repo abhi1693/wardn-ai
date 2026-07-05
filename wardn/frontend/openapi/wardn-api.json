@@ -673,6 +673,67 @@
         "title": "AgentServerToolAssignmentUpdate",
         "type": "object"
       },
+      "AgentToolApprovalDecisionRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "deny"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "AgentToolApprovalDecisionRequest",
+        "type": "object"
+      },
+      "AgentToolApprovalDecisionResponse": {
+        "properties": {
+          "approvalId": {
+            "format": "uuid",
+            "title": "Approvalid",
+            "type": "string"
+          },
+          "assistantMessage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationMessageRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "result": {
+            "default": "",
+            "title": "Result",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvalId",
+          "status",
+          "toolName"
+        ],
+        "title": "AgentToolApprovalDecisionResponse",
+        "type": "object"
+      },
       "AgentToolAssignmentUpdate": {
         "properties": {
           "servers": {
@@ -9804,6 +9865,135 @@
           }
         },
         "summary": "Chat Workspace Agent Route",
+        "tags": [
+          "workspace-agents"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}/tool-approvals/{approval_id}": {
+      "post": {
+        "operationId": "workspace_agents_decide_tool_approval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Approval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentToolApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentToolApprovalDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Workspace Agent Tool Approval Route",
         "tags": [
           "workspace-agents"
         ]

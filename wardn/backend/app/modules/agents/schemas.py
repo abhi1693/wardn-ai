@@ -210,6 +210,24 @@ class AgentToolListResponse(BaseModel):
     servers: list[AgentServerToolAssignmentRead] = Field(default_factory=list)
 
 
+class AgentToolApprovalDecisionRequest(BaseModel):
+    decision: Literal["approve", "deny"]
+
+
+class AgentToolApprovalDecisionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    approval_id: uuid.UUID = Field(alias="approvalId")
+    status: str
+    tool_name: str = Field(alias="toolName")
+    result: str = ""
+    error: str = ""
+    assistant_message: ConversationMessageRead | None = Field(
+        default=None,
+        alias="assistantMessage",
+    )
+
+
 class AgentAvailableToolRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

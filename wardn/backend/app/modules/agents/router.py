@@ -22,6 +22,8 @@ from app.modules.agents.schemas import (
     AgentRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
+    AgentToolApprovalDecisionRequest,
+    AgentToolApprovalDecisionResponse,
     AgentToolAssignmentUpdate,
     AgentToolListResponse,
     AgentUpdate,
@@ -29,6 +31,7 @@ from app.modules.agents.schemas import (
 from app.modules.agents.service import (
     AgentChatProviderError,
     create_workspace_agent,
+    decide_agent_tool_approval,
     delete_agent,
     get_agent,
     get_workspace_agent_run,
@@ -443,6 +446,44 @@ async def chat_workspace_agent_route(
             "X-Vercel-AI-UI-Message-Stream": "v1",
         },
     )
+
+
+@workspace_router.post(
+    "/{agent_id}/tool-approvals/{approval_id}",
+    response_model=AgentToolApprovalDecisionResponse,
+    operation_id="workspace_agents_decide_tool_approval",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def decide_workspace_agent_tool_approval_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_id: UUID,
+    approval_id: UUID,
+    payload: AgentToolApprovalDecisionRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentToolApprovalDecisionResponse:
+    try:
+        response = await decide_agent_tool_approval(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+            agent_id,
+            approval_id,
+            payload,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_access_error(exc)
+        raise
+    await session.commit()
+    return response
 
 
 @workspace_router.get(

@@ -201,6 +201,78 @@ class AgentRunStep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class AgentToolApproval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_tool_approvals"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_run_id",
+            "tool_call_id",
+            name="uq_agent_tool_approvals_run_tool_call",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    requested_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    decided_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    installation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_server_installations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tool_schema_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_server_tool_schemas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tool_call_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    result: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
 class AgentMCPServerAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "agent_mcp_server_assignments"
     __table_args__ = (

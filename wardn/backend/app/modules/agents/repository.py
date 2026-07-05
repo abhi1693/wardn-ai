@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.modules.agents.models import (
     Agent,
@@ -10,6 +11,7 @@ from app.modules.agents.models import (
     AgentMCPToolAssignment,
     AgentRun,
     AgentRunStep,
+    AgentToolApproval,
     ConversationMessage,
     WorkspaceConversation,
 )
@@ -207,6 +209,39 @@ async def append_conversation_message(
     return message
 
 
+async def update_conversation_tool_activity(
+    session: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    data_update: dict,
+) -> bool:
+    messages = await list_conversation_messages(session, conversation_id=conversation_id)
+    approval_id_text = str(approval_id)
+    for message in messages:
+        changed = False
+        parts = []
+        for part in message.parts:
+            next_part = dict(part)
+            data = next_part.get("data")
+            approval = data.get("approval") if isinstance(data, dict) else None
+            if isinstance(approval, dict) and approval.get("id") == approval_id_text:
+                next_data = dict(data)
+                next_approval = dict(approval)
+                next_approval["status"] = data_update.get("status", next_approval.get("status"))
+                next_data["approval"] = next_approval
+                next_data.update(data_update)
+                next_part["data"] = next_data
+                changed = True
+            parts.append(next_part)
+        if changed:
+            message.parts = parts
+            flag_modified(message, "parts")
+            await session.flush()
+            return True
+    return False
+
+
 async def create_agent_run(
     session: AsyncSession,
     *,
@@ -264,6 +299,63 @@ async def append_agent_run_step(
     await session.flush()
     await session.refresh(step)
     return step
+
+
+async def create_tool_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+    agent_run_id: uuid.UUID | None,
+    requested_by_id: uuid.UUID | None,
+    installation_id: uuid.UUID,
+    tool_schema_id: uuid.UUID,
+    tool_call_id: str,
+    tool_name: str,
+    arguments: dict,
+) -> AgentToolApproval:
+    approval = AgentToolApproval(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        requested_by_id=requested_by_id,
+        decided_by_id=None,
+        installation_id=installation_id,
+        tool_schema_id=tool_schema_id,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        arguments=arguments,
+        status="pending",
+        result="",
+        error="",
+    )
+    session.add(approval)
+    await session.flush()
+    await session.refresh(approval)
+    return approval
+
+
+async def get_tool_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    approval_id: uuid.UUID,
+) -> AgentToolApproval | None:
+    result = await session.execute(
+        select(AgentToolApproval).where(
+            AgentToolApproval.id == approval_id,
+            AgentToolApproval.organization_id == organization_id,
+            AgentToolApproval.workspace_id == workspace_id,
+            AgentToolApproval.agent_id == agent_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def finish_agent_run(

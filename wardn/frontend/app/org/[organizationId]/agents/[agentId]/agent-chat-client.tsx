@@ -61,7 +61,12 @@ type AgentChatClientProps = {
 
 type MessageRole = UIMessage["role"];
 type MessagePart = UIMessage["parts"][number];
+type ToolApprovalData = {
+  id?: string;
+  status?: string;
+};
 type ToolActivityData = {
+  approval?: ToolApprovalData;
   arguments?: unknown;
   error?: string;
   result?: unknown;
@@ -287,8 +292,22 @@ function toolActivities(parts: MessagePart[]) {
 function toolActivitySummary(activities: ToolActivityPart[]) {
   const completed = activities.filter((activity) => activity.data?.status === "completed").length;
   const failed = activities.filter((activity) => activity.data?.status === "failed").length;
+  const pending = activities.filter(
+    (activity) => activity.data?.status === "requires_confirmation"
+  ).length;
+  const denied = activities.filter((activity) => activity.data?.status === "denied").length;
+  const blocked = activities.filter((activity) => activity.data?.status === "blocked").length;
   if (failed > 0) {
     return `${failed} failed`;
+  }
+  if (pending > 0) {
+    return `${pending} need approval`;
+  }
+  if (denied > 0) {
+    return `${denied} denied`;
+  }
+  if (blocked > 0) {
+    return `${blocked} blocked`;
   }
   if (completed === activities.length) {
     return `${completed} completed`;
@@ -314,10 +333,14 @@ function agentRunIdFromMessage(message: UIMessage) {
 }
 
 function ToolActivity({
+  approvalDecisions = {},
   activities,
+  onDecideApproval,
   traceHref,
 }: {
+  approvalDecisions?: Record<string, string>;
   activities: ToolActivityPart[];
+  onDecideApproval?: (activity: ToolActivityPart, decision: "approve" | "deny") => void;
   traceHref?: string;
 }) {
   if (activities.length === 0) {
@@ -350,7 +373,14 @@ function ToolActivity({
             const isDone = status === "completed";
             const isFailed = status === "failed";
             const isBlocked = status === "blocked";
+            const isDenied = status === "denied";
             const needsConfirmation = status === "requires_confirmation";
+            const approvalId = activity.data?.approval?.id ?? "";
+            const isApprovalPending =
+              needsConfirmation &&
+              approvalId &&
+              (activity.data?.approval?.status ?? "pending") === "pending";
+            const decisionInFlight = approvalId ? approvalDecisions[approvalId] : "";
             const result = toolActivityResult(activity);
             return (
               <div
@@ -360,7 +390,7 @@ function ToolActivity({
                 <div className="flex items-start gap-2">
                   {isDone ? (
                     <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                  ) : isBlocked ? (
+                  ) : isBlocked || isDenied ? (
                     <ShieldOff className="mt-0.5 size-3.5 shrink-0 text-amber-700" />
                   ) : needsConfirmation ? (
                     <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
@@ -374,12 +404,45 @@ function ToolActivity({
                       {activity.data?.toolName ?? "MCP tool"}
                     </div>
                     <div className="mt-0.5 text-[var(--on-surface-variant)]">
-                      {isFailed || isBlocked || needsConfirmation
+                      {isFailed || isBlocked || isDenied || needsConfirmation
                         ? activity.data?.error ?? status
                         : status}
                     </div>
                   </div>
                 </div>
+                {isApprovalPending && onDecideApproval ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 pl-5">
+                    <Button
+                      className="h-8 px-2.5 text-xs"
+                      disabled={Boolean(decisionInFlight)}
+                      onClick={() => onDecideApproval(activity, "approve")}
+                      size="sm"
+                      type="button"
+                    >
+                      {decisionInFlight === "approve" ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="size-3.5" />
+                      )}
+                      Approve
+                    </Button>
+                    <Button
+                      className="h-8 px-2.5 text-xs"
+                      disabled={Boolean(decisionInFlight)}
+                      onClick={() => onDecideApproval(activity, "deny")}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {decisionInFlight === "deny" ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <ShieldOff className="size-3.5" />
+                      )}
+                      Deny
+                    </Button>
+                  </div>
+                ) : null}
                 {result ? (
                   <details className="mt-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
                     <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
@@ -429,6 +492,7 @@ export function AgentChatClient({
   workspaceId,
 }: AgentChatClientProps) {
   const [input, setInput] = useState("");
+  const [approvalDecisions, setApprovalDecisions] = useState<Record<string, string>>({});
   const [lastSubmittedText, setLastSubmittedText] = useState("");
   const chatApi = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents/${agent.id}/chat`;
   const persistedMessages = useMemo(() => uiMessages(initialMessages), [initialMessages]);
@@ -439,7 +503,7 @@ export function AgentChatClient({
       }),
     [chatApi]
   );
-  const { error, messages, sendMessage, status, stop } = useChat({
+  const { error, messages, sendMessage, setMessages, status, stop } = useChat({
     id: conversation?.id,
     messages: persistedMessages,
     transport,
@@ -467,6 +531,96 @@ export function AgentChatClient({
       return;
     }
     await sendMessage({ text });
+  }
+
+  function updateApprovalActivity(
+    approvalId: string,
+    update: { error?: string; result?: unknown; status: string }
+  ) {
+    setMessages((currentMessages) =>
+      currentMessages.map((message) => ({
+        ...message,
+        parts: message.parts.map((part) => {
+          if (!isToolActivityPart(part) || part.data?.approval?.id !== approvalId) {
+            return part;
+          }
+          const nextData: ToolActivityData = {
+            ...part.data,
+            approval: {
+              ...part.data.approval,
+              status: update.status,
+            },
+            status: update.status,
+          };
+          if (update.result !== undefined && update.result !== "") {
+            nextData.result = update.result;
+          } else {
+            delete nextData.result;
+          }
+          if (update.error) {
+            nextData.error = update.error;
+          } else {
+            delete nextData.error;
+          }
+          return { ...part, data: nextData } as MessagePart;
+        }),
+      }))
+    );
+  }
+
+  function appendAssistantMessage(message: ConversationMessageRead | null | undefined) {
+    if (!message) {
+      return;
+    }
+    const [nextMessage] = uiMessages([message]);
+    setMessages((currentMessages) => {
+      if (currentMessages.some((entry) => entry.id === nextMessage.id)) {
+        return currentMessages;
+      }
+      return [...currentMessages, nextMessage];
+    });
+  }
+
+  async function decideToolApproval(activity: ToolActivityPart, decision: "approve" | "deny") {
+    const approvalId = activity.data?.approval?.id;
+    if (!approvalId || approvalDecisions[approvalId]) {
+      return;
+    }
+    setApprovalDecisions((current) => ({ ...current, [approvalId]: decision }));
+    try {
+      const response = await fetch(
+        `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents/${agent.id}/tool-approvals/${approvalId}`,
+        {
+          body: JSON.stringify({ decision }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || "Approval failed");
+      }
+      updateApprovalActivity(approvalId, {
+        error: typeof data.error === "string" ? data.error : "",
+        result: data.result,
+        status: typeof data.status === "string" ? data.status : "failed",
+      });
+      appendAssistantMessage(data.assistantMessage);
+    } catch (approvalError) {
+      updateApprovalActivity(approvalId, {
+        error:
+          approvalError instanceof Error
+            ? approvalError.message
+            : "Approval failed",
+        status: "requires_confirmation",
+      });
+    } finally {
+      setApprovalDecisions((current) => {
+        const next = { ...current };
+        delete next[approvalId];
+        return next;
+      });
+    }
   }
 
   useEffect(() => {
@@ -643,7 +797,12 @@ export function AgentChatClient({
                         )}
                       >
                         {!isUser ? (
-                          <ToolActivity activities={activities} traceHref={traceHref} />
+                          <ToolActivity
+                            activities={activities}
+                            approvalDecisions={approvalDecisions}
+                            onDecideApproval={decideToolApproval}
+                            traceHref={traceHref}
+                          />
                         ) : null}
                         {text ? <MessageMarkdown role={message.role} text={text} /> : null}
                       </div>
