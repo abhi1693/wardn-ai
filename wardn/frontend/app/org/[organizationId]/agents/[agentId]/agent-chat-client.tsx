@@ -327,6 +327,14 @@ function toolActivityResult(activity: ToolActivityPart) {
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
 }
 
+function toolActivityArguments(activity: ToolActivityPart) {
+  const args = activity.data?.arguments;
+  if (args === undefined || args === null || args === "") {
+    return "";
+  }
+  return typeof args === "string" ? args : JSON.stringify(args, null, 2);
+}
+
 function toolActivityProgress(activity: ToolActivityPart) {
   const progress = activity.data?.progress;
   if (typeof progress !== "number" || !Number.isFinite(progress)) {
@@ -344,6 +352,13 @@ function toolActivityProgress(activity: ToolActivityPart) {
     label: `${progress}`,
     percent: null,
   };
+}
+
+function toolActivityStatusLabel(status: string) {
+  if (status === "requires_confirmation") {
+    return "Needs approval";
+  }
+  return status.replace(/_/g, " ");
 }
 
 function agentRunIdFromMessage(message: UIMessage) {
@@ -370,11 +385,14 @@ function ToolActivity({
     return null;
   }
   return (
-    <details className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
+    <details
+      className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]"
+      open
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-[var(--on-surface-variant)]">
         <span className="flex min-w-0 items-center gap-2">
           <Wrench className="size-3.5 shrink-0" />
-          <span>Tool activity</span>
+          <span>Tool steps</span>
         </span>
         <span className="flex items-center gap-2">
           {traceHref ? (
@@ -390,8 +408,8 @@ function ToolActivity({
         </span>
       </summary>
       <div className="border-t border-[var(--outline-variant)] px-3 py-2">
-        <div className="space-y-1.5">
-          {activities.map((activity) => {
+        <div>
+          {activities.map((activity, index) => {
             const status = activity.data?.status ?? "running";
             const isDone = status === "completed";
             const isFailed = status === "failed";
@@ -404,94 +422,122 @@ function ToolActivity({
               approvalId &&
               (activity.data?.approval?.status ?? "pending") === "pending";
             const decisionInFlight = approvalId ? approvalDecisions[approvalId] : "";
+            const args = toolActivityArguments(activity);
             const result = toolActivityResult(activity);
             const progress = toolActivityProgress(activity);
+            const activityMessage =
+              isFailed || isBlocked || isDenied || needsConfirmation
+                ? activity.data?.error ?? toolActivityStatusLabel(status)
+                : activity.data?.message ?? toolActivityStatusLabel(status);
             return (
               <div
-                className="rounded-md bg-white px-2.5 py-2 text-xs"
+                className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 border-b border-[var(--outline-variant)] py-2 text-xs last:border-b-0"
                 key={activity.id ?? `${activity.data?.toolName}-${status}`}
               >
-                <div className="flex items-start gap-2">
-                  {isDone ? (
-                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                  ) : isBlocked || isDenied ? (
-                    <ShieldOff className="mt-0.5 size-3.5 shrink-0 text-amber-700" />
-                  ) : needsConfirmation ? (
-                    <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-                  ) : isFailed ? (
-                    <Square className="mt-0.5 size-3.5 shrink-0 text-red-600" />
-                  ) : (
-                    <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-[var(--on-surface-variant)]" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-[var(--on-surface)]">
-                      {activity.data?.toolName ?? "MCP tool"}
-                    </div>
-                    <div className="mt-0.5 text-[var(--on-surface-variant)]">
-                      {isFailed || isBlocked || isDenied || needsConfirmation
-                        ? activity.data?.error ?? status
-                        : activity.data?.message ?? status}
-                    </div>
-                    {progress ? (
-                      <div className="mt-2 max-w-sm">
-                        {progress.percent !== null ? (
-                          <div className="h-1.5 overflow-hidden rounded-sm bg-[var(--surface-container)]">
-                            <div
-                              className="h-full rounded-sm bg-[var(--primary)] transition-[width]"
-                              style={{ width: `${progress.percent}%` }}
-                            />
-                          </div>
-                        ) : null}
-                        <div className="mt-1 font-mono text-[11px] text-[var(--on-surface-variant)]">
-                          {progress.label}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                <div className="flex flex-col items-center">
+                  <span className="flex size-6 items-center justify-center rounded-sm border border-[var(--outline-variant)] bg-white font-mono text-[11px] text-[var(--on-surface-variant)]">
+                    {index + 1}
+                  </span>
+                  {index < activities.length - 1 ? (
+                    <span className="mt-1 w-px flex-1 bg-[var(--outline-variant)]" />
+                  ) : null}
                 </div>
-                {isApprovalPending && onDecideApproval ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 pl-5">
-                    <Button
-                      className="h-8 px-2.5 text-xs"
-                      disabled={Boolean(decisionInFlight)}
-                      onClick={() => onDecideApproval(activity, "approve")}
-                      size="sm"
-                      type="button"
-                    >
-                      {decisionInFlight === "approve" ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="size-3.5" />
-                      )}
-                      Approve
-                    </Button>
-                    <Button
-                      className="h-8 px-2.5 text-xs"
-                      disabled={Boolean(decisionInFlight)}
-                      onClick={() => onDecideApproval(activity, "deny")}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {decisionInFlight === "deny" ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <ShieldOff className="size-3.5" />
-                      )}
-                      Deny
-                    </Button>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2 font-medium text-[var(--on-surface)]">
+                        {isDone ? (
+                          <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />
+                        ) : isBlocked || isDenied ? (
+                          <ShieldOff className="size-3.5 shrink-0 text-amber-700" />
+                        ) : needsConfirmation ? (
+                          <CircleAlert className="size-3.5 shrink-0 text-amber-600" />
+                        ) : isFailed ? (
+                          <Square className="size-3.5 shrink-0 text-red-600" />
+                        ) : (
+                          <Loader2 className="size-3.5 shrink-0 animate-spin text-[var(--on-surface-variant)]" />
+                        )}
+                        <span className="min-w-0 truncate">
+                          {activity.data?.toolName ?? "MCP tool"}
+                        </span>
+                      </div>
+                      <div className="mt-1 break-words text-[var(--on-surface-variant)]">
+                        {activityMessage}
+                      </div>
+                    </div>
+                    <Badge className="shrink-0 capitalize" variant="outline">
+                      {toolActivityStatusLabel(status)}
+                    </Badge>
                   </div>
-                ) : null}
-                {result ? (
-                  <details className="mt-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
-                    <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
-                      Result
-                    </summary>
-                    <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
-                      {result}
-                    </pre>
-                  </details>
-                ) : null}
+                  {progress ? (
+                    <div className="mt-2 max-w-sm">
+                      {progress.percent !== null ? (
+                        <div className="h-1.5 overflow-hidden rounded-sm bg-[var(--surface-container)]">
+                          <div
+                            className="h-full rounded-sm bg-[var(--primary)] transition-[width]"
+                            style={{ width: `${progress.percent}%` }}
+                          />
+                        </div>
+                      ) : null}
+                      <div className="mt-1 font-mono text-[11px] text-[var(--on-surface-variant)]">
+                        {progress.label}
+                      </div>
+                    </div>
+                  ) : null}
+                  {isApprovalPending && onDecideApproval ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button
+                        className="h-8 px-2.5 text-xs"
+                        disabled={Boolean(decisionInFlight)}
+                        onClick={() => onDecideApproval(activity, "approve")}
+                        size="sm"
+                        type="button"
+                      >
+                        {decisionInFlight === "approve" ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="size-3.5" />
+                        )}
+                        Approve
+                      </Button>
+                      <Button
+                        className="h-8 px-2.5 text-xs"
+                        disabled={Boolean(decisionInFlight)}
+                        onClick={() => onDecideApproval(activity, "deny")}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {decisionInFlight === "deny" ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <ShieldOff className="size-3.5" />
+                        )}
+                        Deny
+                      </Button>
+                    </div>
+                  ) : null}
+                  {args ? (
+                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                        Arguments
+                      </summary>
+                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                        {args}
+                      </pre>
+                    </details>
+                  ) : null}
+                  {result ? (
+                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                        Result
+                      </summary>
+                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                        {result}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
               </div>
             );
           })}
