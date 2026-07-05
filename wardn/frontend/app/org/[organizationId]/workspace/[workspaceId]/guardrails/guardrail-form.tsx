@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -80,10 +79,6 @@ function policyEndpoint(organizationId: string, workspaceId: string, policy?: Gu
   )}/workspaces/${encodeURIComponent(
     workspaceId
   )}/guardrails/policies${policy ? `/${encodeURIComponent(policy.id)}` : ""}`;
-}
-
-function modeLabel(mode: GuardrailMode) {
-  return modeOptions.find((option) => option.value === mode)?.label ?? mode;
 }
 
 function selectedValue(value?: string | null) {
@@ -336,16 +331,6 @@ export function GuardrailForm({
               />
               Active
             </label>
-          </div>
-
-          <div className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <Badge variant="outline">{modeLabel(mode)}</Badge>
-              <Badge variant="secondary">Workspace</Badge>
-            </div>
-            <p className="text-sm leading-5 text-[var(--on-surface-variant)]">
-              {modeOptions.find((option) => option.value === mode)?.description}
-            </p>
           </div>
 
           <div className="flex justify-end gap-2">

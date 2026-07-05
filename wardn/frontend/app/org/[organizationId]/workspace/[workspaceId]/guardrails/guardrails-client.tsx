@@ -1,6 +1,14 @@
 "use client";
 
-import { Loader2, Pencil, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  CircleAlert,
+  Loader2,
+  Pencil,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -41,6 +49,18 @@ type GuardrailsClientProps = {
   workspaceId: string;
 };
 
+type GuardrailMode = "allow" | "deny" | "require_confirmation";
+
+const modeActions: Array<{
+  icon: typeof CheckCircle2;
+  label: string;
+  mode: GuardrailMode;
+}> = [
+  { icon: CheckCircle2, label: "Allow", mode: "allow" },
+  { icon: CircleAlert, label: "Require confirmation", mode: "require_confirmation" },
+  { icon: ShieldOff, label: "Deny", mode: "deny" },
+];
+
 function modeLabel(mode: string) {
   if (mode === "require_confirmation") {
     return "Require confirmation";
@@ -48,14 +68,20 @@ function modeLabel(mode: string) {
   return mode.slice(0, 1).toUpperCase() + mode.slice(1);
 }
 
-function modeVariant(mode: string) {
+function modeActionClassName(mode: GuardrailMode, isActive: boolean) {
   if (mode === "allow") {
-    return "success" as const;
+    return isActive
+      ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+      : "text-emerald-700 hover:bg-emerald-50";
   }
   if (mode === "deny") {
-    return "secondary" as const;
+    return isActive
+      ? "bg-red-50 text-red-700 hover:bg-red-100"
+      : "text-red-700 hover:bg-red-50";
   }
-  return "outline" as const;
+  return isActive
+    ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+    : "text-amber-700 hover:bg-amber-50";
 }
 
 function policyEndpoint(organizationId: string, workspaceId: string, policy: GuardrailPolicyRead) {
@@ -103,7 +129,44 @@ export function GuardrailsClient({
 }: GuardrailsClientProps) {
   const [policies, setPolicies] = useState(initialPolicies);
   const [deletingPolicyId, setDeletingPolicyId] = useState<string | null>(null);
+  const [updatingMode, setUpdatingMode] = useState<{ mode: GuardrailMode; policyId: string } | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
+
+  async function updatePolicyMode(record: GuardrailPolicyRecord, mode: GuardrailMode) {
+    if (record.policy.mode === mode || updatingMode) {
+      return;
+    }
+
+    setUpdatingMode({ policyId: record.policy.id, mode });
+    setError(null);
+    try {
+      const response = await fetch(policyEndpoint(organizationId, workspaceId, record.policy), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "Guardrail policy mode could not be changed."));
+      }
+      const updated = data as GuardrailPolicyRead;
+      setPolicies((current) =>
+        current.map((entry) =>
+          entry.policy.id === updated.id ? { ...entry, policy: updated } : entry
+        )
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Guardrail policy mode could not be changed."
+      );
+    } finally {
+      setUpdatingMode(null);
+    }
+  }
 
   async function deletePolicy(record: GuardrailPolicyRecord) {
     if (!window.confirm(`Delete ${record.policy.name}?`)) {
@@ -175,9 +238,37 @@ export function GuardrailsClient({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={modeVariant(record.policy.mode)}>
-                      {modeLabel(record.policy.mode)}
-                    </Badge>
+                    <div
+                      aria-label={`Policy mode: ${modeLabel(record.policy.mode)}`}
+                      className="flex w-fit items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-white p-1"
+                    >
+                      {modeActions.map((action) => {
+                        const Icon = action.icon;
+                        const isActive = record.policy.mode === action.mode;
+                        const isUpdating =
+                          updatingMode?.policyId === record.policy.id &&
+                          updatingMode.mode === action.mode;
+                        return (
+                          <Button
+                            aria-label={`${action.label} ${record.policy.name}`}
+                            className={modeActionClassName(action.mode, isActive)}
+                            disabled={Boolean(updatingMode)}
+                            key={action.mode}
+                            onClick={() => updatePolicyMode(record, action.mode)}
+                            size="icon"
+                            title={action.label}
+                            type="button"
+                            variant="ghost"
+                          >
+                            {isUpdating ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Icon className="size-3.5" />
+                            )}
+                          </Button>
+                        );
+                      })}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <span className="block max-w-96 truncate text-sm">
