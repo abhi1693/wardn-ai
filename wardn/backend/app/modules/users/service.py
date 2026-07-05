@@ -25,10 +25,12 @@ from app.modules.users.exceptions import (
     DuplicateUserError,
     InvalidAPITokenScopeError,
     InvalidLoginError,
+    OIDCAuthenticationError,
     UserAPITokenNotFoundError,
     UserNotFoundError,
 )
 from app.modules.users.models import LocalAuthCredential, User, UserAPIToken
+from app.modules.users.oidc import OIDCIdentity
 from app.modules.users.schemas import (
     LoginRequest,
     UserAPITokenCreate,
@@ -222,6 +224,46 @@ async def authenticate_local_user(session: AsyncSession, payload: LoginRequest) 
     if not valid_password:
         raise InvalidLoginError("invalid email or password")
 
+    user.last_login_at = datetime.now(UTC)
+    await session.flush()
+    return user
+
+
+async def authenticate_oidc_identity(
+    session: AsyncSession,
+    identity: OIDCIdentity,
+    *,
+    auto_create_users: bool,
+    superuser_emails: list[str],
+) -> User:
+    email = normalize_email(identity.email)
+    user = await repository.get_user_by_email(session, email)
+    is_superuser = email in {value.casefold() for value in superuser_emails}
+
+    if user is None:
+        if not auto_create_users:
+            raise OIDCAuthenticationError("OIDC user auto-creation is disabled")
+        user = User(
+            email=email,
+            first_name=identity.first_name.strip(),
+            last_name=identity.last_name.strip(),
+            is_active=True,
+            is_superuser=is_superuser,
+            last_login_at=datetime.now(UTC),
+        )
+        session.add(user)
+        await session.flush()
+        return user
+
+    if not user.is_active:
+        raise OIDCAuthenticationError("user is inactive")
+
+    if identity.first_name.strip():
+        user.first_name = identity.first_name.strip()
+    if identity.last_name.strip():
+        user.last_name = identity.last_name.strip()
+    if is_superuser:
+        user.is_superuser = True
     user.last_login_at = datetime.now(UTC)
     await session.flush()
     return user

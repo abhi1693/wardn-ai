@@ -10,10 +10,12 @@ from app.modules.users.exceptions import (
     BootstrapUserExistsError,
     DuplicateUserError,
     InvalidLoginError,
+    OIDCAuthenticationError,
     UserAPITokenNotFoundError,
     UserNotFoundError,
 )
 from app.modules.users.models import LocalAuthCredential, User, UserAPIToken
+from app.modules.users.oidc import OIDCIdentity
 from app.modules.users.schemas import (
     LoginRequest,
     UserAPITokenCreate,
@@ -421,4 +423,92 @@ async def test_authenticate_local_user_rejects_invalid_credentials(monkeypatch) 
         await service.authenticate_local_user(
             FakeSession(),
             LoginRequest(email="admin@example.com", password=SecretStr("invalid")),
+        )
+
+
+@pytest.mark.asyncio
+async def test_authenticate_oidc_identity_creates_user(monkeypatch) -> None:
+    async def no_existing_user(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_user_by_email", no_existing_user)
+    session = FakeSession()
+
+    user = await service.authenticate_oidc_identity(
+        session,
+        OIDCIdentity(
+            email=" Admin@Example.COM ",
+            first_name="Ada",
+            last_name="Lovelace",
+            subject="subject-1",
+        ),
+        auto_create_users=True,
+        superuser_emails=["admin@example.com"],
+    )
+
+    assert user.email == "admin@example.com"
+    assert user.first_name == "Ada"
+    assert user.last_name == "Lovelace"
+    assert user.is_active is True
+    assert user.is_superuser is True
+    assert user.local_credentials is None
+    assert user.last_login_at is not None
+    assert session.added == [user]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_authenticate_oidc_identity_updates_existing_user(monkeypatch) -> None:
+    user = User(
+        email="admin@example.com",
+        first_name="Old",
+        last_name="Name",
+        is_active=True,
+        is_superuser=False,
+    )
+
+    async def existing_user(*args, **kwargs):
+        return user
+
+    monkeypatch.setattr(service.repository, "get_user_by_email", existing_user)
+
+    result = await service.authenticate_oidc_identity(
+        FakeSession(),
+        OIDCIdentity(
+            email="admin@example.com",
+            first_name="Ada",
+            last_name="Lovelace",
+            subject="subject-1",
+        ),
+        auto_create_users=True,
+        superuser_emails=["admin@example.com"],
+    )
+
+    assert result is user
+    assert user.first_name == "Ada"
+    assert user.last_name == "Lovelace"
+    assert user.is_superuser is True
+    assert user.last_login_at is not None
+
+
+@pytest.mark.asyncio
+async def test_authenticate_oidc_identity_rejects_missing_user_when_auto_create_disabled(
+    monkeypatch,
+) -> None:
+    async def no_existing_user(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_user_by_email", no_existing_user)
+
+    with pytest.raises(OIDCAuthenticationError):
+        await service.authenticate_oidc_identity(
+            FakeSession(),
+            OIDCIdentity(
+                email="admin@example.com",
+                first_name="Ada",
+                last_name="Lovelace",
+                subject="subject-1",
+            ),
+            auto_create_users=False,
+            superuser_emails=[],
         )

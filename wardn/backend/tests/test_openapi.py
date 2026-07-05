@@ -14,9 +14,12 @@ def test_openapi_exposes_expected_paths() -> None:
     assert set(schema["paths"]) == {
         "/api/v1/auth/api-tokens",
         "/api/v1/auth/api-tokens/{token_id}",
+        "/api/v1/auth/config",
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
+        "/api/v1/auth/oidc/callback",
+        "/api/v1/auth/oidc/login",
         "/api/v1/health/live",
         "/api/v1/health/ready",
         "/api/v1/mcp/gateway",
@@ -201,9 +204,12 @@ def test_auth_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     api_tokens = schema["paths"]["/api/v1/auth/api-tokens"]
     api_token = schema["paths"]["/api/v1/auth/api-tokens/{token_id}"]
+    config = schema["paths"]["/api/v1/auth/config"]["get"]
     login = schema["paths"]["/api/v1/auth/login"]["post"]
     logout = schema["paths"]["/api/v1/auth/logout"]["post"]
     me = schema["paths"]["/api/v1/auth/me"]["get"]
+    oidc_login = schema["paths"]["/api/v1/auth/oidc/login"]["get"]
+    oidc_callback = schema["paths"]["/api/v1/auth/oidc/callback"]["get"]
 
     assert api_tokens["get"]["operationId"] == "auth_list_api_tokens"
     assert api_tokens["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -225,6 +231,10 @@ def test_auth_openapi_contract() -> None:
     }
     assert api_token["delete"]["operationId"] == "auth_delete_api_token"
     assert api_token["delete"]["responses"]["204"]["description"] == "Successful Response"
+    assert config["operationId"] == "auth_config"
+    assert config["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AuthConfigRead"
+    }
     assert login["operationId"] == "auth_login"
     assert login["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/LoginRequest"
@@ -241,6 +251,12 @@ def test_auth_openapi_contract() -> None:
     assert me["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/UserRead"
     }
+    assert oidc_login["operationId"] == "auth_oidc_login"
+    assert oidc_login["responses"]["302"]["description"] == (
+        "Redirect to the configured OIDC provider."
+    )
+    assert oidc_callback["operationId"] == "auth_oidc_callback"
+    assert oidc_callback["responses"]["302"]["description"] == "Redirect to the Wardn frontend."
 
 
 def test_llm_provider_credentials_openapi_contract() -> None:

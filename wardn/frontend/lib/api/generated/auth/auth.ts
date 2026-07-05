@@ -5,6 +5,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type {
+  AuthConfigRead,
+  AuthOidcCallbackParams,
+  AuthOidcLoginParams,
   ErrorResponse,
   HTTPValidationError,
   LoginRequest,
@@ -234,6 +237,48 @@ export const authUpdateApiToken = async (tokenId: string,
 }
 
 
+export type authConfigResponse200 = {
+  data: AuthConfigRead
+  status: 200
+}
+
+export type authConfigResponseSuccess = (authConfigResponse200) & {
+  headers: Headers;
+};
+;
+
+export type authConfigResponse = (authConfigResponseSuccess)
+
+export const getAuthConfigUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/auth/config`
+}
+
+/**
+ * @summary Auth Config
+ */
+export const authConfig = async ( options?: RequestInit): Promise<authConfigResponse> => {
+
+  const res = await fetch(getAuthConfigUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authConfigResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authConfigResponse
+}
+
+
 export type authLoginResponse200 = {
   data: UserRead
   status: 200
@@ -376,6 +421,138 @@ export const authMe = async ( options?: RequestInit): Promise<authMeResponse> =>
 
   const data: authMeResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as authMeResponse
+}
+
+
+export type authOidcCallbackResponse200 = {
+  data: unknown
+  status: 200
+}
+
+export type authOidcCallbackResponse302 = {
+  data: void
+  status: 302
+}
+
+export type authOidcCallbackResponse401 = {
+  data: ErrorResponse
+  status: 401
+}
+
+export type authOidcCallbackResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authOidcCallbackResponseSuccess = (authOidcCallbackResponse200) & {
+  headers: Headers;
+};
+export type authOidcCallbackResponseError = (authOidcCallbackResponse302 | authOidcCallbackResponse401 | authOidcCallbackResponse422) & {
+  headers: Headers;
+};
+
+export type authOidcCallbackResponse = (authOidcCallbackResponseSuccess | authOidcCallbackResponseError)
+
+export const getAuthOidcCallbackUrl = (params?: AuthOidcCallbackParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/auth/oidc/callback?${stringifiedParams}` : `http://localhost:8000/api/v1/auth/oidc/callback`
+}
+
+/**
+ * @summary Oidc Callback
+ */
+export const authOidcCallback = async (params?: AuthOidcCallbackParams, options?: RequestInit): Promise<authOidcCallbackResponse> => {
+
+  const res = await fetch(getAuthOidcCallbackUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authOidcCallbackResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authOidcCallbackResponse
+}
+
+
+export type authOidcLoginResponse200 = {
+  data: unknown
+  status: 200
+}
+
+export type authOidcLoginResponse302 = {
+  data: void
+  status: 302
+}
+
+export type authOidcLoginResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type authOidcLoginResponse503 = {
+  data: ErrorResponse
+  status: 503
+}
+
+export type authOidcLoginResponseSuccess = (authOidcLoginResponse200) & {
+  headers: Headers;
+};
+export type authOidcLoginResponseError = (authOidcLoginResponse302 | authOidcLoginResponse422 | authOidcLoginResponse503) & {
+  headers: Headers;
+};
+
+export type authOidcLoginResponse = (authOidcLoginResponseSuccess | authOidcLoginResponseError)
+
+export const getAuthOidcLoginUrl = (params?: AuthOidcLoginParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/auth/oidc/login?${stringifiedParams}` : `http://localhost:8000/api/v1/auth/oidc/login`
+}
+
+/**
+ * @summary Oidc Login
+ */
+export const authOidcLogin = async (params?: AuthOidcLoginParams, options?: RequestInit): Promise<authOidcLoginResponse> => {
+
+  const res = await fetch(getAuthOidcLoginUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: authOidcLoginResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as authOidcLoginResponse
 }
 
 

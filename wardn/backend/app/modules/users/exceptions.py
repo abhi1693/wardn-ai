@@ -24,3 +24,11 @@ class InvalidLoginError(UserModuleError):
 
 class InvalidAPITokenScopeError(UserModuleError):
     pass
+
+
+class OIDCConfigurationError(UserModuleError):
+    pass
+
+
+class OIDCAuthenticationError(UserModuleError):
+    pass

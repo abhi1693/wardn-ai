@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,11 +21,23 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_token_secret: str = "dev-token-secret-change-me"
     api_token_prefix: str = "wardn"
+    auth_mode: Literal["local", "oidc"] = "local"
     session_cookie_name: str = "wardn_session"
     session_secret: str = "dev-session-secret-change-me"
     session_ttl_seconds: int = 60 * 60 * 12
     public_base_url: str = ""
     frontend_base_url: str = "http://localhost:3000"
+    oidc_provider_name: str = "External identity provider"
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = ""
+    oidc_scopes: str = "openid email profile"
+    oidc_state_cookie_name: str = "wardn_oidc_state"
+    oidc_allow_unverified_email: bool = False
+    oidc_auto_create_users: bool = True
+    oidc_allowed_email_domains: list[str] = []
+    oidc_superuser_emails: list[str] = []
     mcp_install_root: str = "data/mcp-installations"
     mcp_runtime_provider: str = "local"
     mcp_runtime_namespace: str = "wardn-runtimes"
@@ -80,6 +93,24 @@ class Settings(BaseSettings):
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("oidc_allowed_email_domains", mode="before")
+    @classmethod
+    def parse_oidc_allowed_email_domains(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [
+                domain.strip().casefold().removeprefix("@")
+                for domain in value.split(",")
+                if domain.strip()
+            ]
+        return value
+
+    @field_validator("oidc_superuser_emails", mode="before")
+    @classmethod
+    def parse_oidc_superuser_emails(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [email.strip().casefold() for email in value.split(",") if email.strip()]
         return value
 
 

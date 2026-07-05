@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr
 
@@ -80,3 +81,12 @@ class UserAPITokenListResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: SecretStr
+
+
+class AuthConfigRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    auth_mode: Literal["local", "oidc"] = Field(alias="authMode")
+    local_login_enabled: bool = Field(alias="localLoginEnabled")
+    oidc_login_enabled: bool = Field(alias="oidcLoginEnabled")
+    oidc_provider_name: str = Field(alias="oidcProviderName")
