@@ -261,6 +261,42 @@ def test_mcp_gateway_requires_bearer_token() -> None:
     assert response.json()["detail"] == "gateway bearer token required"
 
 
+def test_mcp_gateway_ping_returns_empty_result() -> None:
+    response = common_gateway_client().post(
+        GATEWAY_PATH,
+        json={"jsonrpc": "2.0", "id": "ping-1", "method": "ping"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"jsonrpc": "2.0", "id": "ping-1", "result": {}}
+
+
+def test_workspace_mcp_gateway_ping_returns_empty_result(monkeypatch) -> None:
+    async def get_workspace_by_id(*args, **kwargs):
+        return type(
+            "Workspace",
+            (),
+            {
+                "id": uuid.UUID(TEST_WORKSPACE_ID),
+                "organization_id": uuid.UUID(TEST_ORGANIZATION_ID),
+            },
+        )()
+
+    monkeypatch.setattr(
+        gateway_router.organizations_repository,
+        "get_workspace_by_id",
+        get_workspace_by_id,
+    )
+
+    response = gateway_client().post(
+        WORKSPACE_GATEWAY_PATH,
+        json={"jsonrpc": "2.0", "id": 7, "method": "ping", "params": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"jsonrpc": "2.0", "id": 7, "result": {}}
+
+
 def test_mcp_gateway_tools_list_is_bounded() -> None:
     response = common_gateway_client().post(
         GATEWAY_PATH,

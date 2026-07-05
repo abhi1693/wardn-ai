@@ -139,6 +139,8 @@ async def handle_mcp_gateway_rpc(
 
     if method == "initialize":
         return jsonrpc_result(request_id, service.initialize_result())
+    if method == "ping":
+        return jsonrpc_result(request_id, service.ping_result())
     if method == "tools/list":
         return jsonrpc_result(request_id, {"tools": service.gateway_tools()})
     if method == "tools/call":

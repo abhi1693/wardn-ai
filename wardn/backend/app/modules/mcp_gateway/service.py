@@ -631,6 +631,10 @@ def initialize_result() -> dict[str, Any]:
     }
 
 
+def ping_result() -> dict[str, Any]:
+    return {}
+
+
 async def call_tool(
     session: AsyncSession,
     name: str,

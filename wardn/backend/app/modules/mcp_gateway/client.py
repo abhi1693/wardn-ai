@@ -178,6 +178,16 @@ def send_stdio_message(session: MCPStdioSession, payload: dict[str, Any]) -> Non
         raise MCPGatewayUpstreamError("stdio MCP process closed stdin") from exc
 
 
+def handle_stdio_peer_request(session: MCPStdioSession, payload: dict[str, Any]) -> bool:
+    if payload.get("jsonrpc") != "2.0" or payload.get("method") != "ping" or "id" not in payload:
+        return False
+    send_stdio_message(
+        session,
+        {"jsonrpc": "2.0", "id": payload.get("id"), "result": {}},
+    )
+    return True
+
+
 def read_stdio_response(
     session: MCPStdioSession,
     request_id: int,
@@ -208,6 +218,8 @@ def read_stdio_response(
         try:
             response = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if handle_stdio_peer_request(session, response):
             continue
         if response.get("id") == request_id:
             return response
