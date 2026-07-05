@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db_session
 from app.modules.mcp_gateway import service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.mcp_gateway.oauth import bearer_challenge
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.organizations import repository as organizations_repository
 from app.modules.organizations.exceptions import (
@@ -87,6 +88,7 @@ def api_token_scope_ids(values: list[str] | None) -> frozenset[UUID] | None:
 
 
 async def require_gateway_api_token(
+    request: Request,
     session: AsyncSession,
     authorization: str | None,
 ) -> tuple[User, UserAPIToken]:
@@ -94,7 +96,7 @@ async def require_gateway_api_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="gateway bearer token required",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": bearer_challenge(request)},
         )
     plaintext_token = authorization.removeprefix("Bearer ").removeprefix("bearer ").strip()
     authenticated = await authenticate_api_token(session, plaintext_token)
@@ -102,7 +104,7 @@ async def require_gateway_api_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid gateway bearer token",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": bearer_challenge(request, error="invalid_token")},
         )
     return authenticated
 
@@ -179,7 +181,7 @@ async def mcp_gateway_rpc(
     authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
     try:
-        user, api_token = await require_gateway_api_token(session, authorization)
+        user, api_token = await require_gateway_api_token(request, session, authorization)
         scope = build_api_token_gateway_scope(user, api_token)
     except ValueError as exc:
         return jsonrpc_error(None, -32602, str(exc))

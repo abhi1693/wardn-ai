@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.db.session import get_db_session
 from app.main import create_app
 from app.modules.mcp_gateway import client as gateway_client_module
+from app.modules.mcp_gateway import oauth as gateway_oauth
 from app.modules.mcp_gateway import repository
 from app.modules.mcp_gateway import router as gateway_router
 from app.modules.mcp_gateway import service as gateway_service
@@ -260,6 +263,109 @@ def test_mcp_gateway_requires_bearer_token() -> None:
 
     assert response.status_code == 401
     assert response.json()["detail"] == "gateway bearer token required"
+    assert response.headers["www-authenticate"] == (
+        'Bearer resource_metadata="http://testserver/.well-known/oauth-protected-resource", '
+        'scope="mcp:tools"'
+    )
+
+
+def test_mcp_oauth_metadata_discovery() -> None:
+    client = TestClient(create_app())
+
+    resource_response = client.get("/.well-known/oauth-protected-resource")
+    auth_response = client.get("/.well-known/oauth-authorization-server")
+
+    assert resource_response.status_code == 200
+    assert resource_response.json() == {
+        "resource": "http://testserver/api/v1/mcp/gateway",
+        "authorization_servers": ["http://testserver"],
+        "scopes_supported": ["mcp:tools"],
+        "bearer_methods_supported": ["header"],
+    }
+    assert auth_response.status_code == 200
+    auth_metadata = auth_response.json()
+    assert auth_metadata["issuer"] == "http://testserver"
+    assert auth_metadata["authorization_endpoint"] == (
+        "http://testserver/api/v1/oauth/authorize"
+    )
+    assert auth_metadata["token_endpoint"] == "http://testserver/api/v1/oauth/token"
+    assert auth_metadata["registration_endpoint"] == (
+        "http://testserver/api/v1/oauth/register"
+    )
+    assert auth_metadata["code_challenge_methods_supported"] == ["S256"]
+    assert auth_metadata["token_endpoint_auth_methods_supported"] == ["none"]
+
+
+def test_mcp_oauth_dynamic_client_registration() -> None:
+    response = TestClient(create_app()).post(
+        "/api/v1/oauth/register",
+        json={
+            "client_name": "Codex",
+            "redirect_uris": ["http://127.0.0.1:39123/callback"],
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["client_name"] == "Codex"
+    assert payload["redirect_uris"] == ["http://127.0.0.1:39123/callback"]
+    metadata = gateway_oauth.client_metadata(payload["client_id"])
+    assert metadata["client_name"] == "Codex"
+    assert metadata["redirect_uris"] == ["http://127.0.0.1:39123/callback"]
+
+
+def test_mcp_oauth_token_exchange_issues_gateway_api_token(monkeypatch) -> None:
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    client = TestClient(app)
+    user_id = uuid.uuid4()
+    redirect_uri = "http://127.0.0.1:39123/callback"
+    client_id = gateway_oauth.create_client_id(
+        {"client_name": "Codex", "redirect_uris": [redirect_uri]}
+    )
+    verifier = "test-verifier"
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode(
+        "ascii"
+    ).rstrip("=")
+    user = User(id=user_id, email="admin@example.com", is_superuser=True, is_active=True)
+    code = gateway_oauth.authorization_code(
+        user,
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": challenge,
+            "resource": "http://testserver/api/v1/mcp/gateway",
+            "scope": "mcp:tools",
+        },
+    )
+
+    async def get_user_by_id(*args, **kwargs):
+        return user
+
+    async def create_api_token(*args, **kwargs):
+        return (
+            UserAPIToken(user_id=user_id, token_prefix="new", token_hash="hash"),
+            "wardn_new.secret",
+        )
+
+    monkeypatch.setattr(gateway_oauth.users_repository, "get_user_by_id", get_user_by_id)
+    monkeypatch.setattr(gateway_oauth, "create_user_api_token", create_api_token)
+
+    response = client.post(
+        "/api/v1/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+            "resource": "http://testserver/api/v1/mcp/gateway",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "wardn_new.secret"
+    assert response.json()["token_type"] == "Bearer"
 
 
 def test_mcp_gateway_ping_returns_empty_result() -> None:

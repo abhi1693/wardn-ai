@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.modules.mcp_gateway.oauth import well_known_router as mcp_gateway_oauth_well_known_router
 from app.modules.mcp_runtime.reaper import start_runtime_reaper, stop_runtime_reaper
 from app.modules.mcp_runtime.shutdown import teardown_runtime_sessions
 from app.modules.mcp_runtime.warmup import start_runtime_warmup, stop_runtime_warmup
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix=settings.api_prefix)
+    app.include_router(mcp_gateway_oauth_well_known_router)
     return app
 
 

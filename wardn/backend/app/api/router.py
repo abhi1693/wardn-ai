@@ -5,6 +5,7 @@ from app.modules.agents.router import workspace_runs_router as workspace_agent_r
 from app.modules.guardrails.router import workspace_router as workspace_guardrails_router
 from app.modules.health.router import router as health_router
 from app.modules.llm_providers.router import router as llm_provider_credentials_router
+from app.modules.mcp_gateway.oauth import oauth_router as mcp_gateway_oauth_router
 from app.modules.mcp_gateway.router import router as mcp_gateway_router
 from app.modules.mcp_gateway.router import workspace_router as workspace_mcp_gateway_router
 from app.modules.mcp_registry.router import organization_catalog_router
@@ -29,6 +30,7 @@ api_router.include_router(workspace_agent_runs_router)
 api_router.include_router(organization_catalog_router)
 api_router.include_router(organization_mcp_registry_router)
 api_router.include_router(workspace_mcp_registry_router)
+api_router.include_router(mcp_gateway_oauth_router)
 api_router.include_router(mcp_gateway_router)
 api_router.include_router(workspace_mcp_gateway_router)
 api_router.include_router(workspace_mcp_runtime_router)
