@@ -137,6 +137,11 @@ async def handle_mcp_gateway_rpc(
     if request_id is None and isinstance(method, str) and method.startswith("notifications/"):
         return Response(status_code=status.HTTP_202_ACCEPTED)
 
+    try:
+        request_meta = service.request_meta(params)
+    except ValueError as exc:
+        return jsonrpc_error(request_id, -32602, str(exc))
+
     if method == "initialize":
         return jsonrpc_result(request_id, service.initialize_result())
     if method == "ping":
@@ -154,6 +159,7 @@ async def handle_mcp_gateway_rpc(
                     tool_name,
                     arguments,
                     scope=scope,
+                    request_meta=request_meta,
                 ),
             )
         except ValueError as exc:

@@ -2004,6 +2004,7 @@ class KubernetesRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        request_meta: dict[str, Any] | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         if runtime_session is None:
@@ -2025,6 +2026,7 @@ class KubernetesRuntimeProvider:
             runtime_request_headers(installation),
             tool_name=tool_name,
             arguments=arguments,
+            request_meta=request_meta,
             verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
         )
 

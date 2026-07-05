@@ -27,8 +27,23 @@ from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProvid
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations import repository as organizations_repository
 
-PROTOCOL_VERSION = "2025-06-18"
+PROTOCOL_VERSION = "2025-11-25"
 MAX_SEARCH_LIMIT = 25
+
+
+def is_progress_token(value: Any) -> bool:
+    return isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def request_meta(params: dict[str, Any]) -> dict[str, Any]:
+    meta = params.get("_meta")
+    if meta is None:
+        return {}
+    if not isinstance(meta, dict):
+        raise ValueError("_meta must be an object")
+    if "progressToken" in meta and not is_progress_token(meta["progressToken"]):
+        raise ValueError("progressToken must be a string or integer")
+    return dict(meta)
 
 
 def parse_cursor(cursor: str | None) -> int:
@@ -500,6 +515,7 @@ async def run_mcp_tool(
     arguments: dict[str, Any],
     *,
     scope: GatewayScope,
+    request_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     server_name = str(arguments.get("serverName") or "").strip()
     tool_name = str(arguments.get("toolName") or "").strip()
@@ -558,6 +574,7 @@ async def run_mcp_tool(
             server,
             tool_name=tool_name,
             arguments=tool_arguments,
+            request_meta=request_meta,
         )
         await session.commit()
     except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
@@ -641,6 +658,7 @@ async def call_tool(
     arguments: dict[str, Any],
     *,
     scope: GatewayScope,
+    request_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if name == "search_mcp_servers":
         return await search_mcp_servers(session, arguments, scope=scope)
@@ -651,5 +669,10 @@ async def call_tool(
     if name == "get_mcp_tool":
         return await get_mcp_tool(session, arguments, scope=scope)
     if name == "run_mcp_tool":
-        return await run_mcp_tool(session, arguments, scope=scope)
+        return await run_mcp_tool(
+            session,
+            arguments,
+            scope=scope,
+            request_meta=request_meta,
+        )
     raise LookupError(f"unknown gateway tool: {name}")

@@ -45,6 +45,7 @@ class RemoteRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        request_meta: dict[str, Any] | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         runtime = require_remote_installation(installation)
@@ -53,6 +54,7 @@ class RemoteRuntimeProvider:
             runtime.headers,
             tool_name=tool_name,
             arguments=arguments,
+            request_meta=request_meta,
         )
 
     def ensure_runtime(

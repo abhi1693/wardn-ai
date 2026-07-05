@@ -58,7 +58,15 @@ class FakeRuntimeManager:
     def list_tools(self, installation):
         return []
 
-    def call_tool(self, installation, *, tool_name, arguments, runtime_session=None):
+    def call_tool(
+        self,
+        installation,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+        runtime_session=None,
+    ):
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     def ensure_runtime(self, installation, *, runtime_session=None, wait_ready=True):
@@ -87,7 +95,15 @@ class FakeRuntimeManager:
 
 
 class FailingRuntimeManager(FakeRuntimeManager):
-    def call_tool(self, installation, *, tool_name, arguments, runtime_session=None):
+    def call_tool(
+        self,
+        installation,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+        runtime_session=None,
+    ):
         raise RuntimeError("tool failed")
 
 
@@ -101,12 +117,21 @@ class ThreadRecordingRuntimeManager(FakeRuntimeManager):
         super().__init__()
         self.call_thread_id: int | None = None
 
-    def call_tool(self, installation, *, tool_name, arguments, runtime_session=None):
+    def call_tool(
+        self,
+        installation,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+        runtime_session=None,
+    ):
         self.call_thread_id = threading.get_ident()
         return super().call_tool(
             installation,
             tool_name=tool_name,
             arguments=arguments,
+            request_meta=request_meta,
             runtime_session=runtime_session,
         )
 

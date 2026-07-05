@@ -10,6 +10,7 @@ from app.modules.mcp_registry.installer import (
     install_server_runtime,
     parse_mcp_response_body,
     safe_path_component,
+    verify_remote_mcp_server,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
 
@@ -52,6 +53,56 @@ def test_parse_mcp_response_body_reads_json_and_sse() -> None:
     assert parse_mcp_response_body(f"event: message\ndata: {json.dumps(payload)}\n\n") == payload
 
 
+def test_parse_mcp_response_body_skips_sse_progress_notifications() -> None:
+    progress = {
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {"progressToken": "abc123", "progress": 1},
+    }
+    payload = {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+    body = (
+        f"event: message\ndata: {json.dumps(progress)}\n\n"
+        f"event: message\ndata: {json.dumps(payload)}\n\n"
+    )
+
+    assert parse_mcp_response_body(body) == payload
+
+
+def test_verify_remote_mcp_server_uses_negotiated_protocol_header(monkeypatch) -> None:
+    seen: list[dict] = []
+
+    def send_remote_mcp_request(url, payload, **kwargs):
+        seen.append({"url": url, "payload": payload, **kwargs})
+        if payload["method"] == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"protocolVersion": "2025-11-25", "serverInfo": {}},
+            }, "session-1"
+        if payload["method"] == "notifications/initialized":
+            return {}, None
+        return {
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": {"tools": []},
+        }, None
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.send_remote_mcp_request",
+        send_remote_mcp_request,
+    )
+
+    result = verify_remote_mcp_server({"url": "https://example.com/mcp"})
+
+    assert result["protocolVersion"] == "2025-11-25"
+    assert seen[0]["payload"]["params"]["protocolVersion"] == "2025-11-25"
+    assert "protocol_version" not in seen[0]
+    assert seen[1]["payload"] == {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    assert seen[1]["protocol_version"] == "2025-11-25"
+    assert seen[2]["payload"]["method"] == "tools/list"
+    assert seen[2]["protocol_version"] == "2025-11-25"
+
+
 def test_install_server_runtime_creates_verified_remote_runtime_manifest(
     tmp_path,
     monkeypatch,
@@ -62,7 +113,7 @@ def test_install_server_runtime_creates_verified_remote_runtime_manifest(
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": "2025-11-25",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -124,7 +175,7 @@ def test_install_server_runtime_uses_prompted_remote_config(tmp_path, monkeypatc
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": "2025-11-25",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -164,7 +215,7 @@ def test_install_server_runtime_uses_optional_remote_config(tmp_path, monkeypatc
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": "2025-11-25",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -191,7 +242,7 @@ def test_install_server_runtime_uses_custom_remote_header(tmp_path, monkeypatch)
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": "2025-11-25",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",

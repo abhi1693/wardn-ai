@@ -72,6 +72,7 @@ class LocalProcessRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        request_meta: dict[str, Any] | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         runtime = package_runtime(installation)
@@ -82,6 +83,7 @@ class LocalProcessRuntimeProvider:
                 managed,
                 tool_name=tool_name,
                 arguments=arguments,
+                request_meta=request_meta,
             ),
         )
 
@@ -224,6 +226,7 @@ class LocalProcessRuntimeProvider:
         *,
         tool_name: str,
         arguments: dict[str, Any],
+        request_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = managed.next_request_id
         managed.next_request_id += 1
@@ -232,4 +235,5 @@ class LocalProcessRuntimeProvider:
             request_id=request_id,
             tool_name=tool_name,
             arguments=arguments,
+            request_meta=request_meta,
         )

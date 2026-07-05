@@ -245,6 +245,7 @@ def test_mcp_gateway_initialize() -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["result"]["protocolVersion"] == "2025-11-25"
     assert payload["result"]["serverInfo"]["name"] == "wardn-mcp-gateway"
     assert payload["result"]["capabilities"] == {"tools": {"listChanged": True}}
 
@@ -311,6 +312,25 @@ def test_mcp_gateway_tools_list_is_bounded() -> None:
         "get_mcp_tool",
         "run_mcp_tool",
     ]
+
+
+def test_mcp_gateway_rejects_invalid_progress_token() -> None:
+    response = common_gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/list",
+            "params": {"_meta": {"progressToken": {"bad": "token"}}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "error": {"code": -32602, "message": "progressToken must be a string or integer"},
+    }
 
 
 def test_send_remote_request_preserves_jsonrpc_http_error(monkeypatch) -> None:
@@ -632,13 +652,22 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
 
     seen = {}
 
-    async def call_tool_with_tracking(session, installation, server, *, tool_name, arguments):
+    async def call_tool_with_tracking(
+        session,
+        installation,
+        server,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+    ):
         seen.update(
             {
                 "server_name": installation.server_name,
                 "server_version": server.version,
                 "tool_name": tool_name,
                 "arguments": arguments,
+                "request_meta": request_meta,
             }
         )
         return {
@@ -662,6 +691,7 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
             "method": "tools/call",
             "params": {
                 "name": "run_mcp_tool",
+                "_meta": {"progressToken": "progress-1"},
                 "arguments": {
                     "serverName": "io.github.example/weather",
                     "toolName": "get_forecast",
@@ -679,6 +709,7 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         "server_version": "1.0.0",
         "tool_name": "get_forecast",
         "arguments": {"location": "Delhi"},
+        "request_meta": {"progressToken": "progress-1"},
     }
 
 
@@ -971,13 +1002,22 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
 
     seen = {}
 
-    async def call_tool_with_tracking(session, installation, server, *, tool_name, arguments):
+    async def call_tool_with_tracking(
+        session,
+        installation,
+        server,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+    ):
         seen.update(
             {
                 "server_name": installation.server_name,
                 "server_version": server.version,
                 "tool_name": tool_name,
                 "arguments": arguments,
+                "request_meta": request_meta,
             }
         )
         return {
@@ -1021,7 +1061,7 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
 def test_mcp_gateway_initialized_notification_returns_accepted() -> None:
     response = gateway_client().post(
         GATEWAY_PATH,
-        json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
     )
 
     assert response.status_code == 202

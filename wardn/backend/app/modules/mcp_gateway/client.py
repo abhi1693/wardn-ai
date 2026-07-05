@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 from app.core.config import get_settings
 from app.modules.mcp_registry.installer import parse_mcp_response_body
 
-PROTOCOL_VERSION = "2025-06-18"
+PROTOCOL_VERSION = "2025-11-25"
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
 
 
 class MCPGatewayUpstreamError(Exception):
@@ -24,6 +25,7 @@ class MCPRemoteSession:
     url: str
     headers: dict[str, str]
     session_id: str | None
+    protocol_version: str
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ def send_remote_request(
     *,
     session_id: str | None = None,
     headers: dict[str, str] | None = None,
+    protocol_version: str | None = None,
     verify_tls: bool = True,
 ) -> tuple[dict[str, Any], str | None]:
     request_headers = {
@@ -48,6 +51,8 @@ def send_remote_request(
         request_headers.update(headers)
     if session_id:
         request_headers["Mcp-Session-Id"] = session_id
+    if protocol_version:
+        request_headers["MCP-Protocol-Version"] = protocol_version
 
     request = Request(
         url,
@@ -80,6 +85,16 @@ def send_remote_request(
         raise MCPGatewayUpstreamError("upstream MCP server returned invalid JSON-RPC") from exc
 
 
+def negotiated_protocol_version(response: dict[str, Any]) -> str:
+    result = response.get("result")
+    protocol_version = result.get("protocolVersion") if isinstance(result, dict) else None
+    if protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+        raise MCPGatewayUpstreamError(
+            f"upstream MCP server negotiated unsupported protocol version: {protocol_version}"
+        )
+    return str(protocol_version)
+
+
 def open_remote_session(
     url: str,
     headers: dict[str, str],
@@ -105,19 +120,26 @@ def open_remote_session(
         raise MCPGatewayUpstreamError(f"upstream initialize failed: {response['error']}")
     if "result" not in response:
         raise MCPGatewayUpstreamError("upstream initialize returned no result")
+    protocol_version = negotiated_protocol_version(response)
 
     try:
         send_remote_request(
             url,
-            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
             session_id=session_id,
             headers=headers,
+            protocol_version=protocol_version,
             verify_tls=verify_tls,
         )
     except MCPGatewayUpstreamError:
         pass
 
-    return MCPRemoteSession(url=url, headers=headers, session_id=session_id)
+    return MCPRemoteSession(
+        url=url,
+        headers=headers,
+        session_id=session_id,
+        protocol_version=protocol_version,
+    )
 
 
 def start_stdio_session(
@@ -188,6 +210,13 @@ def handle_stdio_peer_request(session: MCPStdioSession, payload: dict[str, Any])
     return True
 
 
+def is_stdio_peer_notification(payload: dict[str, Any]) -> bool:
+    method = payload.get("method")
+    return payload.get("jsonrpc") == "2.0" and isinstance(method, str) and method.startswith(
+        "notifications/"
+    )
+
+
 def read_stdio_response(
     session: MCPStdioSession,
     request_id: int,
@@ -221,6 +250,8 @@ def read_stdio_response(
             continue
         if handle_stdio_peer_request(session, response):
             continue
+        if is_stdio_peer_notification(response):
+            continue
         if response.get("id") == request_id:
             return response
     raise MCPGatewayUpstreamError(f"stdio MCP process timed out waiting for {request_id}")
@@ -253,9 +284,10 @@ def open_stdio_session(
             raise MCPGatewayUpstreamError(f"upstream initialize failed: {response['error']}")
         if "result" not in response:
             raise MCPGatewayUpstreamError("upstream initialize returned no result")
+        negotiated_protocol_version(response)
         send_stdio_message(
             session,
-            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
         )
         return session
     except Exception:
@@ -280,6 +312,7 @@ def list_tools(
             {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": params},
             session_id=session.session_id,
             headers=session.headers,
+            protocol_version=session.protocol_version,
             verify_tls=verify_tls,
         )
         if "error" in response:
@@ -372,19 +405,24 @@ def call_tool(
     *,
     tool_name: str,
     arguments: dict[str, Any],
+    request_meta: dict[str, Any] | None = None,
     verify_tls: bool = True,
 ) -> dict[str, Any]:
     session = open_remote_session(url, headers, verify_tls=verify_tls)
+    params: dict[str, Any] = {"name": tool_name, "arguments": arguments}
+    if request_meta:
+        params["_meta"] = request_meta
     response, _ = send_remote_request(
         session.url,
         {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
+            "params": params,
         },
         session_id=session.session_id,
         headers=session.headers,
+        protocol_version=session.protocol_version,
         verify_tls=verify_tls,
     )
     if "error" in response:
@@ -401,14 +439,18 @@ def call_stdio_session_tool(
     request_id: int,
     tool_name: str,
     arguments: dict[str, Any],
+    request_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    params: dict[str, Any] = {"name": tool_name, "arguments": arguments}
+    if request_meta:
+        params["_meta"] = request_meta
     send_stdio_message(
         session,
         {
             "jsonrpc": "2.0",
             "id": request_id,
             "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
+            "params": params,
         },
     )
     response = read_stdio_response(session, request_id)
@@ -428,6 +470,7 @@ def call_stdio_tool(
     environment: dict[str, str],
     tool_name: str,
     arguments: dict[str, Any],
+    request_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = open_stdio_session(command, args, cwd=cwd, environment=environment)
     try:
@@ -436,6 +479,7 @@ def call_stdio_tool(
             request_id=2,
             tool_name=tool_name,
             arguments=arguments,
+            request_meta=request_meta,
         )
     finally:
         close_stdio_session(session)

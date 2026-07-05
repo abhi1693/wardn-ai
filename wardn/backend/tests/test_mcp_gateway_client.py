@@ -2,7 +2,12 @@ import sys
 
 import pytest
 
-from app.modules.mcp_gateway.client import MCPGatewayUpstreamError, list_stdio_tools
+from app.modules.mcp_gateway.client import (
+    MCPGatewayUpstreamError,
+    call_stdio_tool,
+    list_stdio_tools,
+    send_remote_request,
+)
 
 
 def test_list_stdio_tools_includes_stderr_when_process_exits() -> None:
@@ -29,7 +34,16 @@ ping_response = json.loads(sys.stdin.readline())
 if ping_response != {"jsonrpc": "2.0", "id": "server-ping", "result": {}}:
     sys.stderr.write(f"unexpected ping response: {ping_response}\n")
     sys.exit(2)
-print(json.dumps({"jsonrpc": "2.0", "id": initialize["id"], "result": {}}), flush=True)
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": initialize["id"],
+            "result": {"protocolVersion": "2025-11-25"},
+        }
+    ),
+    flush=True,
+)
 sys.stdin.readline()
 tools_request = json.loads(sys.stdin.readline())
 print(
@@ -47,3 +61,89 @@ print(
     tools = list_stdio_tools(sys.executable, ["-c", script], cwd="", environment={})
 
     assert tools == [{"name": "health", "inputSchema": {"type": "object"}}]
+
+
+def test_call_stdio_tool_sends_progress_token_and_ignores_progress_notification() -> None:
+    script = r"""
+import json
+import sys
+
+initialize = json.loads(sys.stdin.readline())
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": initialize["id"],
+            "result": {"protocolVersion": "2025-11-25"},
+        }
+    ),
+    flush=True,
+)
+sys.stdin.readline()
+tool_request = json.loads(sys.stdin.readline())
+if tool_request["params"].get("_meta") != {"progressToken": 123}:
+    sys.stderr.write(f"unexpected request meta: {tool_request}\n")
+    sys.exit(2)
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/progress",
+            "params": {"progressToken": 123, "progress": 1, "total": 2},
+        }
+    ),
+    flush=True,
+)
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": tool_request["id"],
+            "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
+        }
+    ),
+    flush=True,
+)
+"""
+
+    result = call_stdio_tool(
+        sys.executable,
+        ["-c", script],
+        cwd="",
+        environment={},
+        tool_name="health",
+        arguments={},
+        request_meta={"progressToken": 123},
+    )
+
+    assert result == {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+
+def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
+    seen = {}
+
+    class FakeResponse:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b'{"jsonrpc":"2.0","id":2,"result":{}}'
+
+    def urlopen(request, *args, **kwargs):
+        seen["headers"] = {key.lower(): value for key, value in request.header_items()}
+        return FakeResponse()
+
+    monkeypatch.setattr("app.modules.mcp_gateway.client.urlopen", urlopen)
+
+    send_remote_request(
+        "https://example.com/mcp",
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        protocol_version="2025-11-25",
+    )
+
+    assert seen["headers"]["mcp-protocol-version"] == "2025-11-25"

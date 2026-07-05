@@ -2396,11 +2396,20 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
     )
     seen = {}
 
-    def call_tool(endpoint_url, headers, *, tool_name, arguments, verify_tls=True):
+    def call_tool(
+        endpoint_url,
+        headers,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+        verify_tls=True,
+    ):
         seen["endpoint_url"] = endpoint_url
         seen["headers"] = headers
         seen["tool_name"] = tool_name
         seen["arguments"] = arguments
+        seen["request_meta"] = request_meta
         seen["verify_tls"] = verify_tls
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
@@ -2422,6 +2431,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         "headers": {},
         "tool_name": "echo",
         "arguments": {"value": "ok"},
+        "request_meta": None,
         "verify_tls": True,
     }
     assert fake_reconciler.reconciled_manifest is not None
@@ -2498,7 +2508,16 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
     )
     seen = {}
 
-    def call_tool(endpoint_url, headers, *, tool_name, arguments, verify_tls=True):
+    def call_tool(
+        endpoint_url,
+        headers,
+        *,
+        tool_name,
+        arguments,
+        request_meta=None,
+        verify_tls=True,
+    ):
+        seen["request_meta"] = request_meta
         seen["verify_tls"] = verify_tls
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 

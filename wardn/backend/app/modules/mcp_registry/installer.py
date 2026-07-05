@@ -23,6 +23,8 @@ from app.modules.mcp_registry.models import MCPServerVersion
 RUNTIME_FILE_DIR_NAME = "runtime-files"
 KUBERNETES_RUNTIME_FILE_MOUNT_PATH = "/opt/wardn/runtime-files"
 ConfigValues = dict[str, Any]
+PROTOCOL_VERSION = "2025-11-25"
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
 
 
 @dataclass(frozen=True)
@@ -465,12 +467,17 @@ def parse_mcp_response_body(body: str) -> dict[str, Any]:
     if not body:
         return {}
     if "data:" in body:
+        fallback: dict[str, Any] = {}
         for line in body.splitlines():
             if line.startswith("data:"):
                 data = line.removeprefix("data:").strip()
                 if data and data != "[DONE]":
-                    return json.loads(data)
-        return {}
+                    payload = json.loads(data)
+                    if isinstance(payload, dict):
+                        if "result" in payload or "error" in payload:
+                            return payload
+                        fallback = payload
+        return fallback
     return json.loads(body)
 
 
@@ -480,6 +487,7 @@ def send_remote_mcp_request(
     *,
     session_id: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    protocol_version: str | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     headers = {
         "Accept": "application/json, text/event-stream",
@@ -490,6 +498,8 @@ def send_remote_mcp_request(
         headers.update(extra_headers)
     if session_id:
         headers["Mcp-Session-Id"] = session_id
+    if protocol_version:
+        headers["MCP-Protocol-Version"] = protocol_version
 
     request = Request(
         url,
@@ -522,6 +532,16 @@ def send_remote_mcp_request(
         ) from exc
 
 
+def negotiated_protocol_version(response: dict[str, Any]) -> str:
+    result = response.get("result")
+    protocol_version = result.get("protocolVersion") if isinstance(result, dict) else None
+    if protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+        raise MCPServerInstallationFailedError(
+            f"remote MCP server negotiated unsupported protocol version: {protocol_version}"
+        )
+    return str(protocol_version)
+
+
 def verify_remote_mcp_server(
     remote: dict[str, Any],
     *,
@@ -538,7 +558,7 @@ def verify_remote_mcp_server(
             "id": 1,
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
                 "clientInfo": {"name": "wardn", "version": "0.1.0"},
             },
@@ -551,13 +571,15 @@ def verify_remote_mcp_server(
         )
     if "result" not in initialize_response:
         raise MCPServerInstallationFailedError("remote MCP initialize returned no result")
+    protocol_version = negotiated_protocol_version(initialize_response)
 
     try:
         send_remote_mcp_request(
             url,
-            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
             session_id=session_id,
             extra_headers=extra_headers,
+            protocol_version=protocol_version,
         )
     except MCPServerInstallationFailedError:
         # Some HTTP MCP servers return an empty/no-content response for notifications.
@@ -569,6 +591,7 @@ def verify_remote_mcp_server(
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         session_id=session_id,
         extra_headers=extra_headers,
+        protocol_version=protocol_version,
     )
     if "error" in tools_response:
         raise MCPServerInstallationFailedError(
