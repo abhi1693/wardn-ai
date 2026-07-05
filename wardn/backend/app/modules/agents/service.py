@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import platform
@@ -42,9 +43,9 @@ from app.modules.agents.schemas import (
     AgentRunRead,
     AgentRunStepRead,
     AgentServerToolAssignmentRead,
-    AgentToolAssignmentUpdate,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
+    AgentToolAssignmentUpdate,
     AgentToolListResponse,
     AgentToolRead,
     AgentUpdate,
@@ -173,7 +174,11 @@ class AgentChatToolActivityEvent:
     status: str
     arguments: dict[str, Any] | None = None
     error: str | None = None
+    message: str | None = None
+    progress: float | int | None = None
+    progress_token: str | int | None = None
     result: str | None = None
+    total: float | int | None = None
     approval: dict[str, Any] | None = None
 
 
@@ -1137,6 +1142,8 @@ async def execute_agent_tool_call(
     agent: Agent | None = None,
     conversation: WorkspaceConversation | None = None,
     agent_run: AgentRun | None = None,
+    request_meta: dict[str, Any] | None = None,
+    progress_callback=None,
 ) -> AgentToolExecutionResult:
     tool = tools.get(tool_call.name)
     if tool is None:
@@ -1231,6 +1238,8 @@ async def execute_agent_tool_call(
             tool.server,
             tool_name=tool.tool_schema.tool_name,
             arguments=tool_call.arguments,
+            request_meta=request_meta,
+            progress_callback=progress_callback,
         )
         await session.commit()
     except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
@@ -1261,6 +1270,104 @@ def chatgpt_codex_messages(messages: list[AgentChatMessage]) -> list[dict[str, A
             }
         )
     return result
+
+
+def progress_number(value: Any) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
+def progress_message(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def progress_token_value(value: Any) -> str | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (str, int)):
+        return value
+    return None
+
+
+def progress_activity_event(
+    *,
+    activity_id: str,
+    tool_name: str,
+    params: dict[str, Any],
+) -> AgentChatToolActivityEvent:
+    return AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status="running",
+        message=progress_message(params.get("message")),
+        progress=progress_number(params.get("progress")),
+        progress_token=progress_token_value(params.get("progressToken")),
+        total=progress_number(params.get("total")),
+    )
+
+
+async def execute_agent_tool_call_with_progress(
+    session: AsyncSession,
+    tools: dict[str, AgentRuntimeTool],
+    tool_call: AgentToolCall,
+    *,
+    activity_id: str,
+    tool_name: str,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent: Agent | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
+    progress_token = f"agent-tool:{tool_call.call_id}"
+    progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def progress_callback(params: dict[str, Any]) -> None:
+        loop.call_soon_threadsafe(progress_queue.put_nowait, dict(params))
+
+    task = asyncio.create_task(
+        execute_agent_tool_call(
+            session,
+            tools,
+            tool_call,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent=agent,
+            conversation=conversation,
+            agent_run=agent_run,
+            request_meta={"progressToken": progress_token},
+            progress_callback=progress_callback,
+        )
+    )
+
+    while not task.done():
+        progress_task = asyncio.create_task(progress_queue.get())
+        done, pending = await asyncio.wait(
+            {task, progress_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for pending_task in pending:
+            pending_task.cancel()
+        if progress_task in done:
+            yield progress_activity_event(
+                activity_id=activity_id,
+                tool_name=tool_name,
+                params=progress_task.result(),
+            )
+
+    while not progress_queue.empty():
+        yield progress_activity_event(
+            activity_id=activity_id,
+            tool_name=tool_name,
+            params=progress_queue.get_nowait(),
+        )
+    yield task.result()
 
 
 def chatgpt_codex_request_body(
@@ -1460,17 +1567,29 @@ async def stream_chatgpt_codex_response_text(
                         status="running",
                         arguments=tool_call.arguments,
                     )
-                    execution = await execute_agent_tool_call(
+                    execution: AgentToolExecutionResult | None = None
+                    async for update in execute_agent_tool_call_with_progress(
                         session,
                         tools,
                         tool_call,
+                        activity_id=activity_id,
+                        tool_name=tool_name,
                         user=user,
                         organization_id=organization_id,
                         workspace_id=workspace_id,
                         agent=agent,
                         conversation=conversation,
                         agent_run=agent_run,
-                    )
+                    ):
+                        if isinstance(update, AgentChatToolActivityEvent):
+                            yield update
+                        else:
+                            execution = update
+                    if execution is None:
+                        execution = tool_execution_result(
+                            tool_name,
+                            f"Tool {tool_name} failed: no tool result was returned",
+                        )
                     yield AgentChatToolActivityEvent(
                         id=activity_id,
                         tool_name=tool_name,
@@ -1700,8 +1819,16 @@ async def persisted_agent_chat_stream(
                 data["arguments"] = sanitize_run_payload(event.arguments)
             if event.error:
                 data["error"] = event.error
+            if event.message:
+                data["message"] = event.message
+            if event.progress is not None:
+                data["progress"] = event.progress
+            if event.progress_token is not None:
+                data["progressToken"] = event.progress_token
             if event.result:
                 data["result"] = sanitize_run_payload(event.result)
+            if event.total is not None:
+                data["total"] = event.total
             if event.approval:
                 data["approval"] = sanitize_run_payload(event.approval)
             activity_part = {
@@ -1710,7 +1837,8 @@ async def persisted_agent_chat_stream(
                 "data": data,
             }
             activity_parts[event.id] = activity_part
-            if agent_run is not None:
+            is_progress_update = event.progress is not None or event.message is not None
+            if agent_run is not None and not is_progress_update:
                 await repository.append_agent_run_step(
                     session,
                     agent_run_id=agent_run.id,

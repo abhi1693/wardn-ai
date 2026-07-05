@@ -69,9 +69,13 @@ type ToolActivityData = {
   approval?: ToolApprovalData;
   arguments?: unknown;
   error?: string;
+  message?: string;
+  progress?: number;
+  progressToken?: string | number;
   result?: unknown;
   status?: string;
   toolName?: string;
+  total?: number;
 };
 type ToolActivityPart = MessagePart & {
   data?: ToolActivityData;
@@ -323,6 +327,25 @@ function toolActivityResult(activity: ToolActivityPart) {
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
 }
 
+function toolActivityProgress(activity: ToolActivityPart) {
+  const progress = activity.data?.progress;
+  if (typeof progress !== "number" || !Number.isFinite(progress)) {
+    return null;
+  }
+  const total = activity.data?.total;
+  if (typeof total === "number" && Number.isFinite(total) && total > 0) {
+    const percent = Math.max(0, Math.min(100, (progress / total) * 100));
+    return {
+      label: `${Math.round(percent)}%`,
+      percent,
+    };
+  }
+  return {
+    label: `${progress}`,
+    percent: null,
+  };
+}
+
 function agentRunIdFromMessage(message: UIMessage) {
   const metadata = "metadata" in message ? message.metadata : null;
   if (!metadata || typeof metadata !== "object") {
@@ -382,6 +405,7 @@ function ToolActivity({
               (activity.data?.approval?.status ?? "pending") === "pending";
             const decisionInFlight = approvalId ? approvalDecisions[approvalId] : "";
             const result = toolActivityResult(activity);
+            const progress = toolActivityProgress(activity);
             return (
               <div
                 className="rounded-md bg-white px-2.5 py-2 text-xs"
@@ -406,8 +430,23 @@ function ToolActivity({
                     <div className="mt-0.5 text-[var(--on-surface-variant)]">
                       {isFailed || isBlocked || isDenied || needsConfirmation
                         ? activity.data?.error ?? status
-                        : status}
+                        : activity.data?.message ?? status}
                     </div>
+                    {progress ? (
+                      <div className="mt-2 max-w-sm">
+                        {progress.percent !== null ? (
+                          <div className="h-1.5 overflow-hidden rounded-sm bg-[var(--surface-container)]">
+                            <div
+                              className="h-full rounded-sm bg-[var(--primary)] transition-[width]"
+                              style={{ width: `${progress.percent}%` }}
+                            />
+                          </div>
+                        ) : null}
+                        <div className="mt-1 font-mono text-[11px] text-[var(--on-surface-variant)]">
+                          {progress.label}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 {isApprovalPending && onDecideApproval ? (

@@ -46,6 +46,7 @@ class RemoteRuntimeProvider:
         tool_name: str,
         arguments: dict[str, Any],
         request_meta: dict[str, Any] | None = None,
+        progress_callback: client.MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         runtime = require_remote_installation(installation)

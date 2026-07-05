@@ -106,6 +106,8 @@ print(
 )
 """
 
+    progress_updates = []
+
     result = call_stdio_tool(
         sys.executable,
         ["-c", script],
@@ -114,9 +116,11 @@ print(
         tool_name="health",
         arguments={},
         request_meta={"progressToken": 123},
+        progress_callback=progress_updates.append,
     )
 
     assert result == {"content": [{"type": "text", "text": "ok"}], "isError": False}
+    assert progress_updates == [{"progressToken": 123, "progress": 1, "total": 2}]
 
 
 def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:

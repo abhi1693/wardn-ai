@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -23,6 +24,7 @@ RUNTIME_PROVIDER_KUBERNETES = "kubernetes"
 RUNTIME_TRANSPORT_STDIO = "stdio"
 RUNTIME_TRANSPORT_STREAMABLE_HTTP = "streamable_http"
 WARDN_CUSTOM_HEADERS_ENV = "WARDN_MCP_CUSTOM_HEADERS"
+MCPProgressCallback = Callable[[dict[str, Any]], None]
 
 RUNTIME_HEALTH_READY = "ready"
 RUNTIME_HEALTH_NOT_READY = "not_ready"
@@ -64,6 +66,7 @@ class MCPRuntimeProvider(Protocol):
         tool_name: str,
         arguments: dict[str, Any],
         request_meta: dict[str, Any] | None = None,
+        progress_callback: MCPProgressCallback | None = None,
         runtime_session: "MCPRuntimeSession | None" = None,
     ) -> dict[str, Any]:
         ...

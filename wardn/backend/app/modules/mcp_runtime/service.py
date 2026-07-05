@@ -485,6 +485,7 @@ async def call_tool_with_tracking(
     tool_name: str,
     arguments: dict[str, Any],
     request_meta: dict[str, Any] | None = None,
+    progress_callback=None,
     manager: MCPRuntimeManager | None = None,
 ) -> dict[str, Any]:
     manager = manager or get_runtime_manager()
@@ -531,6 +532,7 @@ async def call_tool_with_tracking(
             tool_name=tool_name,
             arguments=arguments,
             request_meta=request_meta,
+            progress_callback=progress_callback,
             runtime_session=runtime_session,
         )
     except Exception as exc:

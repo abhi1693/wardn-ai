@@ -14,6 +14,7 @@ from app.modules.mcp_runtime.provider import (
     RUNTIME_TRANSPORT_STDIO,
     RUNTIME_TRANSPORT_STREAMABLE_HTTP,
     WARDN_CUSTOM_HEADERS_ENV,
+    MCPProgressCallback,
     MCPRuntimeProvider,
     RuntimeHealth,
     RuntimeSpec,
@@ -57,6 +58,7 @@ class MCPRuntimeManager(Protocol):
         tool_name: str,
         arguments: dict[str, Any],
         request_meta: dict[str, Any] | None = None,
+        progress_callback: MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         ...
@@ -158,6 +160,7 @@ class DefaultMCPRuntimeManager:
         tool_name: str,
         arguments: dict[str, Any],
         request_meta: dict[str, Any] | None = None,
+        progress_callback: MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         return self._registry.select_provider(installation).call_tool(
@@ -165,6 +168,7 @@ class DefaultMCPRuntimeManager:
             tool_name=tool_name,
             arguments=arguments,
             request_meta=request_meta,
+            progress_callback=progress_callback,
             runtime_session=runtime_session,
         )
 

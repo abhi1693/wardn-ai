@@ -2403,6 +2403,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         tool_name,
         arguments,
         request_meta=None,
+        progress_callback=None,
         verify_tls=True,
     ):
         seen["endpoint_url"] = endpoint_url
@@ -2515,6 +2516,7 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
         tool_name,
         arguments,
         request_meta=None,
+        progress_callback=None,
         verify_tls=True,
     ):
         seen["request_meta"] = request_meta

@@ -65,6 +65,7 @@ class FakeRuntimeManager:
         tool_name,
         arguments,
         request_meta=None,
+        progress_callback=None,
         runtime_session=None,
     ):
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
@@ -102,6 +103,7 @@ class FailingRuntimeManager(FakeRuntimeManager):
         tool_name,
         arguments,
         request_meta=None,
+        progress_callback=None,
         runtime_session=None,
     ):
         raise RuntimeError("tool failed")
@@ -124,6 +126,7 @@ class ThreadRecordingRuntimeManager(FakeRuntimeManager):
         tool_name,
         arguments,
         request_meta=None,
+        progress_callback=None,
         runtime_session=None,
     ):
         self.call_thread_id = threading.get_ident()
@@ -132,6 +135,7 @@ class ThreadRecordingRuntimeManager(FakeRuntimeManager):
             tool_name=tool_name,
             arguments=arguments,
             request_meta=request_meta,
+            progress_callback=progress_callback,
             runtime_session=runtime_session,
         )
 

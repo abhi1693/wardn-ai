@@ -4,6 +4,7 @@ import select
 import ssl
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -31,6 +32,9 @@ class MCPRemoteSession:
 @dataclass(frozen=True)
 class MCPStdioSession:
     process: subprocess.Popen[str]
+
+
+MCPProgressCallback = Callable[[dict[str, Any]], None]
 
 
 def send_remote_request(
@@ -210,6 +214,13 @@ def handle_stdio_peer_request(session: MCPStdioSession, payload: dict[str, Any])
     return True
 
 
+def progress_notification_params(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if payload.get("jsonrpc") != "2.0" or payload.get("method") != "notifications/progress":
+        return None
+    params = payload.get("params")
+    return params if isinstance(params, dict) else {}
+
+
 def is_stdio_peer_notification(payload: dict[str, Any]) -> bool:
     method = payload.get("method")
     return payload.get("jsonrpc") == "2.0" and isinstance(method, str) and method.startswith(
@@ -221,6 +232,7 @@ def read_stdio_response(
     session: MCPStdioSession,
     request_id: int,
     *,
+    progress_callback: MCPProgressCallback | None = None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     process = session.process
@@ -249,6 +261,10 @@ def read_stdio_response(
         except json.JSONDecodeError:
             continue
         if handle_stdio_peer_request(session, response):
+            continue
+        if progress_params := progress_notification_params(response):
+            if progress_callback is not None:
+                progress_callback(progress_params)
             continue
         if is_stdio_peer_notification(response):
             continue
@@ -440,6 +456,7 @@ def call_stdio_session_tool(
     tool_name: str,
     arguments: dict[str, Any],
     request_meta: dict[str, Any] | None = None,
+    progress_callback: MCPProgressCallback | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"name": tool_name, "arguments": arguments}
     if request_meta:
@@ -453,7 +470,11 @@ def call_stdio_session_tool(
             "params": params,
         },
     )
-    response = read_stdio_response(session, request_id)
+    response = read_stdio_response(
+        session,
+        request_id,
+        progress_callback=progress_callback,
+    )
     if "error" in response:
         raise MCPGatewayUpstreamError(f"upstream tools/call failed: {response['error']}")
     result = response.get("result")
@@ -471,6 +492,7 @@ def call_stdio_tool(
     tool_name: str,
     arguments: dict[str, Any],
     request_meta: dict[str, Any] | None = None,
+    progress_callback: MCPProgressCallback | None = None,
 ) -> dict[str, Any]:
     session = open_stdio_session(command, args, cwd=cwd, environment=environment)
     try:
@@ -480,6 +502,7 @@ def call_stdio_tool(
             tool_name=tool_name,
             arguments=arguments,
             request_meta=request_meta,
+            progress_callback=progress_callback,
         )
     finally:
         close_stdio_session(session)

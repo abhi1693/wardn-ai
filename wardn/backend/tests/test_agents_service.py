@@ -132,6 +132,15 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
         yield service.AgentChatToolActivityEvent(
             id="tool-call-1",
             tool_name="resolve-library-id",
+            status="running",
+            message="Resolving library",
+            progress=1,
+            progress_token="agent-tool:call-1",
+            total=2,
+        )
+        yield service.AgentChatToolActivityEvent(
+            id="tool-call-1",
+            tool_name="resolve-library-id",
             status="completed",
             result="Resolved /vercel/next.js",
         )
@@ -158,6 +167,7 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
         "start",
         "data-tool-activity",
         "data-tool-activity",
+        "data-tool-activity",
         "text-start",
         "text-delta",
         "text-end",
@@ -170,10 +180,18 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
     }
     assert chunks[2]["data"] == {
         "toolName": "resolve-library-id",
+        "status": "running",
+        "message": "Resolving library",
+        "progress": 1,
+        "progressToken": "agent-tool:call-1",
+        "total": 2,
+    }
+    assert chunks[3]["data"] == {
+        "toolName": "resolve-library-id",
         "status": "completed",
         "result": "Resolved /vercel/next.js",
     }
-    assert chunks[4]["delta"] == "Final answer"
+    assert chunks[5]["delta"] == "Final answer"
     assert persisted == [
         {
             "conversation_id": conversation.id,
@@ -464,16 +482,6 @@ async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
     workspace_id = uuid4()
     installation_id = uuid4()
     tool_schema_id = uuid4()
-    agent = Agent(
-        id=uuid4(),
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        name="Assistant",
-        instructions="Help.",
-        scope="workspace",
-        model_name="gpt-5.5",
-        is_active=True,
-    )
     installation = MCPServerInstallation(
         id=installation_id,
         workspace_id=workspace_id,

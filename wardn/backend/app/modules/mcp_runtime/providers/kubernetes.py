@@ -2005,6 +2005,7 @@ class KubernetesRuntimeProvider:
         tool_name: str,
         arguments: dict[str, Any],
         request_meta: dict[str, Any] | None = None,
+        progress_callback: mcp_client.MCPProgressCallback | None = None,
         runtime_session: MCPRuntimeSession | None = None,
     ) -> dict[str, Any]:
         if runtime_session is None:
