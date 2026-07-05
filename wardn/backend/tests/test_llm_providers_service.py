@@ -119,12 +119,12 @@ async def test_org_admin_can_create_provider_credential(monkeypatch) -> None:
         session,
         user,
         organization_id,
-            LLMProviderCredentialCreate(
-                name=" Primary OpenAI ",
-                provider=" OpenAI ",
-                apiKeySecretStoreId=secret_store_id,
-                apiKey="sk-test",
-            ),
+        LLMProviderCredentialCreate(
+            name=" Primary OpenAI ",
+            provider=" OpenAI ",
+            apiKeySecretStoreId=secret_store_id,
+            apiKey="sk-test",
+        ),
     )
 
     credential = session.added[0]
@@ -202,11 +202,11 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
         LLMProviderCredentialCreate(
             name="ChatGPT OAuth",
             provider="openai_chatgpt",
-                authMethod="oauth",
-                oauthProvider="chatgpt",
-                oauthAccessTokenSecretHandleId=access_handle_id,
-                oauthRefreshTokenSecretHandleId=refresh_handle_id,
-                oauthExpiresAt=expires_at,
+            authMethod="oauth",
+            oauthProvider="chatgpt",
+            oauthAccessTokenSecretHandleId=access_handle_id,
+            oauthRefreshTokenSecretHandleId=refresh_handle_id,
+            oauthExpiresAt=expires_at,
             oauthScopes=["openid", "profile"],
             oauthMetadata={"tenant": "default"},
         ),
@@ -228,6 +228,106 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
     assert response.api_key_secret_handle_id is None
     assert response.oauth_access_token_secret_handle_id == access_handle_id
     assert response.oauth_refresh_token_secret_handle_id == refresh_handle_id
+
+
+@pytest.mark.asyncio
+async def test_refresh_chatgpt_oauth_credential_writes_shared_secret_document(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    store_id = uuid4()
+    access_handle_id = uuid4()
+    refresh_handle_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider="openai_chatgpt",
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_access_token_secret_handle_id=access_handle_id,
+        oauth_refresh_token_secret_handle_id=refresh_handle_id,
+        is_active=True,
+    )
+    store = SimpleNamespace(
+        id=store_id,
+        provider="openbao",
+        workspace_id=None,
+        is_active=True,
+    )
+    access_handle = SimpleNamespace(
+        id=access_handle_id,
+        store_id=store_id,
+        workspace_id=None,
+        external_ref="wardn/orgs/acme/chatgpt",
+        key_name="access_token",
+        purpose="oauth_token",
+    )
+    refresh_handle = SimpleNamespace(
+        id=refresh_handle_id,
+        store_id=store_id,
+        workspace_id=None,
+        external_ref="wardn/orgs/acme/chatgpt",
+        key_name="refresh_token",
+        purpose="oauth_token",
+    )
+    writes: list[dict] = []
+
+    async def refresh_chatgpt_oauth_token(refresh_token: str):
+        assert refresh_token == "old-refresh"
+        return {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        }
+
+    async def get_handle(*args, **kwargs):
+        return {
+            access_handle_id: access_handle,
+            refresh_handle_id: refresh_handle,
+        }[kwargs["handle_id"]]
+
+    async def get_store(*args, **kwargs):
+        assert kwargs["store_id"] == store_id
+        return store
+
+    class FakeProvider:
+        async def write(self, store, external_ref, values, context):
+            writes.append(
+                {
+                    "external_ref": external_ref,
+                    "values": values,
+                    "workspace_id": context.workspace_id,
+                }
+            )
+
+    monkeypatch.setattr(service, "refresh_chatgpt_oauth_token", refresh_chatgpt_oauth_token)
+    monkeypatch.setattr(service.secrets_repository, "get_handle", get_handle)
+    monkeypatch.setattr(service.secrets_repository, "get_store", get_store)
+    monkeypatch.setattr(service, "get_secret_provider", lambda _provider: FakeProvider())
+
+    secrets = await service.refresh_chatgpt_oauth_credential(
+        FakeSession(),
+        credential,
+        service.ResolvedLLMCredentialSecrets(
+            oauth_access_token="old-access",
+            oauth_refresh_token="old-refresh",
+        ),
+    )
+
+    assert secrets.oauth_access_token == "new-access"
+    assert secrets.oauth_refresh_token == "new-refresh"
+    assert writes == [
+        {
+            "external_ref": "wardn/orgs/acme/chatgpt",
+            "values": {
+                "access_token": "new-access",
+                "refresh_token": "new-refresh",
+            },
+            "workspace_id": None,
+        }
+    ]
+    assert credential.oauth_expires_at is not None
 
 
 @pytest.mark.asyncio

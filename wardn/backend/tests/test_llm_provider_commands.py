@@ -92,6 +92,7 @@ async def test_connect_chatgpt_writes_tokens_and_creates_handle_credential(monke
     await commands.connect_chatgpt_from_args(
         Namespace(
             organization_id=str(organization_id),
+            credential_id="",
             user_email=user.email,
             user_id="",
             name="Team ChatGPT",
@@ -121,3 +122,96 @@ async def test_connect_chatgpt_writes_tokens_and_creates_handle_credential(monke
     assert credential.name == "Team ChatGPT"
     assert credential.oauth_access_token_secret_handle_id == access_handle_id
     assert credential.oauth_refresh_token_secret_handle_id == refresh_handle_id
+
+
+@pytest.mark.asyncio
+async def test_connect_chatgpt_reconnects_existing_credential(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
+    credential = SimpleNamespace(
+        id=credential_id,
+        name="Team ChatGPT",
+        provider="openai_chatgpt",
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        visibility="organization",
+        workspace_id=None,
+    )
+    calls = {}
+
+    monkeypatch.setattr(
+        commands,
+        "start_callback_server",
+        lambda state, result_queue: FakeCallbackServer(result_queue),
+    )
+    monkeypatch.setattr(commands.webbrowser, "open", lambda _url: None)
+    monkeypatch.setattr(commands, "AsyncSessionLocal", lambda: FakeSession())
+
+    async def get_command_user(*args, **kwargs):
+        return user
+
+    async def get_credential(*args, **kwargs):
+        assert kwargs["credential_id"] == credential_id
+        return credential
+
+    async def require_scope_permission(*args, **kwargs):
+        calls.setdefault("permission", []).append(kwargs)
+
+    async def exchange_chatgpt_oauth_code(*args, **kwargs):
+        return {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def replace_chatgpt_oauth_credential_tokens(*args, **kwargs):
+        calls["replace"] = {"args": args, "kwargs": kwargs}
+
+    async def fail_create_provider_credential(*args, **kwargs):
+        raise AssertionError("reconnect should not create a credential")
+
+    monkeypatch.setattr(commands, "get_command_user", get_command_user)
+    monkeypatch.setattr(commands.llm_repository, "get_credential", get_credential)
+    monkeypatch.setattr(commands, "require_scope_permission", require_scope_permission)
+    monkeypatch.setattr(commands, "user_can_see_credential", lambda _user, _credential: True)
+    monkeypatch.setattr(commands, "exchange_chatgpt_oauth_code", exchange_chatgpt_oauth_code)
+    monkeypatch.setattr(
+        commands,
+        "replace_chatgpt_oauth_credential_tokens",
+        replace_chatgpt_oauth_credential_tokens,
+    )
+    monkeypatch.setattr(
+        commands,
+        "create_provider_credential",
+        fail_create_provider_credential,
+    )
+
+    await commands.connect_chatgpt_from_args(
+        Namespace(
+            organization_id=str(organization_id),
+            credential_id=str(credential_id),
+            user_email=user.email,
+            user_id="",
+            name="ignored",
+            visibility="organization",
+            workspace_id="",
+            secret_store_id="",
+            secret_path="",
+            no_browser=True,
+            timeout_seconds=5,
+        )
+    )
+
+    assert calls["permission"] == [
+        {
+            "visibility": "organization",
+            "workspace_id": None,
+        },
+        {
+            "visibility": "organization",
+            "workspace_id": None,
+        },
+    ]
+    assert calls["replace"]["args"][1] is credential
+    assert calls["replace"]["args"][2]["access_token"] == "new-access-token"

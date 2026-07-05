@@ -6,12 +6,14 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  CircleAlert,
   Copy,
   Info,
   ListTree,
   Loader2,
   Pencil,
   Send,
+  ShieldOff,
   Square,
   UserRound,
   Wrench,
@@ -347,6 +349,8 @@ function ToolActivity({
             const status = activity.data?.status ?? "running";
             const isDone = status === "completed";
             const isFailed = status === "failed";
+            const isBlocked = status === "blocked";
+            const needsConfirmation = status === "requires_confirmation";
             const result = toolActivityResult(activity);
             return (
               <div
@@ -356,6 +360,10 @@ function ToolActivity({
                 <div className="flex items-start gap-2">
                   {isDone ? (
                     <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                  ) : isBlocked ? (
+                    <ShieldOff className="mt-0.5 size-3.5 shrink-0 text-amber-700" />
+                  ) : needsConfirmation ? (
+                    <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
                   ) : isFailed ? (
                     <Square className="mt-0.5 size-3.5 shrink-0 text-red-600" />
                   ) : (
@@ -366,7 +374,9 @@ function ToolActivity({
                       {activity.data?.toolName ?? "MCP tool"}
                     </div>
                     <div className="mt-0.5 text-[var(--on-surface-variant)]">
-                      {isFailed ? activity.data?.error ?? "Failed" : status}
+                      {isFailed || isBlocked || needsConfirmation
+                        ? activity.data?.error ?? status
+                        : status}
                     </div>
                   </div>
                 </div>
@@ -419,6 +429,7 @@ export function AgentChatClient({
   workspaceId,
 }: AgentChatClientProps) {
   const [input, setInput] = useState("");
+  const [lastSubmittedText, setLastSubmittedText] = useState("");
   const chatApi = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents/${agent.id}/chat`;
   const persistedMessages = useMemo(() => uiMessages(initialMessages), [initialMessages]);
   const transport = useMemo(
@@ -446,6 +457,15 @@ export function AgentChatClient({
       return;
     }
     setInput("");
+    setLastSubmittedText(text);
+    await sendMessage({ text });
+  }
+
+  async function retryLastMessage() {
+    const text = lastSubmittedText.trim();
+    if (!text || isRunning) {
+      return;
+    }
     await sendMessage({ text });
   }
 
@@ -587,6 +607,9 @@ export function AgentChatClient({
                 const text = messageText(message.parts);
                 const activities = toolActivities(message.parts);
                 const isUser = message.role === "user";
+                if (!text && activities.length === 0) {
+                  return null;
+                }
                 const agentRunId = agentRunIdFromMessage(message);
                 const traceHref = agentRunId
                   ? `/org/${organization.id}/workspace/${workspaceId}/agent-runs/${agentRunId}`
@@ -642,8 +665,18 @@ export function AgentChatClient({
             ) : null}
 
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error.message}
+              <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <span>{error.message}</span>
+                <Button
+                  className="h-8 border-red-200 bg-white px-3 text-xs text-red-700 hover:bg-red-50"
+                  disabled={!lastSubmittedText || isRunning}
+                  onClick={retryLastMessage}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Retry
+                </Button>
               </div>
             ) : null}
           </div>

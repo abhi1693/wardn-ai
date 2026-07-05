@@ -14,11 +14,18 @@ from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
     AgentMCPToolAssignment,
+    AgentRun,
     WorkspaceConversation,
 )
-from app.modules.agents.schemas import AgentChatMessage, AgentCreate, AgentToolAssignmentUpdate
+from app.modules.agents.schemas import (
+    AgentChatMessage,
+    AgentChatRequest,
+    AgentCreate,
+    AgentToolAssignmentUpdate,
+)
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
+from app.modules.llm_providers.service import ResolvedLLMCredentialSecrets
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -187,6 +194,161 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
         }
     ]
     assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
+    monkeypatch,
+) -> None:
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        created_by_id=uuid4(),
+        title="Chat",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=conversation.organization_id,
+        workspace_id=conversation.workspace_id,
+        agent_id=conversation.agent_id,
+        conversation_id=conversation.id,
+        trigger_type="chat",
+        status="running",
+    )
+    persisted: list[dict] = []
+    steps: list[dict] = []
+    finished: list[dict] = []
+
+    async def append_conversation_message(*args, **kwargs):
+        persisted.append(kwargs)
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def finish_agent_run(*args, **kwargs):
+        finished.append(kwargs)
+
+    async def provider_stream():
+        raise service.AgentChatProviderError(
+            "LLM provider websocket failed with HTTP 401",
+            status_code=401,
+        )
+        yield service.AgentChatTextEvent(text="unreachable")
+
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+
+    session = FakeSession()
+    chunks = ui_stream_chunks(
+        [
+            chunk
+            async for chunk in service.persisted_agent_chat_stream(
+                session,
+                conversation,
+                provider_stream(),
+                agent_run,
+            )
+        ]
+    )
+
+    text_delta = next(chunk for chunk in chunks if chunk["type"] == "text-delta")
+    assert "ChatGPT rejected the stored OAuth token" in text_delta["delta"]
+    assert chunks[-1] == {"type": "finish", "finishReason": "error"}
+    assert steps[0]["step_type"] == "error"
+    assert steps[-1]["status"] == "failed"
+    assert finished == [
+        {"status": "failed", "error": "LLM provider websocket failed with HTTP 401"}
+    ]
+    assert persisted[0]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider=service.OPENAI_CHATGPT_PROVIDER,
+        visibility="organization",
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_metadata={"accountId": "account-1"},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        workspace_id=uuid4(),
+        provider_credential_id=credential.id,
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    calls: list[str] = []
+
+    async def resolve_credential_secrets(*args, **kwargs):
+        return ResolvedLLMCredentialSecrets(
+            oauth_access_token="old-access",
+            oauth_refresh_token="refresh-token",
+        )
+
+    async def refresh_chatgpt_oauth_credential(*args, **kwargs):
+        credential.oauth_metadata = {"accountId": "account-2"}
+        return ResolvedLLMCredentialSecrets(
+            oauth_access_token="new-access",
+            oauth_refresh_token="new-refresh",
+        )
+
+    async def stream_chatgpt_codex_response_text(*args, **kwargs):
+        authorization = kwargs["headers"]["Authorization"]
+        calls.append(authorization)
+        if authorization == "Bearer old-access":
+            raise service.AgentChatProviderError("expired", status_code=401)
+        yield service.AgentChatTextEvent(text="ok")
+
+    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(
+        service,
+        "refresh_chatgpt_oauth_credential",
+        refresh_chatgpt_oauth_credential,
+    )
+    monkeypatch.setattr(
+        service,
+        "stream_chatgpt_codex_response_text",
+        stream_chatgpt_codex_response_text,
+    )
+
+    events = [
+        event
+        async for event in service.run_agent_chat(
+            FakeSession(),
+            agent,
+            credential,
+            AgentChatRequest(
+                messages=[
+                    AgentChatMessage(
+                        role="user",
+                        parts=[{"type": "text", "text": "hi"}],
+                    )
+                ]
+            ),
+            {},
+        )
+    ]
+
+    assert calls == ["Bearer old-access", "Bearer new-access"]
+    assert events == [service.AgentChatTextEvent(text="ok")]
 
 
 def test_sanitize_run_payload_redacts_sensitive_keys_and_truncates_long_text() -> None:

@@ -122,7 +122,9 @@ export function CredentialForm({
     () => workspaces.filter((workspace) => workspace.status === "active"),
     [workspaces]
   );
-  const isChatgptConnectorCreate = provider === "openai_chatgpt" && !isEditing;
+  const isChatgptCredential = provider === "openai_chatgpt";
+  const isChatgptConnectorCreate = isChatgptCredential && !isEditing;
+  const credentialId = credential?.id ?? "";
   const availableSecretStores = useMemo(() => {
     const activeStores = secretStores.filter((store) => store.isActive);
     if (visibility === "workspace" && workspaceId) {
@@ -165,10 +167,10 @@ export function CredentialForm({
       : !isChatgptConnectorCreate);
 
   const chatgptCommand = useMemo(() => {
-    if (provider !== "openai_chatgpt") {
+    if (!isChatgptCredential) {
       return "";
     }
-    if (!hasCredentialName) {
+    if (!isEditing && !hasCredentialName) {
       return "";
     }
 
@@ -183,25 +185,33 @@ export function CredentialForm({
       shellQuote(organization.id),
       "--user-email",
       shellQuote(currentUser?.email ?? "<user-email>"),
-      "--secret-store-id",
-      shellQuote(effectiveSecretStoreId || "<secret-store-id>"),
-      "--name",
-      shellQuote(name.trim()),
-      "--visibility",
-      shellQuote(visibility),
     ];
 
-    if (visibility === "workspace") {
-      command.push("--workspace-id", shellQuote(workspaceId || "<workspace-id>"));
+    if (credentialId) {
+      command.push("--credential-id", shellQuote(credentialId));
+    } else {
+      command.push(
+        "--secret-store-id",
+        shellQuote(effectiveSecretStoreId || "<secret-store-id>"),
+        "--name",
+        shellQuote(name.trim()),
+        "--visibility",
+        shellQuote(visibility)
+      );
+      if (visibility === "workspace") {
+        command.push("--workspace-id", shellQuote(workspaceId || "<workspace-id>"));
+      }
     }
     return command.join(" ");
   }, [
+    credentialId,
     currentUser?.email,
+    effectiveSecretStoreId,
     hasCredentialName,
+    isChatgptCredential,
+    isEditing,
     name,
     organization.id,
-    provider,
-    effectiveSecretStoreId,
     visibility,
     workspaceId,
   ]);
@@ -460,7 +470,33 @@ export function CredentialForm({
                       </div>
                     ) : null}
                   </div>
-                ) : null}
+                ) : (
+                  <div className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium">Reconnect ChatGPT</div>
+                        <p className="mt-1 text-sm text-[var(--on-surface-variant)]">
+                          Run this command to replace the OAuth tokens for this credential.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={copyChatgptCommand}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {copiedCommand ? <Check /> : <Copy />}
+                        {copiedCommand ? "Copied" : "Copy"}
+                      </Button>
+                    </div>
+                    <pre
+                      className="max-h-36 overflow-x-auto rounded-md border border-[var(--outline-variant)] bg-white p-3 text-xs leading-5 text-[var(--on-surface)]"
+                      id="credential-chatgpt-reconnect-command"
+                    >
+                      <code>{chatgptCommand}</code>
+                    </pre>
+                  </div>
+                )}
               </div>
             )}
 

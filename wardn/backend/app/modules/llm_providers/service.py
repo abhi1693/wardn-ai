@@ -33,7 +33,10 @@ from app.modules.organizations.service import (
     require_organization_member,
     require_workspace_admin,
 )
-from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets import repository as secrets_repository
+from app.modules.secrets.exceptions import InvalidSecretHandleError, SecretsError
+from app.modules.secrets.provider import SecretResolutionContext
+from app.modules.secrets.providers.registry import get_secret_provider
 from app.modules.secrets.schemas import SecretHandleCreate
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
@@ -256,6 +259,219 @@ async def exchange_chatgpt_oauth_code(
             "ChatGPT OAuth token response did not include access and refresh tokens"
         )
     return payload
+
+
+async def refresh_chatgpt_oauth_token(refresh_token: str) -> dict[str, Any]:
+    if not refresh_token.strip():
+        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth refresh token is missing")
+    try:
+        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                CHATGPT_OAUTH_TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": CHATGPT_OAUTH_CLIENT_ID,
+                    "refresh_token": refresh_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+    except httpx.HTTPError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth token refresh could not reach OpenAI"
+        ) from exc
+    if response.status_code in {400, 401, 403}:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth refresh token was rejected; reconnect the credential"
+        )
+    if not response.is_success:
+        raise InvalidLLMProviderCredentialAuthError(
+            f"ChatGPT OAuth token refresh failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth refresh response is invalid"
+        ) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth refresh response did not include an access token"
+        )
+    return payload
+
+
+async def get_oauth_secret_handle(
+    session: AsyncSession,
+    credential: LLMProviderCredential,
+    handle_id: uuid.UUID,
+) -> tuple[Any, Any]:
+    handle = await secrets_repository.get_handle(
+        session,
+        organization_id=credential.organization_id,
+        handle_id=handle_id,
+    )
+    if handle is None:
+        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth secret handle was not found")
+    store = await secrets_repository.get_store(
+        session,
+        organization_id=credential.organization_id,
+        store_id=handle.store_id,
+    )
+    if store is None or not store.is_active:
+        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth secret store is not available")
+    if store.workspace_id is not None and store.workspace_id != handle.workspace_id:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth secret handle and store workspaces do not match"
+        )
+    external_ref = handle.external_ref.strip().strip("/")
+    key_name = handle.key_name.strip()
+    if not external_ref or not key_name:
+        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth secret handle is incomplete")
+    return handle, store
+
+
+async def write_oauth_secret_values(
+    credential: LLMProviderCredential,
+    handle: Any,
+    store: Any,
+    values: dict[str, str],
+) -> None:
+    try:
+        await get_secret_provider(store.provider).write(
+            store,
+            handle.external_ref.strip().strip("/"),
+            values,
+            SecretResolutionContext(
+                organization_id=str(credential.organization_id),
+                workspace_id=str(handle.workspace_id or credential.workspace_id)
+                if handle.workspace_id or credential.workspace_id
+                else None,
+                purpose=handle.purpose,
+            ),
+        )
+    except (InvalidSecretHandleError, SecretsError) as exc:
+        raise InvalidLLMProviderCredentialAuthError(str(exc)) from exc
+
+
+async def refresh_chatgpt_oauth_credential(
+    session: AsyncSession,
+    credential: LLMProviderCredential,
+    secrets: ResolvedLLMCredentialSecrets,
+) -> ResolvedLLMCredentialSecrets:
+    if credential.oauth_access_token_secret_handle_id is None:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth access token secret handle is required"
+        )
+    if credential.oauth_refresh_token_secret_handle_id is None:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth refresh token secret handle is required"
+        )
+    payload = await refresh_chatgpt_oauth_token(secrets.oauth_refresh_token)
+    access_token = payload["access_token"]
+    refresh_token = payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        refresh_token = secrets.oauth_refresh_token
+    token_values = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    access_handle, access_store = await get_oauth_secret_handle(
+        session,
+        credential,
+        credential.oauth_access_token_secret_handle_id,
+    )
+    refresh_handle, refresh_store = await get_oauth_secret_handle(
+        session,
+        credential,
+        credential.oauth_refresh_token_secret_handle_id,
+    )
+    access_key = access_handle.key_name.strip()
+    refresh_key = refresh_handle.key_name.strip()
+    values_by_target: dict[tuple[uuid.UUID, str], dict[str, str]] = {}
+    handles_by_target: dict[tuple[uuid.UUID, str], tuple[Any, Any]] = {}
+    for handle, store, key_name in (
+        (access_handle, access_store, access_key),
+        (refresh_handle, refresh_store, refresh_key),
+    ):
+        value = token_values.get(key_name)
+        if not value:
+            raise InvalidLLMProviderCredentialAuthError(
+                "ChatGPT OAuth token refresh value is missing"
+            )
+        target = (store.id, handle.external_ref.strip().strip("/"))
+        values_by_target.setdefault(target, {})[key_name] = value
+        handles_by_target[target] = (handle, store)
+    for target, values in values_by_target.items():
+        handle, store = handles_by_target[target]
+        await write_oauth_secret_values(credential, handle, store, values)
+    credential.oauth_expires_at = expires_at_from_seconds(payload.get("expires_in"))
+    credential.oauth_metadata = chatgpt_oauth_metadata(access_token)
+    if isinstance(payload.get("scope"), str):
+        credential.oauth_scopes = payload["scope"].split()
+    await session.flush()
+    return ResolvedLLMCredentialSecrets(
+        oauth_access_token=access_token,
+        oauth_refresh_token=refresh_token,
+    )
+
+
+async def replace_chatgpt_oauth_credential_tokens(
+    session: AsyncSession,
+    credential: LLMProviderCredential,
+    token_payload: dict[str, Any],
+) -> None:
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth token response did not include an access token"
+        )
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth token response did not include a refresh token"
+        )
+    if credential.oauth_access_token_secret_handle_id is None:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth access token secret handle is required"
+        )
+    if credential.oauth_refresh_token_secret_handle_id is None:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth refresh token secret handle is required"
+        )
+    access_handle, access_store = await get_oauth_secret_handle(
+        session,
+        credential,
+        credential.oauth_access_token_secret_handle_id,
+    )
+    refresh_handle, refresh_store = await get_oauth_secret_handle(
+        session,
+        credential,
+        credential.oauth_refresh_token_secret_handle_id,
+    )
+    token_values = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    values_by_target: dict[tuple[uuid.UUID, str], dict[str, str]] = {}
+    handles_by_target: dict[tuple[uuid.UUID, str], tuple[Any, Any]] = {}
+    for handle, store in ((access_handle, access_store), (refresh_handle, refresh_store)):
+        key_name = handle.key_name.strip()
+        value = token_values.get(key_name)
+        if not value:
+            raise InvalidLLMProviderCredentialAuthError(
+                "ChatGPT OAuth token response does not match the configured secret handles"
+            )
+        target = (store.id, handle.external_ref.strip().strip("/"))
+        values_by_target.setdefault(target, {})[key_name] = value
+        handles_by_target[target] = (handle, store)
+    for target, values in values_by_target.items():
+        handle, store = handles_by_target[target]
+        await write_oauth_secret_values(credential, handle, store, values)
+    credential.oauth_expires_at = expires_at_from_seconds(token_payload.get("expires_in"))
+    credential.oauth_metadata = chatgpt_oauth_metadata(access_token)
+    if isinstance(token_payload.get("scope"), str):
+        credential.oauth_scopes = token_payload["scope"].split()
+    await session.flush()
 
 
 def validate_auth_settings(

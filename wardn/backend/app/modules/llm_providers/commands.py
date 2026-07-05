@@ -30,6 +30,9 @@ from app.modules.llm_providers.service import (
     expires_at_from_seconds,
     generate_oauth_state,
     generate_pkce_pair,
+    replace_chatgpt_oauth_credential_tokens,
+    require_scope_permission,
+    user_can_see_credential,
 )
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
@@ -50,6 +53,11 @@ REDIRECT_URI = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}{CALLBACK_PATH}"
 
 def configure_connectchatgpt_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--organization-id", required=True, help="Organization UUID.")
+    parser.add_argument(
+        "--credential-id",
+        default="",
+        help="Existing ChatGPT credential UUID to reconnect.",
+    )
     parser.add_argument("--user-email", default="", help="Wardn user email to own the credential.")
     parser.add_argument("--user-id", default="", help="Wardn user UUID to own the credential.")
     parser.add_argument("--name", default="OpenAI ChatGPT", help="Credential name.")
@@ -62,7 +70,7 @@ def configure_connectchatgpt_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace-id", default="", help="Workspace UUID for workspace scope.")
     parser.add_argument(
         "--secret-store-id",
-        required=True,
+        default="",
         help="Secret store UUID where ChatGPT OAuth tokens will be written.",
     )
     parser.add_argument(
@@ -190,8 +198,18 @@ def handle_display_name(name: str, suffix: str, run_id: str) -> str:
 async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
     organization_id = UUID(args.organization_id)
     workspace_id = UUID(args.workspace_id) if args.workspace_id else None
-    secret_store_id = UUID(args.secret_store_id)
+    credential_id = UUID(args.credential_id) if args.credential_id else None
+    secret_store_id = UUID(args.secret_store_id) if args.secret_store_id else None
     name = credential_name(args.name)
+    if credential_id is not None:
+        if args.workspace_id:
+            raise ValueError("--workspace-id is not used when reconnecting a credential")
+        if args.secret_store_id:
+            raise ValueError("--secret-store-id is not used when reconnecting a credential")
+        if args.secret_path:
+            raise ValueError("--secret-path is not used when reconnecting a credential")
+    elif secret_store_id is None:
+        raise ValueError("--secret-store-id is required when creating a ChatGPT credential")
     if args.visibility == "workspace" and workspace_id is None:
         raise ValueError("--workspace-id is required when --visibility workspace")
     if args.visibility != "workspace" and workspace_id is not None:
@@ -203,12 +221,41 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
             user_id=args.user_id,
             user_email=args.user_email,
         )
-        if await llm_repository.get_credential_by_name(
-            session,
-            organization_id=organization_id,
-            name=name,
-        ):
-            raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+        if credential_id is not None:
+            credential = await llm_repository.get_credential(
+                session,
+                organization_id=organization_id,
+                credential_id=credential_id,
+            )
+            if (
+                credential is None
+                or credential.provider != OPENAI_CHATGPT_PROVIDER
+                or credential.auth_method != "oauth"
+                or credential.oauth_provider != "chatgpt"
+            ):
+                raise InvalidLLMProviderCredentialAuthError(
+                    "ChatGPT OAuth credential was not found"
+                )
+            if not user_can_see_credential(user, credential):
+                raise InvalidLLMProviderCredentialAuthError(
+                    "ChatGPT OAuth credential was not found"
+                )
+            await require_scope_permission(
+                session,
+                user,
+                organization_id,
+                visibility=credential.visibility,
+                workspace_id=credential.workspace_id,
+            )
+        else:
+            if await llm_repository.get_credential_by_name(
+                session,
+                organization_id=organization_id,
+                name=name,
+            ):
+                raise DuplicateLLMProviderCredentialError(
+                    "provider credential name already exists"
+                )
 
     verifier, challenge = generate_pkce_pair()
     state = generate_oauth_state()
@@ -248,12 +295,44 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
             user_id=args.user_id,
             user_email=args.user_email,
         )
+        if credential_id is not None:
+            credential = await llm_repository.get_credential(
+                session,
+                organization_id=organization_id,
+                credential_id=credential_id,
+            )
+            if (
+                credential is None
+                or credential.provider != OPENAI_CHATGPT_PROVIDER
+                or credential.auth_method != "oauth"
+                or credential.oauth_provider != "chatgpt"
+            ):
+                raise InvalidLLMProviderCredentialAuthError(
+                    "ChatGPT OAuth credential was not found"
+                )
+            if not user_can_see_credential(user, credential):
+                raise InvalidLLMProviderCredentialAuthError(
+                    "ChatGPT OAuth credential was not found"
+                )
+            await require_scope_permission(
+                session,
+                user,
+                organization_id,
+                visibility=credential.visibility,
+                workspace_id=credential.workspace_id,
+            )
+            await replace_chatgpt_oauth_credential_tokens(session, credential, token_payload)
+            await session.commit()
+            print(f"ChatGPT credential reconnected: {credential.name} ({credential.id})")
+            return
         if await llm_repository.get_credential_by_name(
             session,
             organization_id=organization_id,
             name=name,
         ):
             raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+        if secret_store_id is None:
+            raise ValueError("--secret-store-id is required when creating a ChatGPT credential")
         handle_workspace_id = workspace_id if args.visibility == "workspace" else None
         external_ref = (
             args.secret_path.strip().strip("/")

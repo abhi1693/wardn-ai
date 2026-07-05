@@ -109,6 +109,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: Activity,
     },
     {
+      label: "Guardrails",
+      href: `${workspaceBasePath}/guardrails`,
+      activeKey: "workspace-guardrails",
+      icon: ShieldCheck,
+    },
+    {
       label: "Settings",
       href: `/organizations/${encodeURIComponent(
         organizationId
@@ -132,6 +138,7 @@ type AppShellProps = {
     | "catalog"
     | "llm-credentials"
     | "secret-backends"
+    | "workspace-guardrails"
     | "agents"
     | "workspace-agents"
     | "agent-tokens"
@@ -163,6 +170,7 @@ export function AppShell({
     active === "workspace-chat" ||
     active === "install" ||
     active === "runtime" ||
+    active === "workspace-guardrails" ||
     active === "workspace-agents" ||
     active === "workspace-settings";
   const navigationItems = isWorkspaceScope
