@@ -394,6 +394,8 @@ def decision_for_policies(policies: list[GuardrailPolicy]) -> GuardrailDecision:
 async def evaluate_tool_call_guardrails(
     session: AsyncSession,
     context: GuardrailEvaluationContext,
+    *,
+    include_agent_scoped: bool = False,
 ) -> GuardrailDecision:
     policies = await repository.list_matching_policies(
         session,
@@ -402,5 +404,6 @@ async def evaluate_tool_call_guardrails(
         agent_id=context.agent_id,
         installation_id=context.installation_id,
         tool_schema_id=context.tool_schema_id,
+        include_agent_scoped=include_agent_scoped,
     )
     return decision_for_policies(policies)

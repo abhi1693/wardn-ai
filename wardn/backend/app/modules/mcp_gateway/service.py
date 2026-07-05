@@ -4,6 +4,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.guardrails.service import (
+    GUARDRAIL_MODE_ALLOW,
+    GUARDRAIL_MODE_DENY,
+    GUARDRAIL_MODE_REQUIRE_CONFIRMATION,
+    GuardrailDecision,
+    GuardrailEvaluationContext,
+    evaluate_tool_call_guardrails,
+)
 from app.modules.mcp_gateway import repository
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_gateway.scope import GatewayScope
@@ -17,6 +25,7 @@ from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 from app.modules.mcp_runtime.manager import runtime_kind
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.organizations import repository as organizations_repository
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_SEARCH_LIMIT = 25
@@ -145,6 +154,46 @@ def error_tool_result(message: str, payload: dict[str, Any] | None = None) -> di
         "structuredContent": structured_content,
         "isError": True,
     }
+
+
+def guardrail_tool_result(
+    decision: GuardrailDecision,
+    *,
+    server_name: str,
+    tool_name: str,
+) -> dict[str, Any]:
+    status = (
+        "blocked"
+        if decision.mode == GUARDRAIL_MODE_DENY
+        else "approval_required"
+    )
+    message = decision.message or (
+        "Tool call blocked by guardrail."
+        if decision.mode == GUARDRAIL_MODE_DENY
+        else "Tool call requires approval by guardrail."
+    )
+    if decision.mode == GUARDRAIL_MODE_DENY:
+        message = (
+            f"{message} Do not complete this denied MCP request from cached, prior, "
+            "or alternate data."
+        )
+    return error_tool_result(
+        message,
+        {
+            "serverName": server_name,
+            "toolName": tool_name,
+            "guardrail": {
+                "status": status,
+                "mode": decision.mode,
+                "policyId": str(decision.policy_id) if decision.policy_id else "",
+                "policyName": decision.policy_name,
+                "message": message,
+                "matchedPolicyIds": [
+                    str(policy_id) for policy_id in decision.matched_policy_ids
+                ],
+            },
+        },
+    )
 
 
 def gateway_tools() -> list[dict[str, Any]]:
@@ -474,6 +523,34 @@ async def run_mcp_tool(
     if row is None:
         raise LookupError("enabled MCP server was not found")
     installation, server = row
+    decision = await evaluate_gateway_tool_guardrails(
+        session,
+        installation,
+        server,
+        tool_name=tool_name,
+        arguments=tool_arguments,
+        scope=scope,
+    )
+    if decision.mode in (GUARDRAIL_MODE_DENY, GUARDRAIL_MODE_REQUIRE_CONFIRMATION):
+        await session.commit()
+        return guardrail_tool_result(
+            decision,
+            server_name=server_name,
+            tool_name=tool_name,
+        )
+    if decision.mode != GUARDRAIL_MODE_ALLOW:
+        await session.commit()
+        return error_tool_result(
+            "Unsupported guardrail decision.",
+            {
+                "serverName": server_name,
+                "toolName": tool_name,
+                "guardrail": {
+                    "status": "blocked",
+                    "mode": decision.mode,
+                },
+            },
+        )
     try:
         upstream_result = await call_tool_with_tracking(
             session,
@@ -504,6 +581,47 @@ async def run_mcp_tool(
             "upstreamResult": upstream_result,
         },
     }
+
+
+async def evaluate_gateway_tool_guardrails(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+    server: MCPServerVersion,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    scope: GatewayScope,
+) -> GuardrailDecision:
+    workspace = await organizations_repository.get_workspace_by_id(
+        session,
+        installation.workspace_id,
+    )
+    if workspace is None:
+        raise LookupError("workspace was not found for enabled MCP server")
+    tool_schema = await tool_repository.get_enabled_tool_schema(
+        session,
+        scope=scope,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        tool_name=tool_name,
+    )
+    return await evaluate_tool_call_guardrails(
+        session,
+        GuardrailEvaluationContext(
+            organization_id=workspace.organization_id,
+            workspace_id=installation.workspace_id,
+            user_id=scope.user_id,
+            agent_id=None,
+            conversation_id=None,
+            agent_run_id=None,
+            installation_id=installation.id,
+            tool_schema_id=tool_schema.id if tool_schema else None,
+            server_name=server.name,
+            tool_name=tool_name,
+            arguments=arguments,
+        ),
+        include_agent_scoped=True,
+    )
 
 
 def initialize_result() -> dict[str, Any]:

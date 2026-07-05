@@ -66,15 +66,12 @@ async def list_matching_policies(
     agent_id: uuid.UUID | None,
     installation_id: uuid.UUID,
     tool_schema_id: uuid.UUID | None,
+    include_agent_scoped: bool = False,
 ) -> list[GuardrailPolicy]:
     statement = select(GuardrailPolicy).where(
         GuardrailPolicy.organization_id == organization_id,
         GuardrailPolicy.workspace_id == workspace_id,
         GuardrailPolicy.is_active.is_(True),
-        or_(
-            GuardrailPolicy.agent_id.is_(None),
-            GuardrailPolicy.agent_id == agent_id,
-        ),
         or_(
             GuardrailPolicy.installation_id.is_(None),
             GuardrailPolicy.installation_id == installation_id,
@@ -84,6 +81,13 @@ async def list_matching_policies(
             GuardrailPolicy.tool_schema_id == tool_schema_id,
         ),
     )
+    if not include_agent_scoped:
+        statement = statement.where(
+            or_(
+                GuardrailPolicy.agent_id.is_(None),
+                GuardrailPolicy.agent_id == agent_id,
+            )
+        )
     result = await session.execute(
         statement.order_by(
             GuardrailPolicy.priority.asc(),

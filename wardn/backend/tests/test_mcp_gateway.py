@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import get_db_session
@@ -72,6 +73,10 @@ async def fake_require_workspace_admin(*args, **kwargs):
 
 async def fake_require_organization_admin(*args, **kwargs):
     return None
+
+
+async def allow_gateway_tool_guardrails(*args, **kwargs):
+    return gateway_service.GuardrailDecision(mode="allow", message="allowed")
 
 
 def cached_tool(
@@ -606,6 +611,11 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        allow_gateway_tool_guardrails,
+    )
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
@@ -646,6 +656,11 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatc
         )
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        allow_gateway_tool_guardrails,
+    )
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
@@ -691,6 +706,11 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_kubernetes_runtime_failure(
         )
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        allow_gateway_tool_guardrails,
+    )
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(
@@ -727,6 +747,188 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_kubernetes_runtime_failure(
     }
 
 
+def test_mcp_gateway_run_tool_denies_guardrail_before_runtime(monkeypatch) -> None:
+    policy_id = uuid.uuid4()
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installed_server()
+
+    async def evaluate_gateway_tool_guardrails(*args, **kwargs):
+        return gateway_service.GuardrailDecision(
+            mode="deny",
+            policy_id=policy_id,
+            policy_name="Block weather",
+            message="Tool call blocked by guardrail policy: Block weather",
+            matched_policy_ids=(policy_id,),
+        )
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise AssertionError("runtime should not be called")
+
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        evaluate_gateway_tool_guardrails,
+    )
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_mcp_tool",
+                "arguments": {
+                    "serverName": "io.github.example/weather",
+                    "toolName": "get_forecast",
+                    "arguments": {"location": "Delhi"},
+                },
+            },
+        },
+    )
+
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["guardrail"] == {
+        "status": "blocked",
+        "mode": "deny",
+        "policyId": str(policy_id),
+        "policyName": "Block weather",
+            "message": (
+                "Tool call blocked by guardrail policy: Block weather Do not complete this "
+                "denied MCP request from cached, prior, or alternate data."
+            ),
+        "matchedPolicyIds": [str(policy_id)],
+    }
+
+
+def test_mcp_gateway_run_tool_requires_confirmation_before_runtime(monkeypatch) -> None:
+    policy_id = uuid.uuid4()
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installed_server()
+
+    async def evaluate_gateway_tool_guardrails(*args, **kwargs):
+        return gateway_service.GuardrailDecision(
+            mode="require_confirmation",
+            policy_id=policy_id,
+            policy_name="Confirm weather",
+            message="Tool call requires confirmation by guardrail policy: Confirm weather",
+            matched_policy_ids=(policy_id,),
+        )
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise AssertionError("runtime should not be called")
+
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        evaluate_gateway_tool_guardrails,
+    )
+    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+
+    response = gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_mcp_tool",
+                "arguments": {
+                    "serverName": "io.github.example/weather",
+                    "toolName": "get_forecast",
+                    "arguments": {"location": "Delhi"},
+                },
+            },
+        },
+    )
+
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["guardrail"] == {
+        "status": "approval_required",
+        "mode": "require_confirmation",
+        "policyId": str(policy_id),
+        "policyName": "Confirm weather",
+        "message": "Tool call requires confirmation by guardrail policy: Confirm weather",
+        "matchedPolicyIds": [str(policy_id)],
+    }
+
+
+@pytest.mark.asyncio
+async def test_mcp_gateway_guardrail_context_uses_workspace_and_tool_schema(monkeypatch) -> None:
+    organization_id = uuid.uuid4()
+    installation, server = installed_server()
+    tool_schema = cached_tool(
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name="get_forecast",
+    )
+    tool_schema.id = uuid.uuid4()
+    tool_schema.installation_id = installation.id
+    tool_schema.workspace_id = installation.workspace_id
+    captured = {}
+
+    async def get_workspace_by_id(*args, **kwargs):
+        return type(
+            "Workspace",
+            (),
+            {
+                "id": installation.workspace_id,
+                "organization_id": organization_id,
+            },
+        )()
+
+    async def get_enabled_tool_schema(*args, **kwargs):
+        return tool_schema
+
+    async def evaluate_tool_call_guardrails(*args, **kwargs):
+        captured["context"] = args[1]
+        captured["include_agent_scoped"] = kwargs["include_agent_scoped"]
+        return gateway_service.GuardrailDecision(mode="allow", message="allowed")
+
+    monkeypatch.setattr(
+        gateway_service.organizations_repository,
+        "get_workspace_by_id",
+        get_workspace_by_id,
+    )
+    monkeypatch.setattr(
+        gateway_service.tool_repository,
+        "get_enabled_tool_schema",
+        get_enabled_tool_schema,
+    )
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_tool_call_guardrails",
+        evaluate_tool_call_guardrails,
+    )
+
+    decision = await gateway_service.evaluate_gateway_tool_guardrails(
+        FakeSession(),
+        installation,
+        server,
+        tool_name="get_forecast",
+        arguments={"location": "Delhi"},
+        scope=gateway_service.GatewayScope(user_id=uuid.uuid4(), is_superuser=True),
+    )
+
+    context = captured["context"]
+    assert decision.mode == "allow"
+    assert context.organization_id == organization_id
+    assert context.workspace_id == installation.workspace_id
+    assert context.installation_id == installation.id
+    assert context.tool_schema_id == tool_schema.id
+    assert context.server_name == server.name
+    assert context.tool_name == "get_forecast"
+    assert context.arguments == {"location": "Delhi"}
+    assert captured["include_agent_scoped"] is True
+
+
 def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
     async def get_enabled_installation(*args, **kwargs):
         return installed_package_server(tmp_path)
@@ -748,6 +950,11 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
         }
 
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        allow_gateway_tool_guardrails,
+    )
     monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
 
     response = gateway_client().post(

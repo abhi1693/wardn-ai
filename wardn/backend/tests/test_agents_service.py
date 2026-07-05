@@ -23,6 +23,7 @@ from app.modules.agents.schemas import (
     AgentCreate,
     AgentToolAssignmentUpdate,
 )
+from app.modules.guardrails.service import GuardrailDecision
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
 from app.modules.llm_providers.service import ResolvedLLMCredentialSecrets
@@ -349,6 +350,201 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
 
     assert calls == ["Bearer old-access", "Bearer new-access"]
     assert events == [service.AgentChatTextEvent(text="ok")]
+
+
+@pytest.mark.asyncio
+async def test_filter_agent_runtime_tools_omits_denied_tools(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version="1.0.0",
+        description="Server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    allowed_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="read_docs",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    denied_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="search_repositories",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    user = User(id=uuid4(), email="user@example.com", is_superuser=False)
+    tools = {
+        "allowed": service.AgentRuntimeTool(
+            wire_name="allowed",
+            assignment_id=uuid4(),
+            tool_schema=allowed_schema,
+            installation=installation,
+            server=server,
+        ),
+        "denied": service.AgentRuntimeTool(
+            wire_name="denied",
+            assignment_id=uuid4(),
+            tool_schema=denied_schema,
+            installation=installation,
+            server=server,
+        ),
+    }
+    contexts = []
+
+    async def evaluate_tool_call_guardrails(*args, **kwargs):
+        context = args[1]
+        contexts.append(context)
+        if context.tool_name == "search_repositories":
+            return GuardrailDecision(mode="deny", policy_name="Block search")
+        return GuardrailDecision(mode="allow", policy_name="Allow reads")
+
+    monkeypatch.setattr(
+        service,
+        "evaluate_tool_call_guardrails",
+        evaluate_tool_call_guardrails,
+    )
+
+    result = await service.filter_agent_runtime_tools_for_guardrails(
+        FakeSession(),
+        tools,
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
+
+    assert list(result.allowed_tools) == ["allowed"]
+    assert list(result.denied_tools) == ["denied"]
+    assert {context.tool_name for context in contexts} == {"read_docs", "search_repositories"}
+    assert all(context.arguments == {} for context in contexts)
+
+
+@pytest.mark.asyncio
+async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    installation_id = uuid4()
+    tool_schema_id = uuid4()
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=installation_id,
+        workspace_id=workspace_id,
+        server_name="io.github.github/github-mcp-server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version="1.0.0",
+        description="GitHub MCP Server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=tool_schema_id,
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="search_repositories",
+        title="Search repositories",
+        description="Search GitHub repositories",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={},
+        denied_tools={
+            "search": (
+                service.AgentRuntimeTool(
+                    wire_name="search",
+                    assignment_id=uuid4(),
+                    tool_schema=tool_schema,
+                    installation=installation,
+                    server=server,
+                ),
+                GuardrailDecision(
+                    mode="deny",
+                    policy_name="deny all",
+                    message="Tool call blocked by guardrail policy: deny all",
+                ),
+            )
+        },
+    )
+
+    assert service.message_requests_denied_mcp_tool(
+        AgentChatMessage(
+            role="user",
+            parts=[{"type": "text", "text": "search git-rank repo in github"}],
+        ),
+        guardrail_filter,
+    )
+
+    events = [event async for event in service.preflight_blocked_tool_stream(guardrail_filter)]
+
+    assert isinstance(events[0], service.AgentChatToolActivityEvent)
+    assert events[0].status == "blocked"
+    assert events[0].tool_name == "search_repositories"
+    assert isinstance(events[1], service.AgentChatTextEvent)
+    assert "deny all" in events[1].text
 
 
 def test_sanitize_run_payload_redacts_sensitive_keys_and_truncates_long_text() -> None:

@@ -55,6 +55,7 @@ from app.modules.guardrails.service import (
     GUARDRAIL_MODE_ALLOW,
     GUARDRAIL_MODE_DENY,
     GUARDRAIL_MODE_REQUIRE_CONFIRMATION,
+    GuardrailDecision,
     GuardrailEvaluationContext,
     evaluate_tool_call_guardrails,
 )
@@ -136,6 +137,12 @@ class AgentRuntimeTool:
     tool_schema: MCPServerToolSchema
     installation: MCPServerInstallation
     server: MCPServerVersion
+
+
+@dataclass(frozen=True)
+class AgentRuntimeToolGuardrailFilter:
+    allowed_tools: dict[str, AgentRuntimeTool]
+    denied_tools: dict[str, tuple[AgentRuntimeTool, GuardrailDecision]]
 
 
 @dataclass(frozen=True)
@@ -902,6 +909,122 @@ def response_function_tools(tools: dict[str, AgentRuntimeTool]) -> list[dict[str
         }
         for tool in tools.values()
     ]
+
+
+async def filter_agent_runtime_tools_for_guardrails(
+    session: AsyncSession,
+    tools: dict[str, AgentRuntimeTool],
+    *,
+    user: User | None,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+    agent: Agent,
+) -> AgentRuntimeToolGuardrailFilter:
+    if organization_id is None:
+        return AgentRuntimeToolGuardrailFilter(allowed_tools=tools, denied_tools={})
+    filtered_tools: dict[str, AgentRuntimeTool] = {}
+    denied_tools: dict[str, tuple[AgentRuntimeTool, GuardrailDecision]] = {}
+    for wire_name, tool in tools.items():
+        decision = await evaluate_tool_call_guardrails(
+            session,
+            GuardrailEvaluationContext(
+                organization_id=organization_id,
+                workspace_id=workspace_id or tool.installation.workspace_id,
+                user_id=user.id if user else None,
+                agent_id=agent.id,
+                conversation_id=None,
+                agent_run_id=None,
+                installation_id=tool.installation.id,
+                tool_schema_id=tool.tool_schema.id,
+                server_name=tool.server.name,
+                tool_name=tool.tool_schema.tool_name,
+                arguments={},
+            ),
+        )
+        if decision.mode == GUARDRAIL_MODE_DENY:
+            denied_tools[wire_name] = (tool, decision)
+            continue
+        filtered_tools[wire_name] = tool
+    return AgentRuntimeToolGuardrailFilter(
+        allowed_tools=filtered_tools,
+        denied_tools=denied_tools,
+    )
+
+
+MCP_REQUEST_ACTION_WORDS = {
+    "call",
+    "check",
+    "create",
+    "delete",
+    "fetch",
+    "find",
+    "get",
+    "list",
+    "lookup",
+    "read",
+    "run",
+    "search",
+    "update",
+    "use",
+}
+
+
+def normalize_match_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+def denied_tool_match_terms(tool: AgentRuntimeTool) -> set[str]:
+    values = [
+        tool.tool_schema.tool_name,
+        tool.tool_schema.title or "",
+        tool.tool_schema.description or "",
+        tool.tool_schema.server_name,
+        tool.server.name,
+        tool.server.description or "",
+        tool.installation.config_name,
+    ]
+    terms: set[str] = set()
+    for value in values:
+        normalized = normalize_match_text(value)
+        if normalized:
+            terms.add(normalized)
+            terms.update(part for part in normalized.split() if len(part) >= 4)
+    return terms
+
+
+def message_requests_denied_mcp_tool(
+    message: AgentChatMessage | None,
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+) -> bool:
+    if message is None or not guardrail_filter.denied_tools:
+        return False
+    text = normalize_match_text(text_from_chat_message(message))
+    if not text:
+        return False
+    words = set(text.split())
+    has_action = bool(words & MCP_REQUEST_ACTION_WORDS)
+    for tool, _decision in guardrail_filter.denied_tools.values():
+        if any(term and term in text for term in denied_tool_match_terms(tool)):
+            return True
+    return has_action and not guardrail_filter.allowed_tools
+
+
+async def preflight_blocked_tool_stream(
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    first_tool, first_decision = next(iter(guardrail_filter.denied_tools.values()))
+    policy_name = first_decision.policy_name or "workspace guardrail"
+    message = (
+        f"I can't run that MCP request because it is blocked by guardrail policy: "
+        f"{policy_name}."
+    )
+    yield AgentChatToolActivityEvent(
+        id=f"guardrail-{uuid.uuid4()}",
+        tool_name=first_tool.tool_schema.tool_name,
+        status="blocked",
+        error=first_decision.message or message,
+    )
+    yield AgentChatTextEvent(text=message)
 
 
 def parse_tool_arguments(value: Any) -> dict[str, Any]:
@@ -2009,18 +2132,30 @@ async def stream_agent_chat(
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
     )
-    stream = run_agent_chat(
+    guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
         session,
-        agent,
-        credential,
-        AgentChatRequest(id=payload.id, messages=payload.messages),
         tools,
         user=user,
         organization_id=organization_id,
         workspace_id=workspace_id,
-        conversation=conversation,
-        agent_run=agent_run,
+        agent=agent,
     )
+    latest_message = latest_user_message(payload.messages)
+    if message_requests_denied_mcp_tool(latest_message, guardrail_filter):
+        stream = preflight_blocked_tool_stream(guardrail_filter)
+    else:
+        stream = run_agent_chat(
+            session,
+            agent,
+            credential,
+            AgentChatRequest(id=payload.id, messages=payload.messages),
+            guardrail_filter.allowed_tools,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            conversation=conversation,
+            agent_run=agent_run,
+        )
     return persisted_agent_chat_stream(session, conversation, stream, agent_run)
 
 
