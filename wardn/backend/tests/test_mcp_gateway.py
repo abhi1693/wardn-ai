@@ -6,11 +6,13 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.core.config import Settings
 from app.db.session import get_db_session
 from app.main import create_app
 from app.modules.mcp_gateway import client as gateway_client_module
@@ -298,6 +300,59 @@ def test_mcp_oauth_metadata_discovery() -> None:
     assert auth_metadata["token_endpoint_auth_methods_supported"] == ["none"]
 
 
+def test_mcp_oauth_metadata_uses_forwarded_public_origin() -> None:
+    client = TestClient(create_app())
+    headers = {
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-proto": "https",
+    }
+
+    resource_response = client.get("/.well-known/oauth-protected-resource", headers=headers)
+    auth_response = client.get("/.well-known/oauth-authorization-server", headers=headers)
+
+    assert resource_response.json()["resource"] == "https://app.example.com/api/v1/mcp/gateway"
+    assert resource_response.json()["authorization_servers"] == ["https://app.example.com"]
+    assert auth_response.json()["issuer"] == "https://app.example.com"
+    assert auth_response.json()["authorization_endpoint"] == (
+        "https://app.example.com/api/v1/oauth/authorize"
+    )
+
+
+def test_mcp_oauth_authorize_accepts_direct_backend_resource_with_forwarded_origin() -> None:
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    redirect_uri = "http://127.0.0.1:39123/callback"
+    client_id = gateway_oauth.create_client_id(
+        {"client_name": "Codex", "redirect_uris": [redirect_uri]}
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": "test-challenge",
+            "code_challenge_method": "S256",
+            "resource": "http://testserver/api/v1/mcp/gateway",
+            "scope": "mcp:tools",
+            "state": "client-state",
+        },
+        headers={
+            "x-forwarded-host": "app.example.com",
+            "x-forwarded-proto": "https",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {200, 302}
+    if response.status_code == 302:
+        assert "/api/auth/oidc/login" in response.headers["location"]
+    else:
+        assert "Authorize Wardn MCP" in response.text
+        assert "resource does not match this MCP server" not in response.text
+
+
 def test_mcp_oauth_dynamic_client_registration() -> None:
     response = TestClient(create_app()).post(
         "/api/v1/oauth/register",
@@ -314,6 +369,92 @@ def test_mcp_oauth_dynamic_client_registration() -> None:
     metadata = gateway_oauth.client_metadata(payload["client_id"])
     assert metadata["client_name"] == "Codex"
     assert metadata["redirect_uris"] == ["http://127.0.0.1:39123/callback"]
+
+
+def test_mcp_oauth_authorize_redirects_to_oidc_login(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        auth_mode="oidc",
+        frontend_base_url="https://app.example.com",
+        oidc_issuer_url="https://issuer.example.com",
+        oidc_client_id="wardn-client",
+        oidc_client_secret="wardn-secret",
+    )
+    monkeypatch.setattr(gateway_oauth, "get_settings", lambda: settings)
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    redirect_uri = "http://127.0.0.1:39123/callback"
+    client_id = gateway_oauth.create_client_id(
+        {"client_name": "Codex", "redirect_uris": [redirect_uri]}
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": "test-challenge",
+            "code_challenge_method": "S256",
+            "resource": "http://testserver/api/v1/mcp/gateway",
+            "scope": "mcp:tools",
+            "state": "client-state",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
+        "https://app.example.com/api/auth/oidc/login"
+    )
+    redirect_to = parse_qs(parsed.query)["redirectTo"][0]
+    redirect_target = urlparse(redirect_to)
+    assert redirect_target.path == "/api/v1/oauth/authorize"
+    redirect_query = parse_qs(redirect_target.query)
+    assert redirect_query["client_id"] == [client_id]
+    assert redirect_query["redirect_uri"] == [redirect_uri]
+    assert redirect_query["state"] == ["client-state"]
+
+
+def test_mcp_oauth_post_without_session_redirects_to_oidc_login(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        auth_mode="oidc",
+        frontend_base_url="https://app.example.com",
+        oidc_issuer_url="https://issuer.example.com",
+        oidc_client_id="wardn-client",
+        oidc_client_secret="wardn-secret",
+    )
+    monkeypatch.setattr(gateway_oauth, "get_settings", lambda: settings)
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_session
+    redirect_uri = "http://127.0.0.1:39123/callback"
+    client_id = gateway_oauth.create_client_id(
+        {"client_name": "Codex", "redirect_uris": [redirect_uri]}
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/oauth/authorize",
+        data={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": "test-challenge",
+            "code_challenge_method": "S256",
+            "resource": "http://testserver/api/v1/mcp/gateway",
+            "scope": "mcp:tools",
+            "state": "client-state",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    parsed = urlparse(response.headers["location"])
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
+        "https://app.example.com/api/auth/oidc/login"
+    )
 
 
 def test_mcp_oauth_token_exchange_issues_gateway_api_token(monkeypatch) -> None:

@@ -22,6 +22,7 @@ from app.modules.organizations.service import ORG_ADMIN_ROLES
 from app.modules.users import repository as users_repository
 from app.modules.users.exceptions import InvalidAPITokenScopeError, InvalidLoginError
 from app.modules.users.models import User
+from app.modules.users.oidc import oidc_enabled
 from app.modules.users.schemas import LoginRequest, UserAPITokenCreate
 from app.modules.users.service import authenticate_local_user, create_user_api_token
 
@@ -38,11 +39,26 @@ def public_base_url(request: Request) -> str:
     configured = get_settings().public_base_url.strip().rstrip("/")
     if configured:
         return configured
+    forwarded_host = request.headers.get("x-forwarded-host", "").strip()
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").strip()
+    if forwarded_host and forwarded_proto in {"http", "https"}:
+        return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
     return str(request.base_url).rstrip("/")
 
 
 def mcp_resource_url(request: Request) -> str:
     return f"{public_base_url(request)}{get_settings().api_prefix}/mcp/gateway"
+
+
+def direct_mcp_resource_url(request: Request) -> str:
+    return f"{str(request.base_url).rstrip('/')}{get_settings().api_prefix}/mcp/gateway"
+
+
+def accepted_mcp_resource_urls(request: Request) -> set[str]:
+    return {
+        mcp_resource_url(request),
+        direct_mcp_resource_url(request),
+    }
 
 
 def protected_resource_metadata_url(request: Request) -> str:
@@ -169,6 +185,25 @@ def append_query(url: str, values: dict[str, str]) -> str:
     return f"{url}{separator}{urlencode(values)}"
 
 
+def authorize_request_path(params: dict[str, str]) -> str:
+    query = urlencode(params)
+    path = authorize_path()
+    return f"{path}?{query}" if query else path
+
+
+def oidc_login_redirect(params: dict[str, str]) -> RedirectResponse:
+    settings = get_settings()
+    login_url = (
+        f"{settings.frontend_base_url.rstrip('/')}/api/auth/oidc/login"
+        if settings.frontend_base_url.strip()
+        else f"{settings.api_prefix}/auth/oidc/login"
+    )
+    return RedirectResponse(
+        append_query(login_url, {"redirectTo": authorize_request_path(params)}),
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
 def html_page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
         f"""<!doctype html>
@@ -235,7 +270,7 @@ async def current_session_user(request: Request, session: AsyncSession) -> User 
     return user
 
 
-def validate_authorize_params(params: dict[str, str], *, expected_resource: str) -> None:
+def validate_authorize_params(params: dict[str, str], *, expected_resources: set[str]) -> None:
     if params.get("response_type") != "code":
         raise ValueError("response_type must be code")
     if not params.get("client_id"):
@@ -248,7 +283,7 @@ def validate_authorize_params(params: dict[str, str], *, expected_resource: str)
         raise ValueError("code_challenge_method must be S256")
     if not params.get("resource"):
         raise ValueError("resource is required")
-    if params["resource"] != expected_resource:
+    if params["resource"] not in expected_resources:
         raise ValueError("resource does not match this MCP server")
     validate_redirect_uri(params["client_id"], params["redirect_uri"])
 
@@ -502,7 +537,7 @@ async def authorize(
 ):
     params = {key: value for key, value in request.query_params.items()}
     try:
-        validate_authorize_params(params, expected_resource=mcp_resource_url(request))
+        validate_authorize_params(params, expected_resources=accepted_mcp_resource_urls(request))
     except ValueError as exc:
         return html_page(
             "Authorization error",
@@ -512,6 +547,8 @@ async def authorize(
     user = await current_session_user(request, session)
     if user is not None:
         return await consent_form(session, user, params)
+    if oidc_enabled(get_settings()):
+        return oidc_login_redirect(params)
     return login_form(params)
 
 
@@ -525,10 +562,12 @@ async def authorize_with_password(
     session_user = await current_session_user(request, session)
 
     try:
-        validate_authorize_params(form, expected_resource=mcp_resource_url(request))
+        validate_authorize_params(form, expected_resources=accepted_mcp_resource_urls(request))
         user = session_user
         just_logged_in = False
         if user is None:
+            if oidc_enabled(get_settings()):
+                return oidc_login_redirect(form)
             login = LoginRequest(
                 email=form.get("email", ""),
                 password=SecretStr(form.get("password", "")),
