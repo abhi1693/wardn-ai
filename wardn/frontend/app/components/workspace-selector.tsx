@@ -66,13 +66,13 @@ export function WorkspaceSelector({ context }: WorkspaceSelectorProps) {
     >
       <SelectTrigger
         aria-label="Workspace context"
-        className="h-auto min-h-11 w-full items-center border-slate-700 bg-sidebar-accent px-2.5 py-2 text-left text-slate-200 shadow-none hover:bg-slate-800 focus-visible:border-sky-400 [&>svg]:shrink-0 [&>svg]:text-slate-400"
+        className="h-auto min-h-10 w-full items-center border-border bg-card px-2.5 py-2 text-left shadow-none hover:bg-muted focus-visible:border-ring [&>svg]:shrink-0 [&>svg]:text-muted-foreground"
       >
         <div className="min-w-0">
-          <div className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+          <div className="truncate text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
             {selectedOrganization?.name ?? "Organization"}
           </div>
-          <div className="truncate text-sm font-semibold leading-5 text-white">
+          <div className="truncate text-sm font-medium leading-5 text-foreground">
             {context.selectedWorkspace?.name ?? "No workspace"}
           </div>
         </div>

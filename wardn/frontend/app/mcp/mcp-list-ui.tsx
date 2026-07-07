@@ -133,7 +133,7 @@ type ServerIdentityCellProps = {
 export function ServerIdentityCell({ href, iconUrl, name, title }: ServerIdentityCellProps) {
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded bg-[var(--primary-container)] text-white">
+      <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground">
         {iconUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

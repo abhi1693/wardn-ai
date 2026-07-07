@@ -144,7 +144,7 @@ export default async function OrganizationDashboardPage({
         <CardContent className="grid gap-4 md:grid-cols-[280px_1fr]">
           <div className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
             <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-md bg-[var(--primary-container)] text-white">
+              <div className="flex size-9 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
                 <Activity className="size-4" />
               </div>
               <div>

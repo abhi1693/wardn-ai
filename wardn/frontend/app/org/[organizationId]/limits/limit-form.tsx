@@ -137,10 +137,10 @@ export function LimitForm({
   }
 
   return (
-    <div className="max-w-3xl">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
+    <div className="max-w-4xl">
+      <Card className="overflow-hidden">
+        <CardHeader className="bg-card">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <CardTitle>{isEdit ? "Edit Limit" : "Create Limit"}</CardTitle>
               <CardDescription>
@@ -149,75 +149,71 @@ export function LimitForm({
                   : "Set a quota for this organization or one of its workspaces."}
               </CardDescription>
             </div>
-            <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
-              <SlidersHorizontal className="size-5" />
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+              <SlidersHorizontal className="size-4" />
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <form onSubmit={submit}>
-            <div className="space-y-5 p-5">
-            {isEdit ? (
-              <div className="grid gap-4 rounded-md border bg-muted/30 p-4 sm:grid-cols-2">
-                <div>
-                  <div className="text-xs font-medium text-[var(--on-surface-variant)]">
-                    Limit
+            <div className="space-y-5 p-4">
+              {isEdit ? (
+                <div className="grid gap-0 overflow-hidden rounded-md border bg-card sm:grid-cols-2">
+                  <div className="border-b p-3 sm:border-b-0 sm:border-r">
+                    <div className="text-xs font-medium text-muted-foreground">Limit</div>
+                    <div className="mt-1 text-sm">{displayLimitKey(initialLimit.limitKey)}</div>
                   </div>
-                  <div className="mt-1 text-sm">{displayLimitKey(initialLimit.limitKey)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-[var(--on-surface-variant)]">
-                    Target
-                  </div>
-                  <div className="mt-1 truncate text-sm">
-                    {scopeLabel(initialLimit, organizations, workspaces)}
+                  <div className="p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Target</div>
+                    <div className="mt-1 truncate text-sm">
+                      {scopeLabel(initialLimit, organizations, workspaces)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <Label>Limit key</Label>
-                  <Select onValueChange={updateLimitKey} value={limitKey}>
-                    <SelectTrigger className="mt-2">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {knownLimitKeys.map((entry) => (
-                        <SelectItem key={entry.value} value={entry.value}>
-                          {entry.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {selectedScopeType === "workspace" ? (
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <Label>Target</Label>
-                    <Select onValueChange={setScopeId} value={scopeId}>
+                    <Label>Limit key</Label>
+                    <Select onValueChange={updateLimitKey} value={limitKey}>
                       <SelectTrigger className="mt-2">
-                        <SelectValue placeholder="Select workspace" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {workspaces.map((workspace) => (
-                          <SelectItem key={workspace.id} value={workspace.id}>
-                            {workspace.name}
+                        {knownLimitKeys.map((entry) => (
+                          <SelectItem key={entry.value} value={entry.value}>
+                            {entry.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                ) : (
-                  <div>
-                    <Label>Target</Label>
-                    <div className="mt-2 flex h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-sm">
-                      {organizationName}
+
+                  {selectedScopeType === "workspace" ? (
+                    <div>
+                      <Label>Target</Label>
+                      <Select onValueChange={setScopeId} value={scopeId}>
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select workspace" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workspaces.map((workspace) => (
+                            <SelectItem key={workspace.id} value={workspace.id}>
+                              {workspace.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  ) : (
+                    <div>
+                      <Label>Target</Label>
+                      <div className="mt-2 flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm">
+                        {organizationName}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="max-w-52">
                 <Label htmlFor="limit-value">Value</Label>
@@ -232,14 +228,14 @@ export function LimitForm({
                 />
               </div>
 
-            {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            ) : null}
+              {error ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {error}
+                </div>
+              ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+            <div className="flex justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
               <Button asChild type="button" variant="outline">
                 <Link href={listPath}>Cancel</Link>
               </Button>

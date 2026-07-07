@@ -207,15 +207,15 @@ export function AppShell({
       : selectedWorkspace?.name ?? "Organization context";
 
   return (
-    <main className="min-h-screen bg-[var(--surface)] text-foreground">
-      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[260px] flex-col border-r border-[var(--on-primary-container)]/20 bg-[var(--primary-container)] px-4 py-6 text-[var(--inverse-on-surface)] max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
-        <div className="mb-10 px-2 max-lg:mb-3">
+    <main className="min-h-screen bg-background text-foreground">
+      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[252px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
+        <div className="mb-6 px-2 max-lg:mb-3">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--primary-fixed-dim)] text-[var(--primary-container)]">
+            <div className="flex size-8 items-center justify-center rounded-md border border-border bg-card text-foreground shadow-[var(--shadow-card)]">
               <Layers3 className="size-5" />
             </div>
             <div className="min-w-0">
-              <div className="truncate text-xl font-semibold leading-7 text-white">
+              <div className="truncate text-[15px] font-semibold leading-5 text-foreground">
                 Wardn AI
               </div>
             </div>
@@ -223,7 +223,7 @@ export function AppShell({
         </div>
 
         <nav
-          className="flex-1 space-y-2 max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
+          className="flex-1 space-y-1 max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
           aria-label="Primary"
         >
           {primaryNavItems.map((item) => {
@@ -231,9 +231,10 @@ export function AppShell({
             return (
               <Link
                 className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white max-lg:min-w-fit max-lg:px-3",
+                  "flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors active:bg-muted max-lg:min-w-fit",
+                  "hover:bg-muted hover:text-foreground",
                   item.active &&
-                    "bg-[#d5e3fd] font-semibold text-[#131b2e] hover:bg-[#d5e3fd] hover:text-[#131b2e]"
+                    "border border-[#d9e6ff] bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[var(--shadow-card)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
                 href={item.href}
                 key={item.label}
@@ -245,23 +246,23 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="mt-auto border-t border-[var(--on-primary-container)]/10 pt-6 max-lg:hidden">
+        <div className="mt-auto border-t border-border pt-4 max-lg:hidden">
           <Link
-            className="flex min-h-11 items-center gap-3 rounded-lg px-4 text-sm text-slate-300 transition-all duration-200 active:scale-[0.98] hover:bg-white/10 hover:text-white"
+            className="flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             href={contextSwitchHref}
           >
             <Replace className="size-4" />
             {contextSwitchLabel}
           </Link>
-          <div className="mt-4 flex items-center gap-3 px-4">
-            <div className="flex size-8 items-center justify-center rounded-full border border-[var(--on-primary-container)]/20 bg-[var(--tertiary-container)] text-xs font-bold text-[var(--on-tertiary)]">
+          <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+            <div className="flex size-7 items-center justify-center rounded-md border border-border bg-muted text-xs font-semibold text-foreground">
               {contextTitle.slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <div className="truncate text-xs font-bold text-[var(--inverse-on-surface)]">
+              <div className="truncate text-xs font-medium text-foreground">
                 {contextTitle}
               </div>
-              <div className="truncate text-[10px] text-slate-400">
+              <div className="truncate text-[11px] text-muted-foreground">
                 {contextSubtitle}
               </div>
             </div>
@@ -271,24 +272,24 @@ export function AppShell({
 
       <section
         className={cn(
-          "min-h-screen min-w-0 bg-[var(--surface-bright)] pl-[260px] max-lg:pl-0",
+          "min-h-screen min-w-0 bg-background pl-[252px] max-lg:pl-0",
           sectionClassName
         )}
       >
-        <header className="fixed right-0 top-0 z-40 flex h-16 w-[calc(100%-260px)] items-center border-b border-[var(--outline-variant)] bg-[var(--surface)] max-lg:static max-lg:w-full">
-          <div className="flex w-full items-center justify-between gap-4 px-8 max-md:px-4">
+        <header className="fixed right-0 top-0 z-40 flex h-14 w-[calc(100%-252px)] items-center border-b border-border bg-card/95 backdrop-blur max-lg:static max-lg:w-full">
+          <div className="flex w-full items-center justify-between gap-4 px-6 max-md:px-4">
             <div className="flex min-w-0 items-center gap-4">
               {showBreadcrumbParent ? (
                 <>
-                  <span className="truncate text-sm font-medium leading-5 text-[var(--on-surface-variant)] max-md:hidden">
+                  <span className="truncate text-sm leading-5 text-muted-foreground max-md:hidden">
                     {breadcrumbLabel}
                   </span>
-                  <span className="text-sm leading-5 text-[var(--on-surface-variant)] max-md:hidden">
+                  <span className="text-sm leading-5 text-muted-foreground max-md:hidden">
                     /
                   </span>
                 </>
               ) : null}
-              <h1 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+              <h1 className="truncate text-lg font-semibold leading-6 text-foreground">
                 {title}
               </h1>
             </div>
@@ -301,7 +302,7 @@ export function AppShell({
 
         <div
           className={cn(
-            "mx-auto min-h-screen w-full max-w-[1440px] px-8 pb-8 pt-24 max-lg:pt-8 max-md:px-4 max-md:pb-4",
+            "mx-auto min-h-screen w-full max-w-[1360px] px-6 pb-8 pt-20 max-lg:pt-6 max-md:px-4 max-md:pb-4",
             contentClassName
           )}
         >
