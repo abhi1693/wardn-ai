@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from app.modules.limits import service as limits_service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository, tool_repository
 from app.modules.mcp_registry.exceptions import (
@@ -345,7 +346,7 @@ async def externalize_install_config_secrets(
     replacements: dict[str, dict | None] = {}
     field_key_names: dict[str, str] = {}
 
-    for field_name, purpose in secret_fields.items():
+    for field_name in secret_fields:
         value = config_values.get(field_name)
         if not config_value_present(value) or secret_handle_id_from_value(value):
             continue
@@ -370,7 +371,9 @@ async def externalize_install_config_secrets(
     if payload.config_secret_store_id is None:
         raise MCPServerInstallationUnsupportedError("secret backend is required for MCP secrets")
     if user is None:
-        raise MCPServerInstallationUnsupportedError("authenticated user is required for MCP secrets")
+        raise MCPServerInstallationUnsupportedError(
+            "authenticated user is required for MCP secrets"
+        )
 
     run_id = uuid.uuid4().hex[:8]
     external_ref = install_secret_path(
@@ -407,7 +410,11 @@ async def externalize_install_config_secrets(
                     storeId=payload.config_secret_store_id,
                     workspaceId=workspace_id,
                     purpose=purpose,
-                    displayName=install_secret_display_name(payload.config_name, field_name, run_id),
+                    displayName=install_secret_display_name(
+                        payload.config_name,
+                        field_name,
+                        run_id,
+                    ),
                     externalRef=external_ref,
                     keyName=key_name,
                     metadata={
@@ -685,6 +692,18 @@ async def create_catalog_source(
         raise DuplicateMCPCatalogSourceError("catalog source name already exists")
     if await repository.get_catalog_source_by_url(session, organization_id, base_url):
         raise DuplicateMCPCatalogSourceError("catalog source URL already exists")
+    source_count = await repository.count_catalog_sources_for_organization(
+        session,
+        organization_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.MCP_CATALOG_SOURCES_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=source_count,
+    )
     auth_secret_handle_id = await create_catalog_source_token_handle(
         session,
         user,
@@ -1066,6 +1085,20 @@ async def create_server_version(
             await session.refresh(existing)
             return server_response(existing)
         raise DuplicateMCPServerVersionError("server version already exists")
+
+    if organization_id is not None:
+        version_count = await repository.count_server_versions_for_organization(
+            session,
+            organization_id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
+            scope_chain=[
+                ("organization", organization_id),
+            ],
+            current_count=version_count,
+        )
 
     await repository.clear_latest_for_name(session, payload.name, organization_id=organization_id)
     server = MCPServerVersion(
@@ -1478,6 +1511,21 @@ async def install_server_version(
         workspace_id,
     )
     config_values = merged_install_config_values(installation, payload.config_values)
+    is_new_installation = installation is None
+    if is_new_installation:
+        installation_count = await repository.count_installations_for_workspace(
+            session,
+            workspace_id,
+        )
+        scope_chain = [("workspace", workspace_id)]
+        if organization_id is not None:
+            scope_chain.insert(1, ("organization", organization_id))
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.MCP_SERVER_INSTALLATIONS_PER_WORKSPACE,
+            scope_chain=scope_chain,
+            current_count=installation_count,
+        )
     if organization_id is not None:
         config_values = await externalize_install_config_secrets(
             session,
@@ -1506,7 +1554,6 @@ async def install_server_version(
         handle_refs,
     )
     persist_install_secret_references(runtime_install.install_path, secret_references)
-    is_new_installation = installation is None
     previous_install_path = installation.install_path if installation else ""
     if installation is None:
         installation = MCPServerInstallation(

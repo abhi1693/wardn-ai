@@ -139,7 +139,6 @@ async def create_user_api_token(
         organization_ids=payload.organization_ids,
         workspace_ids=payload.workspace_ids,
     )
-
     token_prefix, token = generate_api_token()
     record = UserAPIToken(
         user_id=user.id,

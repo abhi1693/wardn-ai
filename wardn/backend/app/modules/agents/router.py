@@ -14,9 +14,9 @@ from app.modules.agents.exceptions import (
     InvalidAgentToolAssignmentError,
 )
 from app.modules.agents.schemas import (
-    AgentConversationResponse,
     AgentAvailableToolListResponse,
     AgentChatRequest,
+    AgentConversationResponse,
     AgentCreate,
     AgentListResponse,
     AgentRead,
@@ -45,6 +45,7 @@ from app.modules.agents.service import (
     stream_agent_chat,
     update_agent,
 )
+from app.modules.limits.exceptions import LimitExceededError
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
     OrganizationNotFoundError,
@@ -84,6 +85,8 @@ def raise_access_error(exc: Exception) -> None:
     if isinstance(exc, (OrganizationNotFoundError, WorkspaceNotFoundError)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if isinstance(exc, (OrganizationAccessDeniedError, WorkspaceAccessDeniedError)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if isinstance(exc, LimitExceededError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     if isinstance(exc, (InvalidAgentScopeError, InvalidAgentToolAssignmentError)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

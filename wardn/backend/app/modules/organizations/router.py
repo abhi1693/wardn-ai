@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
+from app.modules.limits.exceptions import LimitExceededError
 from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
     DuplicateWorkspaceError,
@@ -164,6 +165,8 @@ async def create_workspace_route(
     except OrganizationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except LimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except DuplicateWorkspaceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.guardrails.models import GuardrailPolicy
@@ -55,6 +55,37 @@ async def get_policy_by_name(
     )
     result = await session.execute(statement)
     return result.scalar_one_or_none()
+
+
+async def count_policies_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(GuardrailPolicy).where(
+            GuardrailPolicy.workspace_id == workspace_id,
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_policies_created_by_user_for_workspace(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(GuardrailPolicy).where(
+            GuardrailPolicy.workspace_id == workspace_id,
+            GuardrailPolicy.created_by_id == user_id,
+        )
+    )
+    return int(result.scalar_one())
 
 
 async def list_matching_policies(

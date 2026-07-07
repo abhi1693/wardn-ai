@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.limits import service as limits_service
 from app.modules.organizations import repository
 from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
@@ -301,6 +302,36 @@ async def create_workspace(
     slug = normalize_slug(payload.slug)
     if await repository.get_workspace_by_slug(session, organization_id, slug):
         raise DuplicateWorkspaceError("workspace slug already exists")
+
+    organization_workspace_count = await repository.count_active_workspaces_for_organization(
+        session,
+        organization_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.WORKSPACES_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=organization_workspace_count,
+    )
+
+    user_workspace_count = (
+        await repository.count_active_workspaces_created_by_user_for_organization(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+        )
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.WORKSPACES_CREATED_PER_USER,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=user_workspace_count,
+    )
+
     workspace = Workspace(
         organization_id=organization_id,
         name=payload.name.strip(),

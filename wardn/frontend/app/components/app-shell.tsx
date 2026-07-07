@@ -11,6 +11,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -52,6 +53,12 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/tokens` : "/org",
       activeKey: "agent-tokens",
       icon: KeyRound,
+    },
+    {
+      label: "Limits",
+      href: organizationId ? `/org/${organizationId}/limits` : "/org",
+      activeKey: "limits",
+      icon: SlidersHorizontal,
     },
     {
       label: "Secret Backends",
@@ -142,6 +149,7 @@ type AppShellProps = {
     | "agents"
     | "workspace-agents"
     | "agent-tokens"
+    | "limits"
     | "runtime"
     | "install";
   eyebrow: string;

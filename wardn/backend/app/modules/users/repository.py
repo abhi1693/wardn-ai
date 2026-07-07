@@ -44,6 +44,21 @@ async def list_user_api_tokens(
     return list(result.scalars().all())
 
 
+async def count_active_user_api_tokens(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(UserAPIToken).where(
+            UserAPIToken.user_id == user_id,
+            UserAPIToken.is_active.is_(True),
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def get_user_api_token_by_id(
     session: AsyncSession,
     user_id: uuid.UUID,

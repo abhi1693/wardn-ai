@@ -61,6 +61,7 @@ from app.modules.guardrails.service import (
     GuardrailEvaluationContext,
     evaluate_tool_call_guardrails,
 )
+from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.exceptions import InvalidLLMProviderCredentialAuthError
 from app.modules.llm_providers.models import LLMProviderCredential
@@ -511,6 +512,7 @@ async def create_agent(
         name=name,
     ):
         raise DuplicateAgentError("agent name already exists")
+    await require_agent_create_limit(session, user, organization_id, workspace_id)
     provider_credential = await validate_provider_credential(
         session,
         user,
@@ -535,6 +537,58 @@ async def create_agent(
     await session.flush()
     await session.refresh(agent)
     return agent_response(agent, server_count=0, tool_count=0)
+
+
+async def require_agent_create_limit(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+) -> None:
+    organization_agent_count = await repository.count_active_agents_for_organization(
+        session,
+        organization_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.AGENTS_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=organization_agent_count,
+    )
+    if workspace_id is None:
+        return
+
+    workspace_agent_count = await repository.count_active_agents_for_workspace(
+        session,
+        workspace_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.AGENTS_PER_WORKSPACE,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=workspace_agent_count,
+    )
+    user_workspace_agent_count = (
+        await repository.count_active_agents_created_by_user_for_workspace(
+            session,
+            workspace_id=workspace_id,
+            user_id=user.id,
+        )
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.AGENTS_PER_WORKSPACE_PER_USER,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=user_workspace_agent_count,
+    )
 
 
 async def create_workspace_agent(
@@ -653,6 +707,7 @@ async def quick_start_workspace_agent(
         name=QUICK_START_AGENT_NAME,
     )
     if agent is None:
+        await require_agent_create_limit(session, user, organization_id, workspace_id)
         credential, model_name = await select_quick_start_credential_and_model(
             session,
             user,
@@ -703,6 +758,7 @@ async def quick_start_workspace_agent(
     await sync_quick_start_agent_tools(session, agent, workspace_id)
     server_count = await repository.count_agent_servers(session, agent.id)
     tool_count = await repository.count_agent_tools(session, agent.id)
+    await require_workspace_conversation_create_limit(session, user, organization_id, workspace_id)
     conversation = await repository.create_workspace_conversation(
         session,
         organization_id=organization_id,
@@ -714,6 +770,43 @@ async def quick_start_workspace_agent(
         agent=agent_response(agent, server_count=server_count, tool_count=tool_count),
         conversation=conversation_response(conversation),
         messages=[],
+    )
+
+
+async def require_workspace_conversation_create_limit(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> None:
+    workspace_conversation_count = await repository.count_active_workspace_conversations(
+        session,
+        workspace_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.WORKSPACE_CONVERSATIONS_PER_WORKSPACE,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=workspace_conversation_count,
+    )
+    user_workspace_conversation_count = (
+        await repository.count_active_workspace_conversations_created_by_user(
+            session,
+            workspace_id=workspace_id,
+            user_id=user.id,
+        )
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=user_workspace_conversation_count,
     )
 
 

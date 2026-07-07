@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
+from app.modules.limits.exceptions import LimitExceededError
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPCatalogSourceError,
@@ -175,6 +176,8 @@ async def create_organization_mcp_catalog_source(
         response = await create_catalog_source(session, current_user, organization_id, payload)
     except DuplicateMCPCatalogSourceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except (SecretsError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await session.commit()
@@ -338,6 +341,8 @@ async def create_organization_mcp_server_version(
             status_code=status.HTTP_409_CONFLICT,
             detail="server version already exists",
         ) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     await session.commit()
     return response
 
@@ -568,6 +573,8 @@ async def install_workspace_mcp_server_version(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server version not found",
         ) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except MCPServerInstallationFailedError as exc:
@@ -761,6 +768,8 @@ async def install_mcp_server_version(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server version not found",
         ) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except MCPServerInstallationFailedError as exc:
@@ -939,6 +948,8 @@ async def create_mcp_server_version(
             status_code=status.HTTP_409_CONFLICT,
             detail="server version already exists",
         ) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     await session.commit()
     return response
 

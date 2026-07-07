@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.organizations.models import (
@@ -180,3 +180,53 @@ async def get_workspace_membership(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def count_active_workspaces_for_organization(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Workspace)
+        .where(
+            Workspace.organization_id == organization_id,
+            Workspace.status != "archived",
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_active_workspaces_created_by_user(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Workspace)
+        .where(
+            Workspace.created_by_id == user_id,
+            Workspace.status != "archived",
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_active_workspaces_created_by_user_for_organization(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count())
+        .select_from(Workspace)
+        .where(
+            Workspace.organization_id == organization_id,
+            Workspace.created_by_id == user_id,
+            Workspace.status != "archived",
+        )
+    )
+    return int(result.scalar_one())

@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.limits import service as limits_service
 from app.modules.organizations.service import require_organization_admin, require_workspace_admin
 from app.modules.secrets import repository
 from app.modules.secrets.exceptions import (
@@ -179,6 +180,29 @@ async def create_secret_store(
         provider,
         payload.config,
     )
+    store_count = await repository.count_stores_for_organization(session, organization_id)
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.SECRET_STORES_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=store_count,
+    )
+    if payload.workspace_id is not None:
+        workspace_store_count = await repository.count_stores_for_workspace(
+            session,
+            payload.workspace_id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.SECRET_STORES_PER_WORKSPACE,
+            scope_chain=[
+                ("workspace", payload.workspace_id),
+                ("organization", organization_id),
+            ],
+            current_count=workspace_store_count,
+        )
     store = SecretStore(
         organization_id=organization_id,
         workspace_id=payload.workspace_id,
@@ -359,6 +383,29 @@ async def create_secret_handle(
         display_name=display_name,
     ):
         raise DuplicateSecretHandleError("secret handle display name already exists")
+    handle_count = await repository.count_handles_for_organization(session, organization_id)
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.SECRET_HANDLES_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=handle_count,
+    )
+    if payload.workspace_id is not None:
+        workspace_handle_count = await repository.count_handles_for_workspace(
+            session,
+            payload.workspace_id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.SECRET_HANDLES_PER_WORKSPACE,
+            scope_chain=[
+                ("workspace", payload.workspace_id),
+                ("organization", organization_id),
+            ],
+            current_count=workspace_handle_count,
+        )
     handle = SecretHandle(
         organization_id=organization_id,
         workspace_id=payload.workspace_id,

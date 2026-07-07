@@ -109,6 +109,21 @@ async def count_versions_for_name(
     return result.scalar_one()
 
 
+async def count_server_versions_for_organization(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(MCPServerVersion).where(
+            MCPServerVersion.organization_id == organization_id,
+            MCPServerVersion.status != "deleted",
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def get_latest_visible_version(
     session: AsyncSession,
     name: str,
@@ -222,6 +237,20 @@ async def list_installations(
     return list(result.scalars().all())
 
 
+async def count_installations_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(MCPServerInstallation).where(
+            MCPServerInstallation.workspace_id == workspace_id,
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def delete_installation(session: AsyncSession, installation: MCPServerInstallation) -> None:
     await session.delete(installation)
 
@@ -237,6 +266,20 @@ async def list_catalog_sources(
     )
     result = await session.execute(statement)
     return list(result.scalars().all())
+
+
+async def count_catalog_sources_for_organization(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(MCPCatalogSource).where(
+            MCPCatalogSource.organization_id == organization_id,
+        )
+    )
+    return int(result.scalar_one())
 
 
 async def get_catalog_source(

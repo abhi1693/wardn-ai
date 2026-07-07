@@ -3577,6 +3577,118 @@
         "title": "OrganizationUpdate",
         "type": "object"
       },
+      "ResourceLimitListResponse": {
+        "properties": {
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceLimitRead"
+            },
+            "title": "Limits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "limits"
+        ],
+        "title": "ResourceLimitListResponse",
+        "type": "object"
+      },
+      "ResourceLimitRead": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "limitKey": {
+            "title": "Limitkey",
+            "type": "string"
+          },
+          "scopeId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopeid"
+          },
+          "scopeType": {
+            "title": "Scopetype",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "scopeType",
+          "scopeId",
+          "limitKey",
+          "value",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ResourceLimitRead",
+        "type": "object"
+      },
+      "ResourceLimitUpsert": {
+        "properties": {
+          "limitKey": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Limitkey",
+            "type": "string"
+          },
+          "scopeId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopeid"
+          },
+          "scopeType": {
+            "enum": [
+              "organization",
+              "workspace"
+            ],
+            "title": "Scopetype",
+            "type": "string"
+          },
+          "value": {
+            "minimum": 0.0,
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scopeType",
+          "limitKey",
+          "value"
+        ],
+        "title": "ResourceLimitUpsert",
+        "type": "object"
+      },
       "SecretHandleCreate": {
         "properties": {
           "displayName": {
@@ -5248,6 +5360,273 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/limits": {
+      "get": {
+        "operationId": "limits_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scopeType",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scopetype"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scopeId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scopeid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limitKey",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limitkey"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceLimitListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Limits Route",
+        "tags": [
+          "limits"
+        ]
+      },
+      "put": {
+        "operationId": "limits_upsert",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceLimitUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceLimitRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Limit Route",
+        "tags": [
+          "limits"
+        ]
+      }
+    },
+    "/api/v1/limits/{limit_id}": {
+      "delete": {
+        "operationId": "limits_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "limit_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Limit Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Limit Route",
+        "tags": [
+          "limits"
         ]
       }
     },

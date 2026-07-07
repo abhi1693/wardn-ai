@@ -22,6 +22,8 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/auth/oidc/login",
         "/api/v1/health/live",
         "/api/v1/health/ready",
+        "/api/v1/limits",
+        "/api/v1/limits/{limit_id}",
         "/api/v1/mcp/gateway",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
@@ -198,6 +200,26 @@ def test_bootstrap_openapi_contract() -> None:
     assert bootstrap["responses"]["409"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ErrorResponse"
     }
+
+
+def test_limits_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    limits = schema["paths"]["/api/v1/limits"]
+    limit = schema["paths"]["/api/v1/limits/{limit_id}"]
+
+    assert limits["get"]["operationId"] == "limits_list"
+    assert limits["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ResourceLimitListResponse"
+    }
+    assert limits["put"]["operationId"] == "limits_upsert"
+    assert limits["put"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ResourceLimitUpsert"
+    }
+    assert limits["put"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ResourceLimitRead"
+    }
+    assert limit["delete"]["operationId"] == "limits_delete"
+    assert limit["delete"]["responses"]["204"]["description"] == "Successful Response"
 
 
 def test_auth_openapi_contract() -> None:

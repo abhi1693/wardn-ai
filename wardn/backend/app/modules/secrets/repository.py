@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.secrets.models import SecretHandle, SecretStore
@@ -59,6 +59,34 @@ async def get_store_by_name(
     return result.scalar_one_or_none()
 
 
+async def count_stores_for_organization(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(SecretStore).where(
+            SecretStore.organization_id == organization_id,
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_stores_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(SecretStore).where(
+            SecretStore.workspace_id == workspace_id,
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def list_handles(
     session: AsyncSession,
     *,
@@ -91,6 +119,34 @@ async def get_handle(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def count_handles_for_organization(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(SecretHandle).where(
+            SecretHandle.organization_id == organization_id,
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_handles_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> int:
+    if not hasattr(session, "execute"):
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(SecretHandle).where(
+            SecretHandle.workspace_id == workspace_id,
+        )
+    )
+    return int(result.scalar_one())
 
 
 async def get_handle_by_display_name(

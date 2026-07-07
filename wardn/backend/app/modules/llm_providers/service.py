@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository
 from app.modules.llm_providers.exceptions import (
     DuplicateLLMProviderCredentialError,
@@ -872,6 +873,46 @@ async def create_provider_credential(
         name=name,
     ):
         raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+    credential_count = await repository.count_credentials_for_organization(
+        session,
+        organization_id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.LLM_PROVIDER_CREDENTIALS_PER_ORGANIZATION,
+        scope_chain=[
+            ("organization", organization_id),
+        ],
+        current_count=credential_count,
+    )
+    if workspace_id is not None:
+        workspace_credential_count = await repository.count_credentials_for_workspace(
+            session,
+            workspace_id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.LLM_PROVIDER_CREDENTIALS_PER_WORKSPACE,
+            scope_chain=[
+                ("workspace", workspace_id),
+                ("organization", organization_id),
+            ],
+            current_count=workspace_credential_count,
+        )
+    if payload.visibility == "user":
+        user_credential_count = await repository.count_credentials_for_user(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.LLM_PROVIDER_CREDENTIALS_PER_USER,
+            scope_chain=[
+                ("organization", organization_id),
+            ],
+            current_count=user_credential_count,
+        )
     auth_method = payload.auth_method
     oauth_provider = normalize_oauth_provider(payload.oauth_provider)
     provider = normalize_credential_provider(

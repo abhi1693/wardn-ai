@@ -17,6 +17,7 @@ from app.modules.guardrails.schemas import (
     GuardrailPolicyRead,
     GuardrailPolicyUpdate,
 )
+from app.modules.limits import service as limits_service
 from app.modules.organizations.service import (
     require_workspace_admin,
     require_workspace_member,
@@ -279,6 +280,30 @@ async def create_guardrail_policy(
         organization_id=organization_id,
         workspace_id=workspace_id,
         name=name,
+    )
+    policy_count = await repository.count_policies_for_workspace(session, workspace_id)
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.GUARDRAIL_POLICIES_PER_WORKSPACE,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=policy_count,
+    )
+    user_policy_count = await repository.count_policies_created_by_user_for_workspace(
+        session,
+        workspace_id=workspace_id,
+        user_id=user.id,
+    )
+    await limits_service.require_limit_available(
+        session,
+        limit_key=limits_service.GUARDRAIL_POLICIES_PER_WORKSPACE_PER_USER,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+        current_count=user_policy_count,
     )
     policy = GuardrailPolicy(
         organization_id=organization_id,
