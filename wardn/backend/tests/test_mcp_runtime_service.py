@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_runtime import repository, service
@@ -18,6 +19,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
         self.flushed = False
+        self.rolled_back = False
 
     def add(self, instance: object) -> None:
         if getattr(instance, "id", None) is None:
@@ -26,6 +28,36 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flushed = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+    def begin_nested(self):
+        return FakeNestedTransaction()
+
+
+class FakeNestedTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class RuntimeSessionConflictSession(FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_count = 0
+
+    async def flush(self) -> None:
+        self.flushed = True
+        self.flush_count += 1
+        if self.flush_count == 1:
+            raise IntegrityError(
+                "INSERT INTO mcp_runtime_sessions",
+                {},
+                Exception(service.ACTIVE_RUNTIME_SESSION_CONSTRAINT),
+            )
 
 
 class FakeRuntimeManager:
@@ -392,6 +424,61 @@ async def test_ensure_runtime_session_reuses_matching_fingerprint(monkeypatch) -
     assert runtime_session.last_error == ""
     event = added_one(session, MCPRuntimeEvent)
     assert event.event_type == service.RUNTIME_EVENT_SESSION_REUSED
+    assert manager.stopped_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_runtime_session_recovers_from_concurrent_create(monkeypatch) -> None:
+    installation, server = installed_server()
+    session = RuntimeSessionConflictSession()
+    now = datetime.now(UTC)
+    runtime_session = MCPRuntimeSession(
+        installation_id=installation.id,
+        server_name=server.name,
+        server_version=server.version,
+        runtime_provider="local",
+        runtime_kind="remote",
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        started_at=now,
+        ready_at=now,
+        last_used_at=now,
+        expires_at=now + timedelta(minutes=5),
+        stopped_at=None,
+        failure_count=0,
+        last_error="old",
+    )
+    runtime_session.id = uuid.uuid4()
+    lookups = 0
+
+    async def get_active_runtime_session(*args, **kwargs):
+        nonlocal lookups
+        lookups += 1
+        return None if lookups == 1 else runtime_session
+
+    monkeypatch.setattr(repository, "get_active_runtime_session", get_active_runtime_session)
+
+    manager = FakeRuntimeManager()
+
+    result = await service.ensure_runtime_session(
+        session,
+        installation,
+        server,
+        manager=manager,
+        now=now,
+    )
+
+    assert result is runtime_session
+    assert session.rolled_back is False
+    assert session.flush_count == 2
+    assert runtime_session.status == "running"
+    assert runtime_session.last_error == ""
+    assert [event.event_type for event in added_events(session)] == [
+        service.RUNTIME_EVENT_SESSION_REUSED,
+    ]
     assert manager.stopped_sessions == []
 
 

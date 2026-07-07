@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -46,6 +47,7 @@ RUNTIME_EVENT_REAPER_STOPPED = "runtime_reaper_stopped"
 RUNTIME_EVENT_SHUTDOWN_STOP_FAILED = "runtime_shutdown_stop_failed"
 RUNTIME_SUMMARY_RECENT_WINDOW = timedelta(hours=24)
 SECRET_HANDLE_REF_TYPE = "secret_handle"
+ACTIVE_RUNTIME_SESSION_CONSTRAINT = "uq_mcp_runtime_sessions_one_active_per_installation"
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,42 @@ def add_runtime_event(
             now=now,
         )
     )
+
+
+def is_active_runtime_session_conflict(exc: IntegrityError) -> bool:
+    return ACTIVE_RUNTIME_SESSION_CONSTRAINT in str(exc)
+
+
+async def reuse_conflicting_runtime_session(
+    session: AsyncSession,
+    *,
+    installation_id: UUID,
+    config_fingerprint: str,
+    expires_at: datetime,
+    now: datetime,
+) -> MCPRuntimeSession | None:
+    existing = await repository.get_active_runtime_session(
+        session,
+        installation_id,
+        now=now,
+    )
+    if existing is None or existing.config_fingerprint != config_fingerprint:
+        return None
+
+    existing.status = "running"
+    existing.last_used_at = now
+    existing.expires_at = expires_at
+    existing.last_error = ""
+    add_runtime_event(
+        session,
+        existing,
+        RUNTIME_EVENT_SESSION_REUSED,
+        message="Runtime session reused after concurrent creation.",
+        metadata={"status": existing.status, "reason": "concurrent_create"},
+        now=now,
+    )
+    await session.flush()
+    return existing
 
 
 def payload_size_bytes(payload: Any) -> int:
@@ -337,8 +375,23 @@ async def ensure_runtime_session(
         now=now,
         expires_at=expires_at,
     )
-    session.add(runtime_session)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(runtime_session)
+            await session.flush()
+    except IntegrityError as exc:
+        if not is_active_runtime_session_conflict(exc):
+            raise
+        existing = await reuse_conflicting_runtime_session(
+            session,
+            installation_id=installation.id,
+            config_fingerprint=config_fingerprint,
+            expires_at=expires_at,
+            now=now,
+        )
+        if existing is None:
+            raise
+        return existing
     add_runtime_event(
         session,
         runtime_session,
