@@ -1,7 +1,7 @@
 {
   "name": "@wardn/web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "scripts": {
     "api:generate": "orval --config ./orval.config.mjs",
     "dev": "next dev",

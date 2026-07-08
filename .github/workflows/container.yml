@@ -1,0 +1,57 @@
+name: Container Image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver image version without a leading v
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backend:
+    name: Backend linux/arm64
+    uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
+    with:
+      runs-on: ubuntu-24.04-arm
+      image: ghcr.io/abhi1693/wardn-ai-backend
+      context: wardn/backend
+      file: wardn/backend/Dockerfile
+      platforms: linux/arm64
+      cache-scope: wardn-ai-backend-arm64
+      build-args: |
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+      tags: |
+        type=semver,pattern={{version}}
+        type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+      labels: |
+        org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
+        org.opencontainers.image.title=wardn-ai-backend
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  frontend:
+    name: Frontend linux/arm64
+    uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
+    with:
+      runs-on: ubuntu-24.04-arm
+      image: ghcr.io/abhi1693/wardn-ai-frontend
+      context: .
+      file: wardn/frontend/Dockerfile
+      platforms: linux/arm64
+      cache-scope: wardn-ai-frontend-arm64
+      build-args: |
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+      tags: |
+        type=semver,pattern={{version}}
+        type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+      labels: |
+        org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
+        org.opencontainers.image.title=wardn-ai-frontend
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}

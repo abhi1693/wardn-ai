@@ -30,6 +30,34 @@ Frontend code uses TypeScript, React, Next.js App Router, ESLint, and shadcn-sty
 
 Backend tests use `pytest` and `pytest-asyncio`; place tests in `wardn/backend/tests/` with names like `test_mcp_gateway.py`. Add focused tests for service behavior, OpenAPI contracts, and error paths. For frontend changes, run `npm run web:lint` and `npm run web:build`.
 
+## Release Checklist
+
+Use this checklist when asked to release Wardn AI and related home-lab workloads.
+
+1. Verify the Wardn AI repo before release:
+   - Run `npm run backend:lint`.
+   - Run `npm run backend:test`.
+   - Run `npm run web:api:generate`.
+   - Run `npm run web:lint`.
+   - Run `npm run web:build`.
+   - Commit and push Wardn AI changes to `master`.
+
+2. Publish the release:
+   - Create the next Wardn AI GitHub release tag, for example `v0.0.x`.
+   - Watch the container image workflow until it succeeds.
+
+3. Confirm images before updating workloads:
+   - Check the expected GHCR tags exist for Wardn AI backend and frontend.
+   - Check the `registry.home/ghcr.io/...` mirror resolves those same tags.
+
+4. Update home-lab workloads:
+   - Work in `/home/asaharan/PycharmProjects/home-lab`.
+   - Update only Wardn AI related manifests under `kubernetes/projects/applications/apps/wardn-ai`.
+   - Run `kubectl kustomize kubernetes/projects/applications/apps/wardn-ai`.
+   - Commit and push home-lab changes to `master`.
+
+5. Do not apply Kubernetes workloads manually unless explicitly asked.
+
 ## Commit & Pull Request Guidelines
 
 Recent commits use short imperative summaries, for example `Implement MCP install validation flow`. Keep commits focused and include generated OpenAPI/Orval files when API schemas change.

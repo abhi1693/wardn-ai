@@ -151,14 +151,38 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_agent_tool_approvals_workspace_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_tool_schema_id"), table_name="agent_tool_approvals")
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_workspace_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_tool_schema_id"),
+        table_name="agent_tool_approvals",
+    )
     op.drop_index(op.f("ix_agent_tool_approvals_status"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_requested_by_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_organization_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_installation_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_decided_by_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_conversation_id"), table_name="agent_tool_approvals")
-    op.drop_index(op.f("ix_agent_tool_approvals_agent_run_id"), table_name="agent_tool_approvals")
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_requested_by_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_organization_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_installation_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_decided_by_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_conversation_id"),
+        table_name="agent_tool_approvals",
+    )
+    op.drop_index(
+        op.f("ix_agent_tool_approvals_agent_run_id"),
+        table_name="agent_tool_approvals",
+    )
     op.drop_index(op.f("ix_agent_tool_approvals_agent_id"), table_name="agent_tool_approvals")
     op.drop_table("agent_tool_approvals")

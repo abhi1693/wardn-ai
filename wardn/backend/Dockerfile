@@ -13,6 +13,10 @@ COPY alembic.ini ./
 
 RUN pip install --no-cache-dir .
 
+ARG APP_VERSION=0.0.0
+ENV APP_VERSION=$APP_VERSION
+LABEL org.opencontainers.image.version=$APP_VERSION
+
 USER wardn
 
 EXPOSE 8000

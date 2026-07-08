@@ -1,8 +1,18 @@
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+APP_PACKAGE_NAME = "wardn-api"
+
+
+def package_version() -> str:
+    try:
+        return version(APP_PACKAGE_NAME)
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 class Settings(BaseSettings):
@@ -15,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Wardn AI API"
-    app_version: str = "0.1.0"
+    app_version: str = package_version()
     environment: str = "local"
     api_prefix: str = "/api/v1"
     log_level: str = "INFO"

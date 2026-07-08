@@ -8,7 +8,6 @@ Create Date: 2026-06-21 00:09:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision: str = "202606210009"
@@ -24,7 +23,12 @@ def upgrade() -> None:
     if "config_name" not in columns:
         op.add_column(
             "mcp_server_installations",
-            sa.Column("config_name", sa.String(length=100), nullable=False, server_default="default"),
+            sa.Column(
+                "config_name",
+                sa.String(length=100),
+                nullable=False,
+                server_default="default",
+            ),
         )
 
     unique_constraints = inspector.get_unique_constraints("mcp_server_installations")
@@ -62,7 +66,10 @@ def downgrade() -> None:
             "mcp_server_installations",
             type_="unique",
         )
-    if not any(constraint.get("column_names") == ["server_name"] for constraint in unique_constraints):
+    if not any(
+        constraint.get("column_names") == ["server_name"]
+        for constraint in unique_constraints
+    ):
         op.create_unique_constraint(
             "mcp_server_installations_server_name_key",
             "mcp_server_installations",

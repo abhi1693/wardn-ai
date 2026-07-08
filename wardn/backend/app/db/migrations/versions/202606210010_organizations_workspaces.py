@@ -9,9 +9,8 @@ from collections.abc import Sequence
 from uuid import uuid4
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "202606210010"
 down_revision: str | None = "202606210009"
@@ -37,8 +36,18 @@ def upgrade() -> None:
             sa.Column("status", sa.String(length=32), nullable=False, server_default="active"),
             sa.Column("created_by_id", postgresql.UUID(as_uuid=True), nullable=True),
             sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
             sa.ForeignKeyConstraint(["created_by_id"], ["users.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("slug"),
@@ -55,17 +64,43 @@ def upgrade() -> None:
             sa.Column("role", sa.String(length=32), nullable=False, server_default="member"),
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
             sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("organization_id", "user_id", name="uq_organization_memberships_org_user"),
+            sa.UniqueConstraint(
+                "organization_id",
+                "user_id",
+                name="uq_organization_memberships_org_user",
+            ),
         )
-        op.create_index("ix_organization_memberships_is_active", "organization_memberships", ["is_active"])
-        op.create_index("ix_organization_memberships_organization_id", "organization_memberships", ["organization_id"])
+        op.create_index(
+            "ix_organization_memberships_is_active",
+            "organization_memberships",
+            ["is_active"],
+        )
+        op.create_index(
+            "ix_organization_memberships_organization_id",
+            "organization_memberships",
+            ["organization_id"],
+        )
         op.create_index("ix_organization_memberships_role", "organization_memberships", ["role"])
-        op.create_index("ix_organization_memberships_user_id", "organization_memberships", ["user_id"])
+        op.create_index(
+            "ix_organization_memberships_user_id",
+            "organization_memberships",
+            ["user_id"],
+        )
 
     if "workspaces" not in tables:
         op.create_table(
@@ -77,8 +112,18 @@ def upgrade() -> None:
             sa.Column("status", sa.String(length=32), nullable=False, server_default="active"),
             sa.Column("created_by_id", postgresql.UUID(as_uuid=True), nullable=True),
             sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
             sa.ForeignKeyConstraint(["created_by_id"], ["users.id"], ondelete="SET NULL"),
             sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
@@ -97,17 +142,39 @@ def upgrade() -> None:
             sa.Column("role", sa.String(length=32), nullable=False, server_default="member"),
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("workspace_id", "user_id", name="uq_workspace_memberships_workspace_user"),
+            sa.UniqueConstraint(
+                "workspace_id",
+                "user_id",
+                name="uq_workspace_memberships_workspace_user",
+            ),
         )
-        op.create_index("ix_workspace_memberships_is_active", "workspace_memberships", ["is_active"])
+        op.create_index(
+            "ix_workspace_memberships_is_active",
+            "workspace_memberships",
+            ["is_active"],
+        )
         op.create_index("ix_workspace_memberships_role", "workspace_memberships", ["role"])
         op.create_index("ix_workspace_memberships_user_id", "workspace_memberships", ["user_id"])
-        op.create_index("ix_workspace_memberships_workspace_id", "workspace_memberships", ["workspace_id"])
+        op.create_index(
+            "ix_workspace_memberships_workspace_id",
+            "workspace_memberships",
+            ["workspace_id"],
+        )
 
     bind = op.get_bind()
     default_org_id = uuid4()
@@ -146,7 +213,16 @@ def upgrade() -> None:
                 insert into workspaces
                     (id, organization_id, name, slug, description, status, created_at, updated_at)
                 values
-                    (:id, :organization_id, 'Default Workspace', 'default', '', 'active', now(), now())
+                    (
+                        :id,
+                        :organization_id,
+                        'Default Workspace',
+                        'default',
+                        '',
+                        'active',
+                        now(),
+                        now()
+                    )
                 """
             ),
             {"id": default_workspace_id, "organization_id": default_org_id},
@@ -196,7 +272,11 @@ def upgrade() -> None:
             "mcp_server_installations",
             sa.Column("workspace_id", postgresql.UUID(as_uuid=True), nullable=True),
         )
-        op.create_index("ix_mcp_server_installations_workspace_id", "mcp_server_installations", ["workspace_id"])
+        op.create_index(
+            "ix_mcp_server_installations_workspace_id",
+            "mcp_server_installations",
+            ["workspace_id"],
+        )
         op.create_foreign_key(
             "fk_mcp_server_installations_workspace_id_workspaces",
             "mcp_server_installations",
