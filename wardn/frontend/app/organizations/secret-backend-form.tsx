@@ -128,7 +128,6 @@ export function SecretBackendForm({
 
     const config: Record<string, unknown> = {
       baseUrl: baseUrl.trim(),
-      namespace: organizationId,
       kvMount: standardKvMount,
       authMount: authMethod,
       tlsVerify,
