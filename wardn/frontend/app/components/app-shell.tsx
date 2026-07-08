@@ -4,7 +4,6 @@ import {
   Activity,
   Home,
   KeyRound,
-  Layers3,
   MessageSquare,
   PlugZap,
   Replace,
@@ -19,6 +18,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { WorkspaceContext } from "@/lib/workspace-types";
 
+import { BrandMark } from "./brand-mark";
 import { LogoutButton } from "./logout-button";
 
 function organizationNavItems(workspaceContext?: WorkspaceContext) {
@@ -211,9 +211,7 @@ export function AppShell({
       <aside className="fixed left-0 top-0 z-50 flex h-screen w-[252px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
         <div className="mb-6 px-2 max-lg:mb-3">
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-md border border-border bg-card text-foreground shadow-[var(--shadow-card)]">
-              <Layers3 className="size-5" />
-            </div>
+            <BrandMark className="size-8" sizes="32px" />
             <div className="min-w-0">
               <div className="truncate text-[15px] font-semibold leading-5 text-foreground">
                 Wardn AI

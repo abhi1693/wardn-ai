@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BrandMark } from "@/app/components/brand-mark";
 
 type AuthConfig = {
   authMode: "local" | "oidc";
@@ -125,9 +126,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-[420px]">
         <CardHeader className="space-y-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
-              W
-            </div>
+            <BrandMark priority />
             <div className="text-sm font-semibold">Wardn AI</div>
           </div>
           <div>
