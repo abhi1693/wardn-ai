@@ -1,9 +1,17 @@
 "use client";
 
-import { Check, CheckCircle2, Copy, KeyRound, Loader2, PlugZap, ShieldCheck } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  PlugZap,
+  ShieldCheck,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -85,16 +93,25 @@ function authMethodForProvider(provider: CredentialProvider) {
   return provider === "openai_chatgpt" ? "oauth" : "api_key";
 }
 
-function shellQuote(value: string) {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
+type ChatgptDeviceFlowTarget =
+  | { credentialId: string }
+  | {
+      name: string;
+      secretStoreId: string;
+      visibility: CredentialVisibility;
+      workspaceId: string | null;
+    };
+
+type ChatgptDeviceFlow = {
+  deviceAuthId: string;
+  userCode: string;
+  verificationUrl: string;
+  intervalSeconds: number;
+  target: ChatgptDeviceFlowTarget;
+};
 
 export function CredentialForm({
   credential,
-  currentUser,
   organization,
   secretStores,
   workspaces,
@@ -114,7 +131,9 @@ export function CredentialForm({
   const [isActive, setIsActive] = useState(credential?.isActive ?? true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
-  const [copiedCommand, setCopiedCommand] = useState(false);
+  const [isStartingChatgpt, setIsStartingChatgpt] = useState(false);
+  const [isCompletingChatgpt, setIsCompletingChatgpt] = useState(false);
+  const [chatgptDeviceFlow, setChatgptDeviceFlow] = useState<ChatgptDeviceFlow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -155,6 +174,13 @@ export function CredentialForm({
       ? selectedSecretStoreId
       : preferredSecretStore?.id ?? availableSecretStores[0]?.id ?? "";
   const hasCredentialName = name.trim().length > 0;
+  const canStartChatgptDeviceFlow =
+    isChatgptCredential &&
+    hasCredentialName &&
+    !isStartingChatgpt &&
+    !isCompletingChatgpt &&
+    (isEditing || effectiveSecretStoreId.length > 0) &&
+    (visibility !== "workspace" || workspaceId.length > 0);
 
   const canSave =
     hasCredentialName &&
@@ -166,80 +192,120 @@ export function CredentialForm({
         : apiKey.trim().length > 0 && effectiveSecretStoreId.length > 0
       : !isChatgptConnectorCreate);
 
-  const chatgptCommand = useMemo(() => {
-    if (!isChatgptCredential) {
-      return "";
+  const completeChatgptDeviceFlow = useCallback(async (flow: ChatgptDeviceFlow) => {
+    if (isCompletingChatgpt) {
+      return;
     }
-    if (!isEditing && !hasCredentialName) {
-      return "";
-    }
+    setIsCompletingChatgpt(true);
+    setError(null);
 
-    const command = [
-      "cd wardn/backend",
-      "&&",
-      "../../.venv/bin/python",
-      "-m",
-      "app.manage",
-      "connectchatgpt",
-      "--flow",
-      "device",
-      "--no-browser",
-      "--organization-id",
-      shellQuote(organization.id),
-      "--user-email",
-      shellQuote(currentUser?.email ?? "<user-email>"),
-    ];
-
-    if (credentialId) {
-      command.push("--credential-id", shellQuote(credentialId));
-    } else {
-      command.push(
-        "--secret-store-id",
-        shellQuote(effectiveSecretStoreId || "<secret-store-id>"),
-        "--name",
-        shellQuote(name.trim()),
-        "--visibility",
-        shellQuote(visibility)
+    try {
+      const response = await fetch(
+        `/api/organizations/${organization.id}/llm/provider-credentials/chatgpt/device/complete`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            deviceAuthId: flow.deviceAuthId,
+            userCode: flow.userCode,
+            ...flow.target,
+          }),
+        }
       );
-      if (visibility === "workspace") {
-        command.push("--workspace-id", shellQuote(workspaceId || "<workspace-id>"));
+      const data = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "ChatGPT connection could not be completed."));
       }
+      const result = data as { status?: unknown };
+      if (result.status === "pending") {
+        return;
+      }
+      if (result.status !== "connected") {
+        throw new Error("ChatGPT connection returned an unexpected response.");
+      }
+      setChatgptDeviceFlow(null);
+      if (isEditing) {
+        setNotice("ChatGPT credential reconnected.");
+        router.refresh();
+      } else {
+        router.push(`/org/${organization.id}/llm-credentials`);
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "ChatGPT connection could not be completed."
+      );
+    } finally {
+      setIsCompletingChatgpt(false);
     }
-    return command.join(" ");
-  }, [
-    credentialId,
-    currentUser?.email,
-    effectiveSecretStoreId,
-    hasCredentialName,
-    isChatgptCredential,
-    isEditing,
-    name,
-    organization.id,
-    visibility,
-    workspaceId,
-  ]);
+  }, [isCompletingChatgpt, isEditing, organization.id, router]);
 
-  async function copyChatgptCommand() {
-    if (!chatgptCommand) {
+  async function startChatgptDeviceFlow() {
+    if (!canStartChatgptDeviceFlow) {
       return;
     }
 
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(chatgptCommand);
-    } else {
-      const field = document.createElement("textarea");
-      field.value = chatgptCommand;
-      field.setAttribute("readonly", "");
-      field.style.position = "fixed";
-      field.style.top = "-1000px";
-      document.body.appendChild(field);
-      field.select();
-      document.execCommand("copy");
-      document.body.removeChild(field);
+    setIsStartingChatgpt(true);
+    setChatgptDeviceFlow(null);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch(
+        `/api/organizations/${organization.id}/llm/provider-credentials/chatgpt/device/start`,
+        { method: "POST" }
+      );
+      const data = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "ChatGPT connection could not be started."));
+      }
+      const result = data as {
+        deviceAuthId?: unknown;
+        userCode?: unknown;
+        verificationUrl?: unknown;
+        intervalSeconds?: unknown;
+      };
+      if (
+        typeof result.deviceAuthId !== "string" ||
+        typeof result.userCode !== "string" ||
+        typeof result.verificationUrl !== "string"
+      ) {
+        throw new Error("ChatGPT connection returned an invalid device code.");
+      }
+      setChatgptDeviceFlow({
+        deviceAuthId: result.deviceAuthId,
+        userCode: result.userCode,
+        verificationUrl: result.verificationUrl,
+        intervalSeconds:
+          typeof result.intervalSeconds === "number" && result.intervalSeconds > 0
+            ? result.intervalSeconds
+            : 5,
+        target: credentialId
+          ? { credentialId }
+          : {
+              name: name.trim(),
+              secretStoreId: effectiveSecretStoreId,
+              visibility,
+              workspaceId: visibility === "workspace" ? workspaceId : null,
+            },
+      });
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "ChatGPT connection could not be started."
+      );
+    } finally {
+      setIsStartingChatgpt(false);
     }
-    setCopiedCommand(true);
-    window.setTimeout(() => setCopiedCommand(false), 1500);
   }
+
+  useEffect(() => {
+    if (!chatgptDeviceFlow || isCompletingChatgpt) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      void completeChatgptDeviceFlow(chatgptDeviceFlow);
+    }, Math.max(chatgptDeviceFlow.intervalSeconds, 2) * 1000);
+    return () => window.clearTimeout(timeout);
+  }, [chatgptDeviceFlow, completeChatgptDeviceFlow, isCompletingChatgpt]);
 
   async function submitCredential(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -448,56 +514,133 @@ export function CredentialForm({
                         />
                       )}
                     </div>
-                    {hasCredentialName ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <Label htmlFor="credential-chatgpt-command">
-                            ChatGPT connector command
-                          </Label>
+                    <div className="space-y-3 rounded-md border border-[var(--outline-variant)] bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium">ChatGPT device code</span>
+                            <span className="inline-flex items-center gap-1 rounded-md border border-[var(--outline-variant)] px-2 py-1 text-xs font-medium text-[var(--on-surface-variant)]">
+                              <PlugZap className="h-3.5 w-3.5" />
+                              Browser auth
+                            </span>
+                          </div>
+                          <p className="text-sm text-[var(--on-surface-variant)]">
+                            Open ChatGPT, enter the code, and Wardn will finish this credential.
+                          </p>
+                        </div>
+                        {chatgptDeviceFlow ? (
+                          <Button asChild type="button" variant="outline">
+                            <a
+                              href={chatgptDeviceFlow.verificationUrl}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <ExternalLink className="size-4" />
+                              Open ChatGPT
+                            </a>
+                          </Button>
+                        ) : (
                           <Button
-                            onClick={copyChatgptCommand}
-                            size="sm"
+                            disabled={!canStartChatgptDeviceFlow}
+                            onClick={startChatgptDeviceFlow}
+                            type="button"
+                          >
+                            {isStartingChatgpt ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <PlugZap className="size-4" />
+                            )}
+                            Connect ChatGPT
+                          </Button>
+                        )}
+                      </div>
+                      {chatgptDeviceFlow ? (
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                          <div className="rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-4 py-3">
+                            <div className="font-mono text-2xl font-semibold tracking-normal text-[var(--on-surface)]">
+                              {chatgptDeviceFlow.userCode}
+                            </div>
+                          </div>
+                          <Button
+                            disabled={isCompletingChatgpt}
+                            onClick={() => completeChatgptDeviceFlow(chatgptDeviceFlow)}
                             type="button"
                             variant="outline"
                           >
-                            {copiedCommand ? <Check /> : <Copy />}
-                            {copiedCommand ? "Copied" : "Copy"}
+                            {isCompletingChatgpt ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Check className="size-4" />
+                            )}
+                            {isCompletingChatgpt ? "Checking" : "Check status"}
                           </Button>
                         </div>
-                        <pre
-                          className="max-h-36 overflow-x-auto rounded-md border border-[var(--outline-variant)] bg-white p-3 text-xs leading-5 text-[var(--on-surface)]"
-                          id="credential-chatgpt-command"
-                        >
-                          <code>{chatgptCommand}</code>
-                        </pre>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <div className="text-sm font-medium">Reconnect ChatGPT</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-medium">Reconnect ChatGPT</div>
+                          <span className="inline-flex items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-white px-2 py-1 text-xs font-medium text-[var(--on-surface-variant)]">
+                            <PlugZap className="h-3.5 w-3.5" />
+                            Device code
+                          </span>
+                        </div>
                         <p className="mt-1 text-sm text-[var(--on-surface-variant)]">
-                          Run this command to replace the OAuth tokens for this credential.
+                          Open ChatGPT, enter the code, and Wardn will replace the stored tokens.
                         </p>
                       </div>
-                      <Button
-                        onClick={copyChatgptCommand}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        {copiedCommand ? <Check /> : <Copy />}
-                        {copiedCommand ? "Copied" : "Copy"}
-                      </Button>
+                      {chatgptDeviceFlow ? (
+                        <Button asChild type="button" variant="outline">
+                          <a
+                            href={chatgptDeviceFlow.verificationUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <ExternalLink className="size-4" />
+                            Open ChatGPT
+                          </a>
+                        </Button>
+                      ) : (
+                        <Button
+                          disabled={!canStartChatgptDeviceFlow}
+                          onClick={startChatgptDeviceFlow}
+                          type="button"
+                        >
+                          {isStartingChatgpt ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <PlugZap className="size-4" />
+                          )}
+                          Reconnect ChatGPT
+                        </Button>
+                      )}
                     </div>
-                    <pre
-                      className="max-h-36 overflow-x-auto rounded-md border border-[var(--outline-variant)] bg-white p-3 text-xs leading-5 text-[var(--on-surface)]"
-                      id="credential-chatgpt-reconnect-command"
-                    >
-                      <code>{chatgptCommand}</code>
-                    </pre>
+                    {chatgptDeviceFlow ? (
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                        <div className="rounded-md border border-[var(--outline-variant)] bg-white px-4 py-3">
+                          <div className="font-mono text-2xl font-semibold tracking-normal text-[var(--on-surface)]">
+                            {chatgptDeviceFlow.userCode}
+                          </div>
+                        </div>
+                        <Button
+                          disabled={isCompletingChatgpt}
+                          onClick={() => completeChatgptDeviceFlow(chatgptDeviceFlow)}
+                          type="button"
+                          variant="outline"
+                        >
+                          {isCompletingChatgpt ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Check className="size-4" />
+                          )}
+                          {isCompletingChatgpt ? "Checking" : "Check status"}
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>

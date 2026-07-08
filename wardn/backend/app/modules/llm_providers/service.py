@@ -21,6 +21,9 @@ from app.modules.llm_providers.exceptions import (
 )
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import (
+    ChatGPTDeviceAuthorizationCompleteRequest,
+    ChatGPTDeviceAuthorizationCompleteResponse,
+    ChatGPTDeviceAuthorizationStartResponse,
     LLMProviderCredentialCreate,
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
@@ -607,6 +610,202 @@ async def replace_chatgpt_oauth_credential_tokens(
     if isinstance(token_payload.get("scope"), str):
         credential.oauth_scopes = token_payload["scope"].split()
     await session.flush()
+
+
+def chatgpt_oauth_scopes(token_payload: dict[str, Any]) -> list[str]:
+    scope = token_payload.get("scope")
+    if isinstance(scope, str) and scope.strip():
+        return scope.split()
+    return CHATGPT_OAUTH_SCOPE.split()
+
+
+async def create_chatgpt_oauth_credential_from_tokens(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    *,
+    name: str,
+    secret_store_id: uuid.UUID,
+    visibility: str,
+    workspace_id: uuid.UUID | None,
+    token_payload: dict[str, Any],
+) -> LLMProviderCredentialRead:
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth token response did not include an access token"
+        )
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT OAuth token response did not include a refresh token"
+        )
+    normalized_name = normalize_name(name)
+    if await repository.get_credential_by_name(
+        session,
+        organization_id=organization_id,
+        name=normalized_name,
+    ):
+        raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+
+    scoped_workspace_id = await require_scope_permission(
+        session,
+        user,
+        organization_id,
+        visibility=visibility,
+        workspace_id=workspace_id,
+    )
+    user_id = user.id if visibility == "user" else None
+    handle_workspace_id = scoped_workspace_id if visibility == "workspace" else None
+    external_ref = llm_secret_path(
+        organization_id=organization_id,
+        workspace_id=scoped_workspace_id,
+        user_id=user_id,
+        provider=OPENAI_CHATGPT_PROVIDER,
+        name=normalized_name,
+    )
+    await write_secret_values(
+        session,
+        user,
+        organization_id,
+        secret_store_id,
+        workspace_id=handle_workspace_id,
+        external_ref=external_ref,
+        values={
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        },
+        purpose="oauth_token",
+    )
+    access_handle = await create_secret_handle(
+        session,
+        user,
+        organization_id,
+        SecretHandleCreate(
+            storeId=secret_store_id,
+            workspaceId=handle_workspace_id,
+            purpose="oauth_token",
+            displayName=secret_handle_display_name(normalized_name, "access token"),
+            externalRef=external_ref,
+            keyName="access_token",
+            metadata={"provider": "chatgpt", "credentialName": normalized_name},
+        ),
+    )
+    refresh_handle = await create_secret_handle(
+        session,
+        user,
+        organization_id,
+        SecretHandleCreate(
+            storeId=secret_store_id,
+            workspaceId=handle_workspace_id,
+            purpose="oauth_token",
+            displayName=secret_handle_display_name(normalized_name, "refresh token"),
+            externalRef=external_ref,
+            keyName="refresh_token",
+            metadata={"provider": "chatgpt", "credentialName": normalized_name},
+        ),
+    )
+    return await create_provider_credential(
+        session,
+        user,
+        organization_id,
+        LLMProviderCredentialCreate(
+            name=normalized_name,
+            provider=OPENAI_CHATGPT_PROVIDER,
+            visibility=visibility,  # type: ignore[arg-type]
+            workspaceId=scoped_workspace_id,
+            authMethod="oauth",
+            oauthProvider="chatgpt",
+            oauthAccessTokenSecretHandleId=access_handle.id,
+            oauthRefreshTokenSecretHandleId=refresh_handle.id,
+            oauthExpiresAt=expires_at_from_seconds(token_payload.get("expires_in")),
+            oauthScopes=chatgpt_oauth_scopes(token_payload),
+            oauthMetadata=chatgpt_oauth_metadata(access_token),
+        ),
+    )
+
+
+async def start_chatgpt_device_authorization(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+) -> ChatGPTDeviceAuthorizationStartResponse:
+    await require_organization_member(session, user, organization_id)
+    device_code = await request_chatgpt_device_code()
+    return ChatGPTDeviceAuthorizationStartResponse(
+        deviceAuthId=device_code.device_auth_id,
+        userCode=device_code.user_code,
+        verificationUrl=device_code.verification_url,
+        intervalSeconds=device_code.interval_seconds,
+    )
+
+
+async def complete_chatgpt_device_authorization(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    payload: ChatGPTDeviceAuthorizationCompleteRequest,
+) -> ChatGPTDeviceAuthorizationCompleteResponse:
+    device_code = ChatGPTDeviceCode(
+        device_auth_id=payload.device_auth_id.strip(),
+        user_code=payload.user_code.strip(),
+        verification_url=CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
+    )
+    authorization = await poll_chatgpt_device_authorization(device_code)
+    if authorization is None:
+        return ChatGPTDeviceAuthorizationCompleteResponse(status="pending")
+    token_payload = await exchange_chatgpt_oauth_code(
+        code=authorization.authorization_code,
+        code_verifier=authorization.code_verifier,
+        redirect_uri=CHATGPT_DEVICE_AUTH_CALLBACK_URL,
+    )
+    if payload.credential_id is not None:
+        credential = await repository.get_credential(
+            session,
+            organization_id=organization_id,
+            credential_id=payload.credential_id,
+        )
+        if (
+            credential is None
+            or credential.provider != OPENAI_CHATGPT_PROVIDER
+            or credential.auth_method != "oauth"
+            or credential.oauth_provider != "chatgpt"
+        ):
+            raise LLMProviderCredentialNotFoundError("provider credential not found")
+        if not user_can_see_credential(user, credential):
+            raise LLMProviderCredentialNotFoundError("provider credential not found")
+        await require_scope_permission(
+            session,
+            user,
+            organization_id,
+            visibility=credential.visibility,
+            workspace_id=credential.workspace_id,
+        )
+        await replace_chatgpt_oauth_credential_tokens(session, credential, token_payload)
+        await session.refresh(credential)
+        return ChatGPTDeviceAuthorizationCompleteResponse(
+            status="connected",
+            credential=credential_response(credential),
+        )
+
+    if payload.name is None or payload.secret_store_id is None:
+        raise InvalidLLMProviderCredentialAuthError(
+            "name and secretStoreId are required when creating a ChatGPT credential"
+        )
+    credential_response_payload = await create_chatgpt_oauth_credential_from_tokens(
+        session,
+        user,
+        organization_id,
+        name=payload.name,
+        secret_store_id=payload.secret_store_id,
+        visibility=payload.visibility,
+        workspace_id=payload.workspace_id,
+        token_payload=token_payload,
+    )
+    return ChatGPTDeviceAuthorizationCompleteResponse(
+        status="connected",
+        credential=credential_response_payload,
+    )
 
 
 def validate_auth_settings(

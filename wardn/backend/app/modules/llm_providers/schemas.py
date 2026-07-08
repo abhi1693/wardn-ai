@@ -155,3 +155,42 @@ class LLMProviderModelListResponse(BaseModel):
 class LLMProviderCredentialValidationResponse(BaseModel):
     ok: bool
     message: str = ""
+
+
+class ChatGPTDeviceAuthorizationStartResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    device_auth_id: str = Field(alias="deviceAuthId")
+    user_code: str = Field(alias="userCode")
+    verification_url: str = Field(alias="verificationUrl")
+    interval_seconds: int = Field(alias="intervalSeconds")
+
+
+class ChatGPTDeviceAuthorizationCompleteRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    device_auth_id: str = Field(alias="deviceAuthId", min_length=1)
+    user_code: str = Field(alias="userCode", min_length=1)
+    credential_id: uuid.UUID | None = Field(default=None, alias="credentialId")
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    secret_store_id: uuid.UUID | None = Field(default=None, alias="secretStoreId")
+    visibility: LLMProviderVisibility = "organization"
+    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ChatGPTDeviceAuthorizationCompleteRequest":
+        if self.credential_id is None:
+            if self.name is None:
+                raise ValueError("name is required when creating a ChatGPT credential")
+            if self.secret_store_id is None:
+                raise ValueError("secretStoreId is required when creating a ChatGPT credential")
+            if self.visibility == "workspace" and self.workspace_id is None:
+                raise ValueError("workspaceId is required for workspace-scoped credentials")
+            if self.visibility != "workspace" and self.workspace_id is not None:
+                raise ValueError("workspaceId is only valid for workspace-scoped credentials")
+        return self
+
+
+class ChatGPTDeviceAuthorizationCompleteResponse(BaseModel):
+    status: Literal["pending", "connected"]
+    credential: LLMProviderCredentialRead | None = None

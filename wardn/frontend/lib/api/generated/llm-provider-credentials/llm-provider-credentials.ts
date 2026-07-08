@@ -5,6 +5,9 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
+  ChatGPTDeviceAuthorizationCompleteRequest,
+  ChatGPTDeviceAuthorizationCompleteResponse,
+  ChatGPTDeviceAuthorizationStartResponse,
   ErrorResponse,
   HTTPValidationError,
   LLMProviderCredentialCreate,
@@ -142,6 +145,140 @@ export const llmProviderCredentialsCreate = async (organizationId: string,
 
   const data: llmProviderCredentialsCreateResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as llmProviderCredentialsCreateResponse
+}
+
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse200 = {
+  data: ChatGPTDeviceAuthorizationCompleteResponse
+  status: 200
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse409 = {
+  data: ErrorResponse
+  status: 409
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponseSuccess = (llmProviderCredentialsChatgptDeviceCompleteResponse200) & {
+  headers: Headers;
+};
+export type llmProviderCredentialsChatgptDeviceCompleteResponseError = (llmProviderCredentialsChatgptDeviceCompleteResponse400 | llmProviderCredentialsChatgptDeviceCompleteResponse403 | llmProviderCredentialsChatgptDeviceCompleteResponse404 | llmProviderCredentialsChatgptDeviceCompleteResponse409 | llmProviderCredentialsChatgptDeviceCompleteResponse422) & {
+  headers: Headers;
+};
+
+export type llmProviderCredentialsChatgptDeviceCompleteResponse = (llmProviderCredentialsChatgptDeviceCompleteResponseSuccess | llmProviderCredentialsChatgptDeviceCompleteResponseError)
+
+export const getLlmProviderCredentialsChatgptDeviceCompleteUrl = (organizationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/complete`
+}
+
+/**
+ * @summary Complete Chatgpt Device Authorization Route
+ */
+export const llmProviderCredentialsChatgptDeviceComplete = async (organizationId: string,
+    chatGPTDeviceAuthorizationCompleteRequest: ChatGPTDeviceAuthorizationCompleteRequest, options?: RequestInit): Promise<llmProviderCredentialsChatgptDeviceCompleteResponse> => {
+
+  const res = await fetch(getLlmProviderCredentialsChatgptDeviceCompleteUrl(organizationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(chatGPTDeviceAuthorizationCompleteRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: llmProviderCredentialsChatgptDeviceCompleteResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsChatgptDeviceCompleteResponse
+}
+
+
+export type llmProviderCredentialsChatgptDeviceStartResponse200 = {
+  data: ChatGPTDeviceAuthorizationStartResponse
+  status: 200
+}
+
+export type llmProviderCredentialsChatgptDeviceStartResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type llmProviderCredentialsChatgptDeviceStartResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type llmProviderCredentialsChatgptDeviceStartResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type llmProviderCredentialsChatgptDeviceStartResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type llmProviderCredentialsChatgptDeviceStartResponseSuccess = (llmProviderCredentialsChatgptDeviceStartResponse200) & {
+  headers: Headers;
+};
+export type llmProviderCredentialsChatgptDeviceStartResponseError = (llmProviderCredentialsChatgptDeviceStartResponse400 | llmProviderCredentialsChatgptDeviceStartResponse403 | llmProviderCredentialsChatgptDeviceStartResponse404 | llmProviderCredentialsChatgptDeviceStartResponse422) & {
+  headers: Headers;
+};
+
+export type llmProviderCredentialsChatgptDeviceStartResponse = (llmProviderCredentialsChatgptDeviceStartResponseSuccess | llmProviderCredentialsChatgptDeviceStartResponseError)
+
+export const getLlmProviderCredentialsChatgptDeviceStartUrl = (organizationId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/start`
+}
+
+/**
+ * @summary Start Chatgpt Device Authorization Route
+ */
+export const llmProviderCredentialsChatgptDeviceStart = async (organizationId: string, options?: RequestInit): Promise<llmProviderCredentialsChatgptDeviceStartResponse> => {
+
+  const res = await fetch(getLlmProviderCredentialsChatgptDeviceStartUrl(organizationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: llmProviderCredentialsChatgptDeviceStartResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsChatgptDeviceStartResponse
 }
 
 

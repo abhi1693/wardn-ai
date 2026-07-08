@@ -37,6 +37,14 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/llm/provider-credentials"
             "/{credential_id}/validate"
         ),
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/chatgpt/device/start"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/chatgpt/device/complete"
+        ),
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
@@ -292,6 +300,18 @@ def test_llm_provider_credentials_openapi_contract() -> None:
     models = schema["paths"][
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}/models"
     ]
+    chatgpt_device_start = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/chatgpt/device/start"
+        )
+    ]
+    chatgpt_device_complete = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/llm/provider-credentials"
+            "/chatgpt/device/complete"
+        )
+    ]
 
     assert credentials["get"]["operationId"] == "llm_provider_credentials_list"
     assert credentials["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -317,6 +337,21 @@ def test_llm_provider_credentials_openapi_contract() -> None:
     assert models["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/LLMProviderModelListResponse"
     }
+    assert chatgpt_device_start["post"]["operationId"] == (
+        "llm_provider_credentials_chatgpt_device_start"
+    )
+    assert chatgpt_device_start["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ChatGPTDeviceAuthorizationStartResponse"}
+    assert chatgpt_device_complete["post"]["operationId"] == (
+        "llm_provider_credentials_chatgpt_device_complete"
+    )
+    assert chatgpt_device_complete["post"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ChatGPTDeviceAuthorizationCompleteRequest"}
+    assert chatgpt_device_complete["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ChatGPTDeviceAuthorizationCompleteResponse"}
 
 
 def test_workspace_agents_openapi_contract() -> None:

@@ -1034,6 +1034,140 @@
         "title": "BootstrapUserCreate",
         "type": "object"
       },
+      "ChatGPTDeviceAuthorizationCompleteRequest": {
+        "properties": {
+          "credentialId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentialid"
+          },
+          "deviceAuthId": {
+            "minLength": 1,
+            "title": "Deviceauthid",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "secretStoreId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretstoreid"
+          },
+          "userCode": {
+            "minLength": 1,
+            "title": "Usercode",
+            "type": "string"
+          },
+          "visibility": {
+            "default": "organization",
+            "enum": [
+              "organization",
+              "workspace",
+              "user"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceid"
+          }
+        },
+        "required": [
+          "deviceAuthId",
+          "userCode"
+        ],
+        "title": "ChatGPTDeviceAuthorizationCompleteRequest",
+        "type": "object"
+      },
+      "ChatGPTDeviceAuthorizationCompleteResponse": {
+        "properties": {
+          "credential": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMProviderCredentialRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "connected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ChatGPTDeviceAuthorizationCompleteResponse",
+        "type": "object"
+      },
+      "ChatGPTDeviceAuthorizationStartResponse": {
+        "properties": {
+          "deviceAuthId": {
+            "title": "Deviceauthid",
+            "type": "string"
+          },
+          "intervalSeconds": {
+            "title": "Intervalseconds",
+            "type": "integer"
+          },
+          "userCode": {
+            "title": "Usercode",
+            "type": "string"
+          },
+          "verificationUrl": {
+            "title": "Verificationurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceAuthId",
+          "userCode",
+          "verificationUrl",
+          "intervalSeconds"
+        ],
+        "title": "ChatGPTDeviceAuthorizationStartResponse",
+        "type": "object"
+      },
       "ConversationMessageRead": {
         "properties": {
           "agentRunId": {
@@ -6150,6 +6284,204 @@
           }
         },
         "summary": "Create Provider Credential Route",
+        "tags": [
+          "llm-provider-credentials"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/llm/provider-credentials/chatgpt/device/complete": {
+      "post": {
+        "operationId": "llm_provider_credentials_chatgpt_device_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatGPTDeviceAuthorizationCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatGPTDeviceAuthorizationCompleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Chatgpt Device Authorization Route",
+        "tags": [
+          "llm-provider-credentials"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/llm/provider-credentials/chatgpt/device/start": {
+      "post": {
+        "operationId": "llm_provider_credentials_chatgpt_device_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatGPTDeviceAuthorizationStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Chatgpt Device Authorization Route",
         "tags": [
           "llm-provider-credentials"
         ]

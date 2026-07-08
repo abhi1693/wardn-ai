@@ -12,6 +12,7 @@ from app.modules.llm_providers.exceptions import (
 )
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import (
+    ChatGPTDeviceAuthorizationCompleteRequest,
     LLMProviderCredentialCreate,
     LLMProviderCredentialUpdate,
     LLMProviderModelRead,
@@ -156,6 +157,317 @@ async def test_chatgpt_device_authorization_polls_for_authorization(monkeypatch)
                 "user_code": "ABCD-EFGH",
             },
             "headers": service.chatgpt_device_auth_headers(),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_chatgpt_device_authorization_requires_member_and_returns_code(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def request_chatgpt_device_code():
+        return service.ChatGPTDeviceCode(
+            device_auth_id="deviceauth-123",
+            user_code="ABCD-EFGH",
+            verification_url=service.CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
+            interval_seconds=2,
+        )
+
+    monkeypatch.setattr(
+        service.require_organization_member.__globals__["repository"],
+        "get_organization_by_id",
+        get_organization_by_id,
+    )
+    monkeypatch.setattr(
+        service.require_organization_member.__globals__["repository"],
+        "get_organization_membership",
+        get_organization_membership,
+    )
+    monkeypatch.setattr(service, "request_chatgpt_device_code", request_chatgpt_device_code)
+
+    response = await service.start_chatgpt_device_authorization(
+        FakeSession(),
+        user,
+        organization_id,
+    )
+
+    assert response.device_auth_id == "deviceauth-123"
+    assert response.user_code == "ABCD-EFGH"
+    assert response.verification_url == service.CHATGPT_DEVICE_AUTH_VERIFICATION_URL
+    assert response.interval_seconds == 2
+
+
+@pytest.mark.asyncio
+async def test_complete_chatgpt_device_authorization_returns_pending(monkeypatch) -> None:
+    async def poll_chatgpt_device_authorization(device_code):
+        assert device_code.device_auth_id == "deviceauth-123"
+        assert device_code.user_code == "ABCD-EFGH"
+        return None
+
+    monkeypatch.setattr(
+        service,
+        "poll_chatgpt_device_authorization",
+        poll_chatgpt_device_authorization,
+    )
+
+    response = await service.complete_chatgpt_device_authorization(
+        FakeSession(),
+        User(id=uuid4(), email="owner@example.com", is_superuser=False),
+        uuid4(),
+        ChatGPTDeviceAuthorizationCompleteRequest(
+            deviceAuthId="deviceauth-123",
+            userCode="ABCD-EFGH",
+            name="OpenAI ChatGPT",
+            secretStoreId=uuid4(),
+        ),
+    )
+
+    assert response.status == "pending"
+    assert response.credential is None
+
+
+@pytest.mark.asyncio
+async def test_complete_chatgpt_device_authorization_creates_credential(monkeypatch) -> None:
+    organization_id = uuid4()
+    secret_store_id = uuid4()
+    access_handle_id = uuid4()
+    refresh_handle_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="owner",
+        is_active=True,
+    )
+    writes: list[dict] = []
+    handle_payloads: list[object] = []
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def no_duplicate(*args, **kwargs):
+        return None
+
+    async def poll_chatgpt_device_authorization(_device_code):
+        return service.ChatGPTDeviceAuthorization(
+            authorization_code="oauth-code",
+            code_verifier="device-verifier",
+        )
+
+    async def exchange_chatgpt_oauth_code(*args, **kwargs):
+        assert kwargs["code"] == "oauth-code"
+        assert kwargs["code_verifier"] == "device-verifier"
+        assert kwargs["redirect_uri"] == service.CHATGPT_DEVICE_AUTH_CALLBACK_URL
+        return {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def write_secret_values(*args, **kwargs):
+        writes.append({"args": args, "kwargs": kwargs})
+
+    async def create_secret_handle(*args, **kwargs):
+        payload = args[3]
+        handle_payloads.append(payload)
+        return SimpleNamespace(
+            id=access_handle_id if payload.key_name == "access_token" else refresh_handle_id
+        )
+
+    monkeypatch.setattr(
+        service.require_organization_admin.__globals__["repository"],
+        "get_organization_by_id",
+        get_organization_by_id,
+    )
+    monkeypatch.setattr(
+        service.require_organization_admin.__globals__["repository"],
+        "get_organization_membership",
+        get_organization_membership,
+    )
+    monkeypatch.setattr(service.repository, "get_credential_by_name", no_duplicate)
+    monkeypatch.setattr(
+        service,
+        "poll_chatgpt_device_authorization",
+        poll_chatgpt_device_authorization,
+    )
+    monkeypatch.setattr(service, "exchange_chatgpt_oauth_code", exchange_chatgpt_oauth_code)
+    monkeypatch.setattr(service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
+    patch_resolved_secrets(
+        monkeypatch,
+        {
+            access_handle_id: "access-token",
+            refresh_handle_id: "refresh-token",
+        },
+    )
+
+    session = FakeSession()
+    response = await service.complete_chatgpt_device_authorization(
+        session,
+        user,
+        organization_id,
+        ChatGPTDeviceAuthorizationCompleteRequest(
+            deviceAuthId="deviceauth-123",
+            userCode="ABCD-EFGH",
+            name="OpenAI ChatGPT",
+            secretStoreId=secret_store_id,
+        ),
+    )
+
+    credential = session.added[0]
+    assert response.status == "connected"
+    assert response.credential is not None
+    assert response.credential.id == credential.id
+    assert credential.provider == "openai_chatgpt"
+    assert credential.oauth_access_token_secret_handle_id == access_handle_id
+    assert credential.oauth_refresh_token_secret_handle_id == refresh_handle_id
+    assert writes[0]["args"][3] == secret_store_id
+    assert writes[0]["kwargs"]["values"] == {
+        "access_token": "access-token",
+        "refresh_token": "refresh-token",
+    }
+    assert writes[0]["kwargs"]["purpose"] == "oauth_token"
+    assert [payload.key_name for payload in handle_payloads] == [
+        "access_token",
+        "refresh_token",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_complete_chatgpt_device_authorization_reconnects_credential(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="owner",
+        is_active=True,
+    )
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="OpenAI ChatGPT",
+        provider="openai_chatgpt",
+        visibility="organization",
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        base_url="",
+        is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+    replaced: list[dict] = []
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        assert kwargs["credential_id"] == credential_id
+        return credential
+
+    async def poll_chatgpt_device_authorization(_device_code):
+        return service.ChatGPTDeviceAuthorization(
+            authorization_code="oauth-code",
+            code_verifier="device-verifier",
+        )
+
+    async def exchange_chatgpt_oauth_code(*args, **kwargs):
+        return {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        }
+
+    async def replace_chatgpt_oauth_credential_tokens(*args):
+        replaced.append({"credential": args[1], "payload": args[2]})
+
+    monkeypatch.setattr(
+        service.require_organization_admin.__globals__["repository"],
+        "get_organization_by_id",
+        get_organization_by_id,
+    )
+    monkeypatch.setattr(
+        service.require_organization_admin.__globals__["repository"],
+        "get_organization_membership",
+        get_organization_membership,
+    )
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(
+        service,
+        "poll_chatgpt_device_authorization",
+        poll_chatgpt_device_authorization,
+    )
+    monkeypatch.setattr(service, "exchange_chatgpt_oauth_code", exchange_chatgpt_oauth_code)
+    monkeypatch.setattr(
+        service,
+        "replace_chatgpt_oauth_credential_tokens",
+        replace_chatgpt_oauth_credential_tokens,
+    )
+
+    response = await service.complete_chatgpt_device_authorization(
+        FakeSession(),
+        user,
+        organization_id,
+        ChatGPTDeviceAuthorizationCompleteRequest(
+            deviceAuthId="deviceauth-123",
+            userCode="ABCD-EFGH",
+            credentialId=credential_id,
+        ),
+    )
+
+    assert response.status == "connected"
+    assert response.credential is not None
+    assert response.credential.id == credential_id
+    assert replaced == [
+        {
+            "credential": credential,
+            "payload": {
+                "access_token": "new-access",
+                "refresh_token": "new-refresh",
+                "expires_in": 3600,
+            },
         }
     ]
 
