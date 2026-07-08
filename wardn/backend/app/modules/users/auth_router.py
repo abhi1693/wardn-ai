@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.modules.users.oidc import (
     fetch_oidc_metadata,
     frontend_redirect_url,
     oidc_enabled,
+    oidc_state_cookie_name,
     verify_oidc_identity,
     verify_oidc_state,
 )
@@ -48,6 +50,7 @@ from app.modules.users.service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _set_session_cookie(response: Response, user: User) -> None:
@@ -63,13 +66,47 @@ def _set_session_cookie(response: Response, user: User) -> None:
     )
 
 
-def _clear_oidc_state_cookie(response: Response) -> None:
+def _clear_oidc_state_cookie(response: Response, state: str | None = None) -> None:
+    settings = get_settings()
+    cookie_names = [settings.oidc_state_cookie_name]
+    keyed_name = oidc_state_cookie_name(settings, state)
+    if keyed_name not in cookie_names:
+        cookie_names.append(keyed_name)
+
+    for cookie_name in cookie_names:
+        response.delete_cookie(
+            key=cookie_name,
+            httponly=True,
+            secure=settings.environment != "local",
+            samesite="lax",
+            path="/",
+        )
+
+
+def _get_oidc_state_cookie(request: Request, state: str) -> str | None:
+    settings = get_settings()
+    keyed_cookie = request.cookies.get(oidc_state_cookie_name(settings, state))
+    if keyed_cookie:
+        return keyed_cookie
+    return request.cookies.get(settings.oidc_state_cookie_name)
+
+
+def _set_oidc_state_cookie(response: Response, state: str, state_cookie: str) -> None:
     settings = get_settings()
     response.delete_cookie(
         key=settings.oidc_state_cookie_name,
         httponly=True,
         secure=settings.environment != "local",
         samesite="lax",
+        path="/",
+    )
+    response.set_cookie(
+        key=oidc_state_cookie_name(settings, state),
+        value=state_cookie,
+        httponly=True,
+        secure=settings.environment != "local",
+        samesite="lax",
+        max_age=10 * 60,
         path="/",
     )
 
@@ -163,15 +200,7 @@ async def oidc_login(
         ) from exc
 
     response = RedirectResponse(location, status_code=status.HTTP_302_FOUND)
-    response.set_cookie(
-        key=settings.oidc_state_cookie_name,
-        value=state_cookie,
-        httponly=True,
-        secure=settings.environment != "local",
-        samesite="lax",
-        max_age=10 * 60,
-        path="/",
-    )
+    _set_oidc_state_cookie(response, state.state, state_cookie)
     return response
 
 
@@ -204,7 +233,8 @@ async def oidc_callback(
             frontend_redirect_url(settings, "/login?error=oidc"),
             status_code=status.HTTP_302_FOUND,
         )
-        _clear_oidc_state_cookie(response)
+        logger.warning("OIDC callback returned provider error")
+        _clear_oidc_state_cookie(response, state)
         return response
     if not code or not state:
         raise HTTPException(
@@ -212,8 +242,9 @@ async def oidc_callback(
             detail="missing OIDC callback code or state",
         )
 
-    state_cookie = request.cookies.get(settings.oidc_state_cookie_name)
+    state_cookie = _get_oidc_state_cookie(request, state)
     if not state_cookie:
+        logger.warning("OIDC callback failed: missing state cookie")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="missing OIDC state",
@@ -236,11 +267,13 @@ async def oidc_callback(
             superuser_emails=settings.oidc_superuser_emails,
         )
     except OIDCConfigurationError as exc:
+        logger.warning("OIDC callback failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
     except OIDCAuthenticationError as exc:
+        logger.warning("OIDC callback failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
@@ -251,7 +284,7 @@ async def oidc_callback(
         status_code=status.HTTP_302_FOUND,
     )
     _set_session_cookie(response, user)
-    _clear_oidc_state_cookie(response)
+    _clear_oidc_state_cookie(response, oidc_state.state)
     await session.commit()
     return response
 

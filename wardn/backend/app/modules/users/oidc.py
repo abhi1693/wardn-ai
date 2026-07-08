@@ -92,6 +92,13 @@ def frontend_redirect_url(settings: Settings, path: str) -> str:
     return urljoin(settings.frontend_base_url.rstrip("/") + "/", path.lstrip("/"))
 
 
+def oidc_state_cookie_name(settings: Settings, state: str | None) -> str:
+    if not state:
+        return settings.oidc_state_cookie_name
+    digest = hashlib.sha256(state.encode("utf-8")).hexdigest()[:24]
+    return f"{settings.oidc_state_cookie_name}_{digest}"
+
+
 def create_oidc_state(
     settings: Settings,
     *,

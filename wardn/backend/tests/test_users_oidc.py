@@ -40,6 +40,18 @@ def test_oidc_state_rejects_mismatched_state() -> None:
         oidc.verify_oidc_state(settings, cookie, "wrong-state")
 
 
+def test_oidc_state_cookie_name_is_keyed_by_state() -> None:
+    settings = oidc_settings()
+
+    first = oidc.oidc_state_cookie_name(settings, "first-state")
+    second = oidc.oidc_state_cookie_name(settings, "second-state")
+
+    assert first.startswith("wardn_oidc_state_")
+    assert second.startswith("wardn_oidc_state_")
+    assert first != second
+    assert oidc.oidc_state_cookie_name(settings, None) == "wardn_oidc_state"
+
+
 def test_oidc_redirect_uri_defaults_to_frontend_proxy_callback() -> None:
     assert (
         oidc.oidc_redirect_uri(oidc_settings(frontend_base_url="https://wardn.example.com"))
