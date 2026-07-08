@@ -1,25 +1,6 @@
 import { NextResponse } from "next/server";
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
-
-function copySetCookieHeaders(source: Response, target: NextResponse) {
-  const headers = source.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-  const cookies = headers.getSetCookie?.() ?? [];
-
-  if (cookies.length > 0) {
-    for (const cookie of cookies) {
-      target.headers.append("set-cookie", cookie);
-    }
-    return;
-  }
-
-  const cookie = source.headers.get("set-cookie");
-  if (cookie) {
-    target.headers.set("set-cookie", cookie);
-  }
-}
+import { backendUrl, copySetCookieHeaders, oidcErrorRedirect } from "../_lib";
 
 export async function GET(request: Request) {
   const { search } = new URL(request.url);
@@ -33,14 +14,14 @@ export async function GET(request: Request) {
       redirect: "manual",
     });
   } catch {
-    return NextResponse.redirect(new URL("/login?error=oidc", request.url));
+    return oidcErrorRedirect(request);
   }
 
   const location = response.headers.get("location");
   const nextResponse =
     location && response.status >= 300 && response.status < 400
       ? NextResponse.redirect(location, { status: response.status })
-      : NextResponse.redirect(new URL("/login?error=oidc", request.url));
+      : oidcErrorRedirect(request);
   copySetCookieHeaders(response, nextResponse);
   return nextResponse;
 }
