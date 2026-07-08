@@ -21,6 +21,7 @@ from app.modules.llm_providers.exceptions import (
 )
 from app.modules.llm_providers.schemas import LLMProviderCredentialCreate
 from app.modules.llm_providers.service import (
+    CHATGPT_DEVICE_AUTH_CALLBACK_URL,
     CHATGPT_OAUTH_SCOPE,
     OPENAI_CHATGPT_PROVIDER,
     build_chatgpt_authorization_url,
@@ -30,7 +31,9 @@ from app.modules.llm_providers.service import (
     expires_at_from_seconds,
     generate_oauth_state,
     generate_pkce_pair,
+    poll_chatgpt_device_authorization,
     replace_chatgpt_oauth_credential_tokens,
+    request_chatgpt_device_code,
     require_scope_permission,
     user_can_see_credential,
 )
@@ -82,15 +85,24 @@ def configure_connectchatgpt_parser(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--flow",
+        choices=("device", "loopback"),
+        default="device",
+        help=(
+            "OAuth login flow. Device works from containers; loopback requires "
+            "local browser access."
+        ),
+    )
+    parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Print the authorization URL without opening a browser.",
+        help="Print the login URL without opening a browser.",
     )
     parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=15 * 60,
-        help="Seconds to wait for the localhost OAuth callback.",
+        help="Seconds to wait for ChatGPT authorization.",
     )
 
 
@@ -146,6 +158,62 @@ def start_callback_server(state: str, result_queue: queue.Queue[str]) -> HTTPSer
             self.respond(200, oauth_success_html())
 
     return HTTPServer((CALLBACK_HOST, CALLBACK_PORT), CallbackHandler)
+
+
+async def get_chatgpt_device_oauth_tokens(args: argparse.Namespace) -> dict:
+    device_code = await request_chatgpt_device_code()
+    print("Open this URL to connect ChatGPT:")
+    print(device_code.verification_url)
+    print(f"Enter this code: {device_code.user_code}")
+    if not args.no_browser:
+        webbrowser.open(device_code.verification_url)
+
+    timeout_seconds = max(1, int(args.timeout_seconds))
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        authorization = await poll_chatgpt_device_authorization(device_code)
+        if authorization is not None:
+            return await exchange_chatgpt_oauth_code(
+                code=authorization.authorization_code,
+                code_verifier=authorization.code_verifier,
+                redirect_uri=CHATGPT_DEVICE_AUTH_CALLBACK_URL,
+            )
+        await asyncio.sleep(device_code.interval_seconds)
+    raise TimeoutError
+
+
+async def get_chatgpt_loopback_oauth_tokens(args: argparse.Namespace) -> dict:
+    verifier, challenge = generate_pkce_pair()
+    state = generate_oauth_state()
+    authorization_url = build_chatgpt_authorization_url(
+        state=state,
+        code_challenge=challenge,
+        redirect_uri=REDIRECT_URI,
+    )
+
+    result_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+    server = start_callback_server(state, result_queue)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        print("Open this URL to connect ChatGPT:")
+        print(authorization_url)
+        if not args.no_browser:
+            webbrowser.open(authorization_url)
+        code = result_queue.get(timeout=args.timeout_seconds)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    if code.startswith("ERROR:"):
+        raise InvalidLLMProviderCredentialAuthError(code.removeprefix("ERROR:"))
+
+    return await exchange_chatgpt_oauth_code(
+        code=code,
+        code_verifier=verifier,
+        redirect_uri=REDIRECT_URI,
+    )
 
 
 async def get_command_user(session, *, user_id: str, user_email: str):
@@ -257,37 +325,10 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
                     "provider credential name already exists"
                 )
 
-    verifier, challenge = generate_pkce_pair()
-    state = generate_oauth_state()
-    authorization_url = build_chatgpt_authorization_url(
-        state=state,
-        code_challenge=challenge,
-        redirect_uri=REDIRECT_URI,
-    )
-
-    result_queue: queue.Queue[str] = queue.Queue(maxsize=1)
-    server = start_callback_server(state, result_queue)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        print("Open this URL to connect ChatGPT:")
-        print(authorization_url)
-        if not args.no_browser:
-            webbrowser.open(authorization_url)
-        code = result_queue.get(timeout=args.timeout_seconds)
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-    if code.startswith("ERROR:"):
-        raise InvalidLLMProviderCredentialAuthError(code.removeprefix("ERROR:"))
-
-    token_payload = await exchange_chatgpt_oauth_code(
-        code=code,
-        code_verifier=verifier,
-        redirect_uri=REDIRECT_URI,
-    )
+    if getattr(args, "flow", "device") == "loopback":
+        token_payload = await get_chatgpt_loopback_oauth_tokens(args)
+    else:
+        token_payload = await get_chatgpt_device_oauth_tokens(args)
 
     async with AsyncSessionLocal() as session:
         user = await get_command_user(
@@ -413,6 +454,9 @@ def handle_connectchatgpt(args: argparse.Namespace) -> int:
     except queue.Empty:
         print("Error: timed out waiting for ChatGPT OAuth callback.", file=sys.stderr)
         return 1
+    except TimeoutError:
+        print("Error: timed out waiting for ChatGPT authorization.", file=sys.stderr)
+        return 1
     except (
         DuplicateLLMProviderCredentialError,
         InvalidLLMProviderCredentialAuthError,
@@ -442,7 +486,7 @@ def handle_connectchatgpt(args: argparse.Namespace) -> int:
 def register_llm_provider_commands(registry: CommandRegistry) -> None:
     registry.register(
         "connectchatgpt",
-        "Connect an OpenAI ChatGPT OAuth credential using a localhost callback.",
+        "Connect an OpenAI ChatGPT OAuth credential using a device code.",
         configure_connectchatgpt_parser,
         handle_connectchatgpt,
     )

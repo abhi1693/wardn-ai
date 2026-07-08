@@ -50,6 +50,27 @@ async def test_connect_chatgpt_writes_tokens_and_creates_handle_credential(monke
     monkeypatch.setattr(commands.webbrowser, "open", lambda _url: None)
     monkeypatch.setattr(commands, "AsyncSessionLocal", lambda: FakeSession())
 
+    async def request_chatgpt_device_code():
+        return SimpleNamespace(
+            device_auth_id="deviceauth-1",
+            user_code="ABCD-EFGH",
+            verification_url="https://auth.openai.com/codex/device",
+            interval_seconds=1,
+        )
+
+    async def poll_chatgpt_device_authorization(_device_code):
+        return SimpleNamespace(
+            authorization_code="oauth-code",
+            code_verifier="device-verifier",
+        )
+
+    monkeypatch.setattr(commands, "request_chatgpt_device_code", request_chatgpt_device_code)
+    monkeypatch.setattr(
+        commands,
+        "poll_chatgpt_device_authorization",
+        poll_chatgpt_device_authorization,
+    )
+
     async def get_command_user(*args, **kwargs):
         return user
 
@@ -100,11 +121,17 @@ async def test_connect_chatgpt_writes_tokens_and_creates_handle_credential(monke
             workspace_id="",
             secret_store_id=str(store_id),
             secret_path="wardn/custom/chatgpt",
+            flow="device",
             no_browser=True,
             timeout_seconds=5,
         )
     )
 
+    assert calls["exchange"] == {
+        "code": "oauth-code",
+        "code_verifier": "device-verifier",
+        "redirect_uri": commands.CHATGPT_DEVICE_AUTH_CALLBACK_URL,
+    }
     assert calls["write"]["args"][2] == organization_id
     assert calls["write"]["args"][3] == store_id
     assert calls["write"]["kwargs"]["external_ref"] == "wardn/custom/chatgpt"
@@ -147,6 +174,27 @@ async def test_connect_chatgpt_reconnects_existing_credential(monkeypatch) -> No
     )
     monkeypatch.setattr(commands.webbrowser, "open", lambda _url: None)
     monkeypatch.setattr(commands, "AsyncSessionLocal", lambda: FakeSession())
+
+    async def request_chatgpt_device_code():
+        return SimpleNamespace(
+            device_auth_id="deviceauth-1",
+            user_code="ABCD-EFGH",
+            verification_url="https://auth.openai.com/codex/device",
+            interval_seconds=1,
+        )
+
+    async def poll_chatgpt_device_authorization(_device_code):
+        return SimpleNamespace(
+            authorization_code="oauth-code",
+            code_verifier="device-verifier",
+        )
+
+    monkeypatch.setattr(commands, "request_chatgpt_device_code", request_chatgpt_device_code)
+    monkeypatch.setattr(
+        commands,
+        "poll_chatgpt_device_authorization",
+        poll_chatgpt_device_authorization,
+    )
 
     async def get_command_user(*args, **kwargs):
         return user
@@ -198,6 +246,7 @@ async def test_connect_chatgpt_reconnects_existing_credential(monkeypatch) -> No
             workspace_id="",
             secret_store_id="",
             secret_path="",
+            flow="device",
             no_browser=True,
             timeout_seconds=5,
         )

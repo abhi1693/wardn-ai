@@ -50,6 +50,11 @@ CHATGPT_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
 CHATGPT_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CHATGPT_OAUTH_SCOPE = "openid profile email offline_access"
 CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS = 30.0
+CHATGPT_DEVICE_AUTH_USERCODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode"
+CHATGPT_DEVICE_AUTH_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token"
+CHATGPT_DEVICE_AUTH_VERIFICATION_URL = "https://auth.openai.com/codex/device"
+CHATGPT_DEVICE_AUTH_CALLBACK_URL = "https://auth.openai.com/deviceauth/callback"
+CHATGPT_DEVICE_AUTH_USER_AGENT = "wardn-chatgpt-auth/1.0"
 OPENAI_CODEX_AUTH_CLAIM = "https://api.openai.com/auth"
 OPENAI_CODEX_PROFILE_CLAIM = "https://api.openai.com/profile"
 OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
@@ -69,6 +74,20 @@ class ResolvedLLMCredentialSecrets:
     api_key: str = ""
     oauth_access_token: str = ""
     oauth_refresh_token: str = ""
+
+
+@dataclass(frozen=True)
+class ChatGPTDeviceAuthorization:
+    authorization_code: str
+    code_verifier: str
+
+
+@dataclass(frozen=True)
+class ChatGPTDeviceCode:
+    device_auth_id: str
+    user_code: str
+    verification_url: str
+    interval_seconds: int = 5
 
 
 def normalize_provider(value: str) -> str:
@@ -260,6 +279,121 @@ async def exchange_chatgpt_oauth_code(
             "ChatGPT OAuth token response did not include access and refresh tokens"
         )
     return payload
+
+
+def chatgpt_device_auth_headers() -> dict[str, str]:
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": CHATGPT_DEVICE_AUTH_USER_AGENT,
+    }
+
+
+def positive_int(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+async def request_chatgpt_device_code() -> ChatGPTDeviceCode:
+    try:
+        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                CHATGPT_DEVICE_AUTH_USERCODE_URL,
+                json={"client_id": CHATGPT_OAUTH_CLIENT_ID},
+                headers=chatgpt_device_auth_headers(),
+            )
+    except httpx.HTTPError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization could not reach OpenAI"
+        ) from exc
+    if not response.is_success:
+        raise InvalidLLMProviderCredentialAuthError(
+            f"ChatGPT device authorization failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization response is invalid"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization response is invalid"
+        )
+    device_auth_id = payload.get("device_auth_id")
+    user_code = payload.get("user_code") or payload.get("usercode")
+    if not isinstance(device_auth_id, str) or not device_auth_id.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization response did not include a device id"
+        )
+    if not isinstance(user_code, str) or not user_code.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization response did not include a user code"
+        )
+    return ChatGPTDeviceCode(
+        device_auth_id=device_auth_id.strip(),
+        user_code=user_code.strip(),
+        verification_url=CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
+        interval_seconds=positive_int(payload.get("interval"), 5),
+    )
+
+
+async def poll_chatgpt_device_authorization(
+    device_code: ChatGPTDeviceCode,
+) -> ChatGPTDeviceAuthorization | None:
+    try:
+        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                CHATGPT_DEVICE_AUTH_TOKEN_URL,
+                json={
+                    "device_auth_id": device_code.device_auth_id,
+                    "user_code": device_code.user_code,
+                },
+                headers=chatgpt_device_auth_headers(),
+            )
+    except httpx.HTTPError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization polling could not reach OpenAI"
+        ) from exc
+    if response.status_code in {403, 404, 429}:
+        return None
+    if not response.is_success:
+        raise InvalidLLMProviderCredentialAuthError(
+            f"ChatGPT device authorization polling failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization polling response is invalid"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT device authorization polling response is invalid"
+        )
+    error = payload.get("error")
+    if isinstance(error, str) and error.strip():
+        normalized_error = error.strip().casefold()
+        if normalized_error in {"authorization_pending", "pending", "slow_down"}:
+            return None
+        if "expired" in normalized_error:
+            raise InvalidLLMProviderCredentialAuthError("ChatGPT device authorization expired")
+        raise InvalidLLMProviderCredentialAuthError(error.strip())
+    authorization_code = payload.get("authorization_code")
+    code_verifier = payload.get("code_verifier")
+    if not isinstance(authorization_code, str) or not authorization_code.strip():
+        return None
+    if not isinstance(code_verifier, str) or not code_verifier.strip():
+        return None
+    return ChatGPTDeviceAuthorization(
+        authorization_code=authorization_code.strip(),
+        code_verifier=code_verifier.strip(),
+    )
 
 
 async def refresh_chatgpt_oauth_token(refresh_token: str) -> dict[str, Any]:

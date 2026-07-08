@@ -55,6 +55,111 @@ def patch_resolved_secrets(monkeypatch, values: dict) -> None:
     monkeypatch.setattr(service, "resolve_secret", resolve_secret)
 
 
+class FakeResponse:
+    def __init__(self, status_code: int, payload: dict) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> dict:
+        return self._payload
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_device_authorization_requests_user_code(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return FakeResponse(
+                200,
+                {
+                    "device_auth_id": "deviceauth-123",
+                    "user_code": "ABCD-EFGH",
+                    "interval": "2",
+                },
+            )
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+
+    device_code = await service.request_chatgpt_device_code()
+
+    assert device_code.device_auth_id == "deviceauth-123"
+    assert device_code.user_code == "ABCD-EFGH"
+    assert device_code.verification_url == service.CHATGPT_DEVICE_AUTH_VERIFICATION_URL
+    assert device_code.interval_seconds == 2
+    assert calls == [
+        {
+            "url": service.CHATGPT_DEVICE_AUTH_USERCODE_URL,
+            "json": {"client_id": service.CHATGPT_OAUTH_CLIENT_ID},
+            "headers": service.chatgpt_device_auth_headers(),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_device_authorization_polls_for_authorization(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return FakeResponse(
+                200,
+                {
+                    "authorization_code": "oauth-code",
+                    "code_challenge": "device-challenge",
+                    "code_verifier": "device-verifier",
+                },
+            )
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+
+    authorization = await service.poll_chatgpt_device_authorization(
+        service.ChatGPTDeviceCode(
+            device_auth_id="deviceauth-123",
+            user_code="ABCD-EFGH",
+            verification_url=service.CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
+        )
+    )
+
+    assert authorization is not None
+    assert authorization.authorization_code == "oauth-code"
+    assert authorization.code_verifier == "device-verifier"
+    assert calls == [
+        {
+            "url": service.CHATGPT_DEVICE_AUTH_TOKEN_URL,
+            "json": {
+                "device_auth_id": "deviceauth-123",
+                "user_code": "ABCD-EFGH",
+            },
+            "headers": service.chatgpt_device_auth_headers(),
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_org_admin_can_create_provider_credential(monkeypatch) -> None:
     organization_id = uuid4()
