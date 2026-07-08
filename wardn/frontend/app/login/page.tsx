@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { LogIn } from "lucide-react";
+import { LoaderCircle, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -120,6 +120,7 @@ export default function LoginPage() {
   }
 
   const showOidc = config?.authMode === "oidc";
+  const showLocal = config?.authMode === "local";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-5">
@@ -135,7 +136,16 @@ export default function LoginPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {showOidc ? (
+          {isConfigLoading || !config ? (
+            <div className="grid gap-4">
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+              <Button className="w-full gap-2" disabled type="button">
+                <LoaderCircle className="size-4 animate-spin" />
+                Checking sign-in
+              </Button>
+            </div>
+          ) : showOidc ? (
             <div className="grid gap-4">
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -149,7 +159,7 @@ export default function LoginPage() {
                 {isSubmitting ? "Redirecting" : `Sign in with ${config.oidcProviderName}`}
               </Button>
             </div>
-          ) : (
+          ) : showLocal ? (
             <form className="grid gap-4" method="post" onSubmit={handleSubmit}>
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
@@ -187,6 +197,8 @@ export default function LoginPage() {
                 {isSubmitting ? "Signing in" : "Sign in"}
               </Button>
             </form>
+          ) : (
+            <p className="text-sm text-destructive">Sign in is currently unavailable.</p>
           )}
         </CardContent>
       </Card>
