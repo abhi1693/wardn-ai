@@ -1258,6 +1258,28 @@ async def record_agent_llm_usage(
     )
 
 
+async def require_agent_llm_budget_available(
+    session: AsyncSession,
+    *,
+    agent: Agent,
+    user: User | None,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+) -> None:
+    if organization_id is None or workspace_id is None:
+        return
+    await limits_service.require_llm_budget_available(
+        session,
+        limits_service.LLMBudgetContext(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user_id=user.id if user else None,
+            agent_id=agent.id,
+            model=agent.model_name,
+        ),
+    )
+
+
 def mcp_result_text(result: dict[str, Any]) -> str:
     text_parts = []
     content = result.get("content")
@@ -1725,6 +1747,13 @@ async def stream_chatgpt_codex_response_text(
                 call_started_at = datetime.now(UTC)
                 call_usage: observability_service.LLMTokenUsage | None = None
                 tool_calls: list[AgentToolCall] = []
+                await require_agent_llm_budget_available(
+                    session,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                )
 
                 try:
                     await websocket.send(json.dumps(body, separators=(",", ":")))
@@ -1892,6 +1921,13 @@ async def run_agent_chat(
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
         call_started_at = datetime.now(UTC)
         call_usage: observability_service.LLMTokenUsage | None = None
+        await require_agent_llm_budget_available(
+            session,
+            agent=agent,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
 
         def capture_usage(usage: observability_service.LLMTokenUsage) -> None:
             nonlocal call_usage

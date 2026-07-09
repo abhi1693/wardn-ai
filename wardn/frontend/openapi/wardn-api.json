@@ -5151,6 +5151,193 @@
         "title": "SecretValidationResponse",
         "type": "object"
       },
+      "UsageBudgetListResponse": {
+        "properties": {
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBudgetRead"
+            },
+            "title": "Budgets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "budgets"
+        ],
+        "title": "UsageBudgetListResponse",
+        "type": "object"
+      },
+      "UsageBudgetRead": {
+        "properties": {
+          "budgetKey": {
+            "title": "Budgetkey",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "modelFilter": {
+            "title": "Modelfilter",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "periodAnchor": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodanchor"
+          },
+          "scopeId": {
+            "format": "uuid",
+            "title": "Scopeid",
+            "type": "string"
+          },
+          "scopeType": {
+            "title": "Scopetype",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scopeType",
+          "scopeId",
+          "budgetKey",
+          "value",
+          "unit",
+          "period",
+          "modelFilter",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "UsageBudgetRead",
+        "type": "object"
+      },
+      "UsageBudgetUpsert": {
+        "properties": {
+          "budgetKey": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Budgetkey",
+            "type": "string"
+          },
+          "modelFilter": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Modelfilter",
+            "type": "string"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "enum": [
+                  "hour",
+                  "day",
+                  "month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "periodAnchor": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodanchor"
+          },
+          "scopeId": {
+            "format": "uuid",
+            "title": "Scopeid",
+            "type": "string"
+          },
+          "scopeType": {
+            "enum": [
+              "organization",
+              "workspace",
+              "user",
+              "agent"
+            ],
+            "title": "Scopetype",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cost_usd",
+                  "tokens",
+                  "requests"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "scopeType",
+          "scopeId",
+          "budgetKey",
+          "value"
+        ],
+        "title": "UsageBudgetUpsert",
+        "type": "object"
+      },
       "UserAPITokenCreate": {
         "properties": {
           "description": {
@@ -6513,6 +6700,273 @@
           }
         },
         "summary": "Upsert Limit Route",
+        "tags": [
+          "limits"
+        ]
+      }
+    },
+    "/api/v1/limits/budgets": {
+      "get": {
+        "operationId": "usage_budgets_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scopeType",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scopetype"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scopeId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scopeid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "budgetKey",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Budgetkey"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageBudgetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Usage Budgets Route",
+        "tags": [
+          "limits"
+        ]
+      },
+      "put": {
+        "operationId": "usage_budgets_upsert",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageBudgetUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageBudgetRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Usage Budget Route",
+        "tags": [
+          "limits"
+        ]
+      }
+    },
+    "/api/v1/limits/budgets/{budget_id}": {
+      "delete": {
+        "operationId": "usage_budgets_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Budget Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Usage Budget Route",
         "tags": [
           "limits"
         ]

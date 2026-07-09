@@ -23,6 +23,8 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/health/live",
         "/api/v1/health/ready",
         "/api/v1/limits",
+        "/api/v1/limits/budgets",
+        "/api/v1/limits/budgets/{budget_id}",
         "/api/v1/limits/{limit_id}",
         "/api/v1/mcp/gateway",
         "/api/v1/organizations",

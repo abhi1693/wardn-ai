@@ -10,7 +10,11 @@ import type {
   LimitsListParams,
   ResourceLimitListResponse,
   ResourceLimitRead,
-  ResourceLimitUpsert
+  ResourceLimitUpsert,
+  UsageBudgetListResponse,
+  UsageBudgetRead,
+  UsageBudgetUpsert,
+  UsageBudgetsListParams
 } from '../model';
 
 
@@ -136,6 +140,190 @@ export const limitsUpsert = async (resourceLimitUpsert: ResourceLimitUpsert, opt
 
   const data: limitsUpsertResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as limitsUpsertResponse
+}
+
+
+export type usageBudgetsListResponse200 = {
+  data: UsageBudgetListResponse
+  status: 200
+}
+
+export type usageBudgetsListResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type usageBudgetsListResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type usageBudgetsListResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type usageBudgetsListResponseSuccess = (usageBudgetsListResponse200) & {
+  headers: Headers;
+};
+export type usageBudgetsListResponseError = (usageBudgetsListResponse400 | usageBudgetsListResponse403 | usageBudgetsListResponse422) & {
+  headers: Headers;
+};
+
+export type usageBudgetsListResponse = (usageBudgetsListResponseSuccess | usageBudgetsListResponseError)
+
+export const getUsageBudgetsListUrl = (params?: UsageBudgetsListParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/limits/budgets?${stringifiedParams}` : `http://localhost:8000/api/v1/limits/budgets`
+}
+
+/**
+ * @summary List Usage Budgets Route
+ */
+export const usageBudgetsList = async (params?: UsageBudgetsListParams, options?: RequestInit): Promise<usageBudgetsListResponse> => {
+
+  const res = await fetch(getUsageBudgetsListUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: usageBudgetsListResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as usageBudgetsListResponse
+}
+
+
+export type usageBudgetsUpsertResponse200 = {
+  data: UsageBudgetRead
+  status: 200
+}
+
+export type usageBudgetsUpsertResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type usageBudgetsUpsertResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type usageBudgetsUpsertResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type usageBudgetsUpsertResponseSuccess = (usageBudgetsUpsertResponse200) & {
+  headers: Headers;
+};
+export type usageBudgetsUpsertResponseError = (usageBudgetsUpsertResponse400 | usageBudgetsUpsertResponse403 | usageBudgetsUpsertResponse422) & {
+  headers: Headers;
+};
+
+export type usageBudgetsUpsertResponse = (usageBudgetsUpsertResponseSuccess | usageBudgetsUpsertResponseError)
+
+export const getUsageBudgetsUpsertUrl = () => {
+
+
+
+
+  return `http://localhost:8000/api/v1/limits/budgets`
+}
+
+/**
+ * @summary Upsert Usage Budget Route
+ */
+export const usageBudgetsUpsert = async (usageBudgetUpsert: UsageBudgetUpsert, options?: RequestInit): Promise<usageBudgetsUpsertResponse> => {
+
+  const res = await fetch(getUsageBudgetsUpsertUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(usageBudgetUpsert)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: usageBudgetsUpsertResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as usageBudgetsUpsertResponse
+}
+
+
+export type usageBudgetsDeleteResponse204 = {
+  data: void
+  status: 204
+}
+
+export type usageBudgetsDeleteResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type usageBudgetsDeleteResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type usageBudgetsDeleteResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type usageBudgetsDeleteResponseSuccess = (usageBudgetsDeleteResponse204) & {
+  headers: Headers;
+};
+export type usageBudgetsDeleteResponseError = (usageBudgetsDeleteResponse403 | usageBudgetsDeleteResponse404 | usageBudgetsDeleteResponse422) & {
+  headers: Headers;
+};
+
+export type usageBudgetsDeleteResponse = (usageBudgetsDeleteResponseSuccess | usageBudgetsDeleteResponseError)
+
+export const getUsageBudgetsDeleteUrl = (budgetId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/limits/budgets/${budgetId}`
+}
+
+/**
+ * @summary Delete Usage Budget Route
+ */
+export const usageBudgetsDelete = async (budgetId: string, options?: RequestInit): Promise<usageBudgetsDeleteResponse> => {
+
+  const res = await fetch(getUsageBudgetsDeleteUrl(budgetId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: usageBudgetsDeleteResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as usageBudgetsDeleteResponse
 }
 
 
