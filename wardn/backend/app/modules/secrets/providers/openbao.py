@@ -109,6 +109,10 @@ class OpenBaoSecretProvider:
             verify=settings["tls_verify"],
         ) as client:
             response = await client.get(url, headers=headers, params=params)
+            if response.status_code in {401, 403}:
+                token = await self._refresh_client_token(store)
+                headers = self._headers(settings, token.token)
+                response = await client.get(url, headers=headers, params=params)
         if response.status_code == 404:
             raise InvalidSecretHandleError("OpenBao secret was not found")
         if not response.is_success:
@@ -153,6 +157,10 @@ class OpenBaoSecretProvider:
             verify=settings["tls_verify"],
         ) as client:
             response = await client.post(url, headers=headers, json={"data": values})
+            if response.status_code in {401, 403}:
+                token = await self._refresh_client_token(store)
+                headers = self._headers(settings, token.token)
+                response = await client.post(url, headers=headers, json={"data": values})
         if not response.is_success:
             raise InvalidSecretHandleError(
                 f"OpenBao secret write failed with HTTP {response.status_code}"
@@ -236,6 +244,11 @@ class OpenBaoSecretProvider:
             token = await self._login_approle(settings, auth)
         self._token_cache[cache_key] = token
         return token
+
+    async def _refresh_client_token(self, store: SecretStore) -> OpenBaoToken:
+        auth = self._auth_settings(store)
+        self._token_cache.pop(self._cache_key(store, auth), None)
+        return await self._client_token(store)
 
     def _cache_key(self, store: SecretStore, auth: dict[str, str]) -> str:
         updated_at = store.updated_at.isoformat() if store.updated_at else ""

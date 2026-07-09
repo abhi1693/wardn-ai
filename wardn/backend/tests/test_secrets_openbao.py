@@ -4,7 +4,7 @@ import pytest
 
 from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import SecretResolutionContext
-from app.modules.secrets.providers.openbao import OpenBaoSecretProvider
+from app.modules.secrets.providers.openbao import OpenBaoSecretProvider, OpenBaoToken
 
 
 class FakeResponse:
@@ -111,6 +111,49 @@ class FakeValidationAsyncClient:
         return FakeResponse(204, {})
 
 
+class FakeAuthRetryAsyncClient:
+    requests: list[tuple[str, str, dict | None, str | None]] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    async def post(self, url, *, headers=None, json=None):
+        token = headers.get("X-Vault-Token") if headers else None
+        self.requests.append(("POST", url, json, token))
+        return FakeResponse(
+            200,
+            {
+                "auth": {
+                    "client_token": "fresh-token",
+                    "renewable": True,
+                    "lease_duration": 3600,
+                }
+            },
+        )
+
+    async def get(self, url, *, headers=None, params=None):
+        token = headers.get("X-Vault-Token") if headers else None
+        self.requests.append(("GET", url, params, token))
+        if token == "stale-token":
+            return FakeResponse(403, {"errors": ["permission denied"]})
+        assert token == "fresh-token"
+        return FakeResponse(
+            200,
+            {
+                "data": {
+                    "data": {"api_token": "hub-token"},
+                    "metadata": {"version": 8},
+                }
+            },
+        )
+
+
 @pytest.mark.asyncio
 async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
     token_file = tmp_path / "token"
@@ -172,6 +215,83 @@ async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
             "GET",
             "https://bao.example.com/v1/secret/data/wardn/orgs/acme/workspaces/prod/openai",
             {},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openbao_retries_read_with_fresh_token_after_auth_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("service-account-jwt", encoding="utf-8")
+    FakeAuthRetryAsyncClient.requests = []
+    monkeypatch.setattr(
+        "app.modules.secrets.providers.openbao.httpx.AsyncClient",
+        FakeAuthRetryAsyncClient,
+    )
+
+    organization_id = uuid4()
+    provider = OpenBaoSecretProvider()
+    store = SecretStore(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=None,
+        provider="openbao",
+        name="Production OpenBao",
+        config={"baseUrl": "https://bao.example.com", "kvMount": "secret"},
+        auth_config={
+            "method": "kubernetes",
+            "role": "wardn-prod",
+            "serviceAccountTokenPath": str(token_file),
+        },
+        is_active=True,
+    )
+    provider._token_cache[provider._cache_key(store, provider._auth_settings(store))] = (
+        OpenBaoToken(token="stale-token")
+    )
+    handle = SecretHandle(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=None,
+        store_id=store.id,
+        purpose="catalog_source",
+        display_name="Wardn Hub token",
+        external_ref="wardn/orgs/acme/catalog-sources/wardn-hub",
+        key_name="api_token",
+        version="",
+    )
+
+    result = await provider.resolve(
+        store,
+        handle,
+        SecretResolutionContext(
+            organization_id=str(organization_id),
+            purpose="catalog_source",
+        ),
+    )
+
+    assert result.value == "hub-token"
+    assert result.version == "8"
+    assert FakeAuthRetryAsyncClient.requests == [
+        (
+            "GET",
+            "https://bao.example.com/v1/secret/data/wardn/orgs/acme/catalog-sources/wardn-hub",
+            {},
+            "stale-token",
+        ),
+        (
+            "POST",
+            "https://bao.example.com/v1/auth/kubernetes/login",
+            {"role": "wardn-prod", "jwt": "service-account-jwt"},
+            None,
+        ),
+        (
+            "GET",
+            "https://bao.example.com/v1/secret/data/wardn/orgs/acme/catalog-sources/wardn-hub",
+            {},
+            "fresh-token",
         ),
     ]
 
