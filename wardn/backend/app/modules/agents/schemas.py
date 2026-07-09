@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -118,6 +119,13 @@ class AgentRunRead(BaseModel):
     triggered_by_id: uuid.UUID | None = Field(default=None, alias="triggeredById")
     trigger_type: str = Field(alias="triggerType")
     status: str
+    input_tokens: int = Field(default=0, alias="inputTokens")
+    output_tokens: int = Field(default=0, alias="outputTokens")
+    total_tokens: int = Field(default=0, alias="totalTokens")
+    cost_usd: Decimal = Field(default=Decimal("0"), alias="costUsd")
+    tool_calls: int = Field(default=0, alias="toolCalls")
+    trace_id: str = Field(default="", alias="traceId")
+    span_id: str = Field(default="", alias="spanId")
     started_at: datetime = Field(alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")
     error: str

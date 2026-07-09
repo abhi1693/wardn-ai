@@ -17,12 +17,16 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
+    UsageSummaryBreakdownRow,
+    UsageSummaryResponse,
+    UsageSummaryTotals,
 )
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
 
 TEST_ORGANIZATION_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
 TEST_WORKSPACE_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
+TEST_USER_ID = uuid.UUID("33333333-3333-4333-8333-333333333333")
 
 
 class FakeSession:
@@ -35,7 +39,7 @@ async def fake_session():
 
 
 async def fake_current_user():
-    return User(id=uuid.uuid4(), email="admin@example.com", is_superuser=True)
+    return User(id=TEST_USER_ID, email="admin@example.com", is_superuser=True)
 
 
 async def fake_require_workspace_member(*args, **kwargs):
@@ -67,6 +71,47 @@ def workspace_observability_path(suffix: str = "") -> str:
 
 def organization_observability_path(suffix: str = "") -> str:
     return f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/observability{suffix}"
+
+
+def organization_usage_path(suffix: str = "") -> str:
+    return f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/usage{suffix}"
+
+
+def workspace_usage_path(suffix: str = "") -> str:
+    return (
+        f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}"
+        f"/usage{suffix}"
+    )
+
+
+def usage_summary_response() -> UsageSummaryResponse:
+    row = UsageSummaryBreakdownRow(
+        id=str(TEST_USER_ID),
+        label="Test User",
+        requests=2,
+        inputTokens=100,
+        outputTokens=50,
+        totalTokens=150,
+        costUsd="0.000125",
+        toolCalls=3,
+    )
+    return UsageSummaryResponse(
+        summary=UsageSummaryTotals(
+            requests=2,
+            succeeded=2,
+            failed=0,
+            running=0,
+            inputTokens=100,
+            outputTokens=50,
+            totalTokens=150,
+            costUsd="0.000125",
+            toolCalls=3,
+        ),
+        byUser=[row],
+        byWorkspace=[],
+        byAgent=[],
+        byModel=[],
+    )
 
 
 def tool_usage_response() -> MCPToolUsageListResponse:
@@ -182,6 +227,80 @@ def model_price_prefill_response() -> LLMModelPricePrefillResponse:
         sourceModelId="openai/gpt-4.1-mini",
         sourceModelName="OpenAI: GPT-4.1 Mini",
     )
+
+
+def test_organization_usage_summary_route(monkeypatch) -> None:
+    seen = {}
+
+    async def organization_usage_summary(session, *, organization_id):
+        seen["organization_id"] = organization_id
+        return usage_summary_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_organization_admin",
+        fake_require_organization_admin,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "organization_usage_summary",
+        organization_usage_summary,
+    )
+
+    response = observability_client(authenticated=True).get(
+        organization_usage_path("/summary")
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["costUsd"] == "0.000125"
+    assert payload["byUser"][0]["toolCalls"] == 3
+    assert seen == {"organization_id": TEST_ORGANIZATION_ID}
+
+
+def test_workspace_usage_summary_route(monkeypatch) -> None:
+    seen = {}
+
+    async def workspace_usage_summary(session, *, organization_id, workspace_id):
+        seen["organization_id"] = organization_id
+        seen["workspace_id"] = workspace_id
+        return usage_summary_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_workspace_member",
+        fake_require_workspace_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "workspace_usage_summary",
+        workspace_usage_summary,
+    )
+
+    response = observability_client(authenticated=True).get(workspace_usage_path("/summary"))
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["totalTokens"] == 150
+    assert seen == {
+        "organization_id": TEST_ORGANIZATION_ID,
+        "workspace_id": TEST_WORKSPACE_ID,
+    }
+
+
+def test_me_usage_summary_route(monkeypatch) -> None:
+    seen = {}
+
+    async def user_usage_summary(session, *, user_id):
+        seen["user_id"] = user_id
+        return usage_summary_response()
+
+    monkeypatch.setattr(observability_service, "user_usage_summary", user_usage_summary)
+
+    response = observability_client(authenticated=True).get("/api/v1/me/usage")
+
+    assert response.status_code == 200
+    assert response.json()["byUser"][0]["label"] == "Test User"
+    assert seen == {"user_id": TEST_USER_ID}
 
 
 def test_list_mcp_tool_usage_route(monkeypatch) -> None:

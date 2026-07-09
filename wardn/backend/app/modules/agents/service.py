@@ -322,7 +322,13 @@ def conversation_message_response(message: ConversationMessage) -> ConversationM
     )
 
 
-def agent_run_response(agent_run: AgentRun) -> AgentRunRead:
+def agent_run_response(
+    agent_run: AgentRun,
+    usage_summary=None,
+    *,
+    trace_id: str = "",
+    span_id: str = "",
+) -> AgentRunRead:
     return AgentRunRead(
         id=agent_run.id,
         organizationId=agent_run.organization_id,
@@ -332,6 +338,13 @@ def agent_run_response(agent_run: AgentRun) -> AgentRunRead:
         triggeredById=agent_run.triggered_by_id,
         triggerType=agent_run.trigger_type,
         status=agent_run.status,
+        inputTokens=usage_summary.input_tokens if usage_summary is not None else 0,
+        outputTokens=usage_summary.output_tokens if usage_summary is not None else 0,
+        totalTokens=usage_summary.total_tokens if usage_summary is not None else 0,
+        costUsd=usage_summary.cost_usd if usage_summary is not None else 0,
+        toolCalls=usage_summary.tool_calls if usage_summary is not None else 0,
+        traceId=trace_id,
+        spanId=span_id,
         startedAt=agent_run.started_at,
         finishedAt=agent_run.finished_at,
         error=agent_run.error,
@@ -883,8 +896,21 @@ async def get_workspace_agent_run(
     if agent_run is None:
         raise AgentNotFoundError("agent run not found")
     steps = await repository.list_agent_run_steps(session, agent_run_id=agent_run.id)
+    usage_summary = await observability_service.agent_run_usage_summary(
+        session,
+        agent_run_id=agent_run.id,
+    )
+    trace_id, span_id = await observability_service.agent_run_trace_ids(
+        session,
+        agent_run_id=agent_run.id,
+    )
     return AgentRunDetailResponse(
-        run=agent_run_response(agent_run),
+        run=agent_run_response(
+            agent_run,
+            usage_summary,
+            trace_id=trace_id,
+            span_id=span_id,
+        ),
         steps=[agent_run_step_response(step) for step in steps],
     )
 

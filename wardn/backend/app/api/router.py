@@ -16,6 +16,7 @@ from app.modules.mcp_runtime.router import workspace_router as workspace_mcp_run
 from app.modules.observability.router import (
     organization_router as organization_observability_router,
 )
+from app.modules.observability.router import usage_router
 from app.modules.observability.router import (
     workspace_router as workspace_observability_router,
 )
@@ -33,6 +34,7 @@ api_router.include_router(secrets_router)
 api_router.include_router(limits_router)
 api_router.include_router(llm_provider_credentials_router)
 api_router.include_router(workspace_guardrails_router)
+api_router.include_router(usage_router)
 api_router.include_router(organization_observability_router)
 api_router.include_router(workspace_observability_router)
 api_router.include_router(workspace_agents_router)

@@ -15,6 +15,7 @@ from app.modules.observability.schemas import (
     LLMModelPriceUpdate,
     LLMUsageListResponse,
     MCPToolUsageListResponse,
+    UsageSummaryResponse,
 )
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
@@ -38,6 +39,7 @@ organization_router = APIRouter(
     prefix="/organizations/{organization_id}/observability",
     tags=["organization-observability"],
 )
+usage_router = APIRouter(tags=["usage"])
 
 
 async def require_organization_member_or_404(
@@ -78,6 +80,60 @@ async def require_workspace_member_or_404(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@usage_router.get(
+    "/organizations/{organization_id}/usage/summary",
+    response_model=UsageSummaryResponse,
+    operation_id="organization_usage_summary",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def organization_usage_summary_route(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UsageSummaryResponse:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    return await service.organization_usage_summary(session, organization_id=organization_id)
+
+
+@usage_router.get(
+    "/organizations/{organization_id}/workspaces/{workspace_id}/usage/summary",
+    response_model=UsageSummaryResponse,
+    operation_id="workspace_usage_summary",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def workspace_usage_summary_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UsageSummaryResponse:
+    await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
+    return await service.workspace_usage_summary(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+
+
+@usage_router.get(
+    "/me/usage",
+    response_model=UsageSummaryResponse,
+    operation_id="me_usage_summary",
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse}},
+)
+async def me_usage_summary_route(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UsageSummaryResponse:
+    return await service.user_usage_summary(session, user_id=current_user.id)
 
 
 @workspace_router.get(

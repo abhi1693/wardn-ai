@@ -8,13 +8,21 @@
 export interface AgentRunRead {
   agentId: string;
   conversationId?: string | null;
+  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
+  costUsd?: string;
   createdAt: string;
   error: string;
   finishedAt?: string | null;
   id: string;
+  inputTokens?: number;
   organizationId: string;
+  outputTokens?: number;
+  spanId?: string;
   startedAt: string;
   status: string;
+  toolCalls?: number;
+  totalTokens?: number;
+  traceId?: string;
   triggerType: string;
   triggeredById?: string | null;
   updatedAt: string;

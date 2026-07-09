@@ -3,6 +3,7 @@ import {
   Boxes,
   Activity,
   BadgeDollarSign,
+  BarChart3,
   Gauge,
   Home,
   KeyRound,
@@ -13,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -55,6 +57,18 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/llm-pricing` : "/org",
       activeKey: "llm-pricing",
       icon: BadgeDollarSign,
+    },
+    {
+      label: "Usage",
+      href: organizationId ? `/org/${organizationId}/usage` : "/org",
+      activeKey: "usage",
+      icon: BarChart3,
+    },
+    {
+      label: "My Usage",
+      href: organizationId ? `/org/${organizationId}/usage/me` : "/org",
+      activeKey: "my-usage",
+      icon: UserRound,
     },
     {
       label: "Agent Tokens",
@@ -160,6 +174,8 @@ type AppShellProps = {
     | "catalog"
     | "llm-credentials"
     | "llm-pricing"
+    | "usage"
+    | "my-usage"
     | "secret-backends"
     | "workspace-guardrails"
     | "agents"

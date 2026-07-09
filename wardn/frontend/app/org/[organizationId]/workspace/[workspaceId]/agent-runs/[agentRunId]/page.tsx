@@ -1,4 +1,12 @@
-import { ArrowLeft, Clock, ListTree } from "lucide-react";
+import {
+  ArrowLeft,
+  BadgeDollarSign,
+  Clock,
+  Database,
+  ExternalLink,
+  ListTree,
+  Wrench,
+} from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -68,6 +76,27 @@ function statusVariant(status: string) {
   return "outline" as const;
 }
 
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("en").format(value);
+}
+
+function formatCurrency(value: string | number) {
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+  }).format(Number(value || 0));
+}
+
+function grafanaTraceHref(traceId: string) {
+  const template = process.env.NEXT_PUBLIC_GRAFANA_TRACE_URL_TEMPLATE ?? "";
+  if (!template || !traceId) {
+    return "";
+  }
+  return template.replace("{traceId}", encodeURIComponent(traceId));
+}
+
 export default async function AgentRunPage({ params }: AgentRunPageProps) {
   const { organizationId, workspaceId, agentRunId } = await params;
   const [workspaceContext, detail] = await Promise.all([
@@ -82,6 +111,7 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
   const chatHref = `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
   )}/chat/${encodeURIComponent(detail.run.conversationId ?? "")}`;
+  const traceHref = grafanaTraceHref(detail.run.traceId ?? "");
 
   return (
     <AppShell
@@ -139,6 +169,74 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
               {detail.run.error}
             </div>
           ) : null}
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-[var(--outline-variant)] bg-white p-4 shadow-[var(--shadow-card)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-[var(--on-surface-variant)]">Tokens</div>
+              <Database className="size-4 text-[var(--on-surface-variant)]" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold">
+              {formatInteger(detail.run.totalTokens ?? 0)}
+            </div>
+            <div className="mt-1 text-xs text-[var(--on-surface-variant)]">
+              {formatInteger(detail.run.inputTokens ?? 0)} in,{" "}
+              {formatInteger(detail.run.outputTokens ?? 0)} out
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--outline-variant)] bg-white p-4 shadow-[var(--shadow-card)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-[var(--on-surface-variant)]">Cost</div>
+              <BadgeDollarSign className="size-4 text-[var(--on-surface-variant)]" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold">
+              {formatCurrency(detail.run.costUsd ?? 0)}
+            </div>
+            <div className="mt-1 text-xs text-[var(--on-surface-variant)]">
+              Estimated from configured model pricing
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--outline-variant)] bg-white p-4 shadow-[var(--shadow-card)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-[var(--on-surface-variant)]">Tool calls</div>
+              <Wrench className="size-4 text-[var(--on-surface-variant)]" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold">
+              {formatInteger(detail.run.toolCalls ?? 0)}
+            </div>
+            <div className="mt-1 text-xs text-[var(--on-surface-variant)]">
+              MCP invocations attributed to this run
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--outline-variant)] bg-white p-4 shadow-[var(--shadow-card)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-[var(--on-surface-variant)]">Trace</div>
+              <ListTree className="size-4 text-[var(--on-surface-variant)]" />
+            </div>
+            <div className="mt-2 min-w-0 font-mono text-sm">
+              {detail.run.traceId ? (
+                traceHref ? (
+                  <a
+                    className="inline-flex max-w-full items-center gap-1 truncate text-primary underline-offset-4 hover:underline"
+                    href={traceHref}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <span className="truncate">{detail.run.traceId}</span>
+                    <ExternalLink className="size-3 shrink-0" />
+                  </a>
+                ) : (
+                  <span className="block truncate">{detail.run.traceId}</span>
+                )
+              ) : (
+                <span className="text-[var(--on-surface-variant)]">Not recorded</span>
+              )}
+            </div>
+            <div className="mt-1 truncate text-xs text-[var(--on-surface-variant)]">
+              {detail.run.spanId || "No span id recorded"}
+            </div>
+          </div>
         </section>
 
         <section className="rounded-lg border border-[var(--outline-variant)] bg-white shadow-[var(--shadow-card)]">

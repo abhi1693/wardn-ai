@@ -26,6 +26,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/limits/budgets",
         "/api/v1/limits/budgets/{budget_id}",
         "/api/v1/limits/{limit_id}",
+        "/api/v1/me/usage",
         "/api/v1/mcp/gateway",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
@@ -53,6 +54,7 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/observability/llm/model-prices"
             "/{price_id}"
         ),
+        "/api/v1/organizations/{organization_id}/usage/summary",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
@@ -157,6 +159,10 @@ def test_openapi_exposes_expected_paths() -> None:
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/observability/llm-usage"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/usage/summary"
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"

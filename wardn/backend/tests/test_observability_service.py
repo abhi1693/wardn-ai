@@ -23,6 +23,28 @@ class FakeSession:
         self.flushed = True
 
 
+class FakeRow(tuple):
+    def __new__(cls, values, mapping):
+        row = tuple.__new__(cls, values)
+        row._mapping = mapping
+        return row
+
+
+def usage_row(*values, requests=0, input_tokens=0, output_tokens=0, cost_usd="0"):
+    return FakeRow(
+        values,
+        {
+            "requests": requests,
+            "succeeded": requests,
+            "failed": 0,
+            "running": 0,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": Decimal(cost_usd),
+        },
+    )
+
+
 def test_calculate_llm_cost_uses_cache_prices() -> None:
     price = LLMModelPrice(
         provider="openai_api_key",
@@ -223,3 +245,90 @@ async def test_list_workspace_mcp_tool_usage_uses_repository(monkeypatch) -> Non
 
     assert response.summary.total == 1
     assert response.tool_calls[0].user_email == "user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_usage_summary_merges_llm_and_tool_breakdowns(monkeypatch) -> None:
+    organization_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+
+    async def llm_usage_totals(*args, **kwargs):
+        return usage_row(
+            [],
+            requests=2,
+            input_tokens=100,
+            output_tokens=50,
+            cost_usd="0.000125",
+        )
+
+    async def mcp_tool_call_count(*args, **kwargs):
+        return 3
+
+    async def llm_usage_by_user(*args, **kwargs):
+        return [
+            usage_row(
+                user_id,
+                "Asha",
+                "Rao",
+                "asha@example.com",
+                requests=2,
+                input_tokens=100,
+                output_tokens=50,
+                cost_usd="0.000125",
+            )
+        ]
+
+    async def mcp_tool_calls_by_user(*args, **kwargs):
+        return [(user_id, "Asha", "Rao", "asha@example.com", 3)]
+
+    async def llm_usage_by_workspace(*args, **kwargs):
+        return [usage_row(workspace_id, "Default Workspace")]
+
+    async def mcp_tool_calls_by_workspace(*args, **kwargs):
+        return [(workspace_id, "Default Workspace", 3)]
+
+    async def llm_usage_by_agent(*args, **kwargs):
+        return [usage_row(agent_id, "Workspace Assistant")]
+
+    async def mcp_tool_calls_by_agent(*args, **kwargs):
+        return [(agent_id, "Workspace Assistant", 3)]
+
+    async def llm_usage_by_model(*args, **kwargs):
+        return [
+            usage_row(
+                "openai",
+                "gpt-4.1-mini",
+                requests=2,
+                input_tokens=100,
+                output_tokens=50,
+                cost_usd="0.000125",
+            )
+        ]
+
+    monkeypatch.setattr(service.repository, "llm_usage_totals", llm_usage_totals)
+    monkeypatch.setattr(service.repository, "mcp_tool_call_count", mcp_tool_call_count)
+    monkeypatch.setattr(service.repository, "llm_usage_by_user", llm_usage_by_user)
+    monkeypatch.setattr(service.repository, "mcp_tool_calls_by_user", mcp_tool_calls_by_user)
+    monkeypatch.setattr(service.repository, "llm_usage_by_workspace", llm_usage_by_workspace)
+    monkeypatch.setattr(
+        service.repository,
+        "mcp_tool_calls_by_workspace",
+        mcp_tool_calls_by_workspace,
+    )
+    monkeypatch.setattr(service.repository, "llm_usage_by_agent", llm_usage_by_agent)
+    monkeypatch.setattr(service.repository, "mcp_tool_calls_by_agent", mcp_tool_calls_by_agent)
+    monkeypatch.setattr(service.repository, "llm_usage_by_model", llm_usage_by_model)
+
+    response = await service.organization_usage_summary(
+        object(),
+        organization_id=organization_id,
+    )
+
+    assert response.summary.requests == 2
+    assert response.summary.tool_calls == 3
+    assert response.by_user[0].label == "Asha Rao"
+    assert response.by_user[0].cost_usd == Decimal("0.000125")
+    assert response.by_user[0].tool_calls == 3
+    assert response.by_model[0].label == "openai / gpt-4.1-mini"

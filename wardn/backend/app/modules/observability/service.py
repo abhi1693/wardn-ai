@@ -23,6 +23,9 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
+    UsageSummaryBreakdownRow,
+    UsageSummaryResponse,
+    UsageSummaryTotals,
 )
 from app.modules.users.models import User
 
@@ -417,6 +420,299 @@ def llm_usage_summary(records: list[LLMUsageRecord]) -> LLMUsageSummary:
             and record.agent_run_id is None
         ),
     )
+
+
+def row_value(row, key: str, default=0):
+    return row._mapping.get(key, default)
+
+
+def usage_totals_response(row, *, tool_calls: int) -> UsageSummaryTotals:
+    input_tokens = int(row_value(row, "input_tokens"))
+    output_tokens = int(row_value(row, "output_tokens"))
+    return UsageSummaryTotals(
+        requests=int(row_value(row, "requests")),
+        succeeded=int(row_value(row, "succeeded")),
+        failed=int(row_value(row, "failed")),
+        running=int(row_value(row, "running")),
+        inputTokens=input_tokens,
+        outputTokens=output_tokens,
+        totalTokens=input_tokens + output_tokens,
+        costUsd=row_value(row, "cost_usd", Decimal("0")) or Decimal("0"),
+        toolCalls=tool_calls,
+    )
+
+
+def display_label(*, name: str | None = None, email: str | None = None, fallback: str) -> str:
+    value = (name or "").strip() or (email or "").strip()
+    return value or fallback
+
+
+def person_label(first_name: str | None, last_name: str | None, email: str | None) -> str:
+    full_name = f"{first_name or ''} {last_name or ''}".strip()
+    return display_label(name=full_name, email=email, fallback="Unattributed user")
+
+
+def bucket_id(value: UUID | str | None, fallback: str) -> str:
+    return str(value) if value is not None else fallback
+
+
+def add_llm_breakdown(
+    buckets: dict[str, dict[str, Any]],
+    *,
+    key: str,
+    label: str,
+    row,
+) -> None:
+    input_tokens = int(row_value(row, "input_tokens"))
+    output_tokens = int(row_value(row, "output_tokens"))
+    bucket = buckets.setdefault(
+        key,
+        {
+            "id": key,
+            "label": label,
+            "requests": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "costUsd": Decimal("0"),
+            "toolCalls": 0,
+        },
+    )
+    bucket["label"] = label
+    bucket["requests"] += int(row_value(row, "requests"))
+    bucket["inputTokens"] += input_tokens
+    bucket["outputTokens"] += output_tokens
+    bucket["costUsd"] += row_value(row, "cost_usd", Decimal("0")) or Decimal("0")
+
+
+def add_tool_breakdown(
+    buckets: dict[str, dict[str, Any]],
+    *,
+    key: str,
+    label: str,
+    tool_calls: int,
+) -> None:
+    bucket = buckets.setdefault(
+        key,
+        {
+            "id": key,
+            "label": label,
+            "requests": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "costUsd": Decimal("0"),
+            "toolCalls": 0,
+        },
+    )
+    if not bucket["label"] or bucket["label"].startswith("Unattributed"):
+        bucket["label"] = label
+    bucket["toolCalls"] += tool_calls
+
+
+def breakdown_rows(buckets: dict[str, dict[str, Any]]) -> list[UsageSummaryBreakdownRow]:
+    rows = [
+        UsageSummaryBreakdownRow(
+            id=str(bucket["id"]),
+            label=str(bucket["label"]),
+            requests=int(bucket["requests"]),
+            inputTokens=int(bucket["inputTokens"]),
+            outputTokens=int(bucket["outputTokens"]),
+            totalTokens=int(bucket["inputTokens"]) + int(bucket["outputTokens"]),
+            costUsd=bucket["costUsd"],
+            toolCalls=int(bucket["toolCalls"]),
+        )
+        for bucket in buckets.values()
+    ]
+    return sorted(
+        rows,
+        key=lambda row: (
+            row.cost_usd,
+            row.requests,
+            row.tool_calls,
+            row.total_tokens,
+            row.label.casefold(),
+        ),
+        reverse=True,
+    )
+
+
+async def usage_summary_response(
+    session: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
+    user_id: UUID | None = None,
+) -> UsageSummaryResponse:
+    totals_row = await repository.llm_usage_totals(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    total_tool_calls = await repository.mcp_tool_call_count(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+
+    by_user: dict[str, dict[str, Any]] = {}
+    for row in await repository.llm_usage_by_user(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_llm_breakdown(
+            by_user,
+            key=bucket_id(row[0], "unattributed"),
+            label=person_label(row[1], row[2], row[3]),
+            row=row,
+        )
+    for row in await repository.mcp_tool_calls_by_user(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_tool_breakdown(
+            by_user,
+            key=bucket_id(row[0], "unattributed"),
+            label=person_label(row[1], row[2], row[3]),
+            tool_calls=int(row[4] or 0),
+        )
+
+    by_workspace: dict[str, dict[str, Any]] = {}
+    for row in await repository.llm_usage_by_workspace(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_llm_breakdown(
+            by_workspace,
+            key=bucket_id(row[0], "unknown-workspace"),
+            label=display_label(name=row[1], fallback="Unknown workspace"),
+            row=row,
+        )
+    for row in await repository.mcp_tool_calls_by_workspace(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_tool_breakdown(
+            by_workspace,
+            key=bucket_id(row[0], "unknown-workspace"),
+            label=display_label(name=row[1], fallback="Unknown workspace"),
+            tool_calls=int(row[2] or 0),
+        )
+
+    by_agent: dict[str, dict[str, Any]] = {}
+    for row in await repository.llm_usage_by_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_llm_breakdown(
+            by_agent,
+            key=bucket_id(row[0], "unattributed-agent"),
+            label=display_label(name=row[1], fallback="Unattributed agent"),
+            row=row,
+        )
+    for row in await repository.mcp_tool_calls_by_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_tool_breakdown(
+            by_agent,
+            key=bucket_id(row[0], "unattributed-agent"),
+            label=display_label(name=row[1], fallback="Unattributed agent"),
+            tool_calls=int(row[2] or 0),
+        )
+
+    by_model: dict[str, dict[str, Any]] = {}
+    for row in await repository.llm_usage_by_model(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        provider = str(row[0])
+        model = str(row[1])
+        add_llm_breakdown(
+            by_model,
+            key=f"{provider}:{model}",
+            label=f"{provider} / {model}",
+            row=row,
+        )
+
+    return UsageSummaryResponse(
+        summary=usage_totals_response(totals_row, tool_calls=total_tool_calls),
+        byUser=breakdown_rows(by_user),
+        byWorkspace=breakdown_rows(by_workspace),
+        byAgent=breakdown_rows(by_agent),
+        byModel=breakdown_rows(by_model),
+    )
+
+
+async def organization_usage_summary(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+) -> UsageSummaryResponse:
+    return await usage_summary_response(session, organization_id=organization_id)
+
+
+async def workspace_usage_summary(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+) -> UsageSummaryResponse:
+    return await usage_summary_response(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+
+
+async def user_usage_summary(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> UsageSummaryResponse:
+    return await usage_summary_response(session, user_id=user_id)
+
+
+async def agent_run_usage_summary(
+    session: AsyncSession,
+    *,
+    agent_run_id: UUID,
+) -> UsageSummaryTotals:
+    totals_row = await repository.llm_usage_totals(session, agent_run_id=agent_run_id)
+    total_tool_calls = await repository.mcp_tool_call_count(
+        session,
+        agent_run_id=agent_run_id,
+    )
+    return usage_totals_response(totals_row, tool_calls=total_tool_calls)
+
+
+async def agent_run_trace_ids(
+    session: AsyncSession,
+    *,
+    agent_run_id: UUID,
+) -> tuple[str, str]:
+    records = await repository.list_llm_usage_records_for_agent_run(
+        session,
+        agent_run_id=agent_run_id,
+    )
+    for record in records:
+        if record.trace_id:
+            return record.trace_id, record.span_id
+    return "", ""
 
 
 def tool_usage_read(

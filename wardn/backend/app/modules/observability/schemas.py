@@ -156,6 +156,43 @@ class LLMUsageListResponse(BaseModel):
     records: list[LLMUsageRead]
 
 
+class UsageSummaryTotals(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    requests: int
+    succeeded: int
+    failed: int
+    running: int
+    input_tokens: int = Field(alias="inputTokens")
+    output_tokens: int = Field(alias="outputTokens")
+    total_tokens: int = Field(alias="totalTokens")
+    cost_usd: Decimal = Field(alias="costUsd")
+    tool_calls: int = Field(alias="toolCalls")
+
+
+class UsageSummaryBreakdownRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    label: str
+    requests: int
+    input_tokens: int = Field(alias="inputTokens")
+    output_tokens: int = Field(alias="outputTokens")
+    total_tokens: int = Field(alias="totalTokens")
+    cost_usd: Decimal = Field(alias="costUsd")
+    tool_calls: int = Field(alias="toolCalls")
+
+
+class UsageSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    summary: UsageSummaryTotals
+    by_user: list[UsageSummaryBreakdownRow] = Field(alias="byUser")
+    by_workspace: list[UsageSummaryBreakdownRow] = Field(alias="byWorkspace")
+    by_agent: list[UsageSummaryBreakdownRow] = Field(alias="byAgent")
+    by_model: list[UsageSummaryBreakdownRow] = Field(alias="byModel")
+
+
 class MCPToolUsageRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

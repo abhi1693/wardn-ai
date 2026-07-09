@@ -461,6 +461,12 @@
             ],
             "title": "Conversationid"
           },
+          "costUsd": {
+            "default": "0",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
           "createdAt": {
             "format": "date-time",
             "title": "Createdat",
@@ -487,9 +493,24 @@
             "title": "Id",
             "type": "string"
           },
+          "inputTokens": {
+            "default": 0,
+            "title": "Inputtokens",
+            "type": "integer"
+          },
           "organizationId": {
             "format": "uuid",
             "title": "Organizationid",
+            "type": "string"
+          },
+          "outputTokens": {
+            "default": 0,
+            "title": "Outputtokens",
+            "type": "integer"
+          },
+          "spanId": {
+            "default": "",
+            "title": "Spanid",
             "type": "string"
           },
           "startedAt": {
@@ -499,6 +520,21 @@
           },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "toolCalls": {
+            "default": 0,
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "default": 0,
+            "title": "Totaltokens",
+            "type": "integer"
+          },
+          "traceId": {
+            "default": "",
+            "title": "Traceid",
             "type": "string"
           },
           "triggerType": {
@@ -5338,6 +5374,153 @@
         "title": "UsageBudgetUpsert",
         "type": "object"
       },
+      "UsageSummaryBreakdownRow": {
+        "properties": {
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "inputTokens": {
+            "title": "Inputtokens",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outputTokens": {
+            "title": "Outputtokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "requests",
+          "inputTokens",
+          "outputTokens",
+          "totalTokens",
+          "costUsd",
+          "toolCalls"
+        ],
+        "title": "UsageSummaryBreakdownRow",
+        "type": "object"
+      },
+      "UsageSummaryResponse": {
+        "properties": {
+          "byAgent": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Byagent",
+            "type": "array"
+          },
+          "byModel": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Bymodel",
+            "type": "array"
+          },
+          "byUser": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Byuser",
+            "type": "array"
+          },
+          "byWorkspace": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Byworkspace",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/UsageSummaryTotals"
+          }
+        },
+        "required": [
+          "summary",
+          "byUser",
+          "byWorkspace",
+          "byAgent",
+          "byModel"
+        ],
+        "title": "UsageSummaryResponse",
+        "type": "object"
+      },
+      "UsageSummaryTotals": {
+        "properties": {
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "inputTokens": {
+            "title": "Inputtokens",
+            "type": "integer"
+          },
+          "outputTokens": {
+            "title": "Outputtokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "succeeded",
+          "failed",
+          "running",
+          "inputTokens",
+          "outputTokens",
+          "totalTokens",
+          "costUsd",
+          "toolCalls"
+        ],
+        "title": "UsageSummaryTotals",
+        "type": "object"
+      },
       "UserAPITokenCreate": {
         "properties": {
           "description": {
@@ -7088,6 +7271,65 @@
         "summary": "Mcp Gateway Rpc",
         "tags": [
           "mcp-gateway"
+        ]
+      }
+    },
+    "/api/v1/me/usage": {
+      "get": {
+        "operationId": "me_usage_summary",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Me Usage Summary Route",
+        "tags": [
+          "usage"
         ]
       }
     },
@@ -10946,6 +11188,85 @@
         ]
       }
     },
+    "/api/v1/organizations/{organization_id}/usage/summary": {
+      "get": {
+        "operationId": "organization_usage_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Organization Usage Summary Route",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
     "/api/v1/organizations/{organization_id}/workspaces": {
       "get": {
         "operationId": "workspaces_list",
@@ -14766,6 +15087,95 @@
         "summary": "List Workspace Mcp Tool Usage Route",
         "tags": [
           "workspace-observability"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/usage/summary": {
+      "get": {
+        "operationId": "workspace_usage_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Workspace Usage Summary Route",
+        "tags": [
+          "usage"
         ]
       }
     },
