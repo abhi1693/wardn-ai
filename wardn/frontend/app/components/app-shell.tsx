@@ -2,6 +2,7 @@ import {
   BookOpen,
   Boxes,
   Activity,
+  Gauge,
   Home,
   KeyRound,
   MessageSquare,
@@ -116,6 +117,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: Activity,
     },
     {
+      label: "Observability",
+      href: `${workspaceBasePath}/observability`,
+      activeKey: "workspace-observability",
+      icon: Gauge,
+    },
+    {
       label: "Guardrails",
       href: `${workspaceBasePath}/guardrails`,
       activeKey: "workspace-guardrails",
@@ -142,6 +149,7 @@ type AppShellProps = {
     | "workspace-settings"
     | "workspace-dashboard"
     | "workspace-chat"
+    | "workspace-observability"
     | "catalog"
     | "llm-credentials"
     | "secret-backends"
@@ -178,6 +186,7 @@ export function AppShell({
     active === "workspace-chat" ||
     active === "install" ||
     active === "runtime" ||
+    active === "workspace-observability" ||
     active === "workspace-guardrails" ||
     active === "workspace-agents" ||
     active === "workspace-settings";

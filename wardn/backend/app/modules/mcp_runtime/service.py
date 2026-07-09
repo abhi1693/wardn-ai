@@ -315,6 +315,7 @@ async def ensure_runtime_session(
 ) -> MCPRuntimeSession:
     installation = await materialize_installation_secret_references(session, installation)
     now = now or datetime.now(UTC)
+    organization_id = await organization_id_for_workspace(session, installation.workspace_id)
     runtime_spec = manager.runtime_spec(installation)
     config_fingerprint = runtime_spec.fingerprint()
     existing = await repository.get_active_runtime_session(
@@ -347,6 +348,8 @@ async def ensure_runtime_session(
             )
             await session.flush()
         else:
+            if existing.organization_id is None:
+                existing.organization_id = organization_id
             existing.status = "running"
             existing.last_used_at = now
             existing.expires_at = expires_at
@@ -364,6 +367,7 @@ async def ensure_runtime_session(
 
     runtime_session = repository.create_runtime_session(
         installation_id=installation.id,
+        organization_id=organization_id,
         workspace_id=installation.workspace_id,
         server_name=server.name,
         server_version=server.version,
@@ -538,6 +542,9 @@ async def call_tool_with_tracking(
     *,
     tool_name: str,
     arguments: dict[str, Any],
+    user_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    agent_run_id: UUID | None = None,
     cancel_event: Event | None = None,
     cancel_reason: str = "Tool call cancelled.",
     request_meta: dict[str, Any] | None = None,
@@ -564,6 +571,9 @@ async def call_tool_with_tracking(
         server_version=server.version,
         tool_name=tool_name,
         input_size_bytes=payload_size_bytes(arguments),
+        user_id=user_id,
+        agent_id=agent_id,
+        agent_run_id=agent_run_id,
         now=now,
     )
     session.add(invocation)

@@ -128,6 +128,11 @@ export function workspaceRuntimePath(context: WorkspaceContext) {
   return basePath ? `${basePath}/runtime` : "";
 }
 
+export function workspaceObservabilityPath(context: WorkspaceContext) {
+  const basePath = workspaceBasePath(context);
+  return basePath ? `${basePath}/observability` : "";
+}
+
 export function workspaceMcpRegistryPath(
   context: WorkspaceContext,
   suffix: string,
@@ -150,6 +155,18 @@ export function workspaceMcpRuntimePath(
   return `/api/v1/organizations/${encodeURIComponent(
     context.selectedOrganization.id
   )}/workspaces/${encodeURIComponent(context.selectedWorkspace.id)}/mcp/runtime${suffix}`;
+}
+
+export function workspaceObservabilityApiPath(
+  context: WorkspaceContext,
+  suffix: string,
+) {
+  if (!context.selectedOrganization || !context.selectedWorkspace) {
+    return "";
+  }
+  return `/api/v1/organizations/${encodeURIComponent(
+    context.selectedOrganization.id
+  )}/workspaces/${encodeURIComponent(context.selectedWorkspace.id)}/observability${suffix}`;
 }
 
 export function organizationMcpRegistryPath(

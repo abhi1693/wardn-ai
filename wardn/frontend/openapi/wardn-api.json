@@ -3601,6 +3601,251 @@
         "title": "MCPServerToolRead",
         "type": "object"
       },
+      "MCPToolUsageListResponse": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/MCPToolUsageSummary"
+          },
+          "toolCalls": {
+            "items": {
+              "$ref": "#/components/schemas/MCPToolUsageRead"
+            },
+            "title": "Toolcalls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "summary",
+          "toolCalls"
+        ],
+        "title": "MCPToolUsageListResponse",
+        "type": "object"
+      },
+      "MCPToolUsageRead": {
+        "properties": {
+          "agentId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentid"
+          },
+          "agentName": {
+            "title": "Agentname",
+            "type": "string"
+          },
+          "agentRunId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentrunid"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputSizeBytes": {
+            "title": "Inputsizebytes",
+            "type": "integer"
+          },
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "isError": {
+            "title": "Iserror",
+            "type": "boolean"
+          },
+          "organizationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organizationid"
+          },
+          "outputSizeBytes": {
+            "title": "Outputsizebytes",
+            "type": "integer"
+          },
+          "runtimeSessionId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtimesessionid"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "serverVersion": {
+            "title": "Serverversion",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "title": "Startedat",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          },
+          "userDisplayName": {
+            "title": "Userdisplayname",
+            "type": "string"
+          },
+          "userEmail": {
+            "title": "Useremail",
+            "type": "string"
+          },
+          "userId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Userid"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceid"
+          }
+        },
+        "required": [
+          "id",
+          "installationId",
+          "userEmail",
+          "userDisplayName",
+          "agentName",
+          "serverName",
+          "serverVersion",
+          "toolName",
+          "status",
+          "startedAt",
+          "inputSizeBytes",
+          "outputSizeBytes",
+          "isError",
+          "error"
+        ],
+        "title": "MCPToolUsageRead",
+        "type": "object"
+      },
+      "MCPToolUsageSummary": {
+        "properties": {
+          "attributed": {
+            "title": "Attributed",
+            "type": "integer"
+          },
+          "averageDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Averagedurationms"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unattributed": {
+            "title": "Unattributed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "running",
+          "attributed",
+          "unattributed"
+        ],
+        "title": "MCPToolUsageSummary",
+        "type": "object"
+      },
       "OrganizationCreate": {
         "properties": {
           "name": {
@@ -12808,6 +13053,107 @@
         "summary": "Get Workspace Mcp Runtime Summary",
         "tags": [
           "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/observability/mcp-tool-usage": {
+      "get": {
+        "operationId": "workspace_observability_list_mcp_tool_usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolUsageListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Mcp Tool Usage Route",
+        "tags": [
+          "workspace-observability"
         ]
       }
     },

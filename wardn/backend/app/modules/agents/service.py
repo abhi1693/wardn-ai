@@ -1334,6 +1334,9 @@ async def execute_agent_tool_call(
             tool.server,
             tool_name=tool.tool_schema.tool_name,
             arguments=tool_call.arguments,
+            user_id=user.id if user else None,
+            agent_id=agent.id if agent else None,
+            agent_run_id=agent_run.id if agent_run else None,
             cancel_event=cancel_event,
             cancel_reason=cancel_reason,
             request_meta=request_meta,
@@ -2213,6 +2216,9 @@ async def decide_agent_tool_approval(
                 tool.server,
                 tool_name=tool.tool_schema.tool_name,
                 arguments=approval.arguments,
+                user_id=user.id,
+                agent_id=agent.id,
+                agent_run_id=approval.agent_run_id,
             )
             approval.status = "completed"
             approval.result = mcp_result_text(result)

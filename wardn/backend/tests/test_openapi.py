@@ -144,6 +144,10 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/observability/mcp-tool-usage"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/mcp/registry/installed-server-configs/{installation_id}"
         ),
         (

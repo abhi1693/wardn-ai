@@ -192,6 +192,9 @@ def create_tool_invocation(
     server_version: str,
     tool_name: str,
     input_size_bytes: int,
+    user_id: Any | None = None,
+    agent_id: Any | None = None,
+    agent_run_id: Any | None = None,
     now: datetime | None = None,
 ) -> MCPToolInvocation:
     now = now or datetime.now(UTC)
@@ -199,6 +202,9 @@ def create_tool_invocation(
         organization_id=runtime_session.organization_id,
         workspace_id=runtime_session.workspace_id,
         runtime_session_id=runtime_session.id,
+        user_id=user_id,
+        agent_id=agent_id,
+        agent_run_id=agent_run_id,
         installation_id=installation_id,
         server_name=server_name,
         server_version=server_version,
