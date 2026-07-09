@@ -1,12 +1,13 @@
-import { BadgeDollarSign } from "lucide-react";
+import { BadgeDollarSign, Plus } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { getOrganization } from "@/app/organizations/data";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
-import { getCurrentUser, getModelPrices } from "./data";
+import { canManageModelPrices, getCurrentUser, getModelPrices } from "./data";
 import { ModelPricingClient } from "./model-pricing-client";
 
 type ModelPricingPageProps = {
@@ -26,30 +27,34 @@ export default async function ModelPricingPage({ params }: ModelPricingPageProps
     notFound();
   }
 
-  const canManage =
-    currentUser?.is_superuser ||
-    organization.currentUserRole === "owner" ||
-    organization.currentUserRole === "admin";
+  const canManage = canManageModelPrices(currentUser, organization.currentUserRole);
 
   return (
     <AppShell
       active="llm-pricing"
       actions={
-        <Badge variant="outline">
-          <BadgeDollarSign className="size-3.5" />
-          {prices.length} models
-        </Badge>
+        canManage ? (
+          <Button asChild size="sm">
+            <Link href={`/org/${organization.id}/llm-pricing/new`}>
+              <Plus className="size-4" />
+              New price
+            </Link>
+          </Button>
+        ) : undefined
       }
       eyebrow="Organization"
       title="LLM Pricing"
       workspaceContext={workspaceContext}
     >
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <BadgeDollarSign className="size-4" />
+        {prices.length} configured model prices
+      </div>
       <ModelPricingClient
-        canManage={Boolean(canManage)}
+        canManage={canManage}
         initialPrices={prices}
         organizationId={organization.id}
       />
     </AppShell>
   );
 }
-

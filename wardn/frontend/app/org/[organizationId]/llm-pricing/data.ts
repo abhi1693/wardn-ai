@@ -1,17 +1,7 @@
 import type { UserRead } from "@/lib/api/generated/model";
 import { backendCookieHeader, backendPath } from "@/lib/workspace-context";
 
-export type LLMModelPriceRead = {
-  id: string;
-  provider: string;
-  model: string;
-  inputUsdPer1mTokens: string | number;
-  outputUsdPer1mTokens: string | number;
-  cacheReadUsdPer1mTokens: string | number | null;
-  cacheWriteUsdPer1mTokens: string | number | null;
-  createdAt: string;
-  updatedAt: string;
-};
+import type { LLMModelPriceRead } from "./types";
 
 type LLMModelPriceListResponse = {
   prices: LLMModelPriceRead[];
@@ -57,3 +47,17 @@ export async function getModelPrices(organizationId: string) {
   }
 }
 
+export function getModelPriceById(prices: LLMModelPriceRead[], priceId: string) {
+  return prices.find((price) => price.id === priceId) ?? null;
+}
+
+export function canManageModelPrices(
+  currentUser: UserRead | null,
+  organizationRole: string,
+) {
+  return (
+    Boolean(currentUser?.is_superuser) ||
+    organizationRole === "owner" ||
+    organizationRole === "admin"
+  );
+}
