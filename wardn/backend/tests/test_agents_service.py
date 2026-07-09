@@ -904,8 +904,8 @@ def test_websocket_error_message_reads_codex_error_events() -> None:
 
 def test_codex_compat_headers_use_current_default_version() -> None:
     assert service.CODEX_COMPAT_VERSION == service.DEFAULT_CODEX_COMPAT_VERSION
-    assert service.CODEX_COMPAT_VERSION == "0.142.0"
-    assert service.CODEX_COMPAT_USER_AGENT.startswith("codex_cli_rs/0.142.0 ")
+    assert service.CODEX_COMPAT_VERSION == "0.144.0"
+    assert service.CODEX_COMPAT_USER_AGENT.startswith("codex_cli_rs/0.144.0 ")
 
 
 @pytest.mark.asyncio

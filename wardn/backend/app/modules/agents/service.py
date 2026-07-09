@@ -99,7 +99,7 @@ from app.modules.users.models import User
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 CHATGPT_CODEX_RESPONSES_WS_URL = "wss://chatgpt.com/backend-api/codex/responses"
 CHATGPT_CODEX_WEBSOCKET_BETA = "responses_websockets=2026-02-06"
-DEFAULT_CODEX_COMPAT_VERSION = "0.142.0"
+DEFAULT_CODEX_COMPAT_VERSION = "0.144.0"
 CODEX_COMPAT_VERSION = os.getenv("WARDN_CODEX_COMPAT_VERSION", DEFAULT_CODEX_COMPAT_VERSION)
 CODEX_COMPAT_ORIGINATOR = "codex_cli_rs"
 CODEX_COMPAT_USER_AGENT = (
