@@ -381,10 +381,111 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     assert calls["kwargs"]["pagination"] == "page"
     assert calls["kwargs"]["headers"]["Authorization"] == "Bearer hub-token"
     assert calls["kwargs"]["headers"]["X-API-Key"] == "hub-token"
-    assert calls["servers"] == [payload]
+    assert calls["servers"][0].name == payload.name
+    assert calls["servers"][0].meta[service.CATALOG_SOURCE_META_KEY] == {
+        "id": str(source.id),
+        "name": "Wardn Hub",
+        "provider": "wardn_hub",
+        "baseUrl": "https://hub.wardnai.dev",
+        "sourceUrl": "https://hub.wardnai.dev/api/v1/mcp/catalog",
+    }
     assert calls["organization_id"] == ORGANIZATION_ID
     assert source.last_success_at is not None
     assert source.last_error == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_catalog_source_deletes_associated_server_versions(monkeypatch) -> None:
+    source = catalog_source()
+    server = server_version("1.0.0", is_latest=True)
+    replacement = server_version("0.9.0", is_latest=False)
+    calls: list[tuple[str, str]] = []
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def list_server_versions_for_catalog_source(*args, **kwargs):
+        calls.append(("list_source_versions", str(kwargs["source_id"])))
+        return [server]
+
+    async def get_latest_visible_version(*args, **kwargs):
+        calls.append(("replacement", args[1]))
+        return replacement
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(
+        service.repository,
+        "list_server_versions_for_catalog_source",
+        list_server_versions_for_catalog_source,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_latest_visible_version",
+        get_latest_visible_version,
+    )
+    session = FakeSession()
+
+    await service.delete_catalog_source(session, ORGANIZATION_ID, source.id)
+
+    assert ("list_source_versions", str(source.id)) in calls
+    assert ("replacement", server.name) in calls
+    assert server.status == "deleted"
+    assert server.status_message == "Deleted with catalog source Wardn Hub."
+    assert server.is_latest is False
+    assert replacement.is_latest is True
+    assert session.deleted == [source]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_delete_catalog_source_deletes_legacy_single_source_catalog_rows(
+    monkeypatch,
+) -> None:
+    source = catalog_source()
+    server = server_version("1.0.0", is_latest=True)
+    calls: list[str] = []
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def list_server_versions_for_catalog_source(*args, **kwargs):
+        calls.append("tagged")
+        return []
+
+    async def list_catalog_sources(*args, **kwargs):
+        calls.append("sources")
+        return [source]
+
+    async def list_legacy_catalog_server_versions(*args, **kwargs):
+        calls.append("legacy")
+        return [server]
+
+    async def get_latest_visible_version(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(
+        service.repository,
+        "list_server_versions_for_catalog_source",
+        list_server_versions_for_catalog_source,
+    )
+    monkeypatch.setattr(service.repository, "list_catalog_sources", list_catalog_sources)
+    monkeypatch.setattr(
+        service.repository,
+        "list_legacy_catalog_server_versions",
+        list_legacy_catalog_server_versions,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_latest_visible_version",
+        get_latest_visible_version,
+    )
+
+    await service.delete_catalog_source(FakeSession(), ORGANIZATION_ID, source.id)
+
+    assert calls == ["tagged", "sources", "legacy"]
+    assert server.status == "deleted"
+    assert server.is_latest is False
 
 
 @pytest.mark.asyncio

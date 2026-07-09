@@ -77,6 +77,7 @@ VERSION_PREFIX_PATTERN = re.compile(r"^\s*v?(\d+(?:[._-]\d+)*)", re.IGNORECASE)
 CATALOG_SYNC_PAGE_SIZE = 100
 WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
 CATALOG_SOURCE_TOKEN_KEY = "api_token"
+CATALOG_SOURCE_META_KEY = "wardnCatalogSource"
 MCP_INSTALL_SECRET_VALUE_KEY_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
@@ -199,6 +200,29 @@ def server_values(payload: MCPServerCreate, *, is_latest: bool) -> dict:
         values["published_at"] = metadata.published_at
         values["status_changed_at"] = metadata.status_changed_at
     return values
+
+
+def catalog_source_metadata(source: MCPCatalogSource, *, source_url: str) -> dict[str, str]:
+    return {
+        "id": str(source.id),
+        "name": source.name,
+        "provider": source.provider,
+        "baseUrl": source.base_url,
+        "sourceUrl": source_url,
+    }
+
+
+def catalog_source_payload(
+    payload: MCPServerCreate,
+    *,
+    source: MCPCatalogSource,
+    source_url: str,
+) -> MCPServerCreate:
+    document = payload.model_dump(by_alias=True, exclude_none=True)
+    metadata = dict(document.get("_meta") or {})
+    metadata[CATALOG_SOURCE_META_KEY] = catalog_source_metadata(source, source_url=source_url)
+    document["_meta"] = metadata
+    return MCPServerCreate.model_validate(document)
 
 
 SECRET_HANDLE_REF_TYPE = "secret_handle"
@@ -820,6 +844,33 @@ async def delete_catalog_source(
     )
     if source is None:
         raise MCPCatalogSourceNotFoundError("catalog source not found")
+    servers = await repository.list_server_versions_for_catalog_source(
+        session,
+        organization_id=organization_id,
+        source_id=source_id,
+    )
+    if not servers:
+        sources = await repository.list_catalog_sources(session, organization_id)
+        if len(sources) == 1 and sources[0].id == source.id:
+            servers = await repository.list_legacy_catalog_server_versions(
+                session,
+                organization_id=organization_id,
+            )
+    server_names = {server.name for server in servers}
+    for server in servers:
+        server.status = "deleted"
+        server.status_message = f"Deleted with catalog source {source.name}."
+        server.is_latest = False
+
+    await session.flush()
+    for server_name in server_names:
+        replacement = await repository.get_latest_visible_version(
+            session,
+            server_name,
+            organization_id=organization_id,
+        )
+        if replacement:
+            replacement.is_latest = True
     await session.delete(source)
     await session.flush()
 
@@ -975,6 +1026,7 @@ async def sync_catalog_source(
         headers.update(await catalog_source_auth_headers(session, organization_id, source))
         last_error: Exception | None = None
         servers = None
+        synced_source_url = ""
         for source_url in catalog_source_urls(source):
             try:
                 servers = await asyncio.to_thread(
@@ -986,6 +1038,7 @@ async def sync_catalog_source(
                     version=version,
                     pagination="page" if source.provider == "wardn_hub" else "cursor",
                 )
+                synced_source_url = source_url
                 break
             except Exception as exc:
                 last_error = exc
@@ -993,7 +1046,15 @@ async def sync_catalog_source(
             raise ValueError(
                 f"no supported catalog API found at {source.base_url}: {last_error}"
             )
-        count = await sync_supported_servers(session, servers, organization_id=organization_id)
+        sourced_servers = [
+            catalog_source_payload(server, source=source, source_url=synced_source_url)
+            for server in servers
+        ]
+        count = await sync_supported_servers(
+            session,
+            sourced_servers,
+            organization_id=organization_id,
+        )
     except Exception as exc:
         source.last_error = str(exc)
         await session.flush()

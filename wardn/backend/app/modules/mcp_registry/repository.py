@@ -141,6 +141,42 @@ async def get_latest_visible_version(
     return result.scalar_one_or_none()
 
 
+async def list_server_versions_for_catalog_source(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> list[MCPServerVersion]:
+    statement = _visible_query(False).where(
+        MCPServerVersion.organization_id == organization_id,
+        MCPServerVersion.server_json.contains(
+            {"_meta": {"wardnCatalogSource": {"id": str(source_id)}}}
+        ),
+    )
+    result = await session.execute(statement)
+    return list(result.scalars().all())
+
+
+async def list_legacy_catalog_server_versions(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> list[MCPServerVersion]:
+    statement = _visible_query(False).where(
+        MCPServerVersion.organization_id == organization_id,
+        or_(
+            MCPServerVersion.server_json.contains(
+                {"_meta": {"io.modelcontextprotocol.registry/official": {}}}
+            ),
+            MCPServerVersion.server_json.contains(
+                {"_meta": {"com.pulsemcp/server-version": {}}}
+            ),
+        ),
+    )
+    result = await session.execute(statement)
+    return list(result.scalars().all())
+
+
 async def clear_latest_for_name(
     session: AsyncSession,
     name: str,

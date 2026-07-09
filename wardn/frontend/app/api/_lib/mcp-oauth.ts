@@ -30,6 +30,34 @@ function backendApiUrl(path: string, requestUrl: string) {
   return url;
 }
 
+function firstForwardedValue(value: string | null) {
+  return value?.split(",", 1)[0]?.trim() ?? "";
+}
+
+function configuredFrontendOrigin() {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.WARDN_FRONTEND_BASE_URL;
+  return configured?.trim().replace(/\/+$/, "") ?? "";
+}
+
+export function frontendOrigin(request: Request) {
+  const configured = configuredFrontendOrigin();
+  if (configured) {
+    return configured;
+  }
+
+  const requestUrl = new URL(request.url);
+  const forwardedHost =
+    firstForwardedValue(request.headers.get("x-forwarded-host")) ||
+    firstForwardedValue(request.headers.get("host"));
+  const forwardedProto =
+    firstForwardedValue(request.headers.get("x-forwarded-proto")) ||
+    requestUrl.protocol.replace(":", "");
+  if (forwardedHost && ["http", "https"].includes(forwardedProto)) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+  return requestUrl.origin;
+}
+
 function forwardedHeaders(request: Request) {
   const headers: Record<string, string> = {};
   for (const name of ["accept", "authorization", "content-type", "cookie"]) {
@@ -38,14 +66,10 @@ function forwardedHeaders(request: Request) {
       headers[name] = value;
     }
   }
-  const url = new URL(request.url);
-  headers["x-forwarded-host"] = url.host;
-  headers["x-forwarded-proto"] = url.protocol.replace(":", "");
+  const origin = new URL(frontendOrigin(request));
+  headers["x-forwarded-host"] = origin.host;
+  headers["x-forwarded-proto"] = origin.protocol.replace(":", "");
   return headers;
-}
-
-function frontendOrigin(request: Request) {
-  return new URL(request.url).origin;
 }
 
 function rewriteBearerChallenge(value: string, request: Request) {
@@ -54,6 +78,12 @@ function rewriteBearerChallenge(value: string, request: Request) {
     `${backendOrigin}/.well-known/oauth-protected-resource`,
     `${frontendOrigin(request)}/.well-known/oauth-protected-resource`,
   );
+}
+
+export function bearerChallenge(request: Request) {
+  return `Bearer resource_metadata="${frontendOrigin(
+    request,
+  )}/.well-known/oauth-protected-resource", scope="${oauthScope}"`;
 }
 
 export function protectedResourceMetadata(request: Request) {

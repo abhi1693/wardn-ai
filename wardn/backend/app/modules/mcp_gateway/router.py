@@ -174,6 +174,15 @@ async def handle_mcp_gateway_rpc(
     return jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
 
+@router.get("", operation_id="mcp_gateway_auth_discovery", include_in_schema=False)
+async def mcp_gateway_auth_discovery(request: Request) -> JSONResponse:
+    return JSONResponse(
+        {"detail": "gateway bearer token required"},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"WWW-Authenticate": bearer_challenge(request)},
+    )
+
+
 @router.post("", operation_id="mcp_gateway_rpc")
 async def mcp_gateway_rpc(
     request: Request,

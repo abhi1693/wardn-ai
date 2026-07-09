@@ -273,6 +273,22 @@ def test_mcp_gateway_requires_bearer_token() -> None:
     )
 
 
+def test_mcp_gateway_get_advertises_oauth_challenge() -> None:
+    response = TestClient(create_app()).get(
+        GATEWAY_PATH,
+        headers={
+            "x-forwarded-host": "app.example.com",
+            "x-forwarded-proto": "https",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == (
+        'Bearer resource_metadata="https://app.example.com/.well-known/oauth-protected-resource", '
+        'scope="mcp:tools"'
+    )
+
+
 def test_mcp_oauth_metadata_discovery() -> None:
     client = TestClient(create_app())
 
