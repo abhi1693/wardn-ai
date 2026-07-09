@@ -293,7 +293,17 @@ def test_mcp_oauth_metadata_discovery() -> None:
     client = TestClient(create_app())
 
     resource_response = client.get("/.well-known/oauth-protected-resource")
+    path_resource_response = client.get(
+        "/.well-known/oauth-protected-resource/api/v1/mcp/gateway"
+    )
+    embedded_resource_response = client.get(
+        f"{GATEWAY_PATH}/.well-known/oauth-protected-resource"
+    )
     auth_response = client.get("/.well-known/oauth-authorization-server")
+    path_auth_response = client.get(
+        "/.well-known/oauth-authorization-server/api/v1/mcp/gateway"
+    )
+    openid_response = client.get("/.well-known/openid-configuration/api/v1/mcp/gateway")
 
     assert resource_response.status_code == 200
     assert resource_response.json() == {
@@ -302,6 +312,10 @@ def test_mcp_oauth_metadata_discovery() -> None:
         "scopes_supported": ["mcp:tools"],
         "bearer_methods_supported": ["header"],
     }
+    assert path_resource_response.status_code == 200
+    assert path_resource_response.json() == resource_response.json()
+    assert embedded_resource_response.status_code == 200
+    assert embedded_resource_response.json() == resource_response.json()
     assert auth_response.status_code == 200
     auth_metadata = auth_response.json()
     assert auth_metadata["issuer"] == "http://testserver"
@@ -314,6 +328,10 @@ def test_mcp_oauth_metadata_discovery() -> None:
     )
     assert auth_metadata["code_challenge_methods_supported"] == ["S256"]
     assert auth_metadata["token_endpoint_auth_methods_supported"] == ["none"]
+    assert path_auth_response.status_code == 200
+    assert path_auth_response.json() == auth_metadata
+    assert openid_response.status_code == 200
+    assert openid_response.json() == auth_metadata
 
 
 def test_mcp_oauth_metadata_uses_forwarded_public_origin() -> None:

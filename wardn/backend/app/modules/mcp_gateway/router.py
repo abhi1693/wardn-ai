@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db_session
 from app.modules.mcp_gateway import service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
-from app.modules.mcp_gateway.oauth import bearer_challenge
+from app.modules.mcp_gateway.oauth import (
+    authorization_server_metadata_response,
+    bearer_challenge,
+    protected_resource_metadata_response,
+)
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.organizations import repository as organizations_repository
 from app.modules.organizations.exceptions import (
@@ -181,6 +185,33 @@ async def mcp_gateway_auth_discovery(request: Request) -> JSONResponse:
         status_code=status.HTTP_401_UNAUTHORIZED,
         headers={"WWW-Authenticate": bearer_challenge(request)},
     )
+
+
+@router.get(
+    "/.well-known/oauth-protected-resource",
+    operation_id="mcp_gateway_protected_resource_metadata",
+    include_in_schema=False,
+)
+async def mcp_gateway_protected_resource_metadata(request: Request) -> JSONResponse:
+    return protected_resource_metadata_response(request)
+
+
+@router.get(
+    "/.well-known/oauth-authorization-server",
+    operation_id="mcp_gateway_authorization_server_metadata",
+    include_in_schema=False,
+)
+async def mcp_gateway_authorization_server_metadata(request: Request) -> JSONResponse:
+    return authorization_server_metadata_response(request)
+
+
+@router.get(
+    "/.well-known/openid-configuration",
+    operation_id="mcp_gateway_openid_configuration",
+    include_in_schema=False,
+)
+async def mcp_gateway_openid_configuration(request: Request) -> JSONResponse:
+    return authorization_server_metadata_response(request)
 
 
 @router.post("", operation_id="mcp_gateway_rpc")

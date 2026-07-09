@@ -86,10 +86,19 @@ export function bearerChallenge(request: Request) {
   )}/.well-known/oauth-protected-resource", scope="${oauthScope}"`;
 }
 
-export function protectedResourceMetadata(request: Request) {
+function resourceUrl(request: Request, resourcePath?: string[]) {
+  const origin = frontendOrigin(request);
+  if (!resourcePath || resourcePath.length === 0) {
+    return `${origin}/api/v1/mcp/gateway`;
+  }
+  const path = resourcePath.map(encodeURIComponent).join("/");
+  return `${origin}/${path}`;
+}
+
+export function protectedResourceMetadata(request: Request, resourcePath?: string[]) {
   const origin = frontendOrigin(request);
   return NextResponse.json({
-    resource: `${origin}/api/v1/mcp/gateway`,
+    resource: resourceUrl(request, resourcePath),
     authorization_servers: [origin],
     scopes_supported: [oauthScope],
     bearer_methods_supported: ["header"],

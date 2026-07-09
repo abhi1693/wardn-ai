@@ -46,7 +46,9 @@ def public_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-def mcp_resource_url(request: Request) -> str:
+def mcp_resource_url(request: Request, resource_path: str | None = None) -> str:
+    if resource_path:
+        return f"{public_base_url(request)}/{resource_path.strip('/')}"
     return f"{public_base_url(request)}{get_settings().api_prefix}/mcp/gateway"
 
 
@@ -472,11 +474,13 @@ def login_form(params: dict[str, str], *, error: str = "") -> HTMLResponse:
     )
 
 
-@well_known_router.get("/.well-known/oauth-protected-resource")
-async def protected_resource_metadata(request: Request) -> JSONResponse:
+def protected_resource_metadata_response(
+    request: Request,
+    resource_path: str | None = None,
+) -> JSONResponse:
     return JSONResponse(
         {
-            "resource": mcp_resource_url(request),
+            "resource": mcp_resource_url(request, resource_path),
             "authorization_servers": [authorization_issuer(request)],
             "scopes_supported": [MCP_OAUTH_SCOPE],
             "bearer_methods_supported": ["header"],
@@ -484,8 +488,7 @@ async def protected_resource_metadata(request: Request) -> JSONResponse:
     )
 
 
-@well_known_router.get("/.well-known/oauth-authorization-server")
-async def authorization_server_metadata(request: Request) -> JSONResponse:
+def authorization_server_metadata_response(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "issuer": authorization_issuer(request),
@@ -500,6 +503,45 @@ async def authorization_server_metadata(request: Request) -> JSONResponse:
             "resource_parameter_supported": True,
         }
     )
+
+
+@well_known_router.get("/.well-known/oauth-protected-resource")
+async def protected_resource_metadata(request: Request) -> JSONResponse:
+    return protected_resource_metadata_response(request)
+
+
+@well_known_router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
+async def protected_resource_metadata_for_path(
+    request: Request,
+    resource_path: str,
+) -> JSONResponse:
+    return protected_resource_metadata_response(request, resource_path)
+
+
+@well_known_router.get("/.well-known/oauth-authorization-server")
+async def authorization_server_metadata(request: Request) -> JSONResponse:
+    return authorization_server_metadata_response(request)
+
+
+@well_known_router.get("/.well-known/oauth-authorization-server/{resource_path:path}")
+async def authorization_server_metadata_for_path(
+    request: Request,
+    resource_path: str,
+) -> JSONResponse:
+    return authorization_server_metadata_response(request)
+
+
+@well_known_router.get("/.well-known/openid-configuration")
+async def openid_configuration(request: Request) -> JSONResponse:
+    return authorization_server_metadata_response(request)
+
+
+@well_known_router.get("/.well-known/openid-configuration/{resource_path:path}")
+async def openid_configuration_for_path(
+    request: Request,
+    resource_path: str,
+) -> JSONResponse:
+    return authorization_server_metadata_response(request)
 
 
 @oauth_router.post("/register", status_code=status.HTTP_201_CREATED)
