@@ -70,15 +70,59 @@ async def test_superuser_can_create_organization(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_regular_user_cannot_create_organization() -> None:
+async def test_regular_user_can_create_and_own_organization(monkeypatch) -> None:
+    async def missing_organization(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_organization_by_slug", missing_organization)
     user = User(id=uuid4(), email="user@example.com", is_superuser=False)
+    session = FakeSession()
+
+    response = await service.create_organization(
+        session,
+        user,
+        OrganizationCreate(name=" Personal Team ", slug="personal"),
+    )
+
+    organization, membership = session.added
+    assert response.name == "Personal Team"
+    assert response.slug == "personal"
+    assert response.current_user_role == "owner"
+    assert isinstance(organization, Organization)
+    assert isinstance(membership, OrganizationMembership)
+    assert organization.created_by_id == user.id
+    assert membership.organization_id == organization.id
+    assert membership.user_id == user.id
+    assert membership.role == "owner"
+    assert membership.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_regular_user_cannot_access_unjoined_organization(monkeypatch) -> None:
+    organization_id = uuid4()
+    user = User(id=uuid4(), email="outsider@example.com", is_superuser=False)
+    organization = Organization(
+        id=organization_id,
+        name="Personal Team",
+        slug="personal",
+        status="active",
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(
+        service.repository,
+        "get_organization_membership",
+        get_organization_membership,
+    )
 
     with pytest.raises(OrganizationAccessDeniedError):
-        await service.create_organization(
-            FakeSession(),
-            user,
-            OrganizationCreate(name="Platform Team", slug="platform"),
-        )
+        await service.get_organization(FakeSession(), user, organization_id)
 
 
 @pytest.mark.asyncio

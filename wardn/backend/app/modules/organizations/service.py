@@ -148,8 +148,6 @@ async def create_organization(
     user: User,
     payload: OrganizationCreate,
 ) -> OrganizationRead:
-    if not user.is_superuser:
-        raise OrganizationAccessDeniedError("only superusers can create organizations")
     slug = normalize_slug(payload.slug)
     if await repository.get_organization_by_slug(session, slug):
         raise DuplicateOrganizationError("organization slug already exists")
