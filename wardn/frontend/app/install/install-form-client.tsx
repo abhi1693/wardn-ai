@@ -5,19 +5,15 @@ import {
   ChevronRight,
   Download,
   FileUp,
-  Gauge,
-  KeyRound,
   Network,
   Package,
   Search,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -77,7 +73,7 @@ type InstallFormClientProps = {
   secretStores: SecretStoreRead[];
 };
 
-const SERVER_PICKER_PAGE_SIZE = 10;
+const SERVER_PICKER_PAGE_SIZE = 12;
 
 function installUrl(serverName: string) {
   return `/api/mcp/registry/installed-servers/${serverName
@@ -249,31 +245,6 @@ function uniqueServerResponses(servers: MCPRegistryServerResponse[]) {
   return Array.from(byVersion.values());
 }
 
-function schemaInputs(entry: MCPRegistryServerResponse) {
-  const headers = (entry.server.remotes ?? []).flatMap((remote) => {
-    const value = (remote as Record<string, unknown>).headers;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-  const environmentVariables = (entry.server.packages ?? []).flatMap((packageDefinition) => {
-    const value = (packageDefinition as Record<string, unknown>).environmentVariables;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-  const packageArguments = (entry.server.packages ?? []).flatMap((packageDefinition) => {
-    const value = (packageDefinition as Record<string, unknown>).packageArguments;
-    return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
-  });
-  return { environmentVariables, headers, packageArguments };
-}
-
-function configurationSummary(entry: MCPRegistryServerResponse) {
-  const { environmentVariables, headers, packageArguments } = schemaInputs(entry);
-  const inputs = [...headers, ...environmentVariables, ...packageArguments.filter((field) => field.name)];
-  return {
-    requiredCount: inputs.filter((field) => field.isRequired).length,
-    secretCount: inputs.filter((field) => field.isSecret).length,
-  };
-}
-
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -326,65 +297,13 @@ function qualityScoreTone(score: number | null) {
   return "bg-red-500";
 }
 
-function trustReport(entry: MCPRegistryServerResponse) {
+function serverCategory(entry: MCPRegistryServerResponse) {
   const metadata = wardnHubMetadata(entry);
-  return metadata && isRecord(metadata.trustReport) ? metadata.trustReport : null;
-}
-
-function normalizedStatus(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : "";
-}
-
-function trustStatusLabel(report: Record<string, unknown> | null) {
-  if (!report) {
-    return "No report";
+  const category = metadata ? stringValue(metadata.category) : "";
+  if (category) {
+    return category;
   }
-  const status = normalizedStatus(report.status);
-  if (!status) {
-    return "Reported";
-  }
-  return status
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
-}
-
-function trustStatusClass(report: Record<string, unknown> | null) {
-  const status = normalizedStatus(report?.status);
-  if (status === "passed" || status === "pass") {
-    return "text-emerald-700";
-  }
-  if (status === "partial" || status === "warning") {
-    return "text-amber-700";
-  }
-  if (status === "failed" || status === "fail") {
-    return "text-red-700";
-  }
-  return "text-muted-foreground";
-}
-
-function trustComponentSummary(report: Record<string, unknown> | null) {
-  const components = Array.isArray(report?.components) ? report.components : [];
-  const passed = components.filter(
-    (component) => isRecord(component) && normalizedStatus(component.status) === "pass"
-  ).length;
-  const partial = components.filter(
-    (component) => isRecord(component) && normalizedStatus(component.status) === "partial"
-  ).length;
-  const failed = components.filter(
-    (component) => isRecord(component) && normalizedStatus(component.status) === "fail"
-  ).length;
-  if (components.length === 0) {
-    return "";
-  }
-  return `${passed} pass${partial ? ` · ${partial} partial` : ""}${failed ? ` · ${failed} fail` : ""}`;
-}
-
-function repositoryLabel(entry: MCPRegistryServerResponse) {
-  const repository = entry.server.repository;
-  const url = isRecord(repository) ? stringValue(repository.url) : "";
-  return url ? displayHost(url) : "";
+  return deliveryDetails(entry).primary;
 }
 
 function serverIconUrl(entry: MCPRegistryServerResponse) {
@@ -594,24 +513,19 @@ function ServerPickerCard({
   entry: MCPRegistryServerResponse;
   onSelect: () => void;
 }) {
-  const distribution = deliveryDetails(entry);
-  const DistributionIcon = distribution.icon;
-  const config = configurationSummary(entry);
   const score = qualityScore(entry);
-  const report = trustReport(entry);
-  const componentSummary = trustComponentSummary(report);
-  const repository = repositoryLabel(entry);
   const iconUrl = serverIconUrl(entry);
   const description = entry.server.description?.trim();
+  const category = serverCategory(entry);
 
   return (
     <button
-      className="flex min-h-56 w-full flex-col rounded-md border bg-white p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex min-h-48 w-full flex-col rounded-md border bg-white p-4 text-left transition-colors hover:border-primary/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onSelect}
       type="button"
     >
       <div className="flex items-start gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
           {iconUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -625,86 +539,37 @@ function ServerPickerCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="break-words text-sm font-semibold leading-5">
+          <div className="break-words text-sm font-semibold leading-5 text-foreground">
             {entry.server.title || entry.server.name}
           </div>
-          <div className="mt-0.5 break-all text-xs text-muted-foreground">
-            {entry.server.name}
-          </div>
-        </div>
-        <div className="w-24 shrink-0">
-          <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-muted-foreground">Quality</span>
-            <span className="font-semibold">{score === null ? "Pending" : score}</span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className={`h-full rounded-full ${qualityScoreTone(score)}`}
-              style={{ width: `${qualityScorePercent(score)}%` }}
-            />
+          <div className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
+            {category || entry.server.name}
           </div>
         </div>
       </div>
 
       {description ? (
-        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
+        <p className="mt-4 line-clamp-4 text-sm leading-6 text-foreground">
           {description}
         </p>
       ) : (
-        <div className="mt-3 min-h-10 text-sm leading-5 text-muted-foreground">
+        <div className="mt-4 text-sm leading-6 text-muted-foreground">
           No description provided.
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        <Badge variant="outline" className="gap-1.5 font-normal">
-          <DistributionIcon className="size-3.5" />
-          {distribution.primary}
-        </Badge>
-        {config.requiredCount > 0 ? (
-          <Badge variant="outline" className="gap-1.5 font-normal">
-            <KeyRound className="size-3.5" />
-            {config.requiredCount} required
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="gap-1.5 font-normal">
-            <ShieldCheck className="size-3.5" />
-            No required config
-          </Badge>
-        )}
-        {config.secretCount > 0 ? (
-          <Badge variant="outline" className="gap-1.5 font-normal">
-            <KeyRound className="size-3.5" />
-            {config.secretCount} secret
-          </Badge>
-        ) : null}
-        <Badge variant="outline" className="font-normal">
-          v{entry.server.version}
-        </Badge>
-      </div>
-
-      <div className="mt-auto grid gap-2 pt-4 text-xs text-muted-foreground sm:grid-cols-2">
-        <div className="min-w-0 rounded-md bg-muted/60 px-2.5 py-2">
-          <div className="flex items-center gap-1.5 font-medium text-foreground">
-            <ShieldCheck className="size-3.5" />
-            Trust
-          </div>
-          <div className={`mt-1 ${trustStatusClass(report)}`}>
-            {trustStatusLabel(report)}
-          </div>
-          {componentSummary ? <div className="mt-0.5 truncate">{componentSummary}</div> : null}
+      <div className="mt-auto pt-4">
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">Quality score</span>
+          <span className="font-semibold text-foreground">
+            {score === null ? "Pending" : `${score}/100`}
+          </span>
         </div>
-        <div className="min-w-0 rounded-md bg-muted/60 px-2.5 py-2">
-          <div className="flex items-center gap-1.5 font-medium text-foreground">
-            <Gauge className="size-3.5" />
-            Source
-          </div>
-          <div className="mt-1 truncate">
-            {repository || distribution.secondary || "Registry metadata"}
-          </div>
-          {distribution.secondary && repository ? (
-            <div className="mt-0.5 truncate">{distribution.secondary}</div>
-          ) : null}
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${qualityScoreTone(score)}`}
+            style={{ width: `${qualityScorePercent(score)}%` }}
+          />
         </div>
       </div>
     </button>
@@ -1216,88 +1081,81 @@ export function InstallFormClient({
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
       {!selectedServer ? (
-        <Card>
-          <CardHeader><CardTitle>Server</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-2">
-              <Label htmlFor="install-server-search">Server</Label>
-              <div>
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    className="pl-8"
-                    id="install-server-search"
-                    onChange={(event) => setServerQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                      }
-                    }}
-                    placeholder="Search supported servers"
-                    type="search"
-                    value={serverQuery}
-                  />
-                </div>
-              </div>
+        <section className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="install-server-search">Server</Label>
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                className="pl-8"
+                id="install-server-search"
+                onChange={(event) => setServerQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                  }
+                }}
+                placeholder="Search supported servers"
+                type="search"
+                value={serverQuery}
+              />
             </div>
-            <div className="rounded-md border bg-muted/20">
-              <div className="max-h-[38rem] overflow-y-auto p-3">
-                {serverResults.length === 0 ? (
-                  <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-                    {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
-                  </div>
-                ) : (
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    {serverResults.map((entry) => (
-                      <ServerPickerCard
-                        entry={entry}
-                        key={`${entry.server.name}:${entry.server.version}`}
-                        onSelect={() => selectServerForInstall(entry)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-sm">
-                <div className="text-muted-foreground">
-                  {serverResults.length > 0 ? (
-                    <>
-                      Showing {serverPageStart}-{serverPageEnd}
-                      {appliedServerQuery ? ` for "${appliedServerQuery}"` : ""}
-                    </>
-                  ) : (
-                    "No servers to display"
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    disabled={isSearching || serverPreviousCursors.length === 0}
-                    onClick={() => void loadPreviousServerPage()}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <ChevronLeft className="size-4" />
-                    Previous
-                  </Button>
-                  <div className="min-w-16 whitespace-nowrap text-center text-sm font-medium text-muted-foreground">
-                    Page {serverPageNumber}
-                  </div>
-                  <Button
-                    disabled={isSearching || !serverNextCursor}
-                    onClick={() => void loadNextServerPage()}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Next
-                    <ChevronRight className="size-4" />
-                  </Button>
-                </div>
-              </div>
+          </div>
+
+          {serverResults.length === 0 ? (
+            <div className="rounded-md border bg-white px-3 py-10 text-center text-sm text-muted-foreground">
+              {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {serverResults.map((entry) => (
+                <ServerPickerCard
+                  entry={entry}
+                  key={`${entry.server.name}:${entry.server.version}`}
+                  onSelect={() => selectServerForInstall(entry)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <div className="text-muted-foreground">
+              {serverResults.length > 0 ? (
+                <>
+                  Showing {serverPageStart}-{serverPageEnd}
+                  {appliedServerQuery ? ` for "${appliedServerQuery}"` : ""}
+                </>
+              ) : (
+                "No servers to display"
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={isSearching || serverPreviousCursors.length === 0}
+                onClick={() => void loadPreviousServerPage()}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <ChevronLeft className="size-4" />
+                Previous
+              </Button>
+              <div className="min-w-16 whitespace-nowrap text-center text-sm font-medium text-muted-foreground">
+                Page {serverPageNumber}
+              </div>
+              <Button
+                disabled={isSearching || !serverNextCursor}
+                onClick={() => void loadNextServerPage()}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Next
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </section>
       ) : null}
 
       {selectedServer ? (

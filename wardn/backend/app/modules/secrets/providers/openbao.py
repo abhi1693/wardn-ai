@@ -339,7 +339,11 @@ class OpenBaoSecretProvider:
         ) as client:
             response = await client.post(url, headers=self._headers(settings), json=payload)
         if not response.is_success:
-            raise InvalidSecretStoreError(f"OpenBao login failed with HTTP {response.status_code}")
+            message = f"OpenBao login failed with HTTP {response.status_code}"
+            detail = response_error_detail(response)
+            if detail:
+                message = f"{message}: {detail}"
+            raise InvalidSecretStoreError(message)
         auth = record(response_json(response).get("auth"))
         token = string_value(auth.get("client_token"))
         if not token:
@@ -376,6 +380,21 @@ def response_json(response: httpx.Response) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise InvalidSecretStoreError("OpenBao response was not a JSON object")
     return payload
+
+
+def response_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    errors = payload.get("errors")
+    if isinstance(errors, list):
+        return "; ".join(str(error).strip() for error in errors if str(error).strip())
+    if isinstance(errors, str):
+        return errors.strip()
+    return ""
 
 
 def read_text_file(path: str, label: str) -> str:

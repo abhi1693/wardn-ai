@@ -27,7 +27,7 @@ from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProvid
 from app.modules.mcp_runtime.service import call_tool_with_tracking
 from app.modules.organizations import repository as organizations_repository
 
-PROTOCOL_VERSION = "2025-11-25"
+PROTOCOL_VERSION = "2025-06-18"
 MAX_SEARCH_LIMIT = 25
 
 

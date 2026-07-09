@@ -77,7 +77,7 @@ def test_verify_remote_mcp_server_uses_negotiated_protocol_header(monkeypatch) -
             return {
                 "jsonrpc": "2.0",
                 "id": payload["id"],
-                "result": {"protocolVersion": "2025-11-25", "serverInfo": {}},
+                "result": {"protocolVersion": "2025-06-18", "serverInfo": {}},
             }, "session-1"
         if payload["method"] == "notifications/initialized":
             return {}, None
@@ -94,13 +94,13 @@ def test_verify_remote_mcp_server_uses_negotiated_protocol_header(monkeypatch) -
 
     result = verify_remote_mcp_server({"url": "https://example.com/mcp"})
 
-    assert result["protocolVersion"] == "2025-11-25"
-    assert seen[0]["payload"]["params"]["protocolVersion"] == "2025-11-25"
+    assert result["protocolVersion"] == "2025-06-18"
+    assert seen[0]["payload"]["params"]["protocolVersion"] == "2025-06-18"
     assert "protocol_version" not in seen[0]
     assert seen[1]["payload"] == {"jsonrpc": "2.0", "method": "notifications/initialized"}
-    assert seen[1]["protocol_version"] == "2025-11-25"
+    assert seen[1]["protocol_version"] == "2025-06-18"
     assert seen[2]["payload"]["method"] == "tools/list"
-    assert seen[2]["protocol_version"] == "2025-11-25"
+    assert seen[2]["protocol_version"] == "2025-06-18"
 
 
 def test_install_server_runtime_creates_verified_remote_runtime_manifest(
@@ -113,7 +113,7 @@ def test_install_server_runtime_creates_verified_remote_runtime_manifest(
     monkeypatch.setattr(
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -175,7 +175,7 @@ def test_install_server_runtime_uses_prompted_remote_config(tmp_path, monkeypatc
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -215,7 +215,7 @@ def test_install_server_runtime_uses_optional_remote_config(tmp_path, monkeypatc
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",
@@ -242,7 +242,7 @@ def test_install_server_runtime_uses_custom_remote_header(tmp_path, monkeypatch)
         "app.modules.mcp_registry.installer.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "example"},
             "toolCount": 3,
             "verifiedAt": "2026-06-21T00:00:00Z",

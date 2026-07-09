@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -74,6 +75,8 @@ from app.modules.organizations.service import (
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp/registry", tags=["mcp-registry"])
 organization_router = APIRouter(
@@ -632,6 +635,16 @@ async def list_workspace_installed_mcp_server_tools(
     except (MCPServerInstallationNotFoundError, MCPServerNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MCPGatewayUpstreamError as exc:
+        await session.commit()
+        logger.warning(
+            "Installed MCP server tool discovery failed",
+            extra={
+                "installation_id": str(installation_id),
+                "organization_id": str(organization_id),
+                "workspace_id": str(workspace_id),
+                "error": str(exc),
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"installed MCP server could not list tools: {exc}",
@@ -833,6 +846,14 @@ async def list_installed_mcp_server_tools(
             detail=str(exc),
         ) from exc
     except MCPGatewayUpstreamError as exc:
+        await session.commit()
+        logger.warning(
+            "Installed MCP server tool discovery failed",
+            extra={
+                "installation_id": str(installation_id),
+                "error": str(exc),
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"installed MCP server could not list tools: {exc}",

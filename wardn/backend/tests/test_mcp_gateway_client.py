@@ -40,7 +40,7 @@ print(
         {
             "jsonrpc": "2.0",
             "id": initialize["id"],
-            "result": {"protocolVersion": "2025-11-25"},
+            "result": {"protocolVersion": "2025-06-18"},
         }
     ),
     flush=True,
@@ -75,7 +75,7 @@ print(
         {
             "jsonrpc": "2.0",
             "id": initialize["id"],
-            "result": {"protocolVersion": "2025-11-25"},
+            "result": {"protocolVersion": "2025-06-18"},
         }
     ),
     flush=True,
@@ -135,7 +135,7 @@ print(
         {
             "jsonrpc": "2.0",
             "id": initialize["id"],
-            "result": {"protocolVersion": "2025-11-25"},
+            "result": {"protocolVersion": "2025-06-18"},
         }
     ),
     flush=True,
@@ -192,7 +192,7 @@ def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
     send_remote_request(
         "https://example.com/mcp",
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-        protocol_version="2025-11-25",
+        protocol_version="2025-06-18",
     )
 
-    assert seen["headers"]["mcp-protocol-version"] == "2025-11-25"
+    assert seen["headers"]["mcp-protocol-version"] == "2025-06-18"

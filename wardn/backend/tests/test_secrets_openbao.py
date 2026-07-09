@@ -111,6 +111,20 @@ class FakeValidationAsyncClient:
         return FakeResponse(204, {})
 
 
+class FakeInvalidLoginAsyncClient:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    async def post(self, url, *, headers=None, json=None):
+        return FakeResponse(400, {"errors": ["invalid role_id or secret_id"]})
+
+
 class FakeAuthRetryAsyncClient:
     requests: list[tuple[str, str, dict | None, str | None]] = []
 
@@ -398,6 +412,42 @@ async def test_openbao_validate_connection_logs_in_with_approle(monkeypatch, tmp
     assert FakeValidationAsyncClient.requests[3][1].startswith(
         f"https://bao.example.com/v1/secret/metadata/wardn/orgs/{organization_id}/validation/"
     )
+
+
+@pytest.mark.asyncio
+async def test_openbao_validate_connection_includes_login_error_detail(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    role_id_file = tmp_path / "role_id"
+    secret_id_file = tmp_path / "secret_id"
+    role_id_file.write_text("role-id", encoding="utf-8")
+    secret_id_file.write_text("secret-id", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.secrets.providers.openbao.httpx.AsyncClient",
+        FakeInvalidLoginAsyncClient,
+    )
+
+    provider = OpenBaoSecretProvider()
+    store = SecretStore(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=None,
+        provider="openbao",
+        name="Production OpenBao",
+        config={"baseUrl": "https://bao.example.com"},
+        auth_config={
+            "method": "approle",
+            "roleIdFile": str(role_id_file),
+            "secretIdFile": str(secret_id_file),
+        },
+        is_active=True,
+    )
+
+    result = await provider.validate_connection(store)
+
+    assert result.ok is False
+    assert result.message == "OpenBao login failed with HTTP 400: invalid role_id or secret_id"
 
 
 @pytest.mark.asyncio

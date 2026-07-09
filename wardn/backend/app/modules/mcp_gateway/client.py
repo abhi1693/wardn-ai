@@ -14,8 +14,10 @@ from urllib.request import Request, urlopen
 from app.core.config import get_settings
 from app.modules.mcp_registry.installer import parse_mcp_response_body
 
-PROTOCOL_VERSION = "2025-11-25"
-SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
+PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = frozenset(
+    {PROTOCOL_VERSION, "2025-03-26", "2024-11-05", "2024-10-07"}
+)
 
 
 class MCPGatewayUpstreamError(Exception):

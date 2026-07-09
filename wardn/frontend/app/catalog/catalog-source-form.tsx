@@ -20,6 +20,13 @@ import type { SecretStoreRead } from "@/lib/api/generated/model";
 
 import type { MCPCatalogSource } from "./catalog-source-types";
 
+const wardnHubCatalogProvider = {
+  label: "Wardn Hub",
+  provider: "wardn_hub",
+  name: "Wardn Hub",
+  baseUrl: "https://hub.wardnai.dev",
+};
+
 type CatalogSourceFormProps = {
   initialSource?: MCPCatalogSource;
   mode: "create" | "edit";
@@ -43,9 +50,8 @@ export function CatalogSourceForm({
   secretStores,
 }: CatalogSourceFormProps) {
   const router = useRouter();
-  const [name, setName] = useState(initialSource?.name ?? "Wardn Hub");
-  const [provider, setProvider] = useState(initialSource?.provider ?? "wardn_hub");
-  const [baseUrl, setBaseUrl] = useState(initialSource?.baseUrl ?? "https://hub.wardnai.dev");
+  const [name, setName] = useState(initialSource?.name ?? wardnHubCatalogProvider.name);
+  const [baseUrl, setBaseUrl] = useState(initialSource?.baseUrl ?? wardnHubCatalogProvider.baseUrl);
   const [syncMode, setSyncMode] = useState(initialSource?.syncMode ?? "latest_only");
   const [apiTokenSecretStoreId, setApiTokenSecretStoreId] = useState(secretStores[0]?.id ?? "");
   const [apiToken, setApiToken] = useState("");
@@ -58,7 +64,7 @@ export function CatalogSourceForm({
     event.preventDefault();
     setIsSaving(true);
     setError("");
-    const needsToken = provider === "wardn_hub" && !initialSource?.hasAuthToken;
+    const needsToken = !initialSource?.hasAuthToken;
     if ((needsToken || apiToken.trim()) && !apiTokenSecretStoreId) {
       setError("Select a secret backend for the API token.");
       setIsSaving(false);
@@ -72,7 +78,7 @@ export function CatalogSourceForm({
 
     const payload = {
       name,
-      provider,
+      provider: wardnHubCatalogProvider.provider,
       baseUrl,
       syncMode,
       isEnabled,
@@ -132,35 +138,21 @@ export function CatalogSourceForm({
             </div>
             <div className="space-y-2">
               <Label htmlFor="catalog-provider">Provider</Label>
-              <Select
-                onValueChange={(value) => {
-                  setProvider(value);
-                  if (value === "wardn_hub" && !baseUrl.trim()) {
-                    setBaseUrl("https://hub.wardnai.dev");
-                  }
-                }}
-                value={provider}
+              <div
+                className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+                id="catalog-provider"
               >
-                <SelectTrigger id="catalog-provider">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="wardn_hub">Wardn Hub</SelectItem>
-                  <SelectItem value="official">Official MCP registry</SelectItem>
-                  <SelectItem value="custom">Custom registry</SelectItem>
-                </SelectContent>
-              </Select>
+                {wardnHubCatalogProvider.label}
+              </div>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="catalog-url">
-              {provider === "wardn_hub" ? "Hub URL" : "Catalog URL"}
-            </Label>
+            <Label htmlFor="catalog-url">Hub URL</Label>
             <Input
               id="catalog-url"
               onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="https://hub.wardnai.dev"
+              placeholder={wardnHubCatalogProvider.baseUrl}
               required
               type="url"
               value={baseUrl}
@@ -194,7 +186,7 @@ export function CatalogSourceForm({
                 id="catalog-api-token"
                 onChange={(event) => setApiToken(event.target.value)}
                 placeholder={initialSource?.hasAuthToken ? "Leave blank to keep current token" : ""}
-                required={provider === "wardn_hub" && !initialSource?.hasAuthToken}
+                required={!initialSource?.hasAuthToken}
                 type="password"
                 value={apiToken}
               />

@@ -23,8 +23,10 @@ from app.modules.mcp_registry.models import MCPServerVersion
 RUNTIME_FILE_DIR_NAME = "runtime-files"
 KUBERNETES_RUNTIME_FILE_MOUNT_PATH = "/opt/wardn/runtime-files"
 ConfigValues = dict[str, Any]
-PROTOCOL_VERSION = "2025-11-25"
-SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
+PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = frozenset(
+    {PROTOCOL_VERSION, "2025-03-26", "2024-11-05", "2024-10-07"}
+)
 
 
 @dataclass(frozen=True)

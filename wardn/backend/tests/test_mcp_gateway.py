@@ -252,7 +252,7 @@ def test_mcp_gateway_initialize() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["result"]["protocolVersion"] == "2025-11-25"
+    assert payload["result"]["protocolVersion"] == "2025-06-18"
     assert payload["result"]["serverInfo"]["name"] == "wardn-mcp-gateway"
     assert payload["result"]["capabilities"] == {"tools": {"listChanged": True}}
 
