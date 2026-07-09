@@ -290,6 +290,125 @@ async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        trigger_type="chat",
+        status="running",
+    )
+    created_runs: list[dict] = []
+    steps: list[dict] = []
+    finished: list[dict] = []
+    seen_provider_run: list[AgentRun | None] = []
+
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def create_agent_run(*args, **kwargs):
+        created_runs.append(kwargs)
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def finish_agent_run(*args, **kwargs):
+        finished.append(kwargs)
+
+    async def refresh_wildcard_agent_server_tools(*args, **kwargs):
+        return None
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return []
+
+    async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
+        return service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={})
+
+    async def run_agent_chat(*args, **kwargs):
+        seen_provider_run.append(kwargs["agent_run"])
+        yield service.AgentChatTextEvent(text="ok")
+
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(
+        service,
+        "refresh_wildcard_agent_server_tools",
+        refresh_wildcard_agent_server_tools,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            messages=[
+                AgentChatMessage(role="user", parts=[{"type": "text", "text": "hi"}])
+            ]
+        ),
+        workspace_id=workspace_id,
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    assert created_runs == [
+        {
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "agent_id": agent.id,
+            "conversation_id": None,
+            "triggered_by_id": user.id,
+            "trigger_type": "chat",
+        }
+    ]
+    assert seen_provider_run == [agent_run]
+    assert steps[0]["step_type"] == "model_input"
+    assert steps[0]["payload"] == {"message": "hi", "messageCount": 1}
+    assert steps[-1]["step_type"] == "model_output"
+    assert finished == [{"status": "succeeded", "error": ""}]
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+@pytest.mark.asyncio
 async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkeypatch) -> None:
     organization_id = uuid4()
     credential = LLMProviderCredential(

@@ -2215,14 +2215,10 @@ async def persisted_agent_chat_stream(
     yield ui_message_sse_chunk(
         {"type": "finish", "finishReason": "error" if stream_error else "stop"}
     )
-    if conversation is None:
-        return
     content = "".join(chunks).strip()
     parts = list(activity_parts.values())
     if content:
         parts.append({"type": "text", "text": content})
-    if not parts:
-        return
     if agent_run is not None and content:
         await repository.append_agent_run_step(
             session,
@@ -2232,14 +2228,15 @@ async def persisted_agent_chat_stream(
             title="Assistant response" if stream_error is None else "Assistant error",
             payload={"content": sanitize_run_payload(content)},
         )
-    await repository.append_conversation_message(
-        session,
-        conversation_id=conversation.id,
-        role="assistant",
-        content=content,
-        parts=parts,
-        agent_run_id=agent_run.id if agent_run else None,
-    )
+    if conversation is not None and parts:
+        await repository.append_conversation_message(
+            session,
+            conversation_id=conversation.id,
+            role="assistant",
+            content=content,
+            parts=parts,
+            agent_run_id=agent_run.id if agent_run else None,
+        )
     if agent_run is not None:
         run_status = "failed" if stream_error else "succeeded"
         run_error = stream_error or ""
@@ -2561,12 +2558,11 @@ async def stream_agent_chat(
     messages = provider_messages(payload.messages)
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
+    if workspace_id is None:
+        raise InvalidAgentScopeError("agent chat requires a workspace")
     conversation = None
-    agent_run = None
     conversation_id = conversation_id_from_payload(payload)
     if conversation_id is not None:
-        if workspace_id is None:
-            raise InvalidAgentScopeError("conversation chat requires a workspace")
         conversation = await repository.get_workspace_conversation(
             session,
             organization_id=organization_id,
@@ -2575,31 +2571,32 @@ async def stream_agent_chat(
         )
         if conversation is None or conversation.agent_id != agent.id:
             raise AgentNotFoundError("conversation not found")
-        agent_run = await repository.create_agent_run(
-            session,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            agent_id=agent.id,
-            conversation_id=conversation.id,
-            triggered_by_id=user.id,
-            trigger_type="chat",
-        )
-        latest_message = latest_user_message(payload.messages)
-        await repository.append_agent_run_step(
-            session,
-            agent_run_id=agent_run.id,
-            step_type="model_input",
-            status="submitted",
-            title="User message",
-            payload={
-                "message": sanitize_run_payload(text_from_chat_message(latest_message))
-                if latest_message
-                else "",
-                "messageCount": len(payload.messages),
-            },
-        )
+    agent_run = await repository.create_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=conversation.id if conversation is not None else None,
+        triggered_by_id=user.id,
+        trigger_type="chat",
+    )
+    latest_message = latest_user_message(payload.messages)
+    await repository.append_agent_run_step(
+        session,
+        agent_run_id=agent_run.id,
+        step_type="model_input",
+        status="submitted",
+        title="User message",
+        payload={
+            "message": sanitize_run_payload(text_from_chat_message(latest_message))
+            if latest_message
+            else "",
+            "messageCount": len(payload.messages),
+        },
+    )
+    if conversation is not None:
         await persist_chat_turn_user_message(session, conversation, payload, agent_run)
-        await session.commit()
+    await session.commit()
     await refresh_wildcard_agent_server_tools(session, agent.id)
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
