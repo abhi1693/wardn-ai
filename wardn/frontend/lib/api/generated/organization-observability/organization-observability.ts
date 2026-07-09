@@ -9,8 +9,10 @@ import type {
   HTTPValidationError,
   LLMModelPriceCreate,
   LLMModelPriceListResponse,
+  LLMModelPricePrefillResponse,
   LLMModelPriceRead,
-  LLMModelPriceUpdate
+  LLMModelPriceUpdate,
+  OrganizationObservabilityPrefillLlmModelPriceParams
 } from '../model';
 
 
@@ -135,6 +137,79 @@ export const organizationObservabilityCreateLlmModelPrice = async (organizationI
 
   const data: organizationObservabilityCreateLlmModelPriceResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as organizationObservabilityCreateLlmModelPriceResponse
+}
+
+
+export type organizationObservabilityPrefillLlmModelPriceResponse200 = {
+  data: LLMModelPricePrefillResponse
+  status: 200
+}
+
+export type organizationObservabilityPrefillLlmModelPriceResponse400 = {
+  data: ErrorResponse
+  status: 400
+}
+
+export type organizationObservabilityPrefillLlmModelPriceResponse403 = {
+  data: ErrorResponse
+  status: 403
+}
+
+export type organizationObservabilityPrefillLlmModelPriceResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type organizationObservabilityPrefillLlmModelPriceResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type organizationObservabilityPrefillLlmModelPriceResponseSuccess = (organizationObservabilityPrefillLlmModelPriceResponse200) & {
+  headers: Headers;
+};
+export type organizationObservabilityPrefillLlmModelPriceResponseError = (organizationObservabilityPrefillLlmModelPriceResponse400 | organizationObservabilityPrefillLlmModelPriceResponse403 | organizationObservabilityPrefillLlmModelPriceResponse404 | organizationObservabilityPrefillLlmModelPriceResponse422) & {
+  headers: Headers;
+};
+
+export type organizationObservabilityPrefillLlmModelPriceResponse = (organizationObservabilityPrefillLlmModelPriceResponseSuccess | organizationObservabilityPrefillLlmModelPriceResponseError)
+
+export const getOrganizationObservabilityPrefillLlmModelPriceUrl = (organizationId: string,
+    params: OrganizationObservabilityPrefillLlmModelPriceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill`
+}
+
+/**
+ * @summary Prefill Llm Model Price Route
+ */
+export const organizationObservabilityPrefillLlmModelPrice = async (organizationId: string,
+    params: OrganizationObservabilityPrefillLlmModelPriceParams, options?: RequestInit): Promise<organizationObservabilityPrefillLlmModelPriceResponse> => {
+
+  const res = await fetch(getOrganizationObservabilityPrefillLlmModelPriceUrl(organizationId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: organizationObservabilityPrefillLlmModelPriceResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as organizationObservabilityPrefillLlmModelPriceResponse
 }
 
 

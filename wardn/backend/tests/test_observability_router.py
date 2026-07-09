@@ -9,6 +9,7 @@ from app.modules.observability import router as observability_router
 from app.modules.observability import service as observability_service
 from app.modules.observability.schemas import (
     LLMModelPriceListResponse,
+    LLMModelPricePrefillResponse,
     LLMModelPriceRead,
     LLMUsageListResponse,
     LLMUsageRead,
@@ -168,6 +169,21 @@ def model_prices_response() -> LLMModelPriceListResponse:
     )
 
 
+def model_price_prefill_response() -> LLMModelPricePrefillResponse:
+    return LLMModelPricePrefillResponse(
+        found=True,
+        provider="openai",
+        model="gpt-4.1-mini",
+        inputUsdPer1mTokens="0.40",
+        outputUsdPer1mTokens="1.60",
+        cacheReadUsdPer1mTokens="0.10",
+        cacheWriteUsdPer1mTokens="0.50",
+        source="openrouter",
+        sourceModelId="openai/gpt-4.1-mini",
+        sourceModelName="OpenAI: GPT-4.1 Mini",
+    )
+
+
 def test_list_mcp_tool_usage_route(monkeypatch) -> None:
     seen = {}
 
@@ -311,3 +327,36 @@ def test_create_llm_model_price_route(monkeypatch) -> None:
     assert response.status_code == 201
     assert response.json()["model"] == "gpt-4.1-mini"
     assert seen == {"provider": "OpenAI", "model": "gpt-4.1-mini"}
+
+
+def test_prefill_llm_model_price_route(monkeypatch) -> None:
+    seen = {}
+
+    async def fetch_openrouter_model_prices(*, provider, model):
+        seen["provider"] = provider
+        seen["model"] = model
+        return model_price_prefill_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_organization_member",
+        fake_require_organization_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "fetch_openrouter_model_prices",
+        fetch_openrouter_model_prices,
+    )
+
+    response = observability_client(authenticated=True).get(
+        organization_observability_path(
+            "/llm/model-prices/prefill?provider=openai&model=gpt-4.1-mini"
+        )
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["found"] is True
+    assert payload["source"] == "openrouter"
+    assert payload["inputUsdPer1mTokens"] == "0.40"
+    assert seen == {"provider": "openai", "model": "gpt-4.1-mini"}

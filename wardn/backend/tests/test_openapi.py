@@ -46,6 +46,7 @@ def test_openapi_exposes_expected_paths() -> None:
             "/chatgpt/device/complete"
         ),
         "/api/v1/organizations/{organization_id}/observability/llm/model-prices",
+        "/api/v1/organizations/{organization_id}/observability/llm/model-prices/prefill",
         (
             "/api/v1/organizations/{organization_id}/observability/llm/model-prices"
             "/{price_id}"

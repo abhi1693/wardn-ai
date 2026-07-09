@@ -90,7 +90,9 @@ export function ModelPriceForm({
     decimalText(initialPrice?.cacheWriteUsdPer1mTokens)
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrefilling, setIsPrefilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
 
   const effectiveCredential =
     availableCredentials.find((credential) => credential.id === providerCredentialId) ?? null;
@@ -185,6 +187,55 @@ export function ModelPriceForm({
     }
   }
 
+  async function prefillFromOpenRouter() {
+    if (!effectiveCredential || !model.trim() || isPrefilling) {
+      return;
+    }
+
+    setIsPrefilling(true);
+    setError(null);
+    setPrefillNotice(null);
+    try {
+      const params = new URLSearchParams({
+        provider: effectiveCredential.provider,
+        model: model.trim(),
+      });
+      const response = await fetch(
+        `/api/organizations/${organizationId}/observability/llm/model-prices/prefill?${params}`
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            found?: boolean;
+            inputUsdPer1mTokens?: string | number | null;
+            outputUsdPer1mTokens?: string | number | null;
+            cacheReadUsdPer1mTokens?: string | number | null;
+            cacheWriteUsdPer1mTokens?: string | number | null;
+            sourceModelName?: string;
+          }
+        | null;
+      if (!response.ok) {
+        throw new Error(errorMessage(payload, "OpenRouter pricing could not be loaded."));
+      }
+      if (!payload?.found) {
+        setPrefillNotice("No OpenRouter pricing match was found for this model.");
+        return;
+      }
+      setInputPrice(decimalText(payload.inputUsdPer1mTokens));
+      setOutputPrice(decimalText(payload.outputUsdPer1mTokens));
+      setCacheReadPrice(decimalText(payload.cacheReadUsdPer1mTokens));
+      setCacheWritePrice(decimalText(payload.cacheWriteUsdPer1mTokens));
+      setPrefillNotice(
+        payload.sourceModelName
+          ? `Pricing filled from OpenRouter: ${payload.sourceModelName}.`
+          : "Pricing filled from OpenRouter."
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "OpenRouter pricing could not be loaded.");
+    } finally {
+      setIsPrefilling(false);
+    }
+  }
+
   return (
     <div className="max-w-4xl">
       <Card className="overflow-hidden">
@@ -261,6 +312,27 @@ export function ModelPriceForm({
                   <div className="text-sm text-red-700">
                     This model is not available from the selected credential.
                   </div>
+                ) : null}
+              </div>
+              <div className="sm:col-span-2">
+                <Button
+                  disabled={
+                    !effectiveCredential ||
+                    !model.trim() ||
+                    isLoadingModels ||
+                    Boolean(modelError) ||
+                    selectedModelUnavailable ||
+                    isPrefilling
+                  }
+                  onClick={prefillFromOpenRouter}
+                  type="button"
+                  variant="outline"
+                >
+                  {isPrefilling ? <Loader2 className="size-4 animate-spin" /> : <BadgeDollarSign />}
+                  {isPrefilling ? "Loading pricing" : "Prefill from OpenRouter"}
+                </Button>
+                {prefillNotice ? (
+                  <div className="mt-2 text-sm text-muted-foreground">{prefillNotice}</div>
                 ) : null}
               </div>
               <div className="space-y-2">

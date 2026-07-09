@@ -83,6 +83,33 @@ class LLMModelPriceListResponse(BaseModel):
     prices: list[LLMModelPriceRead]
 
 
+class LLMModelPricePrefillResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    found: bool
+    provider: str
+    model: str
+    input_usd_per_1m_tokens: Decimal | None = Field(
+        default=None,
+        alias="inputUsdPer1mTokens",
+    )
+    output_usd_per_1m_tokens: Decimal | None = Field(
+        default=None,
+        alias="outputUsdPer1mTokens",
+    )
+    cache_read_usd_per_1m_tokens: Decimal | None = Field(
+        default=None,
+        alias="cacheReadUsdPer1mTokens",
+    )
+    cache_write_usd_per_1m_tokens: Decimal | None = Field(
+        default=None,
+        alias="cacheWriteUsdPer1mTokens",
+    )
+    source: str = ""
+    source_model_id: str = Field(default="", alias="sourceModelId")
+    source_model_name: str = Field(default="", alias="sourceModelName")
+
+
 class LLMUsageRead(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

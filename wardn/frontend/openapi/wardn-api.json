@@ -1601,6 +1601,92 @@
         "title": "LLMModelPriceListResponse",
         "type": "object"
       },
+      "LLMModelPricePrefillResponse": {
+        "properties": {
+          "cacheReadUsdPer1mTokens": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cachereadusdper1Mtokens"
+          },
+          "cacheWriteUsdPer1mTokens": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cachewriteusdper1Mtokens"
+          },
+          "found": {
+            "title": "Found",
+            "type": "boolean"
+          },
+          "inputUsdPer1mTokens": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputusdper1Mtokens"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "outputUsdPer1mTokens": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputusdper1Mtokens"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "sourceModelId": {
+            "default": "",
+            "title": "Sourcemodelid",
+            "type": "string"
+          },
+          "sourceModelName": {
+            "default": "",
+            "title": "Sourcemodelname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "found",
+          "provider",
+          "model"
+        ],
+        "title": "LLMModelPricePrefillResponse",
+        "type": "object"
+      },
       "LLMModelPriceRead": {
         "properties": {
           "cacheReadUsdPer1mTokens": {
@@ -8935,6 +9021,117 @@
           }
         },
         "summary": "Create Llm Model Price Route",
+        "tags": [
+          "organization-observability"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/observability/llm/model-prices/prefill": {
+      "get": {
+        "operationId": "organization_observability_prefill_llm_model_price",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 1,
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelPricePrefillResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prefill Llm Model Price Route",
         "tags": [
           "organization-observability"
         ]

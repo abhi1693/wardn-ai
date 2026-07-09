@@ -44,6 +44,39 @@ def test_calculate_llm_cost_uses_cache_prices() -> None:
     assert cost == Decimal("0.4725000000")
 
 
+def test_openrouter_prefill_response_converts_per_token_prices() -> None:
+    response = service.openrouter_prefill_response(
+        provider="openai",
+        model="gpt-4.1-mini",
+        entry={
+            "id": "openai/gpt-4.1-mini",
+            "name": "OpenAI: GPT-4.1 Mini",
+            "pricing": {
+                "prompt": "0.0000004",
+                "completion": "0.0000016",
+                "input_cache_read": "0.0000001",
+                "input_cache_write": "0.0000005",
+            },
+        },
+    )
+
+    assert response.found is True
+    assert response.input_usd_per_1m_tokens == Decimal("0.4000000000")
+    assert response.output_usd_per_1m_tokens == Decimal("1.6000000000")
+    assert response.cache_read_usd_per_1m_tokens == Decimal("0.1000000000")
+    assert response.cache_write_usd_per_1m_tokens == Decimal("0.5000000000")
+    assert response.source == "openrouter"
+    assert response.source_model_id == "openai/gpt-4.1-mini"
+
+
+def test_openrouter_matching_maps_openai_chatgpt_to_openai_slug() -> None:
+    assert service.openrouter_entry_matches_model(
+        {"id": "openai/gpt-4.1-mini"},
+        provider="openai_chatgpt",
+        model="gpt-4.1-mini",
+    )
+
+
 @pytest.mark.asyncio
 async def test_record_llm_usage_creates_trace_and_usage_record(monkeypatch) -> None:
     async def get_model_price(*args, **kwargs):

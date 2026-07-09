@@ -10,6 +10,7 @@ from app.modules.observability import service
 from app.modules.observability.schemas import (
     LLMModelPriceCreate,
     LLMModelPriceListResponse,
+    LLMModelPricePrefillResponse,
     LLMModelPriceRead,
     LLMModelPriceUpdate,
     LLMUsageListResponse,
@@ -171,6 +172,30 @@ async def create_llm_model_price_route(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return response
+
+
+@organization_router.get(
+    "/llm/model-prices/prefill",
+    response_model=LLMModelPricePrefillResponse,
+    operation_id="organization_observability_prefill_llm_model_price",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def prefill_llm_model_price_route(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    provider: Annotated[str, Query(min_length=1, max_length=50)],
+    model: Annotated[str, Query(min_length=1, max_length=255)],
+) -> LLMModelPricePrefillResponse:
+    await require_organization_member_or_404(session, current_user, organization_id)
+    try:
+        return await service.fetch_openrouter_model_prices(provider=provider, model=model)
+    except service.LLMModelPricePrefillError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @organization_router.patch(

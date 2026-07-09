@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents.models import Agent
@@ -12,6 +14,7 @@ from app.modules.observability.models import LLMModelPrice, LLMTrace, LLMUsageRe
 from app.modules.observability.schemas import (
     LLMModelPriceCreate,
     LLMModelPriceListResponse,
+    LLMModelPricePrefillResponse,
     LLMModelPriceRead,
     LLMModelPriceUpdate,
     LLMUsageListResponse,
@@ -24,6 +27,12 @@ from app.modules.observability.schemas import (
 from app.modules.users.models import User
 
 TOKEN_PRICE_DIVISOR = Decimal("1000000")
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_TIMEOUT_SECONDS = 10
+OPENROUTER_PROVIDER_SLUGS = {
+    "openai": "openai",
+    "openai_chatgpt": "openai",
+}
 
 
 class DuplicateLLMModelPriceError(ValueError):
@@ -31,6 +40,10 @@ class DuplicateLLMModelPriceError(ValueError):
 
 
 class LLMModelPriceNotFoundError(ValueError):
+    pass
+
+
+class LLMModelPricePrefillError(ValueError):
     pass
 
 
@@ -142,6 +155,106 @@ def normalize_provider(value: str) -> str:
 
 def normalize_model(value: str) -> str:
     return value.strip()
+
+
+def price_per_token_to_per_1m(value: object) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return (Decimal(str(value)) * TOKEN_PRICE_DIVISOR).quantize(Decimal("0.0000000001"))
+    except Exception as exc:
+        raise LLMModelPricePrefillError("OpenRouter returned invalid pricing data") from exc
+
+
+def openrouter_provider_slug(provider: str) -> str:
+    normalized_provider = normalize_provider(provider)
+    return OPENROUTER_PROVIDER_SLUGS.get(normalized_provider, normalized_provider)
+
+
+def openrouter_model_candidates(provider: str, model: str) -> set[str]:
+    provider_slug = openrouter_provider_slug(provider)
+    normalized_model = normalize_model(model).casefold()
+    candidates = {
+        normalized_model,
+        f"{provider_slug}/{normalized_model}",
+    }
+    if "/" in normalized_model:
+        candidates.add(normalized_model.split("/", 1)[1])
+    return {candidate for candidate in candidates if candidate}
+
+
+def openrouter_entry_matches_model(entry: dict[str, Any], provider: str, model: str) -> bool:
+    provider_slug = openrouter_provider_slug(provider)
+    normalized_model = normalize_model(model).casefold()
+    candidates = openrouter_model_candidates(provider, model)
+    for key in ("id", "canonical_slug"):
+        value = str(entry.get(key) or "").casefold()
+        if not value:
+            continue
+        if value in candidates:
+            return True
+        if value.startswith(f"{provider_slug}/") and value.split("/", 1)[1] == normalized_model:
+            return True
+    return False
+
+
+def openrouter_prefill_response(
+    *,
+    provider: str,
+    model: str,
+    entry: dict[str, Any] | None,
+) -> LLMModelPricePrefillResponse:
+    if entry is None:
+        return LLMModelPricePrefillResponse(
+            found=False,
+            provider=normalize_provider(provider),
+            model=normalize_model(model),
+        )
+
+    pricing = entry.get("pricing")
+    if not isinstance(pricing, dict):
+        raise LLMModelPricePrefillError("OpenRouter returned invalid pricing data")
+
+    return LLMModelPricePrefillResponse(
+        found=True,
+        provider=normalize_provider(provider),
+        model=normalize_model(model),
+        inputUsdPer1mTokens=price_per_token_to_per_1m(pricing.get("prompt")),
+        outputUsdPer1mTokens=price_per_token_to_per_1m(pricing.get("completion")),
+        cacheReadUsdPer1mTokens=price_per_token_to_per_1m(pricing.get("input_cache_read")),
+        cacheWriteUsdPer1mTokens=price_per_token_to_per_1m(pricing.get("input_cache_write")),
+        source="openrouter",
+        sourceModelId=str(entry.get("id") or ""),
+        sourceModelName=str(entry.get("name") or ""),
+    )
+
+
+async def fetch_openrouter_model_prices(
+    *,
+    provider: str,
+    model: str,
+) -> LLMModelPricePrefillResponse:
+    try:
+        async with httpx.AsyncClient(timeout=OPENROUTER_TIMEOUT_SECONDS) as client:
+            response = await client.get(OPENROUTER_MODELS_URL)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise LLMModelPricePrefillError("OpenRouter pricing could not be loaded") from exc
+
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        raise LLMModelPricePrefillError("OpenRouter returned invalid model data")
+
+    matched_entry = next(
+        (
+            entry
+            for entry in data
+            if isinstance(entry, dict) and openrouter_entry_matches_model(entry, provider, model)
+        ),
+        None,
+    )
+    return openrouter_prefill_response(provider=provider, model=model, entry=matched_entry)
 
 
 def model_price_read(model_price: LLMModelPrice) -> LLMModelPriceRead:
