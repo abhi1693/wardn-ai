@@ -607,6 +607,109 @@ def test_text_delta_from_openai_event_ignores_function_call_argument_deltas() ->
     )
 
 
+def test_llm_usage_from_completed_event_parses_response_usage() -> None:
+    usage = service.llm_usage_from_completed_event(
+        {
+            "type": "response.completed",
+            "response": {
+                "model": "gpt-4o-mini-2024-07-18",
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 300,
+                    "total_tokens": 1500,
+                    "input_tokens_details": {"cached_tokens": 200},
+                },
+            },
+        }
+    )
+
+    assert usage == service.observability_service.LLMTokenUsage(
+        input_tokens=1200,
+        output_tokens=300,
+        total_tokens=1500,
+        cache_read_input_tokens=200,
+        response_model="gpt-4o-mini-2024-07-18",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="organization",
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    recorded: list[dict] = []
+
+    async def resolve_credential_secrets(*args, **kwargs):
+        return ResolvedLLMCredentialSecrets(api_key="sk-test")
+
+    async def stream_response_text(*args, **kwargs):
+        kwargs["usage_callback"](
+            service.observability_service.LLMTokenUsage(
+                input_tokens=10,
+                output_tokens=5,
+                total_tokens=15,
+                response_model="gpt-4o-mini-2024-07-18",
+            )
+        )
+        yield "ok"
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(service, "stream_response_text", stream_response_text)
+    monkeypatch.setattr(service, "record_agent_llm_usage", record_agent_llm_usage)
+
+    events = [
+        event
+        async for event in service.run_agent_chat(
+            FakeSession(),
+            agent,
+            credential,
+            AgentChatRequest(
+                messages=[
+                    AgentChatMessage(
+                        role="user",
+                        parts=[{"type": "text", "text": "hi"}],
+                    )
+                ]
+            ),
+            {},
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+    ]
+
+    assert events == [service.AgentChatTextEvent(text="ok")]
+    assert len(recorded) == 1
+    assert recorded[0]["status"] == "succeeded"
+    assert recorded[0]["usage"].input_tokens == 10
+    assert recorded[0]["usage"].output_tokens == 5
+    assert recorded[0]["organization_id"] == organization_id
+    assert recorded[0]["workspace_id"] == workspace_id
+
+
 def test_chatgpt_codex_request_body_uses_websocket_response_create_shape() -> None:
     agent = Agent(
         id=uuid4(),

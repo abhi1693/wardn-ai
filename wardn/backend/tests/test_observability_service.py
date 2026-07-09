@@ -1,12 +1,89 @@
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
 from app.modules.agents.models import Agent
 from app.modules.mcp_runtime.models import MCPToolInvocation
 from app.modules.observability import service
+from app.modules.observability.models import LLMModelPrice, LLMTrace, LLMUsageRecord
 from app.modules.users.models import User
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+        self.flushed = False
+
+    def add(self, instance: object) -> None:
+        self.added.append(instance)
+
+    async def flush(self) -> None:
+        self.flushed = True
+
+
+def test_calculate_llm_cost_uses_cache_prices() -> None:
+    price = LLMModelPrice(
+        provider="openai_api_key",
+        model="gpt-4o-mini",
+        input_usd_per_1m_tokens=Decimal("0.1500000000"),
+        output_usd_per_1m_tokens=Decimal("0.6000000000"),
+        cache_read_usd_per_1m_tokens=Decimal("0.0750000000"),
+        cache_write_usd_per_1m_tokens=Decimal("0.3000000000"),
+    )
+    usage = service.LLMTokenUsage(
+        input_tokens=1_000_000,
+        output_tokens=500_000,
+        cache_read_input_tokens=100_000,
+        cache_write_input_tokens=200_000,
+    )
+
+    cost = service.calculate_llm_cost(price, usage)
+
+    assert cost == Decimal("0.4725000000")
+
+
+@pytest.mark.asyncio
+async def test_record_llm_usage_creates_trace_and_usage_record(monkeypatch) -> None:
+    async def get_model_price(*args, **kwargs):
+        return LLMModelPrice(
+            provider="openai_api_key",
+            model="gpt-4o-mini",
+            input_usd_per_1m_tokens=Decimal("0.1500000000"),
+            output_usd_per_1m_tokens=Decimal("0.6000000000"),
+        )
+
+    monkeypatch.setattr(service.repository, "get_model_price", get_model_price)
+    session = FakeSession()
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+
+    record = await service.record_llm_usage(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        agent_run_id=uuid.uuid4(),
+        provider="openai_api_key",
+        model="gpt-4o-mini",
+        usage=service.LLMTokenUsage(
+            input_tokens=1_000,
+            output_tokens=500,
+            total_tokens=1_500,
+        ),
+        started_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 7, 9, 12, 0, 1, tzinfo=UTC),
+        status="succeeded",
+    )
+
+    assert record.organization_id == organization_id
+    assert record.workspace_id == workspace_id
+    assert record.cost_usd == Decimal("0.0004500000")
+    assert any(isinstance(item, LLMTrace) for item in session.added)
+    assert any(isinstance(item, LLMUsageRecord) for item in session.added)
+    assert session.flushed is True
 
 
 def tool_invocation(

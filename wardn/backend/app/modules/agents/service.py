@@ -7,6 +7,7 @@ import threading
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -86,6 +87,7 @@ from app.modules.mcp_registry.models import (
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.observability import service as observability_service
 from app.modules.organizations.service import (
     require_organization_admin,
     require_organization_member,
@@ -1169,6 +1171,93 @@ def response_id_from_event(payload: dict[str, Any]) -> str | None:
     return response_id if isinstance(response_id, str) and response_id else None
 
 
+def int_token_value(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float):
+        return max(int(value), 0)
+    return 0
+
+
+def llm_usage_from_response(response: dict[str, Any]) -> observability_service.LLMTokenUsage:
+    usage = read_record(response.get("usage"))
+    input_tokens = int_token_value(usage.get("input_tokens") or usage.get("prompt_tokens"))
+    output_tokens = int_token_value(
+        usage.get("output_tokens") or usage.get("completion_tokens")
+    )
+    total_tokens = int_token_value(usage.get("total_tokens"))
+    input_details = read_record(
+        usage.get("input_tokens_details") or usage.get("prompt_tokens_details")
+    )
+    cache_creation = read_record(
+        usage.get("cache_creation_input_tokens_details")
+        or input_details.get("cache_creation")
+    )
+    cache_write_tokens = int_token_value(
+        usage.get("cache_creation_input_tokens")
+        or input_details.get("cache_creation_input_tokens")
+        or cache_creation.get("input_tokens")
+    )
+    response_model = response.get("model")
+    return observability_service.LLMTokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens or input_tokens + output_tokens,
+        cache_read_input_tokens=int_token_value(
+            usage.get("cache_read_input_tokens")
+            or input_details.get("cached_tokens")
+            or input_details.get("cache_read_input_tokens")
+        ),
+        cache_write_input_tokens=cache_write_tokens,
+        response_model=response_model if isinstance(response_model, str) else "",
+    )
+
+
+def llm_usage_from_completed_event(
+    payload: dict[str, Any],
+) -> observability_service.LLMTokenUsage | None:
+    if payload.get("type") != "response.completed":
+        return None
+    return llm_usage_from_response(read_record(payload.get("response")))
+
+
+async def record_agent_llm_usage(
+    session: AsyncSession,
+    *,
+    credential: LLMProviderCredential,
+    agent: Agent,
+    user: User | None,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+    agent_run: AgentRun | None,
+    usage: observability_service.LLMTokenUsage | None,
+    started_at: datetime,
+    finished_at: datetime,
+    status: str,
+    error: str = "",
+) -> None:
+    if organization_id is None or workspace_id is None:
+        return
+    usage = usage or observability_service.LLMTokenUsage()
+    await observability_service.record_llm_usage(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user.id if user else None,
+        agent_id=agent.id,
+        agent_run_id=agent_run.id if agent_run else None,
+        provider=credential.provider,
+        model=usage.response_model or agent.model_name,
+        usage=usage,
+        started_at=started_at,
+        finished_at=finished_at,
+        status=status,
+        error=error,
+    )
+
+
 def mcp_result_text(result: dict[str, Any]) -> str:
     text_parts = []
     content = result.get("content")
@@ -1563,6 +1652,7 @@ async def stream_response_text(
     url: str,
     headers: dict[str, str],
     body: dict[str, Any],
+    usage_callback=None,
 ) -> AsyncGenerator[str, None]:
     timeout = httpx.Timeout(AGENT_CHAT_TIMEOUT_SECONDS, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -1579,6 +1669,9 @@ async def stream_response_text(
                 buffer += chunk
                 payloads, buffer = sse_payloads(buffer)
                 for payload in payloads:
+                    usage = llm_usage_from_completed_event(payload)
+                    if usage is not None and usage_callback is not None:
+                        usage_callback(usage)
                     text = text_delta_from_openai_event(payload)
                     if text:
                         yield text
@@ -1597,6 +1690,7 @@ def websocket_error_message(payload: dict[str, Any]) -> str | None:
 async def stream_chatgpt_codex_response_text(
     session: AsyncSession,
     agent: Agent,
+    credential: LLMProviderCredential,
     *,
     user: User | None = None,
     organization_id: uuid.UUID | None = None,
@@ -1628,35 +1722,71 @@ async def stream_chatgpt_codex_response_text(
                     tools=function_tools,
                     previous_response_id=previous_response_id,
                 )
-                await websocket.send(json.dumps(body, separators=(",", ":")))
+                call_started_at = datetime.now(UTC)
+                call_usage: observability_service.LLMTokenUsage | None = None
                 tool_calls: list[AgentToolCall] = []
 
-                async for raw_message in websocket:
-                    if isinstance(raw_message, bytes):
-                        raw_message = raw_message.decode("utf-8", errors="replace")
-                    try:
-                        payload = json.loads(raw_message)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    error_message = websocket_error_message(payload)
-                    if error_message:
-                        status = payload.get("status") or payload.get("status_code")
-                        status_code = status if isinstance(status, int) else 502
-                        raise AgentChatProviderError(
-                            f"LLM provider returned HTTP {status_code}: {error_message}",
-                            status_code=status_code,
-                        )
-                    text = text_delta_from_openai_event(payload)
-                    if text:
-                        yield AgentChatTextEvent(text=text)
-                    tool_calls.extend(tool_calls_from_event(payload))
-                    response_id = response_id_from_event(payload)
-                    if response_id:
-                        previous_response_id = response_id
-                    if payload.get("type") == "response.completed":
-                        break
+                try:
+                    await websocket.send(json.dumps(body, separators=(",", ":")))
+                    async for raw_message in websocket:
+                        if isinstance(raw_message, bytes):
+                            raw_message = raw_message.decode("utf-8", errors="replace")
+                        try:
+                            payload = json.loads(raw_message)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(payload, dict):
+                            continue
+                        error_message = websocket_error_message(payload)
+                        if error_message:
+                            status = payload.get("status") or payload.get("status_code")
+                            status_code = status if isinstance(status, int) else 502
+                            raise AgentChatProviderError(
+                                f"LLM provider returned HTTP {status_code}: {error_message}",
+                                status_code=status_code,
+                            )
+                        usage = llm_usage_from_completed_event(payload)
+                        if usage is not None:
+                            call_usage = usage
+                        text = text_delta_from_openai_event(payload)
+                        if text:
+                            yield AgentChatTextEvent(text=text)
+                        tool_calls.extend(tool_calls_from_event(payload))
+                        response_id = response_id_from_event(payload)
+                        if response_id:
+                            previous_response_id = response_id
+                        if payload.get("type") == "response.completed":
+                            break
+                except Exception as exc:
+                    await record_agent_llm_usage(
+                        session,
+                        credential=credential,
+                        agent=agent,
+                        user=user,
+                        organization_id=organization_id,
+                        workspace_id=workspace_id,
+                        agent_run=agent_run,
+                        usage=call_usage,
+                        started_at=call_started_at,
+                        finished_at=datetime.now(UTC),
+                        status="failed",
+                        error=str(exc),
+                    )
+                    raise
+
+                await record_agent_llm_usage(
+                    session,
+                    credential=credential,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run=agent_run,
+                    usage=call_usage,
+                    started_at=call_started_at,
+                    finished_at=datetime.now(UTC),
+                    status="succeeded",
+                )
 
                 if not tool_calls:
                     return
@@ -1760,15 +1890,53 @@ async def run_agent_chat(
     credential_secrets = await resolve_credential_secrets(session, credential)
 
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
-        async for text in stream_response_text(
-            url=OPENAI_RESPONSES_URL,
-            headers={
-                "Authorization": f"Bearer {credential_secrets.api_key}",
-                "Content-Type": "application/json",
-            },
-            body=body,
-        ):
-            yield AgentChatTextEvent(text=text)
+        call_started_at = datetime.now(UTC)
+        call_usage: observability_service.LLMTokenUsage | None = None
+
+        def capture_usage(usage: observability_service.LLMTokenUsage) -> None:
+            nonlocal call_usage
+            call_usage = usage
+
+        try:
+            async for text in stream_response_text(
+                url=OPENAI_RESPONSES_URL,
+                headers={
+                    "Authorization": f"Bearer {credential_secrets.api_key}",
+                    "Content-Type": "application/json",
+                },
+                body=body,
+                usage_callback=capture_usage,
+            ):
+                yield AgentChatTextEvent(text=text)
+        except Exception as exc:
+            await record_agent_llm_usage(
+                session,
+                credential=credential,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent_run=agent_run,
+                usage=call_usage,
+                started_at=call_started_at,
+                finished_at=datetime.now(UTC),
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        await record_agent_llm_usage(
+            session,
+            credential=credential,
+            agent=agent,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_run=agent_run,
+            usage=call_usage,
+            started_at=call_started_at,
+            finished_at=datetime.now(UTC),
+            status="succeeded",
+        )
         return
 
     if (
@@ -1798,6 +1966,7 @@ async def run_agent_chat(
             async for text in stream_chatgpt_codex_response_text(
                 session,
                 agent,
+                credential,
                 user=user,
                 organization_id=organization_id,
                 workspace_id=workspace_id,
@@ -1828,6 +1997,7 @@ async def run_agent_chat(
             async for text in stream_chatgpt_codex_response_text(
                 session,
                 agent,
+                credential,
                 user=user,
                 organization_id=organization_id,
                 workspace_id=workspace_id,

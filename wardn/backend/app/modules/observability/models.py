@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,7 +10,33 @@ from app.db.base import Base
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 from app.modules.mcp_runtime.models import MCPToolInvocation as MCPToolUsageRecord
 
-__all__ = ["LLMTrace", "LLMUsageRecord", "MCPToolUsageRecord"]
+__all__ = ["LLMModelPrice", "LLMTrace", "LLMUsageRecord", "MCPToolUsageRecord"]
+
+
+class LLMModelPrice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "llm_model_prices"
+    __table_args__ = (
+        UniqueConstraint("provider", "model", name="uq_llm_model_prices_provider_model"),
+    )
+
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    input_usd_per_1m_tokens: Mapped[Decimal] = mapped_column(
+        Numeric(18, 10),
+        nullable=False,
+    )
+    output_usd_per_1m_tokens: Mapped[Decimal] = mapped_column(
+        Numeric(18, 10),
+        nullable=False,
+    )
+    cache_read_usd_per_1m_tokens: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 10),
+        nullable=True,
+    )
+    cache_write_usd_per_1m_tokens: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 10),
+        nullable=True,
+    )
 
 
 class LLMTrace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
