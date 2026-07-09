@@ -45,6 +45,11 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/llm/provider-credentials"
             "/chatgpt/device/complete"
         ),
+        "/api/v1/organizations/{organization_id}/observability/llm/model-prices",
+        (
+            "/api/v1/organizations/{organization_id}/observability/llm/model-prices"
+            "/{price_id}"
+        ),
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
@@ -145,6 +150,10 @@ def test_openapi_exposes_expected_paths() -> None:
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/observability/mcp-tool-usage"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/observability/llm-usage"
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"

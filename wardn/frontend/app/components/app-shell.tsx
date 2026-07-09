@@ -2,6 +2,7 @@ import {
   BookOpen,
   Boxes,
   Activity,
+  BadgeDollarSign,
   Gauge,
   Home,
   KeyRound,
@@ -48,6 +49,12 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       href: organizationId ? `/org/${organizationId}/llm-credentials` : "/org",
       activeKey: "llm-credentials",
       icon: PlugZap,
+    },
+    {
+      label: "LLM Pricing",
+      href: organizationId ? `/org/${organizationId}/llm-pricing` : "/org",
+      activeKey: "llm-pricing",
+      icon: BadgeDollarSign,
     },
     {
       label: "Agent Tokens",
@@ -152,6 +159,7 @@ type AppShellProps = {
     | "workspace-observability"
     | "catalog"
     | "llm-credentials"
+    | "llm-pricing"
     | "secret-backends"
     | "workspace-guardrails"
     | "agents"

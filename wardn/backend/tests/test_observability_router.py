@@ -8,6 +8,11 @@ from app.main import create_app
 from app.modules.observability import router as observability_router
 from app.modules.observability import service as observability_service
 from app.modules.observability.schemas import (
+    LLMModelPriceListResponse,
+    LLMModelPriceRead,
+    LLMUsageListResponse,
+    LLMUsageRead,
+    LLMUsageSummary,
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
@@ -20,7 +25,8 @@ TEST_WORKSPACE_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
 
 
 class FakeSession:
-    pass
+    async def commit(self):
+        return None
 
 
 async def fake_session():
@@ -32,6 +38,14 @@ async def fake_current_user():
 
 
 async def fake_require_workspace_member(*args, **kwargs):
+    return None
+
+
+async def fake_require_organization_member(*args, **kwargs):
+    return None
+
+
+async def fake_require_organization_admin(*args, **kwargs):
     return None
 
 
@@ -48,6 +62,10 @@ def workspace_observability_path(suffix: str = "") -> str:
         f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}"
         f"/observability{suffix}"
     )
+
+
+def organization_observability_path(suffix: str = "") -> str:
+    return f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/observability{suffix}"
 
 
 def tool_usage_response() -> MCPToolUsageListResponse:
@@ -87,6 +105,66 @@ def tool_usage_response() -> MCPToolUsageListResponse:
                 error="",
             )
         ],
+    )
+
+
+def llm_usage_response() -> LLMUsageListResponse:
+    return LLMUsageListResponse(
+        summary=LLMUsageSummary(
+            totalCalls=1,
+            succeeded=1,
+            failed=0,
+            running=0,
+            inputTokens=100,
+            outputTokens=50,
+            totalTokens=150,
+            totalCostUsd="0.000125",
+            attributed=1,
+            unattributed=0,
+        ),
+        records=[
+            LLMUsageRead(
+                id=uuid.uuid4(),
+                organizationId=TEST_ORGANIZATION_ID,
+                workspaceId=TEST_WORKSPACE_ID,
+                userId=uuid.uuid4(),
+                userEmail="user@example.com",
+                userDisplayName="Test User",
+                agentId=uuid.uuid4(),
+                agentName="Workspace Assistant",
+                agentRunId=uuid.uuid4(),
+                provider="openai",
+                model="gpt-4.1-mini",
+                inputTokens=100,
+                outputTokens=50,
+                totalTokens=150,
+                costUsd="0.000125",
+                startedAt=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+                finishedAt=datetime(2026, 7, 9, 12, 0, 1, tzinfo=UTC),
+                status="succeeded",
+                traceId="trace-1",
+                spanId="span-1",
+                error="",
+            )
+        ],
+    )
+
+
+def model_prices_response() -> LLMModelPriceListResponse:
+    return LLMModelPriceListResponse(
+        prices=[
+            LLMModelPriceRead(
+                id=uuid.uuid4(),
+                provider="openai",
+                model="gpt-4.1-mini",
+                inputUsdPer1mTokens="0.40",
+                outputUsdPer1mTokens="1.60",
+                cacheReadUsdPer1mTokens="0.10",
+                cacheWriteUsdPer1mTokens=None,
+                createdAt=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+                updatedAt=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+            )
+        ]
     )
 
 
@@ -131,3 +209,105 @@ def test_list_mcp_tool_usage_route(monkeypatch) -> None:
         "workspace_id": TEST_WORKSPACE_ID,
         "limit": 25,
     }
+
+
+def test_list_llm_usage_route(monkeypatch) -> None:
+    seen = {}
+
+    async def list_workspace_llm_usage(
+        session,
+        *,
+        organization_id,
+        workspace_id,
+        limit=100,
+    ):
+        seen["organization_id"] = organization_id
+        seen["workspace_id"] = workspace_id
+        seen["limit"] = limit
+        return llm_usage_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_workspace_member",
+        fake_require_workspace_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "list_workspace_llm_usage",
+        list_workspace_llm_usage,
+    )
+
+    response = observability_client(authenticated=True).get(
+        workspace_observability_path("/llm-usage?limit=25")
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["totalCalls"] == 1
+    assert payload["summary"]["totalCostUsd"] == "0.000125"
+    assert payload["records"][0]["model"] == "gpt-4.1-mini"
+    assert payload["records"][0]["agentName"] == "Workspace Assistant"
+    assert seen == {
+        "organization_id": TEST_ORGANIZATION_ID,
+        "workspace_id": TEST_WORKSPACE_ID,
+        "limit": 25,
+    }
+
+
+def test_list_llm_model_prices_route(monkeypatch) -> None:
+    async def list_llm_model_prices(session):
+        return model_prices_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_organization_member",
+        fake_require_organization_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "list_llm_model_prices",
+        list_llm_model_prices,
+    )
+
+    response = observability_client(authenticated=True).get(
+        organization_observability_path("/llm/model-prices")
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["prices"][0]["provider"] == "openai"
+    assert payload["prices"][0]["inputUsdPer1mTokens"] == "0.40"
+
+
+def test_create_llm_model_price_route(monkeypatch) -> None:
+    seen = {}
+
+    async def create_llm_model_price(session, payload):
+        seen["provider"] = payload.provider
+        seen["model"] = payload.model
+        return model_prices_response().prices[0]
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_organization_admin",
+        fake_require_organization_admin,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "create_llm_model_price",
+        create_llm_model_price,
+    )
+
+    response = observability_client(authenticated=True).post(
+        organization_observability_path("/llm/model-prices"),
+        json={
+            "provider": "OpenAI",
+            "model": "gpt-4.1-mini",
+            "inputUsdPer1mTokens": "0.40",
+            "outputUsdPer1mTokens": "1.60",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["model"] == "gpt-4.1-mini"
+    assert seen == {"provider": "OpenAI", "model": "gpt-4.1-mini"}

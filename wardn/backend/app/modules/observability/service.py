@@ -10,6 +10,13 @@ from app.modules.mcp_runtime.models import MCPToolInvocation
 from app.modules.observability import repository
 from app.modules.observability.models import LLMModelPrice, LLMTrace, LLMUsageRecord
 from app.modules.observability.schemas import (
+    LLMModelPriceCreate,
+    LLMModelPriceListResponse,
+    LLMModelPriceRead,
+    LLMModelPriceUpdate,
+    LLMUsageListResponse,
+    LLMUsageRead,
+    LLMUsageSummary,
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
@@ -17,6 +24,14 @@ from app.modules.observability.schemas import (
 from app.modules.users.models import User
 
 TOKEN_PRICE_DIVISOR = Decimal("1000000")
+
+
+class DuplicateLLMModelPriceError(ValueError):
+    pass
+
+
+class LLMModelPriceNotFoundError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -121,8 +136,174 @@ async def record_llm_usage(
     )
 
 
+def normalize_provider(value: str) -> str:
+    return value.strip().casefold()
+
+
+def normalize_model(value: str) -> str:
+    return value.strip()
+
+
+def model_price_read(model_price: LLMModelPrice) -> LLMModelPriceRead:
+    return LLMModelPriceRead(
+        id=model_price.id,
+        provider=model_price.provider,
+        model=model_price.model,
+        inputUsdPer1mTokens=model_price.input_usd_per_1m_tokens,
+        outputUsdPer1mTokens=model_price.output_usd_per_1m_tokens,
+        cacheReadUsdPer1mTokens=model_price.cache_read_usd_per_1m_tokens,
+        cacheWriteUsdPer1mTokens=model_price.cache_write_usd_per_1m_tokens,
+        createdAt=model_price.created_at,
+        updatedAt=model_price.updated_at,
+    )
+
+
+async def list_llm_model_prices(session: AsyncSession) -> LLMModelPriceListResponse:
+    return LLMModelPriceListResponse(
+        prices=[
+            model_price_read(model_price)
+            for model_price in await repository.list_model_prices(session)
+        ]
+    )
+
+
+async def create_llm_model_price(
+    session: AsyncSession,
+    payload: LLMModelPriceCreate,
+) -> LLMModelPriceRead:
+    provider = normalize_provider(payload.provider)
+    model = normalize_model(payload.model)
+    existing = await repository.get_model_price(session, provider=provider, model=model)
+    if existing is not None:
+        raise DuplicateLLMModelPriceError("model price already exists")
+
+    model_price = LLMModelPrice(
+        provider=provider,
+        model=model,
+        input_usd_per_1m_tokens=payload.input_usd_per_1m_tokens,
+        output_usd_per_1m_tokens=payload.output_usd_per_1m_tokens,
+        cache_read_usd_per_1m_tokens=payload.cache_read_usd_per_1m_tokens,
+        cache_write_usd_per_1m_tokens=payload.cache_write_usd_per_1m_tokens,
+    )
+    return model_price_read(
+        await repository.save_model_price(session, model_price=model_price)
+    )
+
+
+async def update_llm_model_price(
+    session: AsyncSession,
+    *,
+    price_id: UUID,
+    payload: LLMModelPriceUpdate,
+) -> LLMModelPriceRead:
+    model_price = await repository.get_model_price_by_id(session, price_id=price_id)
+    if model_price is None:
+        raise LLMModelPriceNotFoundError("model price not found")
+
+    update_values = payload.model_dump(exclude_unset=True, by_alias=False)
+    next_provider = normalize_provider(update_values.get("provider", model_price.provider))
+    next_model = normalize_model(update_values.get("model", model_price.model))
+    duplicate = await repository.get_model_price(
+        session,
+        provider=next_provider,
+        model=next_model,
+    )
+    if duplicate is not None and duplicate.id != model_price.id:
+        raise DuplicateLLMModelPriceError("model price already exists")
+
+    model_price.provider = next_provider
+    model_price.model = next_model
+    if "input_usd_per_1m_tokens" in update_values:
+        model_price.input_usd_per_1m_tokens = update_values["input_usd_per_1m_tokens"]
+    if "output_usd_per_1m_tokens" in update_values:
+        model_price.output_usd_per_1m_tokens = update_values["output_usd_per_1m_tokens"]
+    if "cache_read_usd_per_1m_tokens" in update_values:
+        model_price.cache_read_usd_per_1m_tokens = update_values[
+            "cache_read_usd_per_1m_tokens"
+        ]
+    if "cache_write_usd_per_1m_tokens" in update_values:
+        model_price.cache_write_usd_per_1m_tokens = update_values[
+            "cache_write_usd_per_1m_tokens"
+        ]
+
+    return model_price_read(
+        await repository.save_model_price(session, model_price=model_price)
+    )
+
+
+async def delete_llm_model_price(
+    session: AsyncSession,
+    *,
+    price_id: UUID,
+) -> None:
+    model_price = await repository.get_model_price_by_id(session, price_id=price_id)
+    if model_price is None:
+        raise LLMModelPriceNotFoundError("model price not found")
+    await repository.delete_model_price(session, model_price=model_price)
+
+
 def user_display_name(user: User | None) -> str:
     return user.display_name if user is not None else ""
+
+
+def llm_usage_read(
+    usage_record: LLMUsageRecord,
+    user: User | None,
+    agent: Agent | None,
+) -> LLMUsageRead:
+    return LLMUsageRead(
+        id=usage_record.id,
+        organizationId=usage_record.organization_id,
+        workspaceId=usage_record.workspace_id,
+        userId=usage_record.user_id,
+        userEmail=user.email if user is not None else "",
+        userDisplayName=user_display_name(user),
+        agentId=usage_record.agent_id,
+        agentName=agent.name if agent is not None else "",
+        agentRunId=usage_record.agent_run_id,
+        provider=usage_record.provider,
+        model=usage_record.model,
+        inputTokens=usage_record.input_tokens,
+        outputTokens=usage_record.output_tokens,
+        totalTokens=usage_record.input_tokens + usage_record.output_tokens,
+        costUsd=usage_record.cost_usd,
+        startedAt=usage_record.started_at,
+        finishedAt=usage_record.finished_at,
+        status=usage_record.status,
+        traceId=usage_record.trace_id,
+        spanId=usage_record.span_id,
+        error=usage_record.error,
+    )
+
+
+def llm_usage_summary(records: list[LLMUsageRecord]) -> LLMUsageSummary:
+    failed = sum(1 for record in records if record.status == "failed")
+    total_input_tokens = sum(record.input_tokens for record in records)
+    total_output_tokens = sum(record.output_tokens for record in records)
+    return LLMUsageSummary(
+        totalCalls=len(records),
+        succeeded=sum(1 for record in records if record.status == "succeeded"),
+        failed=failed,
+        running=sum(1 for record in records if record.status == "running"),
+        inputTokens=total_input_tokens,
+        outputTokens=total_output_tokens,
+        totalTokens=total_input_tokens + total_output_tokens,
+        totalCostUsd=sum((record.cost_usd for record in records), Decimal("0")),
+        attributed=sum(
+            1
+            for record in records
+            if record.user_id is not None
+            or record.agent_id is not None
+            or record.agent_run_id is not None
+        ),
+        unattributed=sum(
+            1
+            for record in records
+            if record.user_id is None
+            and record.agent_id is None
+            and record.agent_run_id is None
+        ),
+    )
 
 
 def tool_usage_read(
@@ -219,5 +400,28 @@ async def list_workspace_mcp_tool_usage(
         toolCalls=[
             tool_usage_read(invocation, user, agent)
             for invocation, user, agent in rows
+        ],
+    )
+
+
+async def list_workspace_llm_usage(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    limit: int = 100,
+) -> LLMUsageListResponse:
+    rows = await repository.list_llm_usage(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        limit=limit,
+    )
+    records = [usage_record for usage_record, _user, _agent in rows]
+    return LLMUsageListResponse(
+        summary=llm_usage_summary(records),
+        records=[
+            llm_usage_read(usage_record, user, agent)
+            for usage_record, user, agent in rows
         ],
     )

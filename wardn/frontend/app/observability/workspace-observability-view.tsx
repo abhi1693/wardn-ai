@@ -68,6 +68,48 @@ type MCPToolUsageListResponse = {
   toolCalls: MCPToolUsageRead[];
 };
 
+type LLMUsageSummary = {
+  totalCalls: number;
+  succeeded: number;
+  failed: number;
+  running: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  totalCostUsd: string | number;
+  attributed: number;
+  unattributed: number;
+};
+
+type LLMUsageRead = {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  userId: string | null;
+  userEmail: string;
+  userDisplayName: string;
+  agentId: string | null;
+  agentName: string;
+  agentRunId: string | null;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: string | number;
+  startedAt: string;
+  finishedAt: string | null;
+  status: string;
+  traceId: string;
+  spanId: string;
+  error: string;
+};
+
+type LLMUsageListResponse = {
+  summary: LLMUsageSummary;
+  records: LLMUsageRead[];
+};
+
 type WorkspaceObservabilityViewProps = {
   workspaceContext: WorkspaceContext;
 };
@@ -84,6 +126,24 @@ function emptyUsage(): MCPToolUsageListResponse {
       averageDurationMs: null,
     },
     toolCalls: [],
+  };
+}
+
+function emptyLLMUsage(): LLMUsageListResponse {
+  return {
+    summary: {
+      totalCalls: 0,
+      succeeded: 0,
+      failed: 0,
+      running: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      totalCostUsd: 0,
+      attributed: 0,
+      unattributed: 0,
+    },
+    records: [],
   };
 }
 
@@ -107,8 +167,41 @@ async function getMcpToolUsage(context: WorkspaceContext) {
   }
 }
 
+async function getLLMUsage(context: WorkspaceContext) {
+  const path = workspaceObservabilityApiPath(context, "/llm-usage?limit=100");
+  if (!path) {
+    return emptyLLMUsage();
+  }
+  try {
+    const cookie = await backendCookieHeader();
+    const response = await fetch(backendPath(path), {
+      cache: "no-store",
+      headers: cookie ? { cookie } : {},
+    });
+    if (!response.ok) {
+      return emptyLLMUsage();
+    }
+    return (await response.json()) as LLMUsageListResponse;
+  } catch {
+    return emptyLLMUsage();
+  }
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatCurrency(value: string | number) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "$0";
+  }
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: numericValue < 0.01 ? 6 : 2,
+    minimumFractionDigits: numericValue > 0 ? 2 : 0,
+    style: "currency",
+  }).format(numericValue);
 }
 
 function formatBytes(value: number) {
@@ -165,6 +258,16 @@ function agentLabel(call: MCPToolUsageRead) {
   return call.agentName || "Direct MCP";
 }
 
+function llmActorLabel(record: LLMUsageRead) {
+  if (record.userDisplayName) {
+    return record.userDisplayName;
+  }
+  if (record.userEmail) {
+    return record.userEmail;
+  }
+  return "Unattributed";
+}
+
 export async function WorkspaceObservabilityView({
   workspaceContext,
 }: WorkspaceObservabilityViewProps) {
@@ -174,8 +277,12 @@ export async function WorkspaceObservabilityView({
     redirect("/");
   }
 
-  const usage = await getMcpToolUsage(workspaceContext);
+  const [usage, llmUsage] = await Promise.all([
+    getMcpToolUsage(workspaceContext),
+    getLLMUsage(workspaceContext),
+  ]);
   const { summary, toolCalls } = usage;
+  const { summary: llmSummary, records: llmRecords } = llmUsage;
   const successRate =
     summary.total > 0 ? Math.round((summary.succeeded / summary.total) * 100) : 0;
 
@@ -350,20 +457,83 @@ export async function WorkspaceObservabilityView({
         <div className="space-y-5">
           <Card>
             <CardHeader>
-              <CardTitle>LLM Usage</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>LLM Usage</CardTitle>
+                <Badge variant={llmSummary.failed > 0 ? "secondary" : "outline"}>
+                  {formatCurrency(llmSummary.totalCostUsd)}
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border border-dashed p-4">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 size-4 text-muted-foreground" />
-                  <div>
-                    <div className="text-sm font-medium">Waiting for instrumentation</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      Token and cost rows will populate after model calls write usage records.
+              {llmRecords.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-md border p-3">
+                      <div className="text-muted-foreground">Calls</div>
+                      <div className="mt-1 text-lg font-semibold">
+                        {formatNumber(llmSummary.totalCalls)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border p-3">
+                      <div className="text-muted-foreground">Tokens</div>
+                      <div className="mt-1 text-lg font-semibold">
+                        {formatNumber(llmSummary.totalTokens)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {llmRecords.slice(0, 6).map((record) => {
+                      const runHref = record.agentRunId
+                        ? `/org/${encodeURIComponent(
+                            organization.id
+                          )}/workspace/${encodeURIComponent(
+                            workspace.id
+                          )}/agent-runs/${encodeURIComponent(record.agentRunId)}`
+                        : "";
+
+                      return (
+                        <div
+                          className="rounded-md border p-3 text-sm"
+                          key={record.id}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{record.model}</div>
+                              <div className="mt-1 truncate text-xs text-muted-foreground">
+                                {record.provider} / {llmActorLabel(record)}
+                              </div>
+                            </div>
+                            <Badge variant={record.status === "failed" ? "secondary" : "outline"}>
+                              {record.status}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                            <span>{formatNumber(record.totalTokens)} tokens</span>
+                            <span className="font-mono">{formatCurrency(record.costUsd)}</span>
+                          </div>
+                          {runHref ? (
+                            <Button asChild className="mt-3 w-full" size="sm" variant="outline">
+                              <Link href={runHref}>Trace</Link>
+                            </Button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 size-4 text-muted-foreground" />
+                    <div>
+                      <div className="text-sm font-medium">No model calls recorded</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        LLM usage will appear after agent model calls complete.
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
 
@@ -387,6 +557,14 @@ export async function WorkspaceObservabilityView({
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Running</span>
                 <span className="font-mono">{formatNumber(summary.running)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">LLM attributed</span>
+                <span className="font-mono">{formatNumber(llmSummary.attributed)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">LLM cost</span>
+                <span className="font-mono">{formatCurrency(llmSummary.totalCostUsd)}</span>
               </div>
             </CardContent>
           </Card>
