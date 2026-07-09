@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   FileUp,
+  Gauge,
   KeyRound,
   Network,
   Package,
@@ -273,6 +274,124 @@ function configurationSummary(entry: MCPRegistryServerResponse) {
   };
 }
 
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function metadataRecord(entry: MCPRegistryServerResponse, key: string) {
+  const serverMeta = entry.server._meta;
+  if (isRecord(serverMeta?.[key])) {
+    return serverMeta[key];
+  }
+  const responseMeta = entry._meta as unknown;
+  if (isRecord(responseMeta) && isRecord(responseMeta[key])) {
+    return responseMeta[key];
+  }
+  return null;
+}
+
+function wardnHubMetadata(entry: MCPRegistryServerResponse) {
+  return (
+    metadataRecord(entry, "dev.wardnai.hub/catalog") ??
+    metadataRecord(entry, "ai.wardn.hub")
+  );
+}
+
+function qualityScore(entry: MCPRegistryServerResponse) {
+  const metadata = wardnHubMetadata(entry);
+  const directScore = numberValue(entry.server.qualityScore);
+  if (directScore !== null) {
+    return directScore;
+  }
+  return metadata ? numberValue(metadata.qualityScore) : null;
+}
+
+function qualityScorePercent(score: number | null) {
+  return score === null ? 0 : Math.max(0, Math.min(100, score));
+}
+
+function qualityScoreTone(score: number | null) {
+  if (score === null) {
+    return "bg-muted-foreground/25";
+  }
+  if (score >= 85) {
+    return "bg-emerald-500";
+  }
+  if (score >= 70) {
+    return "bg-lime-500";
+  }
+  if (score >= 50) {
+    return "bg-amber-500";
+  }
+  return "bg-red-500";
+}
+
+function trustReport(entry: MCPRegistryServerResponse) {
+  const metadata = wardnHubMetadata(entry);
+  return metadata && isRecord(metadata.trustReport) ? metadata.trustReport : null;
+}
+
+function normalizedStatus(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : "";
+}
+
+function trustStatusLabel(report: Record<string, unknown> | null) {
+  if (!report) {
+    return "No report";
+  }
+  const status = normalizedStatus(report.status);
+  if (!status) {
+    return "Reported";
+  }
+  return status
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
+}
+
+function trustStatusClass(report: Record<string, unknown> | null) {
+  const status = normalizedStatus(report?.status);
+  if (status === "passed" || status === "pass") {
+    return "text-emerald-700";
+  }
+  if (status === "partial" || status === "warning") {
+    return "text-amber-700";
+  }
+  if (status === "failed" || status === "fail") {
+    return "text-red-700";
+  }
+  return "text-muted-foreground";
+}
+
+function trustComponentSummary(report: Record<string, unknown> | null) {
+  const components = Array.isArray(report?.components) ? report.components : [];
+  const passed = components.filter(
+    (component) => isRecord(component) && normalizedStatus(component.status) === "pass"
+  ).length;
+  const partial = components.filter(
+    (component) => isRecord(component) && normalizedStatus(component.status) === "partial"
+  ).length;
+  const failed = components.filter(
+    (component) => isRecord(component) && normalizedStatus(component.status) === "fail"
+  ).length;
+  if (components.length === 0) {
+    return "";
+  }
+  return `${passed} pass${partial ? ` · ${partial} partial` : ""}${failed ? ` · ${failed} fail` : ""}`;
+}
+
+function repositoryLabel(entry: MCPRegistryServerResponse) {
+  const repository = entry.server.repository;
+  const url = isRecord(repository) ? stringValue(repository.url) : "";
+  return url ? displayHost(url) : "";
+}
+
+function serverIconUrl(entry: MCPRegistryServerResponse) {
+  const icon = entry.server.icons?.find((item) => isRecord(item) && stringValue(item.url));
+  return isRecord(icon) ? stringValue(icon.url) : "";
+}
+
 function installTargetKind(target: InstallTarget): InstallTargetKind {
   return target.startsWith("remote") ? "remote" : "package";
 }
@@ -466,6 +585,130 @@ async function responseErrorMessage(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
+}
+
+function ServerPickerCard({
+  entry,
+  onSelect,
+}: {
+  entry: MCPRegistryServerResponse;
+  onSelect: () => void;
+}) {
+  const distribution = deliveryDetails(entry);
+  const DistributionIcon = distribution.icon;
+  const config = configurationSummary(entry);
+  const score = qualityScore(entry);
+  const report = trustReport(entry);
+  const componentSummary = trustComponentSummary(report);
+  const repository = repositoryLabel(entry);
+  const iconUrl = serverIconUrl(entry);
+  const description = entry.server.description?.trim();
+
+  return (
+    <button
+      className="flex min-h-56 w-full flex-col rounded-md border bg-white p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onSelect}
+      type="button"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+          {iconUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt=""
+              className="size-full object-cover"
+              loading="lazy"
+              src={iconUrl}
+            />
+          ) : (
+            (entry.server.title || entry.server.name).slice(0, 1).toUpperCase()
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="break-words text-sm font-semibold leading-5">
+            {entry.server.title || entry.server.name}
+          </div>
+          <div className="mt-0.5 break-all text-xs text-muted-foreground">
+            {entry.server.name}
+          </div>
+        </div>
+        <div className="w-24 shrink-0">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-muted-foreground">Quality</span>
+            <span className="font-semibold">{score === null ? "Pending" : score}</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full rounded-full ${qualityScoreTone(score)}`}
+              style={{ width: `${qualityScorePercent(score)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {description ? (
+        <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
+          {description}
+        </p>
+      ) : (
+        <div className="mt-3 min-h-10 text-sm leading-5 text-muted-foreground">
+          No description provided.
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <Badge variant="outline" className="gap-1.5 font-normal">
+          <DistributionIcon className="size-3.5" />
+          {distribution.primary}
+        </Badge>
+        {config.requiredCount > 0 ? (
+          <Badge variant="outline" className="gap-1.5 font-normal">
+            <KeyRound className="size-3.5" />
+            {config.requiredCount} required
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="gap-1.5 font-normal">
+            <ShieldCheck className="size-3.5" />
+            No required config
+          </Badge>
+        )}
+        {config.secretCount > 0 ? (
+          <Badge variant="outline" className="gap-1.5 font-normal">
+            <KeyRound className="size-3.5" />
+            {config.secretCount} secret
+          </Badge>
+        ) : null}
+        <Badge variant="outline" className="font-normal">
+          v{entry.server.version}
+        </Badge>
+      </div>
+
+      <div className="mt-auto grid gap-2 pt-4 text-xs text-muted-foreground sm:grid-cols-2">
+        <div className="min-w-0 rounded-md bg-muted/60 px-2.5 py-2">
+          <div className="flex items-center gap-1.5 font-medium text-foreground">
+            <ShieldCheck className="size-3.5" />
+            Trust
+          </div>
+          <div className={`mt-1 ${trustStatusClass(report)}`}>
+            {trustStatusLabel(report)}
+          </div>
+          {componentSummary ? <div className="mt-0.5 truncate">{componentSummary}</div> : null}
+        </div>
+        <div className="min-w-0 rounded-md bg-muted/60 px-2.5 py-2">
+          <div className="flex items-center gap-1.5 font-medium text-foreground">
+            <Gauge className="size-3.5" />
+            Source
+          </div>
+          <div className="mt-1 truncate">
+            {repository || distribution.secondary || "Registry metadata"}
+          </div>
+          {distribution.secondary && repository ? (
+            <div className="mt-0.5 truncate">{distribution.secondary}</div>
+          ) : null}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 function InstallFieldControl({
@@ -997,48 +1240,22 @@ export function InstallFormClient({
                 </div>
               </div>
             </div>
-            <div className="rounded-md border">
-              <div className="max-h-[32rem] overflow-y-auto">
+            <div className="rounded-md border bg-muted/20">
+              <div className="max-h-[38rem] overflow-y-auto p-3">
                 {serverResults.length === 0 ? (
                   <div className="px-3 py-10 text-center text-sm text-muted-foreground">
                     {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
                   </div>
                 ) : (
-                  serverResults.map((entry) => {
-                    const distribution = deliveryDetails(entry);
-                    const DistributionIcon = distribution.icon;
-                    const config = configurationSummary(entry);
-                    return (
-                      <button
-                        className="flex w-full items-start justify-between gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-muted"
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {serverResults.map((entry) => (
+                      <ServerPickerCard
+                        entry={entry}
                         key={`${entry.server.name}:${entry.server.version}`}
-                        onClick={() => selectServerForInstall(entry)}
-                        type="button"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-medium">{entry.server.title || entry.server.name}</div>
-                          <div className="mt-0.5 break-all text-xs text-muted-foreground">{entry.server.name}</div>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                          <Badge variant="outline" className="gap-1.5 font-normal">
-                            <DistributionIcon className="size-3.5" />
-                            {distribution.primary}
-                          </Badge>
-                          {config.requiredCount > 0 ? (
-                            <Badge variant="outline" className="gap-1.5 font-normal">
-                              <KeyRound className="size-3.5" />
-                              {config.requiredCount}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="gap-1.5 font-normal">
-                              <ShieldCheck className="size-3.5" />
-                              0
-                            </Badge>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })
+                        onSelect={() => selectServerForInstall(entry)}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-sm">
