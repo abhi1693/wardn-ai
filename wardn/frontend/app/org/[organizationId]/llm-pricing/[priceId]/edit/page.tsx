@@ -7,6 +7,7 @@ import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
+import { getLlmCredentials } from "../../../llm-credentials/data";
 import {
   canManageModelPrices,
   getCurrentUser,
@@ -21,11 +22,12 @@ type EditModelPricePageProps = {
 
 export default async function EditModelPricePage({ params }: EditModelPricePageProps) {
   const { organizationId, priceId } = await params;
-  const [workspaceContext, organization, currentUser, prices] = await Promise.all([
+  const [workspaceContext, organization, currentUser, prices, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId }),
     getOrganization(organizationId),
     getCurrentUser(),
     getModelPrices(organizationId),
+    getLlmCredentials(organizationId),
   ]);
 
   if (!organization || !canManageModelPrices(currentUser, organization.currentUserRole)) {
@@ -52,8 +54,12 @@ export default async function EditModelPricePage({ params }: EditModelPricePageP
       title="Edit Price"
       workspaceContext={workspaceContext}
     >
-      <ModelPriceForm initialPrice={price} mode="edit" organizationId={organization.id} />
+      <ModelPriceForm
+        credentials={credentials}
+        initialPrice={price}
+        mode="edit"
+        organizationId={organization.id}
+      />
     </AppShell>
   );
 }
-

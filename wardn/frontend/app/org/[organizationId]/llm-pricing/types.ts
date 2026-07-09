@@ -10,3 +10,7 @@ export type LLMModelPriceRead = {
   updatedAt: string;
 };
 
+export type ProviderModel = {
+  id: string;
+  name: string;
+};

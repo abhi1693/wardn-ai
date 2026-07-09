@@ -3,7 +3,7 @@
 import { BadgeDollarSign, Loader2, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +16,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import type { LLMModelPriceRead } from "./types";
+import type { LlmCredentialRead } from "../llm-credentials/types";
+import type { LLMModelPriceRead, ProviderModel } from "./types";
 
 type ModelPriceFormProps = {
+  credentials: LlmCredentialRead[];
   initialPrice?: LLMModelPriceRead;
   mode: "create" | "edit";
   organizationId: string;
@@ -43,7 +45,18 @@ function errorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+function providerLabel(credential: LlmCredentialRead) {
+  if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
+    return "OpenAI ChatGPT";
+  }
+  if (credential.provider === "openai") {
+    return "OpenAI";
+  }
+  return credential.provider;
+}
+
 export function ModelPriceForm({
+  credentials,
   initialPrice,
   mode,
   organizationId,
@@ -51,8 +64,19 @@ export function ModelPriceForm({
   const router = useRouter();
   const isEdit = mode === "edit" && initialPrice;
   const listPath = `/org/${organizationId}/llm-pricing`;
-  const [provider, setProvider] = useState(initialPrice?.provider ?? "");
-  const [model, setModel] = useState(initialPrice?.model ?? "");
+  const availableCredentials = useMemo(
+    () => credentials.filter((credential) => credential.isActive),
+    [credentials]
+  );
+  const initialCredentialId =
+    availableCredentials.find((credential) => credential.provider === initialPrice?.provider)?.id ??
+    availableCredentials[0]?.id ??
+    "";
+  const [providerCredentialId, setProviderCredentialId] = useState(initialCredentialId);
+  const [model, setModel] = useState(initialCredentialId ? initialPrice?.model ?? "" : "");
+  const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(Boolean(initialCredentialId));
+  const [modelError, setModelError] = useState<string | null>(null);
   const [inputPrice, setInputPrice] = useState(
     decimalText(initialPrice?.inputUsdPer1mTokens)
   );
@@ -67,16 +91,65 @@ export function ModelPriceForm({
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveCredential =
+    availableCredentials.find((credential) => credential.id === providerCredentialId) ?? null;
+  const selectedModelUnavailable =
+    Boolean(model) && !isLoadingModels && !modelOptions.some((entry) => entry.id === model);
   const canSave =
-    provider.trim().length > 0 &&
+    Boolean(effectiveCredential) &&
     model.trim().length > 0 &&
     inputPrice.trim().length > 0 &&
     outputPrice.trim().length > 0 &&
+    !isLoadingModels &&
+    !modelError &&
+    !selectedModelUnavailable &&
     !isSubmitting;
+
+  useEffect(() => {
+    if (!providerCredentialId) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    async function loadModels() {
+      try {
+        const response = await fetch(
+          `/api/organizations/${organizationId}/llm/provider-credentials/${providerCredentialId}/models`,
+          { signal: abortController.signal }
+        );
+        const data = (await response.json().catch(() => null)) as
+          | { models?: ProviderModel[] }
+          | unknown;
+        if (!response.ok) {
+          throw new Error(errorMessage(data, "Models could not be loaded."));
+        }
+        setModelOptions(
+          Array.isArray((data as { models?: unknown }).models)
+            ? ((data as { models: ProviderModel[] }).models ?? [])
+            : []
+        );
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          return;
+        }
+        setModelOptions([]);
+        setModelError(caught instanceof Error ? caught.message : "Models could not be loaded.");
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsLoadingModels(false);
+        }
+      }
+    }
+
+    void loadModels();
+    return () => abortController.abort();
+  }, [organizationId, providerCredentialId]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSave) {
+    if (!canSave || !effectiveCredential) {
       return;
     }
 
@@ -91,7 +164,7 @@ export function ModelPriceForm({
           method: isEdit ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            provider: provider.trim(),
+            provider: effectiveCredential.provider,
             model: model.trim(),
             inputUsdPer1mTokens: inputPrice.trim(),
             outputUsdPer1mTokens: outputPrice.trim(),
@@ -132,22 +205,63 @@ export function ModelPriceForm({
           <form onSubmit={submit}>
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="provider">Provider</Label>
-                <Input
-                  id="provider"
-                  onChange={(event) => setProvider(event.target.value)}
-                  placeholder="openai"
-                  value={provider}
-                />
+                <Label htmlFor="provider-credential">LLM credential</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={availableCredentials.length === 0}
+                  id="provider-credential"
+                  onChange={(event) => {
+                    const nextCredentialId = event.target.value;
+                    setProviderCredentialId(nextCredentialId);
+                    setModel("");
+                    setModelOptions([]);
+                    setModelError(null);
+                    setIsLoadingModels(Boolean(nextCredentialId));
+                  }}
+                  value={providerCredentialId}
+                >
+                  {availableCredentials.length === 0 ? (
+                    <option value="">No LLM credentials available</option>
+                  ) : null}
+                  {availableCredentials.map((credential) => (
+                    <option key={credential.id} value={credential.id}>
+                      {credential.name} ({providerLabel(credential)})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="model">Model</Label>
-                <Input
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={!effectiveCredential || isLoadingModels || Boolean(modelError)}
                   id="model"
                   onChange={(event) => setModel(event.target.value)}
-                  placeholder="gpt-4.1-mini"
+                  required={Boolean(effectiveCredential)}
                   value={model}
-                />
+                >
+                  <option value="">
+                    {effectiveCredential
+                      ? isLoadingModels
+                        ? "Loading models"
+                        : "Select model"
+                      : "Select an LLM credential first"}
+                  </option>
+                  {selectedModelUnavailable ? (
+                    <option value={model}>{model} (unavailable)</option>
+                  ) : null}
+                  {modelOptions.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+                {modelError ? <div className="text-sm text-red-700">{modelError}</div> : null}
+                {selectedModelUnavailable ? (
+                  <div className="text-sm text-red-700">
+                    This model is not available from the selected credential.
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="input-price">Input $ / 1M tokens</Label>
