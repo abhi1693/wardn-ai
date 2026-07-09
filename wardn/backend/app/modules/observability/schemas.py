@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -183,6 +183,18 @@ class UsageSummaryBreakdownRow(BaseModel):
     tool_calls: int = Field(alias="toolCalls")
 
 
+class UsageTrendPoint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: date
+    requests: int
+    input_tokens: int = Field(alias="inputTokens")
+    output_tokens: int = Field(alias="outputTokens")
+    total_tokens: int = Field(alias="totalTokens")
+    cost_usd: Decimal = Field(alias="costUsd")
+    tool_calls: int = Field(alias="toolCalls")
+
+
 class UsageSummaryResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -191,6 +203,7 @@ class UsageSummaryResponse(BaseModel):
     by_workspace: list[UsageSummaryBreakdownRow] = Field(alias="byWorkspace")
     by_agent: list[UsageSummaryBreakdownRow] = Field(alias="byAgent")
     by_model: list[UsageSummaryBreakdownRow] = Field(alias="byModel")
+    daily: list[UsageTrendPoint]
 
 
 class MCPToolUsageRead(BaseModel):

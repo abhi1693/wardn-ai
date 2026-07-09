@@ -199,6 +199,7 @@ export * from './usageBudgetUpsertUnit';
 export * from './usageSummaryBreakdownRow';
 export * from './usageSummaryResponse';
 export * from './usageSummaryTotals';
+export * from './usageTrendPoint';
 export * from './userAPITokenCreate';
 export * from './userAPITokenCreated';
 export * from './userAPITokenListResponse';

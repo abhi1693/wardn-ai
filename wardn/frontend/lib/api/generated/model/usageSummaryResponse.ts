@@ -6,11 +6,13 @@
  */
 import type { UsageSummaryBreakdownRow } from './usageSummaryBreakdownRow';
 import type { UsageSummaryTotals } from './usageSummaryTotals';
+import type { UsageTrendPoint } from './usageTrendPoint';
 
 export interface UsageSummaryResponse {
   byAgent: UsageSummaryBreakdownRow[];
   byModel: UsageSummaryBreakdownRow[];
   byUser: UsageSummaryBreakdownRow[];
   byWorkspace: UsageSummaryBreakdownRow[];
+  daily: UsageTrendPoint[];
   summary: UsageSummaryTotals;
 }

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -26,6 +26,7 @@ from app.modules.observability.schemas import (
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
+    UsageTrendPoint,
 )
 from app.modules.users.models import User
 
@@ -535,6 +536,72 @@ def breakdown_rows(buckets: dict[str, dict[str, Any]]) -> list[UsageSummaryBreak
     )
 
 
+def usage_date(value: date | datetime | str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
+
+
+def add_llm_daily(
+    buckets: dict[date, dict[str, Any]],
+    *,
+    row,
+) -> None:
+    point_date = usage_date(row[0])
+    bucket = buckets.setdefault(
+        point_date,
+        {
+            "date": point_date,
+            "requests": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "costUsd": Decimal("0"),
+            "toolCalls": 0,
+        },
+    )
+    bucket["requests"] += int(row_value(row, "requests"))
+    bucket["inputTokens"] += int(row_value(row, "input_tokens"))
+    bucket["outputTokens"] += int(row_value(row, "output_tokens"))
+    bucket["costUsd"] += row_value(row, "cost_usd", Decimal("0")) or Decimal("0")
+
+
+def add_tool_daily(
+    buckets: dict[date, dict[str, Any]],
+    *,
+    point_date: date,
+    tool_calls: int,
+) -> None:
+    bucket = buckets.setdefault(
+        point_date,
+        {
+            "date": point_date,
+            "requests": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "costUsd": Decimal("0"),
+            "toolCalls": 0,
+        },
+    )
+    bucket["toolCalls"] += tool_calls
+
+
+def trend_points(buckets: dict[date, dict[str, Any]]) -> list[UsageTrendPoint]:
+    return [
+        UsageTrendPoint(
+            date=point_date,
+            requests=int(bucket["requests"]),
+            inputTokens=int(bucket["inputTokens"]),
+            outputTokens=int(bucket["outputTokens"]),
+            totalTokens=int(bucket["inputTokens"]) + int(bucket["outputTokens"]),
+            costUsd=bucket["costUsd"],
+            toolCalls=int(bucket["toolCalls"]),
+        )
+        for point_date, bucket in sorted(buckets.items(), key=lambda item: item[0])
+    ]
+
+
 async def usage_summary_response(
     session: AsyncSession,
     *,
@@ -649,12 +716,29 @@ async def usage_summary_response(
             row=row,
         )
 
+    daily: dict[date, dict[str, Any]] = {}
+    for row in await repository.llm_usage_by_day(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_llm_daily(daily, row=row)
+    for row in await repository.mcp_tool_calls_by_day(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        add_tool_daily(daily, point_date=usage_date(row[0]), tool_calls=int(row[1] or 0))
+
     return UsageSummaryResponse(
         summary=usage_totals_response(totals_row, tool_calls=total_tool_calls),
         byUser=breakdown_rows(by_user),
         byWorkspace=breakdown_rows(by_workspace),
         byAgent=breakdown_rows(by_agent),
         byModel=breakdown_rows(by_model),
+        daily=trend_points(daily),
     )
 
 

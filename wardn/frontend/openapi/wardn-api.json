@@ -5453,6 +5453,13 @@
             "title": "Byworkspace",
             "type": "array"
           },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/UsageTrendPoint"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
           "summary": {
             "$ref": "#/components/schemas/UsageSummaryTotals"
           }
@@ -5462,7 +5469,8 @@
           "byUser",
           "byWorkspace",
           "byAgent",
-          "byModel"
+          "byModel",
+          "daily"
         ],
         "title": "UsageSummaryResponse",
         "type": "object"
@@ -5519,6 +5527,51 @@
           "toolCalls"
         ],
         "title": "UsageSummaryTotals",
+        "type": "object"
+      },
+      "UsageTrendPoint": {
+        "properties": {
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "inputTokens": {
+            "title": "Inputtokens",
+            "type": "integer"
+          },
+          "outputTokens": {
+            "title": "Outputtokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "requests",
+          "inputTokens",
+          "outputTokens",
+          "totalTokens",
+          "costUsd",
+          "toolCalls"
+        ],
+        "title": "UsageTrendPoint",
         "type": "object"
       },
       "UserAPITokenCreate": {

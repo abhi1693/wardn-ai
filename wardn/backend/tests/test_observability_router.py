@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +20,7 @@ from app.modules.observability.schemas import (
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
+    UsageTrendPoint,
 )
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
@@ -111,6 +112,17 @@ def usage_summary_response() -> UsageSummaryResponse:
         byWorkspace=[],
         byAgent=[],
         byModel=[],
+        daily=[
+            UsageTrendPoint(
+                date=date(2026, 7, 9),
+                requests=2,
+                inputTokens=100,
+                outputTokens=50,
+                totalTokens=150,
+                costUsd="0.000125",
+                toolCalls=3,
+            )
+        ],
     )
 
 

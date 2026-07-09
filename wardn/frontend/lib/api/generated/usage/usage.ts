@@ -15,6 +15,7 @@ export type meUsageSummaryResponse200 = {
   data: UsageSummaryResponse
   status: 200
 }
+
 export type meUsageSummaryResponse401 = {
   data: ErrorResponse
   status: 401

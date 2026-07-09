@@ -268,6 +268,32 @@ async def llm_usage_by_model(
     return list(result.all())
 
 
+async def llm_usage_by_day(
+    session: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
+    user_id: UUID | None = None,
+):
+    usage_date = func.date(LLMUsageRecord.started_at).label("usage_date")
+    result = await session.execute(
+        select(
+            usage_date,
+            *llm_usage_aggregate_columns(),
+        )
+        .where(
+            *llm_usage_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        )
+        .group_by(usage_date)
+        .order_by(usage_date.asc())
+    )
+    return list(result.all())
+
+
 async def mcp_tool_calls_by_user(
     session: AsyncSession,
     *,
@@ -344,6 +370,29 @@ async def mcp_tool_calls_by_agent(
             )
         )
         .group_by(MCPToolInvocation.agent_id, Agent.name)
+    )
+    return list(result.all())
+
+
+async def mcp_tool_calls_by_day(
+    session: AsyncSession,
+    *,
+    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
+    user_id: UUID | None = None,
+):
+    usage_date = func.date(MCPToolInvocation.started_at).label("usage_date")
+    result = await session.execute(
+        select(usage_date, func.count(MCPToolInvocation.id))
+        .where(
+            *mcp_tool_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        )
+        .group_by(usage_date)
+        .order_by(usage_date.asc())
     )
     return list(result.all())
 

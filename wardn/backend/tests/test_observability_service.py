@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -307,6 +307,20 @@ async def test_usage_summary_merges_llm_and_tool_breakdowns(monkeypatch) -> None
             )
         ]
 
+    async def llm_usage_by_day(*args, **kwargs):
+        return [
+            usage_row(
+                date(2026, 7, 9),
+                requests=2,
+                input_tokens=100,
+                output_tokens=50,
+                cost_usd="0.000125",
+            )
+        ]
+
+    async def mcp_tool_calls_by_day(*args, **kwargs):
+        return [(date(2026, 7, 9), 3)]
+
     monkeypatch.setattr(service.repository, "llm_usage_totals", llm_usage_totals)
     monkeypatch.setattr(service.repository, "mcp_tool_call_count", mcp_tool_call_count)
     monkeypatch.setattr(service.repository, "llm_usage_by_user", llm_usage_by_user)
@@ -320,6 +334,8 @@ async def test_usage_summary_merges_llm_and_tool_breakdowns(monkeypatch) -> None
     monkeypatch.setattr(service.repository, "llm_usage_by_agent", llm_usage_by_agent)
     monkeypatch.setattr(service.repository, "mcp_tool_calls_by_agent", mcp_tool_calls_by_agent)
     monkeypatch.setattr(service.repository, "llm_usage_by_model", llm_usage_by_model)
+    monkeypatch.setattr(service.repository, "llm_usage_by_day", llm_usage_by_day)
+    monkeypatch.setattr(service.repository, "mcp_tool_calls_by_day", mcp_tool_calls_by_day)
 
     response = await service.organization_usage_summary(
         object(),
@@ -332,3 +348,6 @@ async def test_usage_summary_merges_llm_and_tool_breakdowns(monkeypatch) -> None
     assert response.by_user[0].cost_usd == Decimal("0.000125")
     assert response.by_user[0].tool_calls == 3
     assert response.by_model[0].label == "openai / gpt-4.1-mini"
+    assert response.daily[0].date == date(2026, 7, 9)
+    assert response.daily[0].total_tokens == 150
+    assert response.daily[0].tool_calls == 3
