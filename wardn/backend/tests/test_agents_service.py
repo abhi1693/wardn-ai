@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agents import service
+from app.modules.agents import chat_orchestrator, provider_clients, service
 from app.modules.agents.exceptions import (
     DuplicateAgentError,
     InvalidAgentScopeError,
@@ -569,15 +569,19 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
             raise service.AgentChatProviderError("expired", status_code=401)
         yield service.AgentChatTextEvent(text="ok")
 
-    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "resolve_credential_secrets",
+        resolve_credential_secrets,
+    )
     monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
     monkeypatch.setattr(
-        service,
+        chat_orchestrator,
         "refresh_chatgpt_oauth_credential",
         refresh_chatgpt_oauth_credential,
     )
     monkeypatch.setattr(
-        service,
+        chat_orchestrator,
         "stream_chatgpt_codex_response_text",
         stream_chatgpt_codex_response_text,
     )
@@ -690,7 +694,7 @@ async def test_filter_agent_runtime_tools_omits_denied_tools(monkeypatch) -> Non
         return GuardrailDecision(mode="allow", policy_name="Allow reads")
 
     monkeypatch.setattr(
-        service,
+        chat_orchestrator,
         "evaluate_tool_call_guardrails",
         evaluate_tool_call_guardrails,
     )
@@ -910,14 +914,18 @@ async def test_run_agent_chat_closes_database_transactions_before_external_strea
         )
         yield "ok"
 
-    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "resolve_credential_secrets",
+        resolve_credential_secrets,
+    )
     monkeypatch.setattr(
         service,
         "require_agent_llm_budget_available",
         require_agent_llm_budget_available,
     )
-    monkeypatch.setattr(service, "record_agent_llm_usage", record_agent_llm_usage)
-    monkeypatch.setattr(service, "stream_response_text", stream_response_text)
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(chat_orchestrator, "stream_response_text", stream_response_text)
 
     events = [
         event
@@ -989,9 +997,13 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
     async def record_agent_llm_usage(*args, **kwargs):
         recorded.append(kwargs)
 
-    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
-    monkeypatch.setattr(service, "stream_response_text", stream_response_text)
-    monkeypatch.setattr(service, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "resolve_credential_secrets",
+        resolve_credential_secrets,
+    )
+    monkeypatch.setattr(chat_orchestrator, "stream_response_text", stream_response_text)
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
 
     events = [
         event
@@ -1280,7 +1292,11 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
 
     monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
     monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
-    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
+    monkeypatch.setattr(
+        provider_clients,
+        "credential_supports_model",
+        credential_supports_model,
+    )
 
     session = FakeSession()
     response = await service.create_agent(
@@ -1333,7 +1349,11 @@ async def test_create_agent_rejects_model_unavailable_for_credential(monkeypatch
 
     monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
     monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
-    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
+    monkeypatch.setattr(
+        provider_clients,
+        "credential_supports_model",
+        credential_supports_model,
+    )
 
     session = FakeSession()
     with pytest.raises(InvalidAgentScopeError):
@@ -1615,7 +1635,11 @@ async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) ->
     monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
     monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
     monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
-    monkeypatch.setattr(service, "credential_supports_model", credential_supports_model)
+    monkeypatch.setattr(
+        provider_clients,
+        "credential_supports_model",
+        credential_supports_model,
+    )
     monkeypatch.setattr(service.llm_provider_repository, "list_credentials", list_credentials)
     monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
     monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)

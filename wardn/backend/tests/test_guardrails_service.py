@@ -4,7 +4,9 @@ from uuid import uuid4
 
 import pytest
 
+from app.modules.agents import approvals as agent_approvals
 from app.modules.agents import service as agent_service
+from app.modules.agents import tool_execution as agent_tool_execution
 from app.modules.agents.models import Agent, AgentRun, AgentToolApproval, WorkspaceConversation
 from app.modules.agents.schemas import AgentToolApprovalDecisionRequest
 from app.modules.guardrails import repository, service
@@ -329,12 +331,16 @@ async def test_agent_tool_call_guardrail_block_skips_runtime(monkeypatch) -> Non
         raise AssertionError("runtime should not be called")
 
     monkeypatch.setattr(
-        agent_service,
+        agent_tool_execution,
         "evaluate_tool_call_guardrails",
         evaluate_tool_call_guardrails,
     )
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
-    monkeypatch.setattr(agent_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        agent_tool_execution,
+        "call_tool_with_tracking",
+        call_tool_with_tracking,
+    )
 
     session = FakeSession()
     execution = await agent_service.execute_agent_tool_call(
@@ -455,12 +461,16 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
         raise AssertionError("runtime should not be called before approval")
 
     monkeypatch.setattr(
-        agent_service,
+        agent_tool_execution,
         "evaluate_tool_call_guardrails",
         evaluate_tool_call_guardrails,
     )
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
-    monkeypatch.setattr(agent_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        agent_tool_execution,
+        "call_tool_with_tracking",
+        call_tool_with_tracking,
+    )
 
     session = FakeSession()
     execution = await agent_service.execute_agent_tool_call(
@@ -599,7 +609,7 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
         captured["run_status"] = kwargs["status"]
         return args[1]
 
-    monkeypatch.setattr(agent_service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
     monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
     monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
     monkeypatch.setattr(
@@ -607,7 +617,7 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
         "list_agent_tool_runtime_rows",
         list_agent_tool_runtime_rows,
     )
-    monkeypatch.setattr(agent_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(agent_approvals, "call_tool_with_tracking", call_tool_with_tracking)
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(
         agent_service.repository,
@@ -615,14 +625,14 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
         update_conversation_tool_activity,
     )
     monkeypatch.setattr(
-        agent_service,
+        agent_approvals,
         "generate_approval_continuation_message",
         generate_approval_continuation_message,
     )
     monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
     monkeypatch.setattr(agent_service.repository, "finish_agent_run", finish_agent_run)
 
-    response = await agent_service.decide_agent_tool_approval(
+    response = await agent_approvals.decide_agent_tool_approval(
         FakeSession(),
         user,
         organization_id,
