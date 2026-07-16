@@ -106,12 +106,13 @@ cd wardn/backend
 ../../.venv/bin/python -m app.manage runmcpjobs
 ```
 
-The API never starts this worker in-process. In non-local environments, deploy the command in a
-dedicated container or pod and set `WARDN_MCP_JOB_WORKER_ISOLATION=container` there. Give that
-workload a separate service identity, explicit CPU/memory and process limits, a read-only root
-filesystem with only the installation volume writable, and egress limited to approved package,
-catalog, secret-store, and database destinations. Do not copy the API's full environment into the
-worker deployment.
+The API never starts this worker in-process. The worker also owns runtime warmup, expiration, and
+retention maintenance; PostgreSQL advisory locks prevent duplicate maintenance when the worker is
+replicated. In non-local environments, deploy the command in a dedicated container or pod and set
+`WARDN_MCP_JOB_WORKER_ISOLATION=container` there. Give that workload a separate service identity,
+explicit CPU/memory and process limits, a read-only root filesystem with only the installation
+volume writable, and egress limited to approved package, catalog, secret-store, and database
+destinations. Do not copy the API's full environment into the worker deployment.
 
 Useful endpoints:
 

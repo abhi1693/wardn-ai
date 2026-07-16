@@ -4,17 +4,20 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from app.core.config import get_settings
+from app.db.advisory_locks import try_advisory_transaction_lock
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_runtime.service import (
     MCPRuntimeReapResult,
     prune_runtime_events,
     prune_tool_invocations,
     reap_expired_runtime_sessions,
+    recover_stale_tool_invocations,
 )
 
 logger = logging.getLogger(__name__)
 
 Sleep = Callable[[float], Awaitable[None]]
+RUNTIME_REAPER_LOCK_ID = 0x574152444E4D4351
 
 
 async def run_runtime_reaper_once(
@@ -23,6 +26,7 @@ async def run_runtime_reaper_once(
     limit: int = 100,
     event_retention_days: int | None = None,
     invocation_retention_days: int | None = None,
+    acquire_leadership: bool = True,
 ) -> MCPRuntimeReapResult:
     settings = get_settings()
     event_retention_days = (
@@ -36,7 +40,19 @@ async def run_runtime_reaper_once(
         else invocation_retention_days
     )
     async with session_factory() as session:
+        if acquire_leadership and not await try_advisory_transaction_lock(
+            session,
+            RUNTIME_REAPER_LOCK_ID,
+        ):
+            await session.rollback()
+            logger.debug("Skipping MCP runtime reaper; another worker owns maintenance.")
+            return MCPRuntimeReapResult(stopped_count=0)
         reap_result = await reap_expired_runtime_sessions(session, limit=limit)
+        recovered_invocation_count = await recover_stale_tool_invocations(
+            session,
+            stale_after_seconds=settings.mcp_runtime_invocation_stale_seconds,
+            limit=limit,
+        )
         deleted_event_count = await prune_runtime_events(
             session,
             retention_days=event_retention_days,
@@ -51,9 +67,19 @@ async def run_runtime_reaper_once(
         stopped_count=reap_result.stopped_count,
         deleted_event_count=deleted_event_count,
         deleted_invocation_count=deleted_invocation_count,
+        recovered_invocation_count=recovered_invocation_count,
     )
-    if result.stopped_count or result.deleted_event_count or result.deleted_invocation_count:
+    if (
+        result.stopped_count
+        or result.recovered_invocation_count
+        or result.deleted_event_count
+        or result.deleted_invocation_count
+    ):
         logger.info("MCP runtime reaper stopped %s expired sessions.", result.stopped_count)
+        logger.info(
+            "MCP runtime reaper recovered %s stale tool invocations.",
+            result.recovered_invocation_count,
+        )
         logger.info("MCP runtime reaper deleted %s expired events.", result.deleted_event_count)
         logger.info(
             "MCP runtime reaper deleted %s expired tool invocations.",

@@ -1,4 +1,5 @@
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -8,6 +9,10 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+DeferredSessionWork = Callable[[AsyncSession], Awaitable[None]]
+DEFERRED_SESSION_WORK_KEY = "deferred_session_work"
 
 settings = get_settings()
 
@@ -33,7 +38,29 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+def defer_session_work(session: AsyncSession, work: DeferredSessionWork) -> None:
+    session.info.setdefault(DEFERRED_SESSION_WORK_KEY, []).append(work)
+
+
+async def run_deferred_session_work(session: AsyncSession) -> None:
+    work_items = session.info.pop(DEFERRED_SESSION_WORK_KEY, [])
+    for work in work_items:
+        try:
+            await work(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.warning("Deferred database work failed.", exc_info=True)
+
+
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
-        async with session.begin():
+        try:
             yield session
+        except BaseException:
+            await session.rollback()
+            await run_deferred_session_work(session)
+            raise
+        else:
+            await session.commit()
+            await run_deferred_session_work(session)

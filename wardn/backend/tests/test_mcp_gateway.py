@@ -974,6 +974,7 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         *,
         tool_name,
         arguments,
+        user_id=None,
         request_meta=None,
     ):
         seen.update(
@@ -996,7 +997,11 @@ def test_mcp_gateway_run_tool(monkeypatch) -> None:
         "evaluate_gateway_tool_guardrails",
         allow_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,
@@ -1043,7 +1048,11 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatc
         "evaluate_gateway_tool_guardrails",
         allow_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,
@@ -1093,7 +1102,11 @@ def test_mcp_gateway_run_tool_returns_tool_error_for_kubernetes_runtime_failure(
         "evaluate_gateway_tool_guardrails",
         allow_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,
@@ -1153,7 +1166,11 @@ def test_mcp_gateway_run_tool_denies_guardrail_before_runtime(monkeypatch) -> No
         "evaluate_gateway_tool_guardrails",
         evaluate_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,
@@ -1211,7 +1228,11 @@ def test_mcp_gateway_run_tool_requires_confirmation_before_runtime(monkeypatch) 
         "evaluate_gateway_tool_guardrails",
         evaluate_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,
@@ -1324,6 +1345,7 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
         *,
         tool_name,
         arguments,
+        user_id=None,
         request_meta=None,
     ):
         seen.update(
@@ -1346,7 +1368,11 @@ def test_mcp_gateway_run_package_tool(tmp_path, monkeypatch) -> None:
         "evaluate_gateway_tool_guardrails",
         allow_gateway_tool_guardrails,
     )
-    monkeypatch.setattr(gateway_service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = gateway_client().post(
         GATEWAY_PATH,

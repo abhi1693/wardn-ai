@@ -11,6 +11,7 @@ from app.modules.mcp_runtime.manager import (
     RUNTIME_TRANSPORT_STDIO,
     WARDN_CUSTOM_HEADERS_ENV,
     DefaultMCPRuntimeManager,
+    RuntimeProviderRegistry,
     package_runtime,
     secret_environment,
 )
@@ -240,6 +241,28 @@ def test_local_process_provider_stop_runtime_is_idempotent(monkeypatch) -> None:
     provider.stop_runtime(runtime_session)
 
     assert closed_sessions == [stdio_session]
+    assert provider._stdio_sessions == {}
+
+
+def test_runtime_manager_shutdown_only_closes_process_local_sessions(monkeypatch) -> None:
+    closed_sessions = []
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.local_process.client.close_stdio_session",
+        closed_sessions.append,
+    )
+    provider = LocalProcessRuntimeProvider()
+    first_session = object()
+    second_session = object()
+    provider._stdio_sessions = {
+        "first": ManagedStdioSession(first_session),
+        "second": ManagedStdioSession(second_session),
+    }
+    manager = DefaultMCPRuntimeManager(RuntimeProviderRegistry([provider]))
+
+    manager.shutdown_local_runtimes()
+
+    assert closed_sessions == [first_session, second_session]
     assert provider._stdio_sessions == {}
 
 

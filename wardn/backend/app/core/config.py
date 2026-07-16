@@ -43,6 +43,7 @@ class Settings(BaseSettings):
         max_length=24,
         pattern=r"^[a-z0-9]+$",
     )
+    api_token_usage_update_interval_seconds: int = Field(default=300, ge=0, le=86_400)
     auth_mode: Literal["local", "oidc"] = "local"
     session_cookie_name: str = Field(default="wardn_session", min_length=1, max_length=64)
     session_secret: SecretStr = Field(
@@ -126,6 +127,7 @@ class Settings(BaseSettings):
     mcp_runtime_reaper_batch_size: int = Field(default=100, ge=1, le=10_000)
     mcp_runtime_event_retention_days: int = Field(default=14, ge=1, le=3650)
     mcp_runtime_invocation_retention_days: int = Field(default=30, ge=1, le=3650)
+    mcp_runtime_invocation_stale_seconds: int = Field(default=600, ge=60, le=86_400)
     mcp_gateway_stdio_response_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     database_url: SecretStr = Field(
         default=SecretStr("postgresql+asyncpg://wardn:wardn@localhost:5432/wardn"),

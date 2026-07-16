@@ -258,3 +258,63 @@ def test_register_mcp_job_command() -> None:
         verbose=False,
         handler=job_commands.handle_runmcpjobs,
     )
+
+
+@pytest.mark.asyncio
+async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
+    settings = Settings(_env_file=None)
+    warmup_task = object()
+    reaper_task = object()
+    seen = {}
+
+    monkeypatch.setattr(job_commands, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        job_commands,
+        "build_job_handlers",
+        lambda: job_worker.MCPJobHandlers(executors={}, cleanup_executors={}),
+    )
+    monkeypatch.setattr(
+        job_commands,
+        "start_runtime_warmup",
+        lambda **kwargs: seen.setdefault("warmup_start", (kwargs, warmup_task))[1],
+    )
+    monkeypatch.setattr(
+        job_commands,
+        "start_runtime_reaper",
+        lambda **kwargs: seen.setdefault("reaper_start", (kwargs, reaper_task))[1],
+    )
+
+    async def stop_runtime_warmup(task):
+        seen["warmup_stop"] = task
+
+    async def stop_runtime_reaper(task):
+        seen["reaper_stop"] = task
+
+    async def cancel_worker_loop(**kwargs):
+        seen["worker"] = kwargs
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(job_commands, "stop_runtime_warmup", stop_runtime_warmup)
+    monkeypatch.setattr(job_commands, "stop_runtime_reaper", stop_runtime_reaper)
+    monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
+
+    args = argparse.Namespace(
+        once=False,
+        worker_id="worker-1",
+        poll_interval=3.0,
+        verbose=False,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await job_commands.run_mcp_jobs_from_args(args)
+
+    assert seen["warmup_start"][0] == {
+        "concurrency": settings.mcp_runtime_warm_startup_concurrency
+    }
+    assert seen["reaper_start"][0] == {
+        "interval_seconds": settings.mcp_runtime_reaper_interval_seconds,
+        "limit": settings.mcp_runtime_reaper_batch_size,
+        "event_retention_days": settings.mcp_runtime_event_retention_days,
+        "invocation_retention_days": settings.mcp_runtime_invocation_retention_days,
+    }
+    assert seen["warmup_stop"] is warmup_task
+    assert seen["reaper_stop"] is reaper_task

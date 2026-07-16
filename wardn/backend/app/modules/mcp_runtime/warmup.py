@@ -5,6 +5,7 @@ from contextlib import suppress
 from uuid import UUID
 
 from app.core.config import get_settings
+from app.db.advisory_locks import try_advisory_transaction_lock
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_registry import repository as registry_repository
 from app.modules.mcp_runtime.manager import (
@@ -17,6 +18,7 @@ from app.modules.mcp_runtime.manager import (
 from app.modules.mcp_runtime.service import MCPRuntimeWarmupResult, warm_runtime_session
 
 logger = logging.getLogger(__name__)
+RUNTIME_WARMUP_LOCK_ID = 0x574152444E4D4350
 
 
 async def list_warmup_installation_ids(*, session_factory=AsyncSessionLocal) -> list[UUID]:
@@ -61,6 +63,7 @@ async def run_runtime_warmup_once(
     session_factory=AsyncSessionLocal,
     manager: MCPRuntimeManager | None = None,
     concurrency: int | None = None,
+    acquire_leadership: bool = True,
 ) -> MCPRuntimeWarmupResult:
     settings = get_settings()
     if not settings.mcp_runtime_warm_on_startup:
@@ -73,52 +76,69 @@ async def run_runtime_warmup_once(
         )
         return MCPRuntimeWarmupResult()
 
-    installation_ids = await list_warmup_installation_ids(session_factory=session_factory)
-    if not installation_ids:
-        return MCPRuntimeWarmupResult()
+    async def warm_installations() -> MCPRuntimeWarmupResult:
+        installation_ids = await list_warmup_installation_ids(session_factory=session_factory)
+        if not installation_ids:
+            return MCPRuntimeWarmupResult()
 
-    limit = max(1, concurrency or settings.mcp_runtime_warm_startup_concurrency)
-    semaphore = asyncio.Semaphore(limit)
-    warmed_count = 0
-    skipped_count = 0
-    failed_count = 0
+        limit = max(1, concurrency or settings.mcp_runtime_warm_startup_concurrency)
+        semaphore = asyncio.Semaphore(limit)
+        warmed_count = 0
+        skipped_count = 0
+        failed_count = 0
 
-    async def warm_one(installation_id: UUID) -> bool:
-        async with semaphore:
-            return await warm_runtime_installation(
-                installation_id,
-                session_factory=session_factory,
-                manager=manager,
-            )
+        async def warm_one(installation_id: UUID) -> bool:
+            async with semaphore:
+                return await warm_runtime_installation(
+                    installation_id,
+                    session_factory=session_factory,
+                    manager=manager,
+                )
 
-    results = await asyncio.gather(
-        *(warm_one(installation_id) for installation_id in installation_ids),
-        return_exceptions=True,
-    )
-    for installation_id, result in zip(installation_ids, results, strict=True):
-        if isinstance(result, Exception):
-            failed_count += 1
-            logger.error(
-                "MCP runtime startup warmup failed for installation %s.",
-                installation_id,
-                exc_info=(type(result), result, result.__traceback__),
-            )
-        elif result:
-            warmed_count += 1
-        else:
-            skipped_count += 1
+        results = await asyncio.gather(
+            *(warm_one(installation_id) for installation_id in installation_ids),
+            return_exceptions=True,
+        )
+        for installation_id, result in zip(installation_ids, results, strict=True):
+            if isinstance(result, Exception):
+                failed_count += 1
+                logger.error(
+                    "MCP runtime startup warmup failed for installation %s.",
+                    installation_id,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
+            elif result:
+                warmed_count += 1
+            else:
+                skipped_count += 1
 
-    logger.info(
-        "MCP runtime startup warmup complete: warmed=%s skipped=%s failed=%s.",
-        warmed_count,
-        skipped_count,
-        failed_count,
-    )
-    return MCPRuntimeWarmupResult(
-        warmed_count=warmed_count,
-        skipped_count=skipped_count,
-        failed_count=failed_count,
-    )
+        logger.info(
+            "MCP runtime startup warmup complete: warmed=%s skipped=%s failed=%s.",
+            warmed_count,
+            skipped_count,
+            failed_count,
+        )
+        return MCPRuntimeWarmupResult(
+            warmed_count=warmed_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+        )
+
+    if not acquire_leadership:
+        return await warm_installations()
+
+    async with session_factory() as leadership_session:
+        if not await try_advisory_transaction_lock(
+            leadership_session,
+            RUNTIME_WARMUP_LOCK_ID,
+        ):
+            await leadership_session.rollback()
+            logger.info("Skipping MCP runtime warmup; another worker owns startup maintenance.")
+            return MCPRuntimeWarmupResult()
+        try:
+            return await warm_installations()
+        finally:
+            await leadership_session.rollback()
 
 
 def start_runtime_warmup(

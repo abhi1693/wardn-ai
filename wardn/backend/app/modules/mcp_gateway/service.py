@@ -24,7 +24,7 @@ from app.modules.mcp_registry.models import (
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 from app.modules.mcp_runtime.manager import runtime_kind
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
-from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.organizations import repository as organizations_repository
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -564,12 +564,13 @@ async def run_mcp_tool(
             },
         )
     try:
-        upstream_result = await call_tool_with_tracking(
+        upstream_result = await call_tool_with_isolated_tracking(
             session,
             installation,
             server,
             tool_name=tool_name,
             arguments=tool_arguments,
+            user_id=scope.user_id,
             request_meta=request_meta,
         )
     except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:

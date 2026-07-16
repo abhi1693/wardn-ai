@@ -86,6 +86,9 @@ class MCPRuntimeManager(Protocol):
     def health_runtime(self, runtime_session: MCPRuntimeSession) -> RuntimeHealth:
         ...
 
+    def shutdown_local_runtimes(self) -> None:
+        ...
+
 
 class RuntimeProviderRegistry:
     def __init__(self, providers: list[MCPRuntimeProvider]) -> None:
@@ -207,6 +210,12 @@ class DefaultMCPRuntimeManager:
         return self._registry.provider_by_name(runtime_session.runtime_provider).health(
             runtime_session
         )
+
+    def shutdown_local_runtimes(self) -> None:
+        provider = self._registry.provider_by_name(RUNTIME_PROVIDER_LOCAL)
+        stop_all = getattr(provider, "stop_all", None)
+        if stop_all is not None:
+            stop_all()
 
 
 def get_runtime_manager() -> MCPRuntimeManager:

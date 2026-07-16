@@ -1,4 +1,5 @@
 import json
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,13 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
+from app.db.session import AsyncSessionLocal
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_runtime import repository
 from app.modules.mcp_runtime.manager import (
     MCPRuntimeManager,
     get_runtime_manager,
 )
-from app.modules.mcp_runtime.models import MCPRuntimeSession
+from app.modules.mcp_runtime.models import MCPRuntimeSession, MCPToolInvocation
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
@@ -33,6 +35,8 @@ from app.modules.organizations import repository as organization_repository
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.secrets.service import resolve_secret
 
+logger = logging.getLogger(__name__)
+
 RUNTIME_EVENT_SESSION_CREATED = "runtime_session_created"
 RUNTIME_EVENT_SESSION_REUSED = "runtime_session_reused"
 RUNTIME_EVENT_SESSION_REPLACED = "runtime_session_replaced"
@@ -44,7 +48,6 @@ RUNTIME_EVENT_TOOL_CALL_SUCCEEDED = "tool_call_succeeded"
 RUNTIME_EVENT_TOOL_CALL_FAILED = "tool_call_failed"
 RUNTIME_EVENT_SESSION_STOPPED = "runtime_session_stopped"
 RUNTIME_EVENT_REAPER_STOPPED = "runtime_reaper_stopped"
-RUNTIME_EVENT_SHUTDOWN_STOP_FAILED = "runtime_shutdown_stop_failed"
 RUNTIME_SUMMARY_RECENT_WINDOW = timedelta(hours=24)
 SECRET_HANDLE_REF_TYPE = "secret_handle"
 ACTIVE_RUNTIME_SESSION_CONSTRAINT = "uq_mcp_runtime_sessions_one_active_per_installation"
@@ -55,6 +58,7 @@ class MCPRuntimeReapResult:
     stopped_count: int
     deleted_event_count: int = 0
     deleted_invocation_count: int = 0
+    recovered_invocation_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,9 +69,12 @@ class MCPRuntimeWarmupResult:
 
 
 @dataclass(frozen=True)
-class MCPRuntimeShutdownResult:
-    stopped_count: int = 0
-    failed_count: int = 0
+class PreparedMCPToolCall:
+    installation: Any
+    runtime_session: MCPRuntimeSession
+    invocation: MCPToolInvocation
+    invocation_id: UUID
+    deferred_runtime_stops: tuple[MCPRuntimeSession, ...] = ()
 
 
 def runtime_session_read(runtime_session: MCPRuntimeSession) -> MCPRuntimeSessionRead:
@@ -312,6 +319,7 @@ async def ensure_runtime_session(
     *,
     manager: MCPRuntimeManager,
     now: datetime | None = None,
+    deferred_runtime_stops: list[MCPRuntimeSession] | None = None,
 ) -> MCPRuntimeSession:
     installation = await materialize_installation_secret_references(session, installation)
     now = now or datetime.now(UTC)
@@ -335,7 +343,10 @@ async def ensure_runtime_session(
                 if existing.config_fingerprint != config_fingerprint
                 else "expired"
             )
-            manager.stop_runtime(existing)
+            if deferred_runtime_stops is None:
+                manager.stop_runtime(existing)
+            else:
+                deferred_runtime_stops.append(existing)
             existing.status = "stopped"
             existing.stopped_at = now
             add_runtime_event(
@@ -518,7 +529,7 @@ def mark_invocation_success(
 def mark_invocation_failed(
     runtime_session: MCPRuntimeSession,
     invocation,
-    error: Exception,
+    error: BaseException,
     *,
     now: datetime,
 ) -> None:
@@ -535,7 +546,7 @@ def mark_invocation_failed(
     runtime_session.last_error = str(error)
 
 
-async def call_tool_with_tracking(
+async def prepare_tool_call_tracking(
     session: AsyncSession,
     installation: MCPServerInstallation,
     server: MCPServerVersion,
@@ -545,24 +556,23 @@ async def call_tool_with_tracking(
     user_id: UUID | None = None,
     agent_id: UUID | None = None,
     agent_run_id: UUID | None = None,
-    cancel_event: Event | None = None,
-    cancel_reason: str = "Tool call cancelled.",
-    request_meta: dict[str, Any] | None = None,
-    progress_callback=None,
     manager: MCPRuntimeManager | None = None,
-) -> dict[str, Any]:
+    defer_runtime_stops: bool = False,
+) -> PreparedMCPToolCall:
     manager = manager or get_runtime_manager()
     runtime_installation = await materialize_installation_secret_references(
         session,
         installation,
     )
     now = datetime.now(UTC)
+    deferred_runtime_stops: list[MCPRuntimeSession] | None = [] if defer_runtime_stops else None
     runtime_session = await ensure_runtime_session(
         session,
         runtime_installation,
         server,
         manager=manager,
         now=now,
+        deferred_runtime_stops=deferred_runtime_stops,
     )
     invocation = repository.create_tool_invocation(
         runtime_session=runtime_session,
@@ -591,23 +601,87 @@ async def call_tool_with_tracking(
     )
     await session.flush()
 
-    try:
-        result = await run_in_threadpool(
-            manager.call_tool,
-            runtime_installation,
-            tool_name=tool_name,
-            arguments=arguments,
-            cancel_event=cancel_event,
-            cancel_reason=cancel_reason,
-            request_meta=request_meta,
-            progress_callback=progress_callback,
-            runtime_session=runtime_session,
+    if invocation.id is None:
+        raise RuntimeError("tool invocation id was not generated")
+    return PreparedMCPToolCall(
+        installation=runtime_installation,
+        runtime_session=runtime_session,
+        invocation=invocation,
+        invocation_id=invocation.id,
+        deferred_runtime_stops=tuple(deferred_runtime_stops or ()),
+    )
+
+
+def execute_prepared_tool_call(
+    prepared: PreparedMCPToolCall,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
+    request_meta: dict[str, Any] | None = None,
+    progress_callback=None,
+    manager: MCPRuntimeManager | None = None,
+) -> dict[str, Any]:
+    manager = manager or get_runtime_manager()
+    for runtime_session in prepared.deferred_runtime_stops:
+        manager.stop_runtime(runtime_session)
+    return manager.call_tool(
+        prepared.installation,
+        tool_name=tool_name,
+        arguments=arguments,
+        cancel_event=cancel_event,
+        cancel_reason=cancel_reason,
+        request_meta=request_meta,
+        progress_callback=progress_callback,
+        runtime_session=prepared.runtime_session,
+    )
+
+
+def detach_prepared_tool_call(session: AsyncSession, prepared: PreparedMCPToolCall) -> None:
+    session.expunge(prepared.runtime_session)
+    session.expunge(prepared.invocation)
+    for runtime_session in prepared.deferred_runtime_stops:
+        session.expunge(runtime_session)
+
+
+async def finalize_prepared_tool_call(
+    session: AsyncSession,
+    prepared: PreparedMCPToolCall,
+    *,
+    tool_name: str,
+    result: dict[str, Any] | None = None,
+    error: BaseException | None = None,
+    reload: bool = True,
+) -> None:
+    if reload:
+        invocation = await repository.get_tool_invocation(
+            session,
+            prepared.invocation_id,
+            for_update=True,
         )
-    except Exception as exc:
+        runtime_session_id = prepared.runtime_session.id
+        if invocation is None or runtime_session_id is None:
+            raise RuntimeError("prepared tool invocation no longer exists")
+        runtime_session = await repository.get_runtime_session(
+            session,
+            runtime_session_id,
+            for_update=True,
+        )
+        if runtime_session is None:
+            raise RuntimeError("prepared runtime session no longer exists")
+    else:
+        invocation = prepared.invocation
+        runtime_session = prepared.runtime_session
+
+    runtime_session.namespace = prepared.runtime_session.namespace
+    runtime_session.pod_name = prepared.runtime_session.pod_name
+    runtime_session.endpoint_url = prepared.runtime_session.endpoint_url
+    if error is not None:
         mark_invocation_failed(
             runtime_session,
             invocation,
-            exc,
+            error,
             now=datetime.now(UTC),
         )
         add_runtime_event(
@@ -618,31 +692,154 @@ async def call_tool_with_tracking(
             metadata={
                 "toolName": tool_name,
                 "durationMs": invocation.duration_ms,
-                "errorType": exc.__class__.__name__,
+                "errorType": error.__class__.__name__,
             },
         )
-        await session.flush()
+    elif result is not None:
+        mark_invocation_success(
+            runtime_session,
+            invocation,
+            result,
+            now=datetime.now(UTC),
+        )
+        add_runtime_event(
+            session,
+            runtime_session,
+            RUNTIME_EVENT_TOOL_CALL_SUCCEEDED,
+            message="Tool call succeeded.",
+            metadata={
+                "toolName": tool_name,
+                "durationMs": invocation.duration_ms,
+                "outputSizeBytes": invocation.output_size_bytes,
+                "isError": invocation.is_error,
+            },
+        )
+    else:
+        raise ValueError("result or error is required to finalize a tool call")
+    await session.flush()
+
+
+async def call_tool_with_tracking(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+    server: MCPServerVersion,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    user_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    agent_run_id: UUID | None = None,
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
+    request_meta: dict[str, Any] | None = None,
+    progress_callback=None,
+    manager: MCPRuntimeManager | None = None,
+) -> dict[str, Any]:
+    manager = manager or get_runtime_manager()
+    prepared = await prepare_tool_call_tracking(
+        session,
+        installation,
+        server,
+        tool_name=tool_name,
+        arguments=arguments,
+        user_id=user_id,
+        agent_id=agent_id,
+        agent_run_id=agent_run_id,
+        manager=manager,
+    )
+
+    try:
+        result = await run_in_threadpool(
+            execute_prepared_tool_call,
+            prepared,
+            tool_name=tool_name,
+            arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
+            request_meta=request_meta,
+            progress_callback=progress_callback,
+            manager=manager,
+        )
+    except Exception as exc:
+        await finalize_prepared_tool_call(
+            session,
+            prepared,
+            tool_name=tool_name,
+            error=exc,
+            reload=False,
+        )
         raise
 
-    mark_invocation_success(
-        runtime_session,
-        invocation,
-        result,
-        now=datetime.now(UTC),
-    )
-    add_runtime_event(
+    await finalize_prepared_tool_call(
         session,
-        runtime_session,
-        RUNTIME_EVENT_TOOL_CALL_SUCCEEDED,
-        message="Tool call succeeded.",
-        metadata={
-            "toolName": tool_name,
-            "durationMs": invocation.duration_ms,
-            "outputSizeBytes": invocation.output_size_bytes,
-            "isError": invocation.is_error,
-        },
+        prepared,
+        tool_name=tool_name,
+        result=result,
+        reload=False,
     )
-    await session.flush()
+    return result
+
+
+async def call_tool_with_isolated_tracking(
+    session: AsyncSession,
+    installation: MCPServerInstallation,
+    server: MCPServerVersion,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    user_id: UUID | None = None,
+    request_meta: dict[str, Any] | None = None,
+    manager: MCPRuntimeManager | None = None,
+    tracking_session_factory=AsyncSessionLocal,
+) -> dict[str, Any]:
+    manager = manager or get_runtime_manager()
+    prepared = await prepare_tool_call_tracking(
+        session,
+        installation,
+        server,
+        tool_name=tool_name,
+        arguments=arguments,
+        user_id=user_id,
+        manager=manager,
+        defer_runtime_stops=True,
+    )
+    await session.commit()
+    detach_prepared_tool_call(session, prepared)
+
+    try:
+        result = await run_in_threadpool(
+            execute_prepared_tool_call,
+            prepared,
+            tool_name=tool_name,
+            arguments=arguments,
+            request_meta=request_meta,
+            manager=manager,
+        )
+    except BaseException as exc:
+        try:
+            async with tracking_session_factory() as finalize_session:
+                await finalize_prepared_tool_call(
+                    finalize_session,
+                    prepared,
+                    tool_name=tool_name,
+                    error=exc,
+                )
+                await finalize_session.commit()
+        except Exception:
+            logger.exception(
+                "Unable to finalize failed MCP tool invocation %s.",
+                prepared.invocation_id,
+            )
+        raise
+
+    async with tracking_session_factory() as finalize_session:
+        await finalize_prepared_tool_call(
+            finalize_session,
+            prepared,
+            tool_name=tool_name,
+            result=result,
+        )
+        await finalize_session.commit()
     return result
 
 
@@ -755,76 +952,6 @@ async def reap_expired_runtime_sessions(
     return MCPRuntimeReapResult(stopped_count=len(expired_sessions))
 
 
-async def shutdown_active_runtime_sessions(
-    session: AsyncSession,
-    *,
-    manager: MCPRuntimeManager | None = None,
-    limit: int = 1000,
-) -> MCPRuntimeShutdownResult:
-    manager = manager or get_runtime_manager()
-    stopped_count = 0
-    failed_count = 0
-    batch_limit = max(1, limit)
-
-    while True:
-        runtime_sessions = await repository.list_active_runtime_sessions(
-            session,
-            limit=batch_limit,
-        )
-        if not runtime_sessions:
-            break
-
-        now = datetime.now(UTC)
-        for runtime_session in runtime_sessions:
-            try:
-                await run_in_threadpool(
-                    manager.stop_runtime,
-                    runtime_session,
-                    delete_resources=True,
-                )
-            except Exception as exc:
-                failed_count += 1
-                runtime_session.status = "failed"
-                runtime_session.expires_at = now
-                runtime_session.failure_count += 1
-                runtime_session.last_error = str(exc)
-                add_runtime_event(
-                    session,
-                    runtime_session,
-                    RUNTIME_EVENT_SHUTDOWN_STOP_FAILED,
-                    message="Runtime session shutdown teardown failed.",
-                    metadata={
-                        "reason": "server_shutdown",
-                        "errorType": exc.__class__.__name__,
-                    },
-                    now=now,
-                )
-                continue
-
-            stopped_count += 1
-            runtime_session.status = "stopped"
-            runtime_session.stopped_at = now
-            runtime_session.expires_at = now
-            runtime_session.last_error = ""
-            add_runtime_event(
-                session,
-                runtime_session,
-                RUNTIME_EVENT_SESSION_STOPPED,
-                message="Runtime session stopped during server shutdown.",
-                metadata={"reason": "server_shutdown"},
-                now=now,
-            )
-
-        await session.flush()
-        if len(runtime_sessions) < batch_limit:
-            break
-
-    return MCPRuntimeShutdownResult(
-        stopped_count=stopped_count,
-        failed_count=failed_count,
-    )
-
-
 async def prune_runtime_events(
     session: AsyncSession,
     *,
@@ -836,6 +963,32 @@ async def prune_runtime_events(
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=retention_days)
     return await repository.delete_runtime_events_before(session, cutoff=cutoff)
+
+
+async def recover_stale_tool_invocations(
+    session: AsyncSession,
+    *,
+    stale_after_seconds: int,
+    limit: int = 100,
+    now: datetime | None = None,
+) -> int:
+    if stale_after_seconds < 1:
+        return 0
+    now = now or datetime.now(UTC)
+    invocations = await repository.list_stale_running_tool_invocations(
+        session,
+        started_before=now - timedelta(seconds=stale_after_seconds),
+        limit=limit,
+    )
+    for invocation in invocations:
+        invocation.status = "failed"
+        invocation.finished_at = now
+        invocation.duration_ms = int((now - invocation.started_at).total_seconds() * 1000)
+        invocation.output_size_bytes = 0
+        invocation.is_error = True
+        invocation.error = "Tool call did not finalize before the recovery deadline."
+    await session.flush()
+    return len(invocations)
 
 
 async def prune_tool_invocations(

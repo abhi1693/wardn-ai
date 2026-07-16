@@ -76,7 +76,9 @@ def test_settings_require_complete_oidc_config_in_production() -> None:
     ("setting_name", "value"),
     [
         ("session_ttl_seconds", 60),
+        ("api_token_usage_update_interval_seconds", -1),
         ("mcp_runtime_reaper_batch_size", 0),
+        ("mcp_runtime_invocation_stale_seconds", 59),
         ("mcp_runtime_kubernetes_service_port", 70_000),
         ("database_pool_size", 0),
         ("database_pool_timeout_seconds", 0),

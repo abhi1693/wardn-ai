@@ -1,9 +1,10 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.security import (
     extract_api_token_key,
     generate_api_token,
@@ -13,6 +14,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.errors import is_constraint_violation
+from app.db.session import defer_session_work
 from app.modules.organizations import repository as organizations_repository
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
@@ -302,6 +304,33 @@ async def authenticate_api_token(
     if user is None or not user.is_active:
         return None
 
-    api_token.last_used_at = datetime.now(UTC)
-    await session.flush()
+    defer_api_token_usage_update(session, api_token)
     return user, api_token
+
+
+def defer_api_token_usage_update(
+    session: AsyncSession,
+    api_token: UserAPIToken,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    token_id = getattr(api_token, "id", None)
+    if token_id is None:
+        return False
+    settings = get_settings()
+    interval = timedelta(seconds=settings.api_token_usage_update_interval_seconds)
+    used_at = now or datetime.now(UTC)
+    update_before = used_at - interval
+    if api_token.last_used_at is not None and api_token.last_used_at >= update_before:
+        return False
+
+    async def update_usage(usage_session: AsyncSession) -> None:
+        await repository.touch_api_token_last_used(
+            usage_session,
+            token_id,
+            used_at=used_at,
+            update_before=update_before,
+        )
+
+    defer_session_work(session, update_usage)
+    return True

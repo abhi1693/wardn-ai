@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +31,27 @@ async def get_api_token_by_prefix(session: AsyncSession, token_prefix: str) -> U
         select(UserAPIToken).where(UserAPIToken.token_prefix == token_prefix)
     )
     return result.scalar_one_or_none()
+
+
+async def touch_api_token_last_used(
+    session: AsyncSession,
+    token_id: uuid.UUID,
+    *,
+    used_at: datetime,
+    update_before: datetime,
+) -> bool:
+    result = await session.execute(
+        update(UserAPIToken)
+        .where(
+            UserAPIToken.id == token_id,
+            or_(
+                UserAPIToken.last_used_at.is_(None),
+                UserAPIToken.last_used_at < update_before,
+            ),
+        )
+        .values(last_used_at=used_at)
+    )
+    return bool(result.rowcount)
 
 
 async def list_user_api_tokens(

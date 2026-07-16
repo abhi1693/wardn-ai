@@ -1,6 +1,7 @@
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -143,11 +144,6 @@ class FailingRuntimeManager(FakeRuntimeManager):
         runtime_session=None,
     ):
         raise RuntimeError("tool failed")
-
-
-class FailingStopRuntimeManager(FakeRuntimeManager):
-    def stop_runtime(self, runtime_session, *, delete_resources=False):
-        raise RuntimeError("stop failed")
 
 
 class ThreadRecordingRuntimeManager(FakeRuntimeManager):
@@ -379,6 +375,90 @@ async def test_call_tool_with_tracking_records_failure(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_isolated_tool_call_releases_request_transaction_before_external_call(
+    monkeypatch,
+) -> None:
+    installation, server = installed_server()
+    order = []
+
+    class TrackingSession:
+        async def commit(self):
+            order.append("request_commit")
+
+        def expunge(self, instance):
+            order.append(f"detach:{instance}")
+
+    class FinalizeSession:
+        async def commit(self):
+            order.append("finalize_commit")
+
+    finalize_session = FinalizeSession()
+
+    class FinalizeContext:
+        async def __aenter__(self):
+            return finalize_session
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+    prepared = SimpleNamespace(
+        invocation_id=uuid.uuid4(),
+        runtime_session="runtime",
+        invocation="invocation",
+        deferred_runtime_stops=("replaced-runtime",),
+    )
+
+    async def prepare(*args, **kwargs):
+        assert kwargs["defer_runtime_stops"] is True
+        order.append("prepare")
+        return prepared
+
+    def execute(seen_prepared, **kwargs):
+        assert seen_prepared is prepared
+        assert order == [
+            "prepare",
+            "request_commit",
+            "detach:runtime",
+            "detach:invocation",
+            "detach:replaced-runtime",
+        ]
+        order.append("external")
+        return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+    async def finalize(session, seen_prepared, **kwargs):
+        assert session is finalize_session
+        assert seen_prepared is prepared
+        assert kwargs["result"]["isError"] is False
+        order.append("finalize")
+
+    monkeypatch.setattr(service, "prepare_tool_call_tracking", prepare)
+    monkeypatch.setattr(service, "execute_prepared_tool_call", execute)
+    monkeypatch.setattr(service, "finalize_prepared_tool_call", finalize)
+
+    result = await service.call_tool_with_isolated_tracking(
+        TrackingSession(),
+        installation,
+        server,
+        tool_name="get_forecast",
+        arguments={"location": "Delhi"},
+        manager=FakeRuntimeManager(),
+        tracking_session_factory=lambda: FinalizeContext(),
+    )
+
+    assert result["content"][0]["text"] == "ok"
+    assert order == [
+        "prepare",
+        "request_commit",
+        "detach:runtime",
+        "detach:invocation",
+        "detach:replaced-runtime",
+        "external",
+        "finalize",
+        "finalize_commit",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ensure_runtime_session_reuses_matching_fingerprint(monkeypatch) -> None:
     installation, server = installed_server()
     session = FakeSession()
@@ -577,103 +657,6 @@ async def test_reap_expired_runtime_sessions_marks_sessions_stopped(monkeypatch)
     assert runtime_session.stopped_at is not None
     assert runtime_session.last_error == ""
     assert added_one(session, MCPRuntimeEvent).event_type == service.RUNTIME_EVENT_REAPER_STOPPED
-
-
-@pytest.mark.asyncio
-async def test_shutdown_active_runtime_sessions_stops_active_sessions(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    runtime_session = MCPRuntimeSession(
-        installation_id=uuid.uuid4(),
-        server_name="io.github.example/weather",
-        server_version="1.0.0",
-        runtime_provider="local",
-        runtime_kind="package",
-        config_fingerprint="runtime-fingerprint",
-        status="idle",
-        pod_name="",
-        namespace="wardn-runtimes",
-        endpoint_url="",
-        started_at=now - timedelta(minutes=5),
-        ready_at=now - timedelta(minutes=5),
-        last_used_at=now - timedelta(minutes=1),
-        expires_at=now + timedelta(minutes=5),
-        stopped_at=None,
-        failure_count=0,
-        last_error="old",
-    )
-    runtime_session.id = uuid.uuid4()
-
-    async def list_active_runtime_sessions(*args, **kwargs):
-        return [runtime_session] if runtime_session.status == "idle" else []
-
-    monkeypatch.setattr(
-        repository,
-        "list_active_runtime_sessions",
-        list_active_runtime_sessions,
-    )
-    manager = FakeRuntimeManager()
-    session = FakeSession()
-
-    result = await service.shutdown_active_runtime_sessions(session, manager=manager)
-
-    assert manager.stopped_sessions == [runtime_session]
-    assert manager.delete_resources_values == [True]
-    assert result.stopped_count == 1
-    assert result.failed_count == 0
-    assert runtime_session.status == "stopped"
-    assert runtime_session.stopped_at is not None
-    assert runtime_session.expires_at == runtime_session.stopped_at
-    assert runtime_session.last_error == ""
-    assert added_one(session, MCPRuntimeEvent).event_type == service.RUNTIME_EVENT_SESSION_STOPPED
-
-
-@pytest.mark.asyncio
-async def test_shutdown_active_runtime_sessions_marks_stop_failures(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    runtime_session = MCPRuntimeSession(
-        installation_id=uuid.uuid4(),
-        server_name="io.github.example/weather",
-        server_version="1.0.0",
-        runtime_provider="local",
-        runtime_kind="package",
-        config_fingerprint="runtime-fingerprint",
-        status="idle",
-        pod_name="",
-        namespace="wardn-runtimes",
-        endpoint_url="",
-        started_at=now - timedelta(minutes=5),
-        ready_at=now - timedelta(minutes=5),
-        last_used_at=now - timedelta(minutes=1),
-        expires_at=now + timedelta(minutes=5),
-        stopped_at=None,
-        failure_count=0,
-        last_error="old",
-    )
-    runtime_session.id = uuid.uuid4()
-
-    async def list_active_runtime_sessions(*args, **kwargs):
-        return [runtime_session] if runtime_session.status == "idle" else []
-
-    monkeypatch.setattr(
-        repository,
-        "list_active_runtime_sessions",
-        list_active_runtime_sessions,
-    )
-    session = FakeSession()
-
-    result = await service.shutdown_active_runtime_sessions(
-        session,
-        manager=FailingStopRuntimeManager(),
-    )
-
-    assert result.stopped_count == 0
-    assert result.failed_count == 1
-    assert runtime_session.status == "failed"
-    assert runtime_session.failure_count == 1
-    assert runtime_session.last_error == "stop failed"
-    assert added_one(session, MCPRuntimeEvent).event_type == (
-        service.RUNTIME_EVENT_SHUTDOWN_STOP_FAILED
-    )
 
 
 @pytest.mark.asyncio
@@ -976,6 +959,52 @@ async def test_get_runtime_summary_aggregates_runtime_health(monkeypatch) -> Non
     assert seen["tool_calls"][0] == (workspace_id, None)
     assert seen["tool_calls"][1][0] == workspace_id
     assert seen["tool_calls"][1][1] == now - service.RUNTIME_SUMMARY_RECENT_WINDOW
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_tool_invocations_marks_abandoned_calls_failed(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    invocation = SimpleNamespace(
+        status="running",
+        started_at=now - timedelta(minutes=20),
+        finished_at=None,
+        duration_ms=None,
+        output_size_bytes=10,
+        is_error=False,
+        error="",
+    )
+    seen = {}
+
+    async def list_stale_running_tool_invocations(session, *, started_before, limit):
+        seen.update(session=session, started_before=started_before, limit=limit)
+        return [invocation]
+
+    monkeypatch.setattr(
+        repository,
+        "list_stale_running_tool_invocations",
+        list_stale_running_tool_invocations,
+    )
+    session = FakeSession()
+
+    recovered_count = await service.recover_stale_tool_invocations(
+        session,
+        stale_after_seconds=600,
+        limit=25,
+        now=now,
+    )
+
+    assert recovered_count == 1
+    assert seen == {
+        "session": session,
+        "started_before": now - timedelta(minutes=10),
+        "limit": 25,
+    }
+    assert invocation.status == "failed"
+    assert invocation.finished_at == now
+    assert invocation.duration_ms == 20 * 60 * 1000
+    assert invocation.output_size_bytes == 0
+    assert invocation.is_error is True
+    assert "recovery deadline" in invocation.error
 
 
 @pytest.mark.asyncio

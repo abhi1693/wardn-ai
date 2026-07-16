@@ -13,6 +13,8 @@ from app.modules.mcp_registry.job_worker import (
     run_job_worker_loop,
     run_job_worker_once,
 )
+from app.modules.mcp_runtime.reaper import start_runtime_reaper, stop_runtime_reaper
+from app.modules.mcp_runtime.warmup import start_runtime_warmup, stop_runtime_warmup
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,20 @@ async def run_mcp_jobs_from_args(args: argparse.Namespace) -> int:
     if args.once:
         await run_job_worker_once(**kwargs)
         return 0
-    await run_job_worker_loop(poll_interval_seconds=poll_interval_seconds, **kwargs)
+    warmup_task = start_runtime_warmup(
+        concurrency=settings.mcp_runtime_warm_startup_concurrency,
+    )
+    reaper_task = start_runtime_reaper(
+        interval_seconds=settings.mcp_runtime_reaper_interval_seconds,
+        limit=settings.mcp_runtime_reaper_batch_size,
+        event_retention_days=settings.mcp_runtime_event_retention_days,
+        invocation_retention_days=settings.mcp_runtime_invocation_retention_days,
+    )
+    try:
+        await run_job_worker_loop(poll_interval_seconds=poll_interval_seconds, **kwargs)
+    finally:
+        await stop_runtime_warmup(warmup_task)
+        await stop_runtime_reaper(reaper_task)
     return 0
 
 

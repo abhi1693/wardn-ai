@@ -38,13 +38,27 @@ async def get_runtime_session(
     runtime_session_id: UUID,
     *,
     workspace_id: UUID | None = None,
+    for_update: bool = False,
 ) -> MCPRuntimeSession | None:
     query = select(MCPRuntimeSession).where(MCPRuntimeSession.id == runtime_session_id)
     if workspace_id is not None:
         query = query.where(MCPRuntimeSession.workspace_id == workspace_id)
-    result = await session.execute(
-        query
-    )
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def get_tool_invocation(
+    session: AsyncSession,
+    invocation_id: UUID,
+    *,
+    for_update: bool = False,
+) -> MCPToolInvocation | None:
+    query = select(MCPToolInvocation).where(MCPToolInvocation.id == invocation_id)
+    if for_update:
+        query = query.with_for_update()
+    result = await session.execute(query)
     return result.scalar_one_or_none()
 
 
@@ -62,20 +76,6 @@ async def list_runtime_sessions(
         query = query.where(MCPRuntimeSession.status == status)
     result = await session.execute(
         query.order_by(MCPRuntimeSession.updated_at.desc()).limit(limit)
-    )
-    return list(result.scalars().all())
-
-
-async def list_active_runtime_sessions(
-    session: AsyncSession,
-    *,
-    limit: int = 1000,
-) -> list[MCPRuntimeSession]:
-    result = await session.execute(
-        select(MCPRuntimeSession)
-        .where(MCPRuntimeSession.status.in_(ACTIVE_RUNTIME_STATUSES))
-        .order_by(MCPRuntimeSession.updated_at.desc())
-        .limit(limit)
     )
     return list(result.scalars().all())
 
@@ -127,6 +127,25 @@ async def count_tool_invocations(
         query = query.where(MCPToolInvocation.started_at >= started_since)
     result = await session.execute(query)
     return list(result.all())
+
+
+async def list_stale_running_tool_invocations(
+    session: AsyncSession,
+    *,
+    started_before: datetime,
+    limit: int = 100,
+) -> list[MCPToolInvocation]:
+    result = await session.execute(
+        select(MCPToolInvocation)
+        .where(
+            MCPToolInvocation.status == "running",
+            MCPToolInvocation.started_at <= started_before,
+        )
+        .order_by(MCPToolInvocation.started_at.asc())
+        .limit(max(1, limit))
+        .with_for_update(skip_locked=True)
+    )
+    return list(result.scalars().all())
 
 
 async def list_recent_error_runtime_sessions(
