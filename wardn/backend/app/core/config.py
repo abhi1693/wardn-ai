@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     oidc_auto_create_users: bool = True
     oidc_allowed_email_domains: list[str] = []
     oidc_superuser_emails: list[str] = []
+    openbao_auth_file_root: str = "/var/run/secrets"
+    openbao_auth_profiles_json: str = "{}"
     mcp_install_root: str = "data/mcp-installations"
     mcp_runtime_provider: str = "local"
     mcp_runtime_namespace: str = "wardn-runtimes"

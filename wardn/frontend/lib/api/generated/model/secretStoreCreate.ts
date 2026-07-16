@@ -4,12 +4,12 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
-import type { SecretStoreCreateAuthConfig } from './secretStoreCreateAuthConfig';
-import type { SecretStoreCreateConfig } from './secretStoreCreateConfig';
+import type { OpenBaoStoreAuthConfig } from './openBaoStoreAuthConfig';
+import type { OpenBaoStoreConfig } from './openBaoStoreConfig';
 
 export interface SecretStoreCreate {
-  authConfig?: SecretStoreCreateAuthConfig;
-  config?: SecretStoreCreateConfig;
+  authConfig: OpenBaoStoreAuthConfig;
+  config: OpenBaoStoreConfig;
   /**
      * @minLength 1
      * @maxLength 100

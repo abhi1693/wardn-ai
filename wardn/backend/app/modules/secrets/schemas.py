@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SecretStoreProviderName = Literal["openbao"]
 SecretPurpose = Literal[
@@ -17,22 +17,52 @@ SecretPurpose = Literal[
 ]
 
 
+class OpenBaoStoreConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
+    kv_mount: str = Field(
+        default="secret",
+        alias="kvMount",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+    )
+    timeout_seconds: float = Field(default=15.0, alias="timeoutSeconds", gt=0, le=60)
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_base_url(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
+    @field_validator("kv_mount")
+    @classmethod
+    def normalize_kv_mount(cls, value: str) -> str:
+        return value.strip().strip("/")
+
+
+class OpenBaoStoreAuthConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    profile: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 class SecretStoreCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     name: str = Field(min_length=1, max_length=100)
     provider: SecretStoreProviderName = "openbao"
     workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    config: dict[str, Any] = Field(default_factory=dict)
-    auth_config: dict[str, Any] = Field(default_factory=dict, alias="authConfig")
+    config: OpenBaoStoreConfig
+    auth_config: OpenBaoStoreAuthConfig = Field(alias="authConfig")
 
 
 class SecretStoreUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    config: dict[str, Any] | None = None
-    auth_config: dict[str, Any] | None = Field(default=None, alias="authConfig")
+    config: OpenBaoStoreConfig | None = None
+    auth_config: OpenBaoStoreAuthConfig | None = Field(default=None, alias="authConfig")
     is_active: bool | None = Field(default=None, alias="isActive")
 
 

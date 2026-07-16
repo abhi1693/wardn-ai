@@ -25,14 +25,8 @@ import {
 } from "./secret-backend-validation";
 import { secretBackendsPath, type SecretBackendScope } from "./secret-backends-paths";
 
-type OpenBaoAuthMethod = "kubernetes" | "approle";
-
 const standardKvMount = "secret";
-const defaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token";
-const defaultAppRoleRoleIdFile = "/run/secrets/openbao_role_id";
-const defaultAppRoleSecretIdFile = "/run/secrets/openbao_secret_id";
 const backendType = "openbao";
-const tlsHttpError = "Verify TLS requires an HTTPS OpenBao URL.";
 
 type SecretBackendFormProps = SecretBackendScope & {
   mode: "create" | "edit";
@@ -49,30 +43,14 @@ function stringSetting(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
-function booleanSetting(value: unknown, fallback: boolean) {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function tlsVerifyConflictsWithUrl(baseUrl: string, tlsVerify: boolean) {
-  return tlsVerify && baseUrl.trim().toLowerCase().startsWith("http://");
-}
-
 function buildInitialForm(store?: SecretStoreRead) {
   const config = record(store?.config);
   const authConfig = record(store?.authConfig);
-  const authMethod = stringSetting(authConfig.method, "kubernetes") as OpenBaoAuthMethod;
-  const normalizedAuthMethod: OpenBaoAuthMethod =
-    authMethod === "approle" ? "approle" : "kubernetes";
 
   return {
     name: store?.name ?? "",
     baseUrl: stringSetting(config.baseUrl),
-    tlsVerify: booleanSetting(config.tlsVerify, true),
-    authMethod: normalizedAuthMethod,
-    kubernetesRole: stringSetting(authConfig.role),
-    serviceAccountTokenPath: stringSetting(authConfig.serviceAccountTokenPath, defaultTokenPath),
-    roleIdFile: stringSetting(authConfig.roleIdFile),
-    secretIdFile: stringSetting(authConfig.secretIdFile),
+    authProfile: stringSetting(authConfig.profile),
     isActive: store?.isActive ?? true,
   };
 }
@@ -89,36 +67,22 @@ export function SecretBackendForm({
 
   const [name, setName] = useState(initialForm.name);
   const [baseUrl, setBaseUrl] = useState(initialForm.baseUrl);
-  const [tlsVerify, setTlsVerify] = useState(initialForm.tlsVerify);
-  const [authMethod, setAuthMethod] = useState<OpenBaoAuthMethod>(initialForm.authMethod);
-  const [kubernetesRole, setKubernetesRole] = useState(initialForm.kubernetesRole);
-  const [serviceAccountTokenPath, setServiceAccountTokenPath] = useState(
-    initialForm.serviceAccountTokenPath
-  );
-  const [roleIdFile, setRoleIdFile] = useState(initialForm.roleIdFile);
-  const [secretIdFile, setSecretIdFile] = useState(initialForm.secretIdFile);
+  const [authProfile, setAuthProfile] = useState(initialForm.authProfile);
   const [isActive, setIsActive] = useState(initialForm.isActive);
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const tlsUrlMismatch = tlsVerifyConflictsWithUrl(baseUrl, tlsVerify);
 
   const canSave =
     name.trim().length > 0 &&
     baseUrl.trim().length > 0 &&
-    !tlsUrlMismatch &&
-    !saving &&
-    (authMethod === "kubernetes"
-      ? kubernetesRole.trim().length > 0 && serviceAccountTokenPath.trim().length > 0
-      : roleIdFile.trim().length > 0 && secretIdFile.trim().length > 0);
+    authProfile.trim().length > 0 &&
+    !saving;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
-      if (tlsUrlMismatch) {
-        setError(tlsHttpError);
-      }
       return;
     }
 
@@ -129,21 +93,8 @@ export function SecretBackendForm({
     const config: Record<string, unknown> = {
       baseUrl: baseUrl.trim(),
       kvMount: standardKvMount,
-      authMount: authMethod,
-      tlsVerify,
     };
-    const authConfig =
-      authMethod === "kubernetes"
-        ? {
-            method: "kubernetes",
-            role: kubernetesRole.trim(),
-            serviceAccountTokenPath: serviceAccountTokenPath.trim(),
-          }
-        : {
-            method: "approle",
-            roleIdFile: roleIdFile.trim(),
-            secretIdFile: secretIdFile.trim(),
-          };
+    const authConfig = { profile: authProfile.trim() };
     const payload = {
       name: name.trim(),
       provider: "openbao",
@@ -182,11 +133,6 @@ export function SecretBackendForm({
 
   async function validateBackend() {
     if (!store || validating) {
-      return;
-    }
-    if (tlsUrlMismatch) {
-      setError(tlsHttpError);
-      setNotice(null);
       return;
     }
 
@@ -258,104 +204,31 @@ export function SecretBackendForm({
                 id="secret-backend-base-url"
                 onChange={(event) => setBaseUrl(event.target.value)}
                 placeholder="https://bao.example.com"
-                required
-                type="url"
-                value={baseUrl}
-              />
-              {tlsUrlMismatch ? (
-                <p className="text-xs leading-5 text-red-600">{tlsHttpError}</p>
-              ) : null}
+              required
+              type="url"
+              value={baseUrl}
+            />
             </div>
             <div className="space-y-2">
-              <Label>Auth method</Label>
-              <Select
-                onValueChange={(value) => setAuthMethod(value as OpenBaoAuthMethod)}
-                value={authMethod}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="kubernetes">Kubernetes</SelectItem>
-                  <SelectItem value="approle">AppRole</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="secret-backend-auth-profile">Authentication profile</Label>
+              <Input
+                id="secret-backend-auth-profile"
+                maxLength={64}
+                onChange={(event) => setAuthProfile(event.target.value)}
+                pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
+                placeholder="production"
+                required
+                value={authProfile}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                Enter a profile configured by the Wardn operator. Credentials, authentication
+                method, destination, and TLS policy are controlled by that profile.
+              </p>
             </div>
           </div>
 
-          {authMethod === "kubernetes" ? (
-            <div className="space-y-2">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="secret-backend-kubernetes-role">
-                    Kubernetes role name
-                  </Label>
-                  <Input
-                    id="secret-backend-kubernetes-role"
-                    onChange={(event) => setKubernetesRole(event.target.value)}
-                    placeholder="wardn"
-                    required
-                    value={kubernetesRole}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="secret-backend-token-path">
-                    Service account token file path
-                  </Label>
-                  <Input
-                    id="secret-backend-token-path"
-                    onChange={(event) => setServiceAccountTokenPath(event.target.value)}
-                    placeholder={defaultTokenPath}
-                    required
-                    value={serviceAccountTokenPath}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="secret-backend-role-id">
-                    AppRole role_id file path
-                  </Label>
-                  <Input
-                    autoComplete="off"
-                    id="secret-backend-role-id"
-                    onChange={(event) => setRoleIdFile(event.target.value)}
-                    placeholder={defaultAppRoleRoleIdFile}
-                    required
-                    value={roleIdFile}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="secret-backend-secret-id">
-                    AppRole secret_id file path
-                  </Label>
-                  <Input
-                    autoComplete="off"
-                    id="secret-backend-secret-id"
-                    onChange={(event) => setSecretIdFile(event.target.value)}
-                    placeholder={defaultAppRoleSecretIdFile}
-                    required
-                    value={secretIdFile}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex min-h-10 items-center gap-3 rounded-md border border-[var(--outline-variant)] px-3 text-sm">
-              <input
-                checked={tlsVerify}
-                className="size-4 accent-primary"
-                onChange={(event) => setTlsVerify(event.target.checked)}
-                type="checkbox"
-              />
-              Verify TLS certificates
-            </label>
-            {isEditing ? (
+          {isEditing ? (
+            <div className="grid gap-3 md:grid-cols-2">
               <label className="flex min-h-10 items-center gap-3 rounded-md border border-[var(--outline-variant)] px-3 text-sm">
                 <input
                   checked={isActive}
@@ -365,8 +238,8 @@ export function SecretBackendForm({
                 />
                 Active
               </label>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
           {error ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

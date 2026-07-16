@@ -4463,6 +4463,52 @@
         "title": "MCPToolUsageSummary",
         "type": "object"
       },
+      "OpenBaoStoreAuthConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "OpenBaoStoreAuthConfig",
+        "type": "object"
+      },
+      "OpenBaoStoreConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "baseUrl": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Baseurl",
+            "type": "string"
+          },
+          "kvMount": {
+            "default": "secret",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "title": "Kvmount",
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "default": 15.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 60.0,
+            "title": "Timeoutseconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "baseUrl"
+        ],
+        "title": "OpenBaoStoreConfig",
+        "type": "object"
+      },
       "OrganizationCreate": {
         "properties": {
           "name": {
@@ -4970,14 +5016,10 @@
       "SecretStoreCreate": {
         "properties": {
           "authConfig": {
-            "additionalProperties": true,
-            "title": "Authconfig",
-            "type": "object"
+            "$ref": "#/components/schemas/OpenBaoStoreAuthConfig"
           },
           "config": {
-            "additionalProperties": true,
-            "title": "Config",
-            "type": "object"
+            "$ref": "#/components/schemas/OpenBaoStoreConfig"
           },
           "name": {
             "maxLength": 100,
@@ -5005,7 +5047,9 @@
           }
         },
         "required": [
-          "name"
+          "name",
+          "config",
+          "authConfig"
         ],
         "title": "SecretStoreCreate",
         "type": "object"
@@ -5120,26 +5164,22 @@
           "authConfig": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/OpenBaoStoreAuthConfig"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Authconfig"
+            ]
           },
           "config": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/OpenBaoStoreConfig"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Config"
+            ]
           },
           "isActive": {
             "anyOf": [

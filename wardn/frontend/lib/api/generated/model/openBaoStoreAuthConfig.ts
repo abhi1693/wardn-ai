@@ -5,4 +5,7 @@
  * OpenAPI spec version: 0.0.1
  */
 
-export type SecretStoreCreateConfig = { [key: string]: unknown };
+export interface OpenBaoStoreAuthConfig {
+  /** @pattern ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ */
+  profile: string;
+}

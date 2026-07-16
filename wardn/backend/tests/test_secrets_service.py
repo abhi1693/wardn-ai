@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from app.modules.secrets import repository, service
 from app.modules.secrets.exceptions import DuplicateSecretStoreError, InvalidSecretHandleError
@@ -54,6 +55,21 @@ class FakeProvider:
         return SecretWriteResult(version="8")
 
 
+def test_secret_store_schema_rejects_user_managed_authentication_settings() -> None:
+    with pytest.raises(ValidationError):
+        SecretStoreCreate(
+            name="Production OpenBao",
+            config={
+                "baseUrl": "https://bao.example.com",
+                "tlsVerify": False,
+            },
+            authConfig={
+                "profile": "production",
+                "roleIdFile": "/etc/passwd",
+            },
+        )
+
+
 @pytest.mark.asyncio
 async def test_create_workspace_secret_store(monkeypatch) -> None:
     organization_id = uuid4()
@@ -84,7 +100,7 @@ async def test_create_workspace_secret_store(monkeypatch) -> None:
             name=" Production OpenBao ",
             workspaceId=workspace_id,
             config={"baseUrl": "https://bao.example.com", "kvMount": "secret"},
-            authConfig={"method": "kubernetes", "role": "wardn-prod"},
+            authConfig={"profile": "production"},
         ),
     )
 
@@ -94,7 +110,7 @@ async def test_create_workspace_secret_store(monkeypatch) -> None:
     assert store.provider == "openbao"
     assert store.workspace_id == workspace_id
     assert store.config["baseUrl"] == "https://bao.example.com"
-    assert store.auth_config["role"] == "wardn-prod"
+    assert store.auth_config == {"profile": "production"}
     assert response.is_active is True
     assert required_scopes == [(user.id, organization_id, workspace_id)]
 
@@ -137,7 +153,7 @@ async def test_create_secret_store_rejects_duplicate_org_url(monkeypatch) -> Non
                 name="Workspace OpenBao",
                 workspaceId=workspace_id,
                 config={"baseUrl": " https://bao.example.com "},
-                authConfig={"method": "kubernetes", "role": "wardn-prod"},
+                authConfig={"profile": "production"},
             ),
         )
 

@@ -1,11 +1,12 @@
 import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
 
+from app.core.config import get_settings
 from app.modules.secrets.exceptions import InvalidSecretHandleError, InvalidSecretStoreError
 from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import (
@@ -14,14 +15,21 @@ from app.modules.secrets.provider import (
     SecretValidationResult,
     SecretWriteResult,
 )
+from app.modules.secrets.providers.openbao_profiles import (
+    OpenBaoAuthProfile,
+    parse_openbao_auth_profiles,
+    read_profile_file,
+)
 
-DEFAULT_KUBERNETES_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 STANDARD_KV_MOUNT = "secret"
-STANDARD_AUTH_MOUNTS = {
-    "approle": "approle",
-    "kubernetes": "kubernetes",
-}
 DEFAULT_TIMEOUT_SECONDS = 15.0
+OPERATOR_MANAGED_STORE_KEYS = {
+    "authMount",
+    "auth_mount",
+    "namespace",
+    "tlsVerify",
+    "tls_verify",
+}
 
 
 @dataclass
@@ -34,8 +42,15 @@ class OpenBaoToken:
 class OpenBaoSecretProvider:
     name = "openbao"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        auth_profiles: Mapping[str, OpenBaoAuthProfile] | None = None,
+        auth_file_root: str | None = None,
+    ) -> None:
         self._token_cache: dict[str, OpenBaoToken] = {}
+        self._configured_auth_profiles = auth_profiles
+        self._configured_auth_file_root = auth_file_root
 
     async def validate_store(self, store: SecretStore) -> SecretValidationResult:
         try:
@@ -171,64 +186,56 @@ class OpenBaoSecretProvider:
 
     def _store_settings(self, store: SecretStore) -> dict[str, Any]:
         config = store.config or {}
+        operator_managed_keys = OPERATOR_MANAGED_STORE_KEYS.intersection(config)
+        if operator_managed_keys:
+            raise InvalidSecretStoreError(
+                "OpenBao authentication, namespace, and TLS settings are operator-managed"
+            )
+        auth = self._auth_settings(store)
         base_url = string_value(config.get("baseUrl") or config.get("base_url")).rstrip("/")
         if not base_url:
             raise InvalidSecretStoreError("OpenBao baseUrl is required")
-        if not base_url.startswith(("http://", "https://")):
-            raise InvalidSecretStoreError("OpenBao baseUrl must be an HTTP(S) URL")
-        tls_verify = bool(config.get("tlsVerify", config.get("tls_verify", True)))
-        if tls_verify and base_url.startswith("http://"):
-            raise InvalidSecretStoreError("Verify TLS requires an HTTPS OpenBao URL")
+        if base_url != auth["base_url"]:
+            raise InvalidSecretStoreError(
+                "OpenBao baseUrl must match the operator-defined authentication profile"
+            )
         kv_mount = string_value(
             config.get("kvMount") or config.get("kv_mount") or STANDARD_KV_MOUNT
         )
-        auth = self._auth_settings(store)
-        auth_mount = string_value(
-            config.get("authMount")
-            or config.get("auth_mount")
-            or STANDARD_AUTH_MOUNTS[auth["method"]]
-        )
         return {
             "base_url": base_url,
-            "namespace": string_value(config.get("namespace")),
+            "namespace": auth["namespace"],
             "kv_mount": kv_mount,
-            "auth_mount": auth_mount,
-            "tls_verify": tls_verify,
+            "auth_mount": auth["auth_mount"],
+            "tls_verify": auth["tls_verify"],
             "timeout_seconds": config.get("timeoutSeconds")
             or config.get("timeout_seconds")
             or DEFAULT_TIMEOUT_SECONDS,
         }
 
-    def _auth_settings(self, store: SecretStore) -> dict[str, str]:
+    def _auth_profiles(self) -> Mapping[str, OpenBaoAuthProfile]:
+        if self._configured_auth_profiles is not None:
+            return self._configured_auth_profiles
+        return parse_openbao_auth_profiles(get_settings().openbao_auth_profiles_json)
+
+    def _auth_file_root(self) -> str:
+        if self._configured_auth_file_root is not None:
+            return self._configured_auth_file_root
+        return get_settings().openbao_auth_file_root
+
+    def _auth_settings(self, store: SecretStore) -> dict[str, Any]:
         auth_config = store.auth_config or {}
-        method = string_value(auth_config.get("method") or "kubernetes").casefold()
-        if method == "kubernetes":
-            role = string_value(auth_config.get("role"))
-            if not role:
-                raise InvalidSecretStoreError("OpenBao Kubernetes auth role is required")
-            token_path = string_value(
-                auth_config.get("serviceAccountTokenPath")
-                or auth_config.get("service_account_token_path")
-                or DEFAULT_KUBERNETES_TOKEN_PATH
+        if set(auth_config) != {"profile"}:
+            raise InvalidSecretStoreError(
+                "OpenBao authConfig must contain only an operator-defined profile name"
             )
-            return {"method": method, "role": role, "token_path": token_path}
-        if method == "approle":
-            role_id_file = string_value(
-                auth_config.get("roleIdFile") or auth_config.get("role_id_file")
-            )
-            secret_id_file = string_value(
-                auth_config.get("secretIdFile") or auth_config.get("secret_id_file")
-            )
-            if not role_id_file or not secret_id_file:
-                raise InvalidSecretStoreError(
-                    "OpenBao AppRole auth requires roleIdFile and secretIdFile"
-                )
-            return {
-                "method": method,
-                "role_id_file": role_id_file,
-                "secret_id_file": secret_id_file,
-            }
-        raise InvalidSecretStoreError("OpenBao auth method must be kubernetes or approle")
+        profile_name = string_value(auth_config.get("profile"))
+        profile = self._auth_profiles().get(profile_name)
+        if profile is None:
+            raise InvalidSecretStoreError("OpenBao authentication profile is not configured")
+        settings = profile.model_dump()
+        settings["profile"] = profile_name
+        return settings
 
     async def _client_token(self, store: SecretStore) -> OpenBaoToken:
         settings = self._store_settings(store)
@@ -250,9 +257,9 @@ class OpenBaoSecretProvider:
         self._token_cache.pop(self._cache_key(store, auth), None)
         return await self._client_token(store)
 
-    def _cache_key(self, store: SecretStore, auth: dict[str, str]) -> str:
+    def _cache_key(self, store: SecretStore, auth: dict[str, Any]) -> str:
         updated_at = store.updated_at.isoformat() if store.updated_at else ""
-        return f"{store.id}:{auth['method']}:{updated_at}"
+        return f"{store.id}:{auth['profile']}:{updated_at}"
 
     async def _validate_kv_probe(
         self,
@@ -309,9 +316,13 @@ class OpenBaoSecretProvider:
     async def _login_kubernetes(
         self,
         settings: dict[str, Any],
-        auth: dict[str, str],
+        auth: dict[str, Any],
     ) -> OpenBaoToken:
-        jwt = read_text_file(auth["token_path"], "Kubernetes service account token")
+        jwt = read_profile_file(
+            self._auth_file_root(),
+            auth["token_file"],
+            "Kubernetes service account token",
+        )
         url = f"{settings['base_url']}/v1/auth/{settings['auth_mount'].strip('/')}/login"
         payload = {"role": auth["role"], "jwt": jwt}
         return await self._login(settings, url, payload)
@@ -319,10 +330,14 @@ class OpenBaoSecretProvider:
     async def _login_approle(
         self,
         settings: dict[str, Any],
-        auth: dict[str, str],
+        auth: dict[str, Any],
     ) -> OpenBaoToken:
-        role_id = read_text_file(auth["role_id_file"], "AppRole role_id")
-        secret_id = read_text_file(auth["secret_id_file"], "AppRole secret_id")
+        role_id = read_profile_file(
+            self._auth_file_root(), auth["role_id_file"], "AppRole role_id"
+        )
+        secret_id = read_profile_file(
+            self._auth_file_root(), auth["secret_id_file"], "AppRole secret_id"
+        )
         url = f"{settings['base_url']}/v1/auth/{settings['auth_mount'].strip('/')}/login"
         payload = {"role_id": role_id, "secret_id": secret_id}
         return await self._login(settings, url, payload)
@@ -395,13 +410,3 @@ def response_error_detail(response: httpx.Response) -> str:
     if isinstance(errors, str):
         return errors.strip()
     return ""
-
-
-def read_text_file(path: str, label: str) -> str:
-    try:
-        value = Path(path).read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise InvalidSecretStoreError(f"{label} file could not be read") from exc
-    if not value:
-        raise InvalidSecretStoreError(f"{label} file was empty")
-    return value

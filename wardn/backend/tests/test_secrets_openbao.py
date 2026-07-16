@@ -2,9 +2,47 @@ from uuid import uuid4
 
 import pytest
 
+from app.modules.secrets.exceptions import InvalidSecretStoreError
 from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import SecretResolutionContext
 from app.modules.secrets.providers.openbao import OpenBaoSecretProvider, OpenBaoToken
+from app.modules.secrets.providers.openbao_profiles import (
+    OpenBaoAuthProfile,
+    read_profile_file,
+)
+
+
+def kubernetes_provider(tmp_path) -> OpenBaoSecretProvider:
+    return OpenBaoSecretProvider(
+        auth_profiles={
+            "production": OpenBaoAuthProfile.model_validate(
+                {
+                    "baseUrl": "https://bao.example.com",
+                    "method": "kubernetes",
+                    "role": "wardn-prod",
+                    "tokenFile": "token",
+                }
+            )
+        },
+        auth_file_root=str(tmp_path),
+    )
+
+
+def approle_provider(tmp_path) -> OpenBaoSecretProvider:
+    return OpenBaoSecretProvider(
+        auth_profiles={
+            "production": OpenBaoAuthProfile.model_validate(
+                {
+                    "baseUrl": "https://bao.example.com",
+                    "method": "approle",
+                    "roleIdFile": "role_id",
+                    "secretIdFile": "secret_id",
+                    "namespace": "org-namespace",
+                }
+            )
+        },
+        auth_file_root=str(tmp_path),
+    )
 
 
 class FakeResponse:
@@ -177,7 +215,7 @@ async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
 
     organization_id = uuid4()
     workspace_id = uuid4()
-    provider = OpenBaoSecretProvider()
+    provider = kubernetes_provider(tmp_path)
     store = SecretStore(
         id=uuid4(),
         organization_id=organization_id,
@@ -187,13 +225,8 @@ async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
         config={
             "baseUrl": "https://bao.example.com",
             "kvMount": "secret",
-            "authMount": "kubernetes",
         },
-        auth_config={
-            "method": "kubernetes",
-            "role": "wardn-prod",
-            "serviceAccountTokenPath": str(token_file),
-        },
+        auth_config={"profile": "production"},
         is_active=True,
     )
     handle = SecretHandle(
@@ -247,7 +280,7 @@ async def test_openbao_retries_read_with_fresh_token_after_auth_failure(
     )
 
     organization_id = uuid4()
-    provider = OpenBaoSecretProvider()
+    provider = kubernetes_provider(tmp_path)
     store = SecretStore(
         id=uuid4(),
         organization_id=organization_id,
@@ -255,11 +288,7 @@ async def test_openbao_retries_read_with_fresh_token_after_auth_failure(
         provider="openbao",
         name="Production OpenBao",
         config={"baseUrl": "https://bao.example.com", "kvMount": "secret"},
-        auth_config={
-            "method": "kubernetes",
-            "role": "wardn-prod",
-            "serviceAccountTokenPath": str(token_file),
-        },
+        auth_config={"profile": "production"},
         is_active=True,
     )
     provider._token_cache[provider._cache_key(store, provider._auth_settings(store))] = (
@@ -318,7 +347,7 @@ async def test_openbao_writes_kv_v2_secret(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.modules.secrets.providers.openbao.httpx.AsyncClient", FakeAsyncClient)
 
     organization_id = uuid4()
-    provider = OpenBaoSecretProvider()
+    provider = kubernetes_provider(tmp_path)
     store = SecretStore(
         id=uuid4(),
         organization_id=organization_id,
@@ -326,11 +355,7 @@ async def test_openbao_writes_kv_v2_secret(monkeypatch, tmp_path) -> None:
         provider="openbao",
         name="Production OpenBao",
         config={"baseUrl": "https://bao.example.com", "kvMount": "secret"},
-        auth_config={
-            "method": "kubernetes",
-            "role": "wardn-prod",
-            "serviceAccountTokenPath": str(token_file),
-        },
+        auth_config={"profile": "production"},
         is_active=True,
     )
 
@@ -370,7 +395,7 @@ async def test_openbao_validate_connection_logs_in_with_approle(monkeypatch, tmp
         FakeValidationAsyncClient,
     )
 
-    provider = OpenBaoSecretProvider()
+    provider = approle_provider(tmp_path)
     organization_id = uuid4()
     store = SecretStore(
         id=uuid4(),
@@ -381,13 +406,8 @@ async def test_openbao_validate_connection_logs_in_with_approle(monkeypatch, tmp
         config={
             "baseUrl": "https://bao.example.com",
             "kvMount": "secret",
-            "namespace": FakeValidationAsyncClient.expected_namespace,
         },
-        auth_config={
-            "method": "approle",
-            "roleIdFile": str(role_id_file),
-            "secretIdFile": str(secret_id_file),
-        },
+        auth_config={"profile": "production"},
         is_active=True,
     )
 
@@ -428,7 +448,7 @@ async def test_openbao_validate_connection_includes_login_error_detail(
         FakeInvalidLoginAsyncClient,
     )
 
-    provider = OpenBaoSecretProvider()
+    provider = approle_provider(tmp_path)
     store = SecretStore(
         id=uuid4(),
         organization_id=uuid4(),
@@ -436,11 +456,7 @@ async def test_openbao_validate_connection_includes_login_error_detail(
         provider="openbao",
         name="Production OpenBao",
         config={"baseUrl": "https://bao.example.com"},
-        auth_config={
-            "method": "approle",
-            "roleIdFile": str(role_id_file),
-            "secretIdFile": str(secret_id_file),
-        },
+        auth_config={"profile": "production"},
         is_active=True,
     )
 
@@ -451,29 +467,36 @@ async def test_openbao_validate_connection_includes_login_error_detail(
 
 
 @pytest.mark.asyncio
-async def test_openbao_rejects_http_url_when_tls_verify_is_enabled(tmp_path) -> None:
-    role_id_file = tmp_path / "role_id"
-    secret_id_file = tmp_path / "secret_id"
-    role_id_file.write_text("role-id", encoding="utf-8")
-    secret_id_file.write_text("secret-id", encoding="utf-8")
-
-    provider = OpenBaoSecretProvider()
+async def test_openbao_rejects_base_url_that_does_not_match_profile(tmp_path) -> None:
+    provider = kubernetes_provider(tmp_path)
     store = SecretStore(
         id=uuid4(),
         organization_id=uuid4(),
         workspace_id=None,
         provider="openbao",
         name="Production OpenBao",
-        config={"baseUrl": "http://bao.example.com", "tlsVerify": True},
-        auth_config={
-            "method": "approle",
-            "roleIdFile": str(role_id_file),
-            "secretIdFile": str(secret_id_file),
-        },
+        config={"baseUrl": "https://attacker.example.com"},
+        auth_config={"profile": "production"},
         is_active=True,
     )
 
     result = await provider.validate_store(store)
 
     assert result.ok is False
-    assert result.message == "Verify TLS requires an HTTPS OpenBao URL"
+    assert result.message == (
+        "OpenBao baseUrl must match the operator-defined authentication profile"
+    )
+
+
+def test_openbao_profile_file_rejects_symlink_outside_operator_root(tmp_path) -> None:
+    credential_root = tmp_path / "credentials"
+    credential_root.mkdir()
+    outside_file = tmp_path / "backend-secret"
+    outside_file.write_text("do-not-read", encoding="utf-8")
+    (credential_root / "token").symlink_to(outside_file)
+
+    with pytest.raises(
+        InvalidSecretStoreError,
+        match="must be inside the operator credential root",
+    ):
+        read_profile_file(str(credential_root), "token", "Kubernetes service account token")

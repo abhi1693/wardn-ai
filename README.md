@@ -224,6 +224,25 @@ Runtime settings use the `WARDN_` prefix. Common local values include:
 - `WARDN_MCP_INSTALL_ROOT`
 - `WARDN_MCP_RUNTIME_PROVIDER`
 
+OpenBao credentials are configured by operators, not organization administrators. Set
+`WARDN_OPENBAO_AUTH_FILE_ROOT` to a read-only credential mount and define named profiles with
+`WARDN_OPENBAO_AUTH_PROFILES_JSON`. File names are relative to the credential root, and each profile
+is bound to its OpenBao destination. For example:
+
+```json
+{
+  "production": {
+    "baseUrl": "https://bao.example.com",
+    "method": "kubernetes",
+    "role": "wardn-production",
+    "tokenFile": "kubernetes.io/serviceaccount/token"
+  }
+}
+```
+
+Secret-store API callers select the profile with `authConfig.profile`; they cannot configure
+credential paths, authentication methods, namespaces, or TLS behavior.
+
 Do not commit credentials, service tokens, `.env` files with real secrets, local
 database dumps, or private research notes. MCP credentials should be treated as
 secrets even when used only for validation.

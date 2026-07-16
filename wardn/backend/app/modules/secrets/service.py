@@ -164,6 +164,8 @@ async def create_secret_store(
 ) -> SecretStoreRead:
     name = normalize_name(payload.name)
     provider = normalize_provider(payload.provider)
+    config = payload.config.model_dump(by_alias=True)
+    auth_config = payload.auth_config.model_dump(by_alias=True)
     if provider not in supported_secret_providers():
         raise InvalidSecretStoreError("unsupported secret store provider")
     await require_secret_scope_admin(session, user, organization_id, payload.workspace_id)
@@ -178,7 +180,7 @@ async def create_secret_store(
         session,
         organization_id,
         provider,
-        payload.config,
+        config,
     )
     store_count = await repository.count_stores_for_organization(session, organization_id)
     await limits_service.require_limit_available(
@@ -209,8 +211,8 @@ async def create_secret_store(
         created_by_id=user.id,
         provider=provider,
         name=name,
-        config=payload.config,
-        auth_config=payload.auth_config,
+        config=config,
+        auth_config=auth_config,
         is_active=True,
     )
     await validate_provider_store(store)
@@ -248,16 +250,17 @@ async def update_secret_store(
             raise DuplicateSecretStoreError("secret store name already exists")
         store.name = name
     if payload.config is not None:
+        config = payload.config.model_dump(by_alias=True)
         await ensure_unique_store_url(
             session,
             organization_id,
             store.provider,
-            payload.config,
+            config,
             exclude_id=store.id,
         )
-        store.config = payload.config
+        store.config = config
     if payload.auth_config is not None:
-        store.auth_config = payload.auth_config
+        store.auth_config = payload.auth_config.model_dump(by_alias=True)
     if payload.is_active is not None:
         store.is_active = payload.is_active
     await validate_provider_store(store)

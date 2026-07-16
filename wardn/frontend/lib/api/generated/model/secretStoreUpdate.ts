@@ -4,12 +4,12 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
-import type { SecretStoreUpdateAuthConfig } from './secretStoreUpdateAuthConfig';
-import type { SecretStoreUpdateConfig } from './secretStoreUpdateConfig';
+import type { OpenBaoStoreAuthConfig } from './openBaoStoreAuthConfig';
+import type { OpenBaoStoreConfig } from './openBaoStoreConfig';
 
 export interface SecretStoreUpdate {
-  authConfig?: SecretStoreUpdateAuthConfig;
-  config?: SecretStoreUpdateConfig;
+  authConfig?: OpenBaoStoreAuthConfig | null;
+  config?: OpenBaoStoreConfig | null;
   isActive?: boolean | null;
   name?: string | null;
 }
