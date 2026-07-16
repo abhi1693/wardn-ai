@@ -1110,25 +1110,28 @@ async def installation_response(
     session,
     installation: MCPServerInstallation,
     organization_id: uuid.UUID | None = None,
+    installed: MCPServerVersion | None = None,
+    latest: MCPServerVersion | None = None,
 ) -> MCPServerInstallationRead:
-    organization_id = organization_id or await organization_id_for_workspace(
-        session,
-        installation.workspace_id,
-    )
-    installed = await repository.get_server_version(
-        session,
-        installation.server_name,
-        installation.installed_version,
-        include_deleted=True,
-        organization_id=organization_id,
-    )
-    latest = await repository.get_server_version(
-        session,
-        installation.server_name,
-        "latest",
-        include_deleted=False,
-        organization_id=organization_id,
-    )
+    if installed is None or latest is None:
+        organization_id = organization_id or await organization_id_for_workspace(
+            session,
+            installation.workspace_id,
+        )
+        installed = await repository.get_server_version(
+            session,
+            installation.server_name,
+            installation.installed_version,
+            include_deleted=True,
+            organization_id=organization_id,
+        )
+        latest = await repository.get_server_version(
+            session,
+            installation.server_name,
+            "latest",
+            include_deleted=False,
+            organization_id=organization_id,
+        )
     if installed is None or latest is None:
         raise MCPServerNotFoundError("installed server version not found")
 
@@ -1479,11 +1482,16 @@ async def list_installations(
     session,
     workspace_id: uuid.UUID | None = None,
 ) -> MCPServerInstallationListResponse:
-    installations = await repository.list_installations(session, workspace_id)
+    rows = await repository.list_installation_version_rows(session, workspace_id)
     return MCPServerInstallationListResponse(
         installations=[
-            await installation_response(session, installation)
-            for installation in installations
+            await installation_response(
+                session,
+                installation,
+                installed=installed,
+                latest=latest,
+            )
+            for installation, installed, latest in rows
         ]
     )
 

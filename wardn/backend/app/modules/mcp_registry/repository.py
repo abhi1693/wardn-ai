@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.mcp_registry.models import (
     MCPCatalogSource,
@@ -271,6 +272,42 @@ async def list_installations(
         statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
     result = await session.execute(statement)
     return list(result.scalars().all())
+
+
+async def list_installation_version_rows(
+    session: AsyncSession,
+    workspace_id: uuid.UUID | None = None,
+) -> list[tuple[MCPServerInstallation, MCPServerVersion, MCPServerVersion]]:
+    installed_version = aliased(MCPServerVersion, name="installed_version")
+    latest_version = aliased(MCPServerVersion, name="latest_version")
+    statement = (
+        select(MCPServerInstallation, installed_version, latest_version)
+        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
+        .join(
+            installed_version,
+            (installed_version.organization_id == Workspace.organization_id)
+            & (installed_version.name == MCPServerInstallation.server_name)
+            & (installed_version.version == MCPServerInstallation.installed_version),
+        )
+        .join(
+            latest_version,
+            (latest_version.organization_id == Workspace.organization_id)
+            & (latest_version.name == MCPServerInstallation.server_name)
+            & latest_version.is_latest.is_(True)
+            & (latest_version.status != "deleted"),
+        )
+        .order_by(
+            MCPServerInstallation.server_name.asc(),
+            MCPServerInstallation.config_name.asc(),
+        )
+    )
+    if workspace_id is not None:
+        statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
+    result = await session.execute(statement)
+    return [
+        (installation, installed, latest)
+        for installation, installed, latest in result.all()
+    ]
 
 
 async def count_installations_for_workspace(

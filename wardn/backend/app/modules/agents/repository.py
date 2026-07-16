@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -78,8 +78,77 @@ async def list_agents(
     workspace_id: uuid.UUID | None = None,
     include_inactive: bool = False,
 ) -> list[tuple[Agent, int, int]]:
+    server_counts = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            func.count(AgentMCPServerAssignment.id).label("server_count"),
+        )
+        .group_by(AgentMCPServerAssignment.agent_id)
+        .subquery()
+    )
+    explicit_tools = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            MCPServerToolSchema.id.label("tool_schema_id"),
+        )
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .join(
+            MCPServerToolSchema,
+            MCPServerToolSchema.id == AgentMCPToolAssignment.tool_schema_id,
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .where(
+            AgentMCPToolAssignment.wildcard.is_(False),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    wildcard_tools = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            MCPServerToolSchema.id.label("tool_schema_id"),
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .join(
+            MCPServerToolSchema,
+            MCPServerToolSchema.installation_id == MCPServerInstallation.id,
+        )
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .where(
+            AgentMCPToolAssignment.wildcard.is_(True),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    effective_tools = union_all(explicit_tools, wildcard_tools).subquery()
+    tool_counts = (
+        select(
+            effective_tools.c.agent_id,
+            func.count(func.distinct(effective_tools.c.tool_schema_id)).label("tool_count"),
+        )
+        .group_by(effective_tools.c.agent_id)
+        .subquery()
+    )
     statement = (
-        select(Agent)
+        select(
+            Agent,
+            func.coalesce(server_counts.c.server_count, 0),
+            func.coalesce(tool_counts.c.tool_count, 0),
+        )
+        .outerjoin(server_counts, server_counts.c.agent_id == Agent.id)
+        .outerjoin(tool_counts, tool_counts.c.agent_id == Agent.id)
         .where(Agent.organization_id == organization_id)
         .order_by(Agent.name.asc())
     )
@@ -114,14 +183,9 @@ async def list_agents(
             )
         )
     result = await session.execute(statement)
-    agents = list(result.scalars().all())
     return [
-        (
-            agent,
-            await count_agent_servers(session, agent.id),
-            await count_agent_tools(session, agent.id),
-        )
-        for agent in agents
+        (agent, int(server_count), int(tool_count))
+        for agent, server_count, tool_count in result.all()
     ]
 
 
