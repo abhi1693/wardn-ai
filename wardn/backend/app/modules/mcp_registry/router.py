@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import InvalidCursorError
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.limits.exceptions import LimitExceededError
@@ -558,9 +559,19 @@ async def list_workspace_installed_mcp_servers(
     workspace_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> MCPServerInstallationListResponse:
     await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
-    return await list_installations(session, workspace_id)
+    try:
+        return await list_installations(
+            session,
+            workspace_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @workspace_router.post(
@@ -749,8 +760,13 @@ async def uninstall_workspace_mcp_server(
 )
 async def list_installed_mcp_servers(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> MCPServerInstallationListResponse:
-    return await list_installations(session)
+    try:
+        return await list_installations(session, cursor=cursor, limit=limit)
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post(

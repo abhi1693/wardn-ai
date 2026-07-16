@@ -13,7 +13,8 @@ import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationToolValidationRequest,
   MCPServerInstallationToolValidationResponse,
-  MCPServerInstallationToolsResponse
+  MCPServerInstallationToolsResponse,
+  WorkspaceMcpRegistryListInstalledServersParams
 } from '../model';
 
 
@@ -217,21 +218,30 @@ export type workspaceMcpRegistryListInstalledServersResponseError = (workspaceMc
 export type workspaceMcpRegistryListInstalledServersResponse = (workspaceMcpRegistryListInstalledServersResponseSuccess | workspaceMcpRegistryListInstalledServersResponseError)
 
 export const getWorkspaceMcpRegistryListInstalledServersUrl = (organizationId: string,
-    workspaceId: string,) => {
+    workspaceId: string,
+    params?: WorkspaceMcpRegistryListInstalledServersParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers`
 }
 
 /**
  * @summary List Workspace Installed Mcp Servers
  */
 export const workspaceMcpRegistryListInstalledServers = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceMcpRegistryListInstalledServersResponse> => {
+    workspaceId: string,
+    params?: WorkspaceMcpRegistryListInstalledServersParams, options?: RequestInit): Promise<workspaceMcpRegistryListInstalledServersResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryListInstalledServersUrl(organizationId,workspaceId),
+  const res = await fetch(getWorkspaceMcpRegistryListInstalledServersUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'

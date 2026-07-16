@@ -17,7 +17,8 @@ import type {
   AgentToolListResponse,
   AgentUpdate,
   ErrorResponse,
-  HTTPValidationError
+  HTTPValidationError,
+  WorkspaceAgentsListParams
 } from '../model';
 
 
@@ -51,21 +52,30 @@ export type workspaceAgentsListResponseError = (workspaceAgentsListResponse403 |
 export type workspaceAgentsListResponse = (workspaceAgentsListResponseSuccess | workspaceAgentsListResponseError)
 
 export const getWorkspaceAgentsListUrl = (organizationId: string,
-    workspaceId: string,) => {
+    workspaceId: string,
+    params?: WorkspaceAgentsListParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
 }
 
 /**
  * @summary List Workspace Agents Route
  */
 export const workspaceAgentsList = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceAgentsListResponse> => {
+    workspaceId: string,
+    params?: WorkspaceAgentsListParams, options?: RequestInit): Promise<workspaceAgentsListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsListUrl(organizationId,workspaceId),
+  const res = await fetch(getWorkspaceAgentsListUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'

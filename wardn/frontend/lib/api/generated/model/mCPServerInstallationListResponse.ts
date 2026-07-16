@@ -4,8 +4,10 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { CursorPageMetadata } from './cursorPageMetadata';
 import type { MCPServerInstallationRead } from './mCPServerInstallationRead';
 
 export interface MCPServerInstallationListResponse {
   installations: MCPServerInstallationRead[];
+  metadata: CursorPageMetadata;
 }

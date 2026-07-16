@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import CursorPageMetadata
 from app.db.errors import is_constraint_violation
 from app.modules.agents import repository
 from app.modules.agents.approvals import (
@@ -232,23 +233,28 @@ async def list_agents(
     user: User,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID | None = None,
+    cursor: str | None = None,
+    limit: int = 50,
 ) -> AgentListResponse:
     if workspace_id is None:
         await require_organization_member(session, user, organization_id)
     else:
         await require_workspace_member(session, user, organization_id, workspace_id)
-    rows = await repository.list_agents(
+    rows, next_cursor = await repository.list_agents(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
         user_id=user.id,
         is_superuser=user.is_superuser,
+        cursor=cursor,
+        limit=limit,
     )
     return AgentListResponse(
         agents=[
             agent_response(agent, server_count=server_count, tool_count=tool_count)
             for agent, server_count, tool_count in rows
-        ]
+        ],
+        metadata=CursorPageMetadata(count=len(rows), nextCursor=next_cursor),
     )
 
 

@@ -40,7 +40,7 @@ async def test_agent_listing_loads_assignment_counts_in_one_query() -> None:
     )
     session = QueryCountingSession([(agent, 2, 7)])
 
-    rows = await agent_repository.list_agents(
+    rows, next_cursor = await agent_repository.list_agents(
         session,
         organization_id=organization_id,
         user_id=uuid4(),
@@ -48,6 +48,7 @@ async def test_agent_listing_loads_assignment_counts_in_one_query() -> None:
     )
 
     assert rows == [(agent, 2, 7)]
+    assert next_cursor == ""
     assert len(session.statements) == 1
     sql = str(session.statements[0])
     assert "agent_mcp_server_assignments" in sql
@@ -93,9 +94,13 @@ async def test_installation_listing_loads_installed_and_latest_versions_in_one_q
     )
     session = QueryCountingSession([(installation, installed, latest)])
 
-    rows = await registry_repository.list_installation_version_rows(session, workspace_id)
+    rows, next_cursor = await registry_repository.list_installation_version_rows(
+        session,
+        workspace_id,
+    )
 
     assert rows == [(installation, installed, latest)]
+    assert next_cursor == ""
     assert len(session.statements) == 1
     sql = str(session.statements[0])
     assert "installed_version" in sql

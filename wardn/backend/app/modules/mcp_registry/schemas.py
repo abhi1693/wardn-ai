@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from app.core.pagination import CursorPageMetadata
+
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
 MCPServerInstallTarget = str
 MCPServerStatus = Literal["active", "deprecated", "deleted"]
@@ -167,6 +169,7 @@ class MCPServerInstallationRead(BaseModel):
 
 class MCPServerInstallationListResponse(BaseModel):
     installations: list[MCPServerInstallationRead]
+    metadata: CursorPageMetadata
 
 
 class MCPOperationJobEventRead(BaseModel):

@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Select, func, or_, select, update
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.modules.mcp_registry.models import (
     MCPCatalogSource,
     MCPServerInstallation,
@@ -277,7 +278,13 @@ async def list_installations(
 async def list_installation_version_rows(
     session: AsyncSession,
     workspace_id: uuid.UUID | None = None,
-) -> list[tuple[MCPServerInstallation, MCPServerVersion, MCPServerVersion]]:
+    *,
+    cursor: str | None = None,
+    limit: int = 50,
+) -> tuple[
+    list[tuple[MCPServerInstallation, MCPServerVersion, MCPServerVersion]],
+    str,
+]:
     installed_version = aliased(MCPServerVersion, name="installed_version")
     latest_version = aliased(MCPServerVersion, name="latest_version")
     statement = (
@@ -299,15 +306,47 @@ async def list_installation_version_rows(
         .order_by(
             MCPServerInstallation.server_name.asc(),
             MCPServerInstallation.config_name.asc(),
+            MCPServerInstallation.id.asc(),
         )
     )
     if workspace_id is not None:
         statement = statement.where(MCPServerInstallation.workspace_id == workspace_id)
-    result = await session.execute(statement)
-    return [
+    cursor_values = decode_cursor(cursor, fields=3)
+    if cursor_values is not None:
+        after_server_name, after_config_name, after_id_value = cursor_values
+        try:
+            after_id = uuid.UUID(after_id_value)
+        except ValueError as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        statement = statement.where(
+            or_(
+                MCPServerInstallation.server_name > after_server_name,
+                and_(
+                    MCPServerInstallation.server_name == after_server_name,
+                    MCPServerInstallation.config_name > after_config_name,
+                ),
+                and_(
+                    MCPServerInstallation.server_name == after_server_name,
+                    MCPServerInstallation.config_name == after_config_name,
+                    MCPServerInstallation.id > after_id,
+                ),
+            )
+        )
+    result = await session.execute(statement.limit(limit + 1))
+    rows = [
         (installation, installed, latest)
         for installation, installed, latest in result.all()
     ]
+    page = rows[:limit]
+    next_cursor = ""
+    if len(rows) > limit and page:
+        last_installation = page[-1][0]
+        next_cursor = encode_cursor(
+            last_installation.server_name,
+            last_installation.config_name,
+            str(last_installation.id),
+        )
+    return page, next_cursor
 
 
 async def count_installations_for_workspace(

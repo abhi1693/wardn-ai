@@ -5,7 +5,9 @@
  * OpenAPI spec version: 0.0.1
  */
 import type { AgentRead } from './agentRead';
+import type { CursorPageMetadata } from './cursorPageMetadata';
 
 export interface AgentListResponse {
   agents: AgentRead[];
+  metadata: CursorPageMetadata;
 }

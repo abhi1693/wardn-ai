@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.core.pagination import CursorPageMetadata
+
 AgentScope = Literal["organization", "workspace"]
 
 
@@ -72,6 +74,7 @@ class AgentRead(BaseModel):
 
 class AgentListResponse(BaseModel):
     agents: list[AgentRead]
+    metadata: CursorPageMetadata
 
 
 class WorkspaceConversationRead(BaseModel):

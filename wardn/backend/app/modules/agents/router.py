@@ -1,10 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
+from app.core.pagination import InvalidCursorError
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.agents.exceptions import (
@@ -107,9 +108,20 @@ async def list_workspace_agents_route(
     workspace_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> AgentListResponse:
     try:
-        return await list_agents(session, current_user, organization_id, workspace_id)
+        return await list_agents(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidCursorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise_access_error(exc)
         raise

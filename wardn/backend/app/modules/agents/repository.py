@@ -5,6 +5,7 @@ from sqlalchemy import and_, delete, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
@@ -77,7 +78,9 @@ async def list_agents(
     is_superuser: bool,
     workspace_id: uuid.UUID | None = None,
     include_inactive: bool = False,
-) -> list[tuple[Agent, int, int]]:
+    cursor: str | None = None,
+    limit: int = 50,
+) -> tuple[list[tuple[Agent, int, int]], str]:
     server_counts = (
         select(
             AgentMCPServerAssignment.agent_id.label("agent_id"),
@@ -150,7 +153,7 @@ async def list_agents(
         .outerjoin(server_counts, server_counts.c.agent_id == Agent.id)
         .outerjoin(tool_counts, tool_counts.c.agent_id == Agent.id)
         .where(Agent.organization_id == organization_id)
-        .order_by(Agent.name.asc())
+        .order_by(Agent.name.asc(), Agent.id.asc())
     )
     if workspace_id is not None:
         statement = statement.where(Agent.workspace_id == workspace_id)
@@ -182,11 +185,30 @@ async def list_agents(
                 )
             )
         )
-    result = await session.execute(statement)
-    return [
+    cursor_values = decode_cursor(cursor, fields=2)
+    if cursor_values is not None:
+        after_name, after_id_value = cursor_values
+        try:
+            after_id = uuid.UUID(after_id_value)
+        except ValueError as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        statement = statement.where(
+            or_(
+                Agent.name > after_name,
+                and_(Agent.name == after_name, Agent.id > after_id),
+            )
+        )
+    result = await session.execute(statement.limit(limit + 1))
+    rows = [
         (agent, int(server_count), int(tool_count))
         for agent, server_count, tool_count in result.all()
     ]
+    page = rows[:limit]
+    next_cursor = ""
+    if len(rows) > limit and page:
+        last_agent = page[-1][0]
+        next_cursor = encode_cursor(last_agent.name, str(last_agent.id))
+    return page, next_cursor
 
 
 async def count_active_agents_for_organization(

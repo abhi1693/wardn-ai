@@ -286,10 +286,14 @@
             },
             "title": "Agents",
             "type": "array"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CursorPageMetadata"
           }
         },
         "required": [
-          "agents"
+          "agents",
+          "metadata"
         ],
         "title": "AgentListResponse",
         "type": "object"
@@ -1274,6 +1278,25 @@
           "updatedAt"
         ],
         "title": "ConversationMessageRead",
+        "type": "object"
+      },
+      "CursorPageMetadata": {
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "nextCursor": {
+            "default": "",
+            "title": "Nextcursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "CursorPageMetadata",
         "type": "object"
       },
       "ErrorResponse": {
@@ -4154,10 +4177,14 @@
             },
             "title": "Installations",
             "type": "array"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CursorPageMetadata"
           }
         },
         "required": [
-          "installations"
+          "installations",
+          "metadata"
         ],
         "title": "MCPServerInstallationListResponse",
         "type": "object"
@@ -12234,6 +12261,34 @@
             }
           },
           {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -14393,6 +14448,34 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           },
           {

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 
+from app.core.pagination import CursorPageMetadata
 from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -1481,8 +1482,16 @@ async def set_default_server_version(
 async def list_installations(
     session,
     workspace_id: uuid.UUID | None = None,
+    *,
+    cursor: str | None = None,
+    limit: int = 50,
 ) -> MCPServerInstallationListResponse:
-    rows = await repository.list_installation_version_rows(session, workspace_id)
+    rows, next_cursor = await repository.list_installation_version_rows(
+        session,
+        workspace_id,
+        cursor=cursor,
+        limit=limit,
+    )
     return MCPServerInstallationListResponse(
         installations=[
             await installation_response(
@@ -1492,7 +1501,8 @@ async def list_installations(
                 latest=latest,
             )
             for installation, installed, latest in rows
-        ]
+        ],
+        metadata=CursorPageMetadata(count=len(rows), nextCursor=next_cursor),
     )
 
 
@@ -1851,4 +1861,7 @@ async def update_installed_servers(
                 )
             )
 
-    return MCPServerInstallationListResponse(installations=updated)
+    return MCPServerInstallationListResponse(
+        installations=updated,
+        metadata=CursorPageMetadata(count=len(updated), nextCursor=""),
+    )
