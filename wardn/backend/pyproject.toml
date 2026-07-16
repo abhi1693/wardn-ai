@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=69", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "wardn-api"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Wardn AI backend API"
 requires-python = ">=3.12"
 dependencies = [
@@ -39,6 +39,9 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 "app.modules.mcp_registry" = ["fixtures/*.json"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.1"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

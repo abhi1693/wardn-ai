@@ -100,6 +100,12 @@ def test_settings_parse_outbound_http_policy_lists() -> None:
     ]
 
 
+def test_settings_normalize_release_tag_version() -> None:
+    settings = make_settings(app_version="v1.2.3")
+
+    assert settings.app_version == "1.2.3"
+
+
 def test_settings_reject_invalid_outbound_http_port() -> None:
     with pytest.raises(ValidationError, match="between 1 and 65535"):
         make_settings(outbound_http_allowed_ports="0,443")

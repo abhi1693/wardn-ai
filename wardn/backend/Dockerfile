@@ -14,6 +14,11 @@ RUN useradd --create-home --shell /bin/bash wardn
 
 COPY --from=uv /uv /uvx /bin/
 
+ARG APP_VERSION=0.0.0
+ENV APP_VERSION=$APP_VERSION \
+    WARDN_APP_VERSION=$APP_VERSION \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WARDN_API=$APP_VERSION
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
@@ -21,8 +26,6 @@ COPY app ./app
 COPY alembic.ini ./
 RUN uv sync --frozen --no-dev --no-editable
 
-ARG APP_VERSION=0.0.0
-ENV APP_VERSION=$APP_VERSION
 LABEL org.opencontainers.image.version=$APP_VERSION
 
 USER wardn

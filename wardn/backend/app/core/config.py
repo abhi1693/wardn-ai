@@ -148,6 +148,16 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
+    @field_validator("app_version", mode="before")
+    @classmethod
+    def normalize_app_version(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if normalized.casefold().startswith("v"):
+            normalized = normalized[1:]
+        if not normalized:
+            raise ValueError("application version must not be empty")
+        return normalized
+
     @field_validator("oidc_allowed_email_domains", mode="before")
     @classmethod
     def parse_oidc_allowed_email_domains(cls, value: str | list[str]) -> list[str]:
