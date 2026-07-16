@@ -3,26 +3,22 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from app.core.pagination import CursorPageMetadata
+from app.core.schemas import APIModel
 
 AgentScope = Literal["organization", "workspace"]
 
 
-class AgentCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class AgentCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=2000)
     instructions: str = Field(min_length=1, max_length=50000)
     scope: AgentScope = "organization"
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    provider_credential_id: uuid.UUID | None = Field(
-        default=None,
-        alias="providerCredentialId",
-    )
-    model_name: str = Field(default="", alias="modelName", max_length=255)
+    workspace_id: uuid.UUID | None = None
+    provider_credential_id: uuid.UUID | None = None
+    model_name: str = Field(default="", max_length=255)
 
     @model_validator(mode="after")
     def validate_scope(self) -> "AgentCreate":
@@ -33,132 +29,121 @@ class AgentCreate(BaseModel):
         return self
 
 
-class AgentUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class AgentUpdate(APIModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=2000)
     instructions: str | None = Field(default=None, min_length=1, max_length=50000)
     scope: AgentScope | None = None
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    provider_credential_id: uuid.UUID | None = Field(
-        default=None,
-        alias="providerCredentialId",
-    )
-    model_name: str | None = Field(default=None, alias="modelName", max_length=255)
-    is_active: bool | None = Field(default=None, alias="isActive")
+    workspace_id: uuid.UUID | None = None
+    provider_credential_id: uuid.UUID | None = None
+    model_name: str | None = Field(default=None, max_length=255)
+    is_active: bool | None = None
 
 
-class AgentRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class AgentRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID = Field(alias="organizationId")
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
-    provider_credential_id: uuid.UUID | None = Field(
-        default=None,
-        alias="providerCredentialId",
-    )
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+    created_by_id: uuid.UUID | None = None
+    provider_credential_id: uuid.UUID | None = None
     name: str
     description: str
     instructions: str
     scope: AgentScope
-    model_name: str = Field(alias="modelName")
-    is_active: bool = Field(alias="isActive")
-    server_count: int = Field(alias="serverCount")
-    tool_count: int = Field(alias="toolCount")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    model_name: str
+    is_active: bool
+    server_count: int
+    tool_count: int
+    created_at: datetime
+    updated_at: datetime
 
 
-class AgentListResponse(BaseModel):
+class AgentListResponse(APIModel):
     agents: list[AgentRead]
     metadata: CursorPageMetadata
 
 
-class WorkspaceConversationRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class WorkspaceConversationRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID = Field(alias="organizationId")
-    workspace_id: uuid.UUID = Field(alias="workspaceId")
-    agent_id: uuid.UUID = Field(alias="agentId")
-    created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    created_by_id: uuid.UUID | None = None
     title: str
-    is_active: bool = Field(alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
-class ConversationMessageRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class ConversationMessageRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    conversation_id: uuid.UUID = Field(alias="conversationId")
-    agent_run_id: uuid.UUID | None = Field(default=None, alias="agentRunId")
+    conversation_id: uuid.UUID
+    agent_run_id: uuid.UUID | None = None
     role: Literal["system", "user", "assistant"]
     content: str
     parts: list[dict[str, Any]] = Field(default_factory=list)
     sequence: int
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class AgentConversationResponse(BaseModel):
+class AgentConversationResponse(APIModel):
     agent: AgentRead
     conversation: WorkspaceConversationRead
     messages: list[ConversationMessageRead] = Field(default_factory=list)
 
 
-class AgentRunRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class AgentRunRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID = Field(alias="organizationId")
-    workspace_id: uuid.UUID = Field(alias="workspaceId")
-    agent_id: uuid.UUID = Field(alias="agentId")
-    conversation_id: uuid.UUID | None = Field(default=None, alias="conversationId")
-    triggered_by_id: uuid.UUID | None = Field(default=None, alias="triggeredById")
-    trigger_type: str = Field(alias="triggerType")
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
+    triggered_by_id: uuid.UUID | None = None
+    trigger_type: str
     status: str
-    input_tokens: int = Field(default=0, alias="inputTokens")
-    output_tokens: int = Field(default=0, alias="outputTokens")
-    total_tokens: int = Field(default=0, alias="totalTokens")
-    cost_usd: Decimal = Field(default=Decimal("0"), alias="costUsd")
-    tool_calls: int = Field(default=0, alias="toolCalls")
-    trace_id: str = Field(default="", alias="traceId")
-    span_id: str = Field(default="", alias="spanId")
-    started_at: datetime = Field(alias="startedAt")
-    finished_at: datetime | None = Field(default=None, alias="finishedAt")
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: Decimal = Field(default=Decimal("0"))
+    tool_calls: int = 0
+    trace_id: str = ""
+    span_id: str = ""
+    started_at: datetime
+    finished_at: datetime | None = None
     error: str
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class AgentRunStepRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class AgentRunStepRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    agent_run_id: uuid.UUID = Field(alias="agentRunId")
-    mcp_tool_invocation_id: uuid.UUID | None = Field(
-        default=None,
-        alias="mcpToolInvocationId",
-    )
+    agent_run_id: uuid.UUID
+    mcp_tool_invocation_id: uuid.UUID | None = None
     sequence: int
-    step_type: str = Field(alias="stepType")
+    step_type: str
     status: str
     title: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class AgentRunListResponse(BaseModel):
+class AgentRunListResponse(APIModel):
     runs: list[AgentRunRead]
 
 
-class AgentRunDetailResponse(BaseModel):
+class AgentRunDetailResponse(APIModel):
     run: AgentRunRead
     steps: list[AgentRunStepRead]
 
@@ -167,14 +152,9 @@ TOOL_ASSIGNMENT_WILDCARD = "*"
 ToolAssignmentSelection = uuid.UUID | Literal["*"]
 
 
-class AgentServerToolAssignmentUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    installation_id: uuid.UUID = Field(alias="installationId")
-    tool_schema_ids: list[ToolAssignmentSelection] = Field(
-        default_factory=list,
-        alias="toolSchemaIds",
-    )
+class AgentServerToolAssignmentUpdate(APIModel):
+    installation_id: uuid.UUID
+    tool_schema_ids: list[ToolAssignmentSelection] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_tool_selection(self) -> "AgentServerToolAssignmentUpdate":
@@ -186,98 +166,83 @@ class AgentServerToolAssignmentUpdate(BaseModel):
         return self
 
 
-class AgentToolAssignmentUpdate(BaseModel):
+class AgentToolAssignmentUpdate(APIModel):
     servers: list[AgentServerToolAssignmentUpdate] = Field(default_factory=list)
 
 
-class AgentToolRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class AgentToolRead(APIModel):
     id: uuid.UUID
-    agent_id: uuid.UUID = Field(alias="agentId")
-    tool_schema_id: uuid.UUID = Field(alias="toolSchemaId")
-    installation_id: uuid.UUID = Field(alias="installationId")
-    workspace_id: uuid.UUID = Field(alias="workspaceId")
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    tool_name: str = Field(alias="toolName")
+    agent_id: uuid.UUID
+    tool_schema_id: uuid.UUID
+    installation_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    config_name: str
+    tool_name: str
     title: str
     description: str
-    input_schema: dict[str, Any] = Field(alias="inputSchema")
-    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(alias="createdAt")
+    created_at: datetime
 
 
-class AgentServerToolAssignmentRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    installation_id: uuid.UUID = Field(alias="installationId")
-    tool_schema_ids: list[ToolAssignmentSelection] = Field(alias="toolSchemaIds")
+class AgentServerToolAssignmentRead(APIModel):
+    installation_id: uuid.UUID
+    tool_schema_ids: list[ToolAssignmentSelection]
 
 
-class AgentToolListResponse(BaseModel):
+class AgentToolListResponse(APIModel):
     tools: list[AgentToolRead]
     servers: list[AgentServerToolAssignmentRead] = Field(default_factory=list)
 
 
-class AgentToolApprovalDecisionRequest(BaseModel):
+class AgentToolApprovalDecisionRequest(APIModel):
     decision: Literal["approve", "deny"]
 
 
-class AgentToolApprovalDecisionResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    approval_id: uuid.UUID = Field(alias="approvalId")
+class AgentToolApprovalDecisionResponse(APIModel):
+    approval_id: uuid.UUID
     status: str
-    tool_name: str = Field(alias="toolName")
+    tool_name: str
     result: str = ""
     error: str = ""
-    assistant_message: ConversationMessageRead | None = Field(
-        default=None,
-        alias="assistantMessage",
-    )
+    assistant_message: ConversationMessageRead | None = None
 
 
-class AgentAvailableToolRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    tool_schema_id: uuid.UUID = Field(alias="toolSchemaId")
-    installation_id: uuid.UUID = Field(alias="installationId")
-    workspace_id: uuid.UUID = Field(alias="workspaceId")
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    tool_name: str = Field(alias="toolName")
+class AgentAvailableToolRead(APIModel):
+    tool_schema_id: uuid.UUID
+    installation_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    config_name: str
+    tool_name: str
     title: str
     description: str
-    input_schema: dict[str, Any] = Field(alias="inputSchema")
-    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
-class AgentAvailableServerRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    installation_id: uuid.UUID = Field(alias="installationId")
-    workspace_id: uuid.UUID = Field(alias="workspaceId")
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    installed_version: str = Field(alias="installedVersion")
+class AgentAvailableServerRead(APIModel):
+    installation_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    config_name: str
+    installed_version: str
     status: str
 
 
-class AgentAvailableToolListResponse(BaseModel):
+class AgentAvailableToolListResponse(APIModel):
     servers: list[AgentAvailableServerRead] = Field(default_factory=list)
     tools: list[AgentAvailableToolRead]
 
 
-class AgentChatMessage(BaseModel):
+class AgentChatMessage(APIModel):
     role: Literal["system", "user", "assistant"]
     parts: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class AgentChatRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class AgentChatRequest(APIModel):
     id: str | None = None
     messages: list[AgentChatMessage] = Field(default_factory=list)

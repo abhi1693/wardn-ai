@@ -8,9 +8,9 @@
 export interface BootstrapUserCreate {
   email: string;
   /** @maxLength 150 */
-  first_name?: string;
+  firstName?: string;
   /** @maxLength 150 */
-  last_name?: string;
+  lastName?: string;
   /** @minLength 8 */
   password: string;
 }

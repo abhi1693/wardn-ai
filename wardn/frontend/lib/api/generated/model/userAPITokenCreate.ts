@@ -8,7 +8,7 @@
 export interface UserAPITokenCreate {
   /** @maxLength 200 */
   description?: string;
-  expires_at?: string | null;
+  expiresAt?: string | null;
   /**
      * @minLength 1
      * @maxLength 100

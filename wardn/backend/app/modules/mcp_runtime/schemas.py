@@ -2,42 +2,40 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from app.core.schemas import APIModel
 
 
-class MCPRuntimeSessionRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRuntimeSessionRead(APIModel):
     id: UUID
-    organization_id: UUID | None = Field(default=None, alias="organizationId")
-    workspace_id: UUID | None = Field(default=None, alias="workspaceId")
-    installation_id: UUID = Field(alias="installationId")
-    server_name: str = Field(alias="serverName")
-    server_version: str = Field(alias="serverVersion")
-    runtime_provider: str = Field(alias="runtimeProvider")
-    runtime_kind: str = Field(alias="runtimeKind")
+    organization_id: UUID | None = None
+    workspace_id: UUID | None = None
+    installation_id: UUID
+    server_name: str
+    server_version: str
+    runtime_provider: str
+    runtime_kind: str
     status: str
-    pod_name: str = Field(alias="podName")
+    pod_name: str
     namespace: str
-    started_at: datetime | None = Field(default=None, alias="startedAt")
-    ready_at: datetime | None = Field(default=None, alias="readyAt")
-    last_used_at: datetime | None = Field(default=None, alias="lastUsedAt")
-    expires_at: datetime | None = Field(default=None, alias="expiresAt")
-    stopped_at: datetime | None = Field(default=None, alias="stoppedAt")
-    failure_count: int = Field(alias="failureCount")
-    last_error: str = Field(alias="lastError")
+    started_at: datetime | None = None
+    ready_at: datetime | None = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    stopped_at: datetime | None = None
+    failure_count: int
+    last_error: str
 
 
-class MCPRuntimeSessionListResponse(BaseModel):
+class MCPRuntimeSessionListResponse(APIModel):
     sessions: list[MCPRuntimeSessionRead]
 
 
-class MCPRuntimeSessionHealthResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    runtime_session_id: UUID = Field(alias="runtimeSessionId")
-    runtime_provider: str = Field(alias="runtimeProvider")
-    runtime_kind: str = Field(alias="runtimeKind")
+class MCPRuntimeSessionHealthResponse(APIModel):
+    runtime_session_id: UUID
+    runtime_provider: str
+    runtime_kind: str
     status: str
     healthy: bool
     ready: bool
@@ -45,53 +43,45 @@ class MCPRuntimeSessionHealthResponse(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
-class MCPRuntimeEventRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRuntimeEventRead(APIModel):
     id: UUID
-    runtime_session_id: UUID = Field(alias="runtimeSessionId")
-    event_type: str = Field(alias="eventType")
+    runtime_session_id: UUID
+    event_type: str
     message: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(alias="createdAt")
+    created_at: datetime
 
 
-class MCPRuntimeEventListResponse(BaseModel):
+class MCPRuntimeEventListResponse(APIModel):
     events: list[MCPRuntimeEventRead]
 
 
-class MCPRuntimeToolCallSummary(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRuntimeToolCallSummary(APIModel):
     total: int
     succeeded: int
     failed: int
     running: int
-    recent_total: int = Field(alias="recentTotal")
-    recent_failed: int = Field(alias="recentFailed")
-    recent_failure_rate: float = Field(alias="recentFailureRate")
+    recent_total: int
+    recent_failed: int
+    recent_failure_rate: float
 
 
-class MCPRuntimeServerError(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    server_name: str = Field(alias="serverName")
-    server_version: str = Field(alias="serverVersion")
-    last_error: str = Field(alias="lastError")
-    last_error_at: datetime | None = Field(default=None, alias="lastErrorAt")
-    failure_count: int = Field(alias="failureCount")
+class MCPRuntimeServerError(APIModel):
+    server_name: str
+    server_version: str
+    last_error: str
+    last_error_at: datetime | None = None
+    failure_count: int
 
 
-class MCPRuntimeSummaryResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    total_sessions: int = Field(alias="totalSessions")
-    active_sessions: int = Field(alias="activeSessions")
-    idle_sessions: int = Field(alias="idleSessions")
-    failed_sessions: int = Field(alias="failedSessions")
-    stopped_sessions: int = Field(alias="stoppedSessions")
-    expired_sessions: int = Field(alias="expiredSessions")
-    stale_active_sessions: int = Field(alias="staleActiveSessions")
-    session_status_counts: dict[str, int] = Field(alias="sessionStatusCounts")
-    tool_calls: MCPRuntimeToolCallSummary = Field(alias="toolCalls")
-    recent_server_errors: list[MCPRuntimeServerError] = Field(alias="recentServerErrors")
+class MCPRuntimeSummaryResponse(APIModel):
+    total_sessions: int
+    active_sessions: int
+    idle_sessions: int
+    failed_sessions: int
+    stopped_sessions: int
+    expired_sessions: int
+    stale_active_sessions: int
+    session_status_counts: dict[str, int]
+    tool_calls: MCPRuntimeToolCallSummary
+    recent_server_errors: list[MCPRuntimeServerError]

@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.core.schemas import APIModel
 from app.modules.secrets.exceptions import InvalidSecretStoreError
 
 PROFILE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -18,18 +19,18 @@ STANDARD_AUTH_MOUNTS = {
 }
 
 
-class OpenBaoAuthProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+class OpenBaoAuthProfile(APIModel):
+    model_config = ConfigDict(extra="forbid")
 
-    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
+    base_url: str = Field(min_length=1, max_length=2048)
     method: Literal["approle", "kubernetes"]
-    auth_mount: str = Field(default="", alias="authMount", max_length=128)
+    auth_mount: str = Field(default="", max_length=128)
     namespace: str = Field(default="", max_length=255)
-    tls_verify: bool = Field(default=True, alias="tlsVerify")
+    tls_verify: bool = True
     role: str = Field(default="", max_length=255)
-    token_file: str = Field(default="", alias="tokenFile", max_length=1024)
-    role_id_file: str = Field(default="", alias="roleIdFile", max_length=1024)
-    secret_id_file: str = Field(default="", alias="secretIdFile", max_length=1024)
+    token_file: str = Field(default="", max_length=1024)
+    role_id_file: str = Field(default="", max_length=1024)
+    secret_id_file: str = Field(default="", max_length=1024)
 
     @field_validator("base_url")
     @classmethod

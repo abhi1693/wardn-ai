@@ -22,7 +22,7 @@ export default async function NewLimitPage({ params }: NewLimitPageProps) {
     getCurrentUser(),
   ]);
 
-  if (!organization || !currentUser?.is_superuser) {
+  if (!organization || !currentUser?.isSuperuser) {
     notFound();
   }
 

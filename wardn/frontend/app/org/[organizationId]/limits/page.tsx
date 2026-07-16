@@ -36,7 +36,7 @@ export default async function LimitsPage({ params }: LimitsPageProps) {
     <AppShell
       active="limits"
       actions={
-        currentUser?.is_superuser ? (
+        currentUser?.isSuperuser ? (
           <Button asChild size="sm">
             <Link href={`/org/${organization.id}/limits/new`}>
               <Plus className="size-4" />

@@ -221,6 +221,19 @@ def test_health_openapi_schema_is_specific() -> None:
     }
 
 
+def test_openapi_component_properties_use_camel_case() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+
+    snake_case_properties = {
+        (schema_name, property_name)
+        for schema_name, component in schema["components"]["schemas"].items()
+        for property_name in component.get("properties", {})
+        if "_" in property_name and property_name != "_meta"
+    }
+
+    assert snake_case_properties == set()
+
+
 def test_bootstrap_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     bootstrap = schema["paths"]["/api/v1/users/bootstrap"]["post"]

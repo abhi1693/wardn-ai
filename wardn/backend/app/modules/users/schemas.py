@@ -2,10 +2,12 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr
+from pydantic import ConfigDict, EmailStr, Field, SecretStr
+
+from app.core.schemas import APIModel
 
 
-class UserRead(BaseModel):
+class UserRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -20,7 +22,7 @@ class UserRead(BaseModel):
     updated_at: datetime
 
 
-class UserCreate(BaseModel):
+class UserCreate(APIModel):
     email: EmailStr
     password: SecretStr = Field(min_length=8)
     first_name: str = Field(default="", max_length=150)
@@ -31,37 +33,33 @@ class BootstrapUserCreate(UserCreate):
     pass
 
 
-class UserAPITokenCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UserAPITokenCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=200)
     expires_at: datetime | None = None
-    organization_ids: list[uuid.UUID] = Field(default_factory=list, alias="organizationIds")
-    workspace_ids: list[uuid.UUID] = Field(default_factory=list, alias="workspaceIds")
+    organization_ids: list[uuid.UUID] = Field(default_factory=list)
+    workspace_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
-class UserAPITokenUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UserAPITokenUpdate(APIModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=200)
     expires_at: datetime | None = None
-    organization_ids: list[uuid.UUID] | None = Field(default=None, alias="organizationIds")
-    workspace_ids: list[uuid.UUID] | None = Field(default=None, alias="workspaceIds")
+    organization_ids: list[uuid.UUID] | None = None
+    workspace_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
 
 
-class UserAPITokenRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class UserAPITokenRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     user_id: uuid.UUID
     name: str
     description: str
     token_prefix: str
-    organization_ids: list[uuid.UUID] = Field(alias="organizationIds")
-    workspace_ids: list[uuid.UUID] = Field(alias="workspaceIds")
+    organization_ids: list[uuid.UUID]
+    workspace_ids: list[uuid.UUID]
     is_active: bool
     expires_at: datetime | None
     last_used_at: datetime | None
@@ -69,24 +67,22 @@ class UserAPITokenRead(BaseModel):
     updated_at: datetime
 
 
-class UserAPITokenCreated(BaseModel):
+class UserAPITokenCreated(APIModel):
     token: str
     record: UserAPITokenRead
 
 
-class UserAPITokenListResponse(BaseModel):
+class UserAPITokenListResponse(APIModel):
     tokens: list[UserAPITokenRead]
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(APIModel):
     email: EmailStr
     password: SecretStr
 
 
-class AuthConfigRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    auth_mode: Literal["local", "oidc"] = Field(alias="authMode")
-    local_login_enabled: bool = Field(alias="localLoginEnabled")
-    oidc_login_enabled: bool = Field(alias="oidcLoginEnabled")
-    oidc_provider_name: str = Field(alias="oidcProviderName")
+class AuthConfigRead(APIModel):
+    auth_mode: Literal["local", "oidc"]
+    local_login_enabled: bool
+    oidc_login_enabled: bool
+    oidc_provider_name: str

@@ -218,7 +218,7 @@ export function AgentTokensClient({
                         <div className="min-w-48">
                           <div className="font-medium">{token.name}</div>
                           <div className="mt-1 max-w-72 truncate text-xs text-[var(--on-surface-variant)]">
-                            {token.description || token.token_prefix}
+                            {token.description || token.tokenPrefix}
                           </div>
                         </div>
                       </TableCell>
@@ -226,12 +226,12 @@ export function AgentTokensClient({
                         <span className="text-sm">{scopeLabel(token, organization)}</span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={token.is_active ? "success" : "secondary"}>
-                          {token.is_active ? "Active" : "Inactive"}
+                        <Badge variant={token.isActive ? "success" : "secondary"}>
+                          {token.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </TableCell>
-                      <TableCell>{formatDate(token.expires_at)}</TableCell>
-                      <TableCell>{formatDate(token.last_used_at)}</TableCell>
+                      <TableCell>{formatDate(token.expiresAt)}</TableCell>
+                      <TableCell>{formatDate(token.lastUsedAt)}</TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-2">
                           <Button

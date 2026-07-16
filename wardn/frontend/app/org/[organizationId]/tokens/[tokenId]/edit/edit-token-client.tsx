@@ -43,12 +43,12 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
   const router = useRouter();
   const [name, setName] = useState(token.name);
   const [description, setDescription] = useState(token.description);
-  const [expiresAt, setExpiresAt] = useState(datetimeLocalValue(token.expires_at));
+  const [expiresAt, setExpiresAt] = useState(datetimeLocalValue(token.expiresAt));
   const [scopeMode, setScopeMode] = useState<ScopeMode>(scopeModeForToken(token));
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<Set<string>>(
     () => new Set(token.workspaceIds)
   );
-  const [isActive, setIsActive] = useState(token.is_active);
+  const [isActive, setIsActive] = useState(token.isActive);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,8 +86,8 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
     const payload: UserAPITokenUpdate = {
       name: name.trim(),
       description: description.trim(),
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      is_active: isActive,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+      isActive,
       organizationIds: scopeMode === "organization" ? [organization.id] : [],
       workspaceIds: scopeMode === "workspaces" ? Array.from(selectedWorkspaceIds).sort() : [],
     };

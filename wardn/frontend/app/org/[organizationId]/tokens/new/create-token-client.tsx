@@ -76,7 +76,7 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
     const payload: UserAPITokenCreate = {
       name: name.trim(),
       description: description.trim() || undefined,
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       organizationIds: scopeMode === "organization" ? [organization.id] : [],
       workspaceIds: scopeMode === "workspaces" ? Array.from(selectedWorkspaceIds).sort() : [],
     };

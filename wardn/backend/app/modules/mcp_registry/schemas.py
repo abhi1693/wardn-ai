@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, Field, SecretStr, field_validator
 
 from app.core.pagination import CursorPageMetadata
+from app.core.schemas import APIModel
 
 MCP_SERVER_NAME_PATTERN = r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$"
 MCPServerInstallTarget = str
@@ -22,28 +23,24 @@ MCPOperationCleanupStatus = Literal[
 ]
 
 
-class MCPFileConfigValue(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPFileConfigValue(APIModel):
     type: Literal["file"] = "file"
     filename: str = Field(default="", max_length=255)
     content: str = ""
-    content_base64: str = Field(default="", alias="contentBase64")
+    content_base64: str = ""
     path: str = Field(default="", max_length=4096)
 
 
-class MCPSecretHandleConfigValue(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPSecretHandleConfigValue(APIModel):
     type: Literal["secret_handle"] = "secret_handle"
-    secret_handle_id: UUID = Field(alias="secretHandleId")
+    secret_handle_id: UUID
 
 
 MCPConfigValue = str | MCPFileConfigValue | MCPSecretHandleConfigValue
 
 
-class MCPServerDocument(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+class MCPServerDocument(APIModel):
+    model_config = ConfigDict(extra="allow")
 
     schema_uri: str = Field(
         alias="$schema",
@@ -55,7 +52,7 @@ class MCPServerDocument(BaseModel):
     title: str = Field(default="", max_length=100)
     repository: dict[str, Any] | None = None
     version: str = Field(min_length=1, max_length=255)
-    website_url: str = Field(default="", alias="websiteUrl", max_length=2048)
+    website_url: str = Field(default="", max_length=2048)
     icons: list[dict[str, Any]] = Field(default_factory=list)
     packages: list[dict[str, Any]] = Field(default_factory=list)
     remotes: list[dict[str, Any]] = Field(default_factory=list)
@@ -79,196 +76,166 @@ class MCPServerCreate(MCPServerDocument):
     pass
 
 
-class MCPRegistryOfficialMetadata(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRegistryOfficialMetadata(APIModel):
     status: MCPServerStatus
-    status_changed_at: datetime = Field(alias="statusChangedAt")
-    status_message: str | None = Field(default=None, alias="statusMessage")
-    published_at: datetime = Field(alias="publishedAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    is_latest: bool = Field(alias="isLatest")
+    status_changed_at: datetime
+    status_message: str | None = None
+    published_at: datetime
+    updated_at: datetime
+    is_latest: bool
 
 
-class MCPPulseServerVersionMetadata(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPPulseServerVersionMetadata(APIModel):
     status: MCPServerStatus = "active"
-    status_changed_at: datetime | None = Field(default=None, alias="statusChangedAt")
-    status_message: str | None = Field(default=None, alias="statusMessage")
-    published_at: datetime | None = Field(default=None, alias="publishedAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    is_latest: bool = Field(default=False, alias="isLatest")
+    status_changed_at: datetime | None = None
+    status_message: str | None = None
+    published_at: datetime | None = None
+    updated_at: datetime
+    is_latest: bool = False
 
 
-class MCPRegistryResponseMeta(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    official: MCPRegistryOfficialMetadata = Field(
-        alias="io.modelcontextprotocol.registry/official"
-    )
+class MCPRegistryResponseMeta(APIModel):
+    official: MCPRegistryOfficialMetadata = Field(alias="io.modelcontextprotocol.registry/official")
 
 
-class MCPRegistryServerResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRegistryServerResponse(APIModel):
     server: MCPServerDocument
     meta: MCPRegistryResponseMeta = Field(alias="_meta")
 
 
-class MCPRegistryListMetadata(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRegistryListMetadata(APIModel):
     count: int
-    next_cursor: str = Field(default="", alias="nextCursor")
+    next_cursor: str = ""
 
 
-class MCPRegistryServerListResponse(BaseModel):
+class MCPRegistryServerListResponse(APIModel):
     servers: list[MCPRegistryServerResponse]
     metadata: MCPRegistryListMetadata
 
 
-class MCPServerInstallRequest(BaseModel):
+class MCPServerInstallRequest(APIModel):
     version: str = Field(default="latest", min_length=1, max_length=255)
-    config_name: str = Field(default="default", alias="configName", min_length=1, max_length=100)
-    config_values: dict[str, MCPConfigValue] = Field(default_factory=dict, alias="configValues")
-    config_secret_store_id: UUID | None = Field(default=None, alias="configSecretStoreId")
+    config_name: str = Field(default="default", min_length=1, max_length=100)
+    config_values: dict[str, MCPConfigValue] = Field(default_factory=dict)
+    config_secret_store_id: UUID | None = None
     install_target: MCPServerInstallTarget | None = Field(
         default=None,
-        alias="installTarget",
         max_length=50,
         pattern=r"^(remote|package)(:\d+)?$",
     )
 
 
-class MCPServerBulkUpdateRequest(BaseModel):
-    server_names: list[str] = Field(alias="serverNames", min_length=1)
+class MCPServerBulkUpdateRequest(APIModel):
+    server_names: list[str] = Field(min_length=1)
 
 
-class MCPServerInstallationRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPServerInstallationRead(APIModel):
     id: UUID
-    workspace_id: UUID = Field(alias="workspaceId")
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    installed_version: str = Field(alias="installedVersion")
-    latest_version: str = Field(alias="latestVersion")
-    update_available: bool = Field(alias="updateAvailable")
+    workspace_id: UUID
+    server_name: str
+    config_name: str
+    installed_version: str
+    latest_version: str
+    update_available: bool
     status: str
-    install_type: str = Field(alias="installType")
-    install_path: str = Field(alias="installPath")
-    runtime_config: dict[str, Any] = Field(alias="runtimeConfig")
-    configured_values: dict[str, str] = Field(default_factory=dict, alias="configuredValues")
-    install_error: str | None = Field(default=None, alias="installError")
-    installed_at: datetime = Field(alias="installedAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    install_type: str
+    install_path: str
+    runtime_config: dict[str, Any]
+    configured_values: dict[str, str] = Field(default_factory=dict)
+    install_error: str | None = None
+    installed_at: datetime
+    updated_at: datetime
     server: MCPServerDocument
-    latest_server: MCPServerDocument = Field(alias="latestServer")
+    latest_server: MCPServerDocument
 
 
-class MCPServerInstallationListResponse(BaseModel):
+class MCPServerInstallationListResponse(APIModel):
     installations: list[MCPServerInstallationRead]
     metadata: CursorPageMetadata
 
 
-class MCPOperationJobEventRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPOperationJobEventRead(APIModel):
     id: UUID
-    event_type: str = Field(alias="eventType")
+    event_type: str
     level: str
     message: str
-    progress_current: int | None = Field(default=None, alias="progressCurrent")
-    progress_total: int | None = Field(default=None, alias="progressTotal")
+    progress_current: int | None = None
+    progress_total: int | None = None
     details: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(alias="createdAt")
+    created_at: datetime
 
 
-class MCPOperationJobRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    job_id: UUID = Field(alias="jobId")
-    organization_id: UUID = Field(alias="organizationId")
-    workspace_id: UUID | None = Field(default=None, alias="workspaceId")
+class MCPOperationJobRead(APIModel):
+    job_id: UUID
+    organization_id: UUID
+    workspace_id: UUID | None = None
     operation: str
-    resource_key: str = Field(alias="resourceKey")
+    resource_key: str
     status: MCPOperationJobStatus
-    progress_current: int = Field(alias="progressCurrent")
-    progress_total: int = Field(alias="progressTotal")
-    progress_message: str = Field(alias="progressMessage")
-    attempt_count: int = Field(alias="attemptCount")
-    max_attempts: int = Field(alias="maxAttempts")
+    progress_current: int
+    progress_total: int
+    progress_message: str
+    attempt_count: int
+    max_attempts: int
     result: dict[str, Any] = Field(default_factory=dict)
-    error_code: str = Field(default="", alias="errorCode")
-    error_message: str = Field(default="", alias="errorMessage")
-    cleanup_status: MCPOperationCleanupStatus = Field(alias="cleanupStatus")
-    cleanup_attempt_count: int = Field(alias="cleanupAttemptCount")
-    cleanup_max_attempts: int = Field(alias="cleanupMaxAttempts")
-    cleanup_available_at: datetime | None = Field(default=None, alias="cleanupAvailableAt")
-    cleanup_error: str = Field(default="", alias="cleanupError")
-    started_at: datetime | None = Field(default=None, alias="startedAt")
-    completed_at: datetime | None = Field(default=None, alias="completedAt")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    error_code: str = ""
+    error_message: str = ""
+    cleanup_status: MCPOperationCleanupStatus
+    cleanup_attempt_count: int
+    cleanup_max_attempts: int
+    cleanup_available_at: datetime | None = None
+    cleanup_error: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
     events: list[MCPOperationJobEventRead] = Field(default_factory=list)
 
 
-class MCPServerInstallationToolValidationRequest(BaseModel):
-    tool_name: str = Field(alias="toolName", min_length=1, max_length=255)
+class MCPServerInstallationToolValidationRequest(APIModel):
+    tool_name: str = Field(min_length=1, max_length=255)
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-class MCPServerInstallationToolValidationResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    tool_name: str = Field(alias="toolName")
+class MCPServerInstallationToolValidationResponse(APIModel):
+    server_name: str
+    config_name: str
+    tool_name: str
     status: MCPServerValidationStatus
-    is_error: bool = Field(alias="isError")
+    is_error: bool
     error: str = ""
     result: dict[str, Any] | None = None
-    validated_at: datetime = Field(alias="validatedAt")
+    validated_at: datetime
 
 
-class MCPServerToolRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    server_name: str = Field(alias="serverName")
-    server_version: str = Field(alias="serverVersion")
-    tool_name: str = Field(alias="toolName")
+class MCPServerToolRead(APIModel):
+    server_name: str
+    server_version: str
+    tool_name: str
     title: str
     description: str
-    input_schema: dict[str, Any] = Field(alias="inputSchema")
-    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
-class MCPServerInstallationToolsResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    server_name: str = Field(alias="serverName")
-    config_name: str = Field(alias="configName")
-    server_version: str = Field(alias="serverVersion")
+class MCPServerInstallationToolsResponse(APIModel):
+    server_name: str
+    config_name: str
+    server_version: str
     tools: list[MCPServerToolRead]
     cache: dict[str, Any] = Field(default_factory=dict)
 
 
-class MCPCatalogSourceCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPCatalogSourceCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     provider: MCPCatalogSourceProvider = "wardn_hub"
-    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
-    tenant_id: str = Field(default="", alias="tenantId", max_length=255)
-    sync_mode: MCPCatalogSyncMode = Field(default="latest_only", alias="syncMode")
-    is_enabled: bool = Field(default=True, alias="isEnabled")
-    api_token_secret_store_id: UUID | None = Field(
-        default=None,
-        alias="apiTokenSecretStoreId",
-    )
-    api_token: SecretStr | None = Field(default=None, alias="apiToken")
+    base_url: str = Field(min_length=1, max_length=2048)
+    tenant_id: str = Field(default="", max_length=255)
+    sync_mode: MCPCatalogSyncMode = "latest_only"
+    is_enabled: bool = True
+    api_token_secret_store_id: UUID | None = None
+    api_token: SecretStr | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -284,20 +251,15 @@ class MCPCatalogSourceCreate(BaseModel):
         return value.strip()
 
 
-class MCPCatalogSourceUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPCatalogSourceUpdate(APIModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     provider: MCPCatalogSourceProvider | None = None
-    base_url: str | None = Field(default=None, alias="baseUrl", min_length=1, max_length=2048)
-    tenant_id: str | None = Field(default=None, alias="tenantId", max_length=255)
-    sync_mode: MCPCatalogSyncMode | None = Field(default=None, alias="syncMode")
-    is_enabled: bool | None = Field(default=None, alias="isEnabled")
-    api_token_secret_store_id: UUID | None = Field(
-        default=None,
-        alias="apiTokenSecretStoreId",
-    )
-    api_token: SecretStr | None = Field(default=None, alias="apiToken")
+    base_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    tenant_id: str | None = Field(default=None, max_length=255)
+    sync_mode: MCPCatalogSyncMode | None = None
+    is_enabled: bool | None = None
+    api_token_secret_store_id: UUID | None = None
+    api_token: SecretStr | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -315,34 +277,29 @@ class MCPCatalogSourceUpdate(BaseModel):
         return value.strip() if value is not None else None
 
 
-class MCPCatalogSourceRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class MCPCatalogSourceRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    organization_id: UUID = Field(alias="organizationId")
+    organization_id: UUID
     name: str
     provider: str
-    base_url: str = Field(alias="baseUrl")
-    tenant_id: str = Field(alias="tenantId")
-    sync_mode: str = Field(alias="syncMode")
-    last_success_at: datetime | None = Field(default=None, alias="lastSuccessAt")
-    last_synced_updated_since: datetime | None = Field(
-        default=None,
-        alias="lastSyncedUpdatedSince",
-    )
-    last_error: str = Field(alias="lastError")
-    is_enabled: bool = Field(alias="isEnabled")
-    has_auth_token: bool = Field(alias="hasAuthToken")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    base_url: str
+    tenant_id: str
+    sync_mode: str
+    last_success_at: datetime | None = None
+    last_synced_updated_since: datetime | None = None
+    last_error: str
+    is_enabled: bool
+    has_auth_token: bool
+    created_at: datetime
+    updated_at: datetime
 
 
-class MCPCatalogSourceListResponse(BaseModel):
+class MCPCatalogSourceListResponse(APIModel):
     sources: list[MCPCatalogSourceRead]
 
 
-class MCPCatalogSourceSyncResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPCatalogSourceSyncResponse(APIModel):
     source: MCPCatalogSourceRead
-    synced_count: int = Field(alias="syncedCount")
+    synced_count: int

@@ -23,7 +23,7 @@ export default async function EditLimitPage({ params }: EditLimitPageProps) {
     getLimits(),
   ]);
 
-  if (!organization || !currentUser?.is_superuser) {
+  if (!organization || !currentUser?.isSuperuser) {
     notFound();
   }
 

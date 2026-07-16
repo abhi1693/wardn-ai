@@ -3,7 +3,9 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from app.core.schemas import APIModel
 
 LimitScopeType = Literal["organization", "workspace"]
 UsageBudgetScopeType = Literal["organization", "workspace", "user", "agent"]
@@ -11,59 +13,51 @@ UsageBudgetUnit = Literal["cost_usd", "tokens", "requests"]
 UsageBudgetPeriod = Literal["hour", "day", "month"]
 
 
-class ResourceLimitUpsert(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    scope_type: LimitScopeType = Field(alias="scopeType")
-    scope_id: UUID | None = Field(default=None, alias="scopeId")
-    limit_key: str = Field(alias="limitKey", min_length=1, max_length=120)
+class ResourceLimitUpsert(APIModel):
+    scope_type: LimitScopeType
+    scope_id: UUID | None = None
+    limit_key: str = Field(min_length=1, max_length=120)
     value: int = Field(ge=0)
 
 
-class ResourceLimitRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class ResourceLimitRead(APIModel):
     id: UUID
-    scope_type: str = Field(alias="scopeType")
-    scope_id: UUID | None = Field(alias="scopeId")
-    limit_key: str = Field(alias="limitKey")
+    scope_type: str
+    scope_id: UUID | None
+    limit_key: str
     value: int
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class ResourceLimitListResponse(BaseModel):
+class ResourceLimitListResponse(APIModel):
     limits: list[ResourceLimitRead]
 
 
-class UsageBudgetUpsert(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    scope_type: UsageBudgetScopeType = Field(alias="scopeType")
-    scope_id: UUID = Field(alias="scopeId")
-    budget_key: str = Field(alias="budgetKey", min_length=1, max_length=120)
+class UsageBudgetUpsert(APIModel):
+    scope_type: UsageBudgetScopeType
+    scope_id: UUID
+    budget_key: str = Field(min_length=1, max_length=120)
     value: Decimal = Field(ge=0)
     unit: UsageBudgetUnit | None = None
     period: UsageBudgetPeriod | None = None
-    period_anchor: datetime | None = Field(default=None, alias="periodAnchor")
-    model_filter: str = Field(default="", alias="modelFilter", max_length=255)
+    period_anchor: datetime | None = None
+    model_filter: str = Field(default="", max_length=255)
 
 
-class UsageBudgetRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UsageBudgetRead(APIModel):
     id: UUID
-    scope_type: str = Field(alias="scopeType")
-    scope_id: UUID = Field(alias="scopeId")
-    budget_key: str = Field(alias="budgetKey")
+    scope_type: str
+    scope_id: UUID
+    budget_key: str
     value: Decimal
     unit: str
     period: str
-    period_anchor: datetime | None = Field(default=None, alias="periodAnchor")
-    model_filter: str = Field(alias="modelFilter")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    period_anchor: datetime | None = None
+    model_filter: str
+    created_at: datetime
+    updated_at: datetime
 
 
-class UsageBudgetListResponse(BaseModel):
+class UsageBudgetListResponse(APIModel):
     budgets: list[UsageBudgetRead]

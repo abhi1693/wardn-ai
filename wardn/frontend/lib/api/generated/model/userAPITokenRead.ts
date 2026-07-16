@@ -6,16 +6,16 @@
  */
 
 export interface UserAPITokenRead {
-  created_at: string;
+  createdAt: string;
   description: string;
-  expires_at: string | null;
+  expiresAt: string | null;
   id: string;
-  is_active: boolean;
-  last_used_at: string | null;
+  isActive: boolean;
+  lastUsedAt: string | null;
   name: string;
   organizationIds: string[];
-  token_prefix: string;
-  updated_at: string;
-  user_id: string;
+  tokenPrefix: string;
+  updatedAt: string;
+  userId: string;
   workspaceIds: string[];
 }

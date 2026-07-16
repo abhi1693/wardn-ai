@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
+
+from app.core.schemas import APIModel
 
 SecretStoreProviderName = Literal["openbao"]
 SecretPurpose = Literal[
@@ -17,18 +19,17 @@ SecretPurpose = Literal[
 ]
 
 
-class OpenBaoStoreConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+class OpenBaoStoreConfig(APIModel):
+    model_config = ConfigDict(extra="forbid")
 
-    base_url: str = Field(alias="baseUrl", min_length=1, max_length=2048)
+    base_url: str = Field(min_length=1, max_length=2048)
     kv_mount: str = Field(
         default="secret",
-        alias="kvMount",
         min_length=1,
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
     )
-    timeout_seconds: float = Field(default=15.0, alias="timeoutSeconds", gt=0, le=60)
+    timeout_seconds: float = Field(default=15.0, gt=0, le=60)
 
     @field_validator("base_url")
     @classmethod
@@ -41,60 +42,54 @@ class OpenBaoStoreConfig(BaseModel):
         return value.strip().strip("/")
 
 
-class OpenBaoStoreAuthConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+class OpenBaoStoreAuthConfig(APIModel):
+    model_config = ConfigDict(extra="forbid")
 
     profile: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
-class SecretStoreCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class SecretStoreCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     provider: SecretStoreProviderName = "openbao"
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
+    workspace_id: uuid.UUID | None = None
     config: OpenBaoStoreConfig
-    auth_config: OpenBaoStoreAuthConfig = Field(alias="authConfig")
+    auth_config: OpenBaoStoreAuthConfig
 
 
-class SecretStoreUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class SecretStoreUpdate(APIModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     config: OpenBaoStoreConfig | None = None
-    auth_config: OpenBaoStoreAuthConfig | None = Field(default=None, alias="authConfig")
-    is_active: bool | None = Field(default=None, alias="isActive")
+    auth_config: OpenBaoStoreAuthConfig | None = None
+    is_active: bool | None = None
 
 
-class SecretStoreRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class SecretStoreRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID | None = Field(default=None, alias="organizationId")
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
+    organization_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    created_by_id: uuid.UUID | None = None
     provider: str
     name: str
     config: dict[str, Any]
-    auth_config: dict[str, Any] = Field(alias="authConfig")
-    is_active: bool = Field(alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    auth_config: dict[str, Any]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
-class SecretStoreListResponse(BaseModel):
+class SecretStoreListResponse(APIModel):
     stores: list[SecretStoreRead]
 
 
-class SecretHandleCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    store_id: uuid.UUID = Field(alias="storeId")
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
+class SecretHandleCreate(APIModel):
+    store_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
     purpose: SecretPurpose = "other"
-    display_name: str = Field(alias="displayName", min_length=1, max_length=100)
-    external_ref: str = Field(alias="externalRef", min_length=1, max_length=2048)
-    key_name: str = Field(default="", alias="keyName", max_length=255)
+    display_name: str = Field(min_length=1, max_length=100)
+    external_ref: str = Field(min_length=1, max_length=2048)
+    key_name: str = Field(default="", max_length=255)
     version: str = Field(default="", max_length=100)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -107,50 +102,46 @@ class SecretHandleCreate(BaseModel):
         return self
 
 
-class SecretHandleUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    store_id: uuid.UUID | None = Field(default=None, alias="storeId")
+class SecretHandleUpdate(APIModel):
+    store_id: uuid.UUID | None = None
     purpose: SecretPurpose | None = None
     display_name: str | None = Field(
         default=None,
-        alias="displayName",
         min_length=1,
         max_length=100,
     )
     external_ref: str | None = Field(
         default=None,
-        alias="externalRef",
         min_length=1,
         max_length=2048,
     )
-    key_name: str | None = Field(default=None, alias="keyName", max_length=255)
+    key_name: str | None = Field(default=None, max_length=255)
     version: str | None = Field(default=None, max_length=100)
     metadata: dict[str, Any] | None = None
 
 
-class SecretHandleRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class SecretHandleRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID = Field(alias="organizationId")
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    store_id: uuid.UUID = Field(alias="storeId")
-    created_by_id: uuid.UUID | None = Field(default=None, alias="createdById")
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+    store_id: uuid.UUID
+    created_by_id: uuid.UUID | None = None
     purpose: str
-    display_name: str = Field(alias="displayName")
-    external_ref: str = Field(alias="externalRef")
-    key_name: str = Field(alias="keyName")
+    display_name: str
+    external_ref: str
+    key_name: str
     version: str
     metadata: dict[str, Any] = Field(alias="handleMetadata")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class SecretHandleListResponse(BaseModel):
+class SecretHandleListResponse(APIModel):
     handles: list[SecretHandleRead]
 
 
-class SecretValidationResponse(BaseModel):
+class SecretValidationResponse(APIModel):
     ok: bool
     message: str = ""

@@ -6,14 +6,14 @@
  */
 
 export interface UserRead {
-  created_at: string;
-  display_name: string;
+  createdAt: string;
+  displayName: string;
   email: string;
-  first_name: string;
+  firstName: string;
   id: string;
-  is_active: boolean;
-  is_superuser: boolean;
-  last_login_at: string | null;
-  last_name: string;
-  updated_at: string;
+  isActive: boolean;
+  isSuperuser: boolean;
+  lastLoginAt: string | null;
+  lastName: string;
+  updatedAt: string;
 }

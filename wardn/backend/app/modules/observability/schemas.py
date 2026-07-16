@@ -2,24 +2,22 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
+
+from app.core.schemas import APIModel
 
 
-class LLMModelPriceBase(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMModelPriceBase(APIModel):
     provider: str = Field(min_length=1, max_length=50)
     model: str = Field(min_length=1, max_length=255)
-    input_usd_per_1m_tokens: Decimal = Field(alias="inputUsdPer1mTokens", ge=0)
-    output_usd_per_1m_tokens: Decimal = Field(alias="outputUsdPer1mTokens", ge=0)
+    input_usd_per_1m_tokens: Decimal = Field(ge=0)
+    output_usd_per_1m_tokens: Decimal = Field(ge=0)
     cache_read_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="cacheReadUsdPer1mTokens",
         ge=0,
     )
     cache_write_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="cacheWriteUsdPer1mTokens",
         ge=0,
     )
 
@@ -36,29 +34,23 @@ class LLMModelPriceCreate(LLMModelPriceBase):
     pass
 
 
-class LLMModelPriceUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMModelPriceUpdate(APIModel):
     provider: str | None = Field(default=None, min_length=1, max_length=50)
     model: str | None = Field(default=None, min_length=1, max_length=255)
     input_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="inputUsdPer1mTokens",
         ge=0,
     )
     output_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="outputUsdPer1mTokens",
         ge=0,
     )
     cache_read_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="cacheReadUsdPer1mTokens",
         ge=0,
     )
     cache_write_usd_per_1m_tokens: Decimal | None = Field(
         default=None,
-        alias="cacheWriteUsdPer1mTokens",
         ge=0,
     )
 
@@ -75,176 +67,146 @@ class LLMModelPriceUpdate(BaseModel):
 
 class LLMModelPriceRead(LLMModelPriceBase):
     id: UUID
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    created_at: datetime
+    updated_at: datetime
 
 
-class LLMModelPriceListResponse(BaseModel):
+class LLMModelPriceListResponse(APIModel):
     prices: list[LLMModelPriceRead]
 
 
-class LLMModelPricePrefillResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMModelPricePrefillResponse(APIModel):
     found: bool
     provider: str
     model: str
-    input_usd_per_1m_tokens: Decimal | None = Field(
-        default=None,
-        alias="inputUsdPer1mTokens",
-    )
-    output_usd_per_1m_tokens: Decimal | None = Field(
-        default=None,
-        alias="outputUsdPer1mTokens",
-    )
-    cache_read_usd_per_1m_tokens: Decimal | None = Field(
-        default=None,
-        alias="cacheReadUsdPer1mTokens",
-    )
-    cache_write_usd_per_1m_tokens: Decimal | None = Field(
-        default=None,
-        alias="cacheWriteUsdPer1mTokens",
-    )
+    input_usd_per_1m_tokens: Decimal | None = None
+    output_usd_per_1m_tokens: Decimal | None = None
+    cache_read_usd_per_1m_tokens: Decimal | None = None
+    cache_write_usd_per_1m_tokens: Decimal | None = None
     source: str = ""
-    source_model_id: str = Field(default="", alias="sourceModelId")
-    source_model_name: str = Field(default="", alias="sourceModelName")
+    source_model_id: str = ""
+    source_model_name: str = ""
 
 
-class LLMUsageRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMUsageRead(APIModel):
     id: UUID
-    organization_id: UUID = Field(alias="organizationId")
-    workspace_id: UUID = Field(alias="workspaceId")
-    user_id: UUID | None = Field(default=None, alias="userId")
-    user_email: str = Field(alias="userEmail")
-    user_display_name: str = Field(alias="userDisplayName")
-    agent_id: UUID | None = Field(default=None, alias="agentId")
-    agent_name: str = Field(alias="agentName")
-    agent_run_id: UUID | None = Field(default=None, alias="agentRunId")
+    organization_id: UUID
+    workspace_id: UUID
+    user_id: UUID | None = None
+    user_email: str
+    user_display_name: str
+    agent_id: UUID | None = None
+    agent_name: str
+    agent_run_id: UUID | None = None
     provider: str
     model: str
-    input_tokens: int = Field(alias="inputTokens")
-    output_tokens: int = Field(alias="outputTokens")
-    total_tokens: int = Field(alias="totalTokens")
-    cost_usd: Decimal = Field(alias="costUsd")
-    started_at: datetime = Field(alias="startedAt")
-    finished_at: datetime | None = Field(default=None, alias="finishedAt")
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal
+    started_at: datetime
+    finished_at: datetime | None = None
     status: str
-    trace_id: str = Field(alias="traceId")
-    span_id: str = Field(alias="spanId")
+    trace_id: str
+    span_id: str
     error: str
 
 
-class LLMUsageSummary(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    total_calls: int = Field(alias="totalCalls")
+class LLMUsageSummary(APIModel):
+    total_calls: int
     succeeded: int
     failed: int
     running: int
-    input_tokens: int = Field(alias="inputTokens")
-    output_tokens: int = Field(alias="outputTokens")
-    total_tokens: int = Field(alias="totalTokens")
-    total_cost_usd: Decimal = Field(alias="totalCostUsd")
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost_usd: Decimal
     attributed: int
     unattributed: int
 
 
-class LLMUsageListResponse(BaseModel):
+class LLMUsageListResponse(APIModel):
     summary: LLMUsageSummary
     records: list[LLMUsageRead]
 
 
-class UsageSummaryTotals(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UsageSummaryTotals(APIModel):
     requests: int
     succeeded: int
     failed: int
     running: int
-    input_tokens: int = Field(alias="inputTokens")
-    output_tokens: int = Field(alias="outputTokens")
-    total_tokens: int = Field(alias="totalTokens")
-    cost_usd: Decimal = Field(alias="costUsd")
-    tool_calls: int = Field(alias="toolCalls")
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
 
 
-class UsageSummaryBreakdownRow(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UsageSummaryBreakdownRow(APIModel):
     id: str
     label: str
     requests: int
-    input_tokens: int = Field(alias="inputTokens")
-    output_tokens: int = Field(alias="outputTokens")
-    total_tokens: int = Field(alias="totalTokens")
-    cost_usd: Decimal = Field(alias="costUsd")
-    tool_calls: int = Field(alias="toolCalls")
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
 
 
-class UsageTrendPoint(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UsageTrendPoint(APIModel):
     date: date
     requests: int
-    input_tokens: int = Field(alias="inputTokens")
-    output_tokens: int = Field(alias="outputTokens")
-    total_tokens: int = Field(alias="totalTokens")
-    cost_usd: Decimal = Field(alias="costUsd")
-    tool_calls: int = Field(alias="toolCalls")
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
 
 
-class UsageSummaryResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class UsageSummaryResponse(APIModel):
     summary: UsageSummaryTotals
-    by_user: list[UsageSummaryBreakdownRow] = Field(alias="byUser")
-    by_workspace: list[UsageSummaryBreakdownRow] = Field(alias="byWorkspace")
-    by_agent: list[UsageSummaryBreakdownRow] = Field(alias="byAgent")
-    by_model: list[UsageSummaryBreakdownRow] = Field(alias="byModel")
+    by_user: list[UsageSummaryBreakdownRow]
+    by_workspace: list[UsageSummaryBreakdownRow]
+    by_agent: list[UsageSummaryBreakdownRow]
+    by_model: list[UsageSummaryBreakdownRow]
     daily: list[UsageTrendPoint]
 
 
-class MCPToolUsageRead(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPToolUsageRead(APIModel):
     id: UUID
-    organization_id: UUID | None = Field(default=None, alias="organizationId")
-    workspace_id: UUID | None = Field(default=None, alias="workspaceId")
-    runtime_session_id: UUID | None = Field(default=None, alias="runtimeSessionId")
-    installation_id: UUID = Field(alias="installationId")
-    user_id: UUID | None = Field(default=None, alias="userId")
-    user_email: str = Field(alias="userEmail")
-    user_display_name: str = Field(alias="userDisplayName")
-    agent_id: UUID | None = Field(default=None, alias="agentId")
-    agent_name: str = Field(alias="agentName")
-    agent_run_id: UUID | None = Field(default=None, alias="agentRunId")
-    server_name: str = Field(alias="serverName")
-    server_version: str = Field(alias="serverVersion")
-    tool_name: str = Field(alias="toolName")
+    organization_id: UUID | None = None
+    workspace_id: UUID | None = None
+    runtime_session_id: UUID | None = None
+    installation_id: UUID
+    user_id: UUID | None = None
+    user_email: str
+    user_display_name: str
+    agent_id: UUID | None = None
+    agent_name: str
+    agent_run_id: UUID | None = None
+    server_name: str
+    server_version: str
+    tool_name: str
     status: str
-    started_at: datetime = Field(alias="startedAt")
-    finished_at: datetime | None = Field(default=None, alias="finishedAt")
-    duration_ms: int | None = Field(default=None, alias="durationMs")
-    input_size_bytes: int = Field(alias="inputSizeBytes")
-    output_size_bytes: int = Field(alias="outputSizeBytes")
-    is_error: bool = Field(alias="isError")
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    input_size_bytes: int
+    output_size_bytes: int
+    is_error: bool
     error: str
 
 
-class MCPToolUsageSummary(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPToolUsageSummary(APIModel):
     total: int
     succeeded: int
     failed: int
     running: int
     attributed: int
     unattributed: int
-    average_duration_ms: int | None = Field(default=None, alias="averageDurationMs")
+    average_duration_ms: int | None = None
 
 
-class MCPToolUsageListResponse(BaseModel):
+class MCPToolUsageListResponse(APIModel):
     summary: MCPToolUsageSummary
-    tool_calls: list[MCPToolUsageRead] = Field(alias="toolCalls")
+    tool_calls: list[MCPToolUsageRead]

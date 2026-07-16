@@ -56,7 +56,7 @@ export function canManageModelPrices(
   organizationRole: string,
 ) {
   return (
-    Boolean(currentUser?.is_superuser) ||
+    Boolean(currentUser?.isSuperuser) ||
     organizationRole === "owner" ||
     organizationRole === "admin"
   );

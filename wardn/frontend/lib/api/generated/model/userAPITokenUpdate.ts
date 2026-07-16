@@ -7,8 +7,8 @@
 
 export interface UserAPITokenUpdate {
   description?: string | null;
-  expires_at?: string | null;
-  is_active?: boolean | null;
+  expiresAt?: string | null;
+  isActive?: boolean | null;
   name?: string | null;
   organizationIds?: string[] | null;
   workspaceIds?: string[] | null;

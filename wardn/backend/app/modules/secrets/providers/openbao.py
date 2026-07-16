@@ -242,7 +242,7 @@ class OpenBaoSecretProvider:
         profile = self._auth_profiles().get(profile_name)
         if profile is None:
             raise InvalidSecretStoreError("OpenBao authentication profile is not configured")
-        settings = profile.model_dump()
+        settings = profile.model_dump(by_alias=False)
         settings["profile"] = profile_name
         return settings
 

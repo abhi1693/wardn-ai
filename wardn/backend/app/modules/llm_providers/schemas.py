@@ -2,44 +2,32 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import ConfigDict, Field, SecretStr, model_validator
+
+from app.core.schemas import APIModel
 
 LLMProviderVisibility = Literal["organization", "workspace", "user"]
 LLMProviderAuthMethod = Literal["api_key", "oauth"]
 LLMProviderOAuthProvider = Literal["chatgpt"]
 
 
-class LLMProviderCredentialCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMProviderCredentialCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     provider: str = Field(min_length=1, max_length=50)
     visibility: LLMProviderVisibility = "organization"
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    auth_method: LLMProviderAuthMethod = Field(default="api_key", alias="authMethod")
-    api_key_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="apiKeySecretHandleId",
-    )
-    api_key_secret_store_id: uuid.UUID | None = Field(
-        default=None,
-        alias="apiKeySecretStoreId",
-    )
-    api_key: SecretStr | None = Field(default=None, alias="apiKey", min_length=1)
-    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
-    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthAccessTokenSecretHandleId",
-    )
-    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthRefreshTokenSecretHandleId",
-    )
-    oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
-    oauth_scopes: list[str] = Field(default_factory=list, alias="oauthScopes")
-    oauth_metadata: dict[str, Any] = Field(default_factory=dict, alias="oauthMetadata")
-    base_url: str = Field(default="", alias="baseUrl", max_length=2048)
-    extra_headers: dict[str, str] = Field(default_factory=dict, alias="extraHeaders")
+    workspace_id: uuid.UUID | None = None
+    auth_method: LLMProviderAuthMethod = "api_key"
+    api_key_secret_handle_id: uuid.UUID | None = None
+    api_key_secret_store_id: uuid.UUID | None = None
+    api_key: SecretStr | None = Field(default=None, min_length=1)
+    oauth_provider: LLMProviderOAuthProvider | None = None
+    oauth_access_token_secret_handle_id: uuid.UUID | None = None
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = None
+    oauth_expires_at: datetime | None = None
+    oauth_scopes: list[str] = Field(default_factory=list)
+    oauth_metadata: dict[str, Any] = Field(default_factory=dict)
+    base_url: str = Field(default="", max_length=2048)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_scope(self) -> "LLMProviderCredentialCreate":
@@ -76,106 +64,82 @@ class LLMProviderCredentialCreate(BaseModel):
         return self
 
 
-class LLMProviderCredentialUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class LLMProviderCredentialUpdate(APIModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     provider: str | None = Field(default=None, min_length=1, max_length=50)
     visibility: LLMProviderVisibility | None = None
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    auth_method: LLMProviderAuthMethod | None = Field(default=None, alias="authMethod")
-    api_key_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="apiKeySecretHandleId",
-    )
-    oauth_provider: LLMProviderOAuthProvider | None = Field(default=None, alias="oauthProvider")
-    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthAccessTokenSecretHandleId",
-    )
-    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthRefreshTokenSecretHandleId",
-    )
-    oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
-    oauth_scopes: list[str] | None = Field(default=None, alias="oauthScopes")
-    oauth_metadata: dict[str, Any] | None = Field(default=None, alias="oauthMetadata")
-    base_url: str | None = Field(default=None, alias="baseUrl", max_length=2048)
-    extra_headers: dict[str, str] | None = Field(default=None, alias="extraHeaders")
-    is_active: bool | None = Field(default=None, alias="isActive")
+    workspace_id: uuid.UUID | None = None
+    auth_method: LLMProviderAuthMethod | None = None
+    api_key_secret_handle_id: uuid.UUID | None = None
+    oauth_provider: LLMProviderOAuthProvider | None = None
+    oauth_access_token_secret_handle_id: uuid.UUID | None = None
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = None
+    oauth_expires_at: datetime | None = None
+    oauth_scopes: list[str] | None = None
+    oauth_metadata: dict[str, Any] | None = None
+    base_url: str | None = Field(default=None, max_length=2048)
+    extra_headers: dict[str, str] | None = None
+    is_active: bool | None = None
 
 
-class LLMProviderCredentialRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+class LLMProviderCredentialRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID = Field(alias="organizationId")
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
-    user_id: uuid.UUID | None = Field(default=None, alias="userId")
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
     name: str
     provider: str
     visibility: LLMProviderVisibility
-    auth_method: LLMProviderAuthMethod = Field(alias="authMethod")
-    api_key_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="apiKeySecretHandleId",
-    )
-    base_url: str = Field(alias="baseUrl")
-    extra_headers: dict[str, str] = Field(alias="extraHeaders")
-    oauth_provider: str = Field(alias="oauthProvider")
-    oauth_access_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthAccessTokenSecretHandleId",
-    )
-    oauth_refresh_token_secret_handle_id: uuid.UUID | None = Field(
-        default=None,
-        alias="oauthRefreshTokenSecretHandleId",
-    )
-    oauth_expires_at: datetime | None = Field(default=None, alias="oauthExpiresAt")
-    oauth_scopes: list[str] = Field(alias="oauthScopes")
-    oauth_metadata: dict[str, Any] = Field(alias="oauthMetadata")
-    is_active: bool = Field(alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
+    auth_method: LLMProviderAuthMethod
+    api_key_secret_handle_id: uuid.UUID | None = None
+    base_url: str
+    extra_headers: dict[str, str]
+    oauth_provider: str
+    oauth_access_token_secret_handle_id: uuid.UUID | None = None
+    oauth_refresh_token_secret_handle_id: uuid.UUID | None = None
+    oauth_expires_at: datetime | None = None
+    oauth_scopes: list[str]
+    oauth_metadata: dict[str, Any]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
-class LLMProviderCredentialListResponse(BaseModel):
+class LLMProviderCredentialListResponse(APIModel):
     credentials: list[LLMProviderCredentialRead]
 
 
-class LLMProviderModelRead(BaseModel):
+class LLMProviderModelRead(APIModel):
     id: str
     name: str
 
 
-class LLMProviderModelListResponse(BaseModel):
+class LLMProviderModelListResponse(APIModel):
     models: list[LLMProviderModelRead]
 
 
-class LLMProviderCredentialValidationResponse(BaseModel):
+class LLMProviderCredentialValidationResponse(APIModel):
     ok: bool
     message: str = ""
 
 
-class ChatGPTDeviceAuthorizationStartResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    device_auth_id: str = Field(alias="deviceAuthId")
-    user_code: str = Field(alias="userCode")
-    verification_url: str = Field(alias="verificationUrl")
-    interval_seconds: int = Field(alias="intervalSeconds")
+class ChatGPTDeviceAuthorizationStartResponse(APIModel):
+    device_auth_id: str
+    user_code: str
+    verification_url: str
+    interval_seconds: int
 
 
-class ChatGPTDeviceAuthorizationCompleteRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    device_auth_id: str = Field(alias="deviceAuthId", min_length=1)
-    user_code: str = Field(alias="userCode", min_length=1)
-    credential_id: uuid.UUID | None = Field(default=None, alias="credentialId")
+class ChatGPTDeviceAuthorizationCompleteRequest(APIModel):
+    device_auth_id: str = Field(min_length=1)
+    user_code: str = Field(min_length=1)
+    credential_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    secret_store_id: uuid.UUID | None = Field(default=None, alias="secretStoreId")
+    secret_store_id: uuid.UUID | None = None
     visibility: LLMProviderVisibility = "organization"
-    workspace_id: uuid.UUID | None = Field(default=None, alias="workspaceId")
+    workspace_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def validate_target(self) -> "ChatGPTDeviceAuthorizationCompleteRequest":
@@ -191,6 +155,6 @@ class ChatGPTDeviceAuthorizationCompleteRequest(BaseModel):
         return self
 
 
-class ChatGPTDeviceAuthorizationCompleteResponse(BaseModel):
+class ChatGPTDeviceAuthorizationCompleteResponse(APIModel):
     status: Literal["pending", "connected"]
     credential: LLMProviderCredentialRead | None = None

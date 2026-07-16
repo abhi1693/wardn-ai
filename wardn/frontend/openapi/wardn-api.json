@@ -1047,16 +1047,16 @@
             "title": "Email",
             "type": "string"
           },
-          "first_name": {
+          "firstName": {
             "default": "",
             "maxLength": 150,
-            "title": "First Name",
+            "title": "Firstname",
             "type": "string"
           },
-          "last_name": {
+          "lastName": {
             "default": "",
             "maxLength": 150,
-            "title": "Last Name",
+            "title": "Lastname",
             "type": "string"
           },
           "password": {
@@ -5914,7 +5914,7 @@
             "title": "Description",
             "type": "string"
           },
-          "expires_at": {
+          "expiresAt": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -5924,7 +5924,7 @@
                 "type": "null"
               }
             ],
-            "title": "Expires At"
+            "title": "Expiresat"
           },
           "name": {
             "maxLength": 100,
@@ -5990,16 +5990,16 @@
       },
       "UserAPITokenRead": {
         "properties": {
-          "created_at": {
+          "createdAt": {
             "format": "date-time",
-            "title": "Created At",
+            "title": "Createdat",
             "type": "string"
           },
           "description": {
             "title": "Description",
             "type": "string"
           },
-          "expires_at": {
+          "expiresAt": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -6009,18 +6009,18 @@
                 "type": "null"
               }
             ],
-            "title": "Expires At"
+            "title": "Expiresat"
           },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
-          "is_active": {
-            "title": "Is Active",
+          "isActive": {
+            "title": "Isactive",
             "type": "boolean"
           },
-          "last_used_at": {
+          "lastUsedAt": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -6030,7 +6030,7 @@
                 "type": "null"
               }
             ],
-            "title": "Last Used At"
+            "title": "Lastusedat"
           },
           "name": {
             "title": "Name",
@@ -6044,18 +6044,18 @@
             "title": "Organizationids",
             "type": "array"
           },
-          "token_prefix": {
-            "title": "Token Prefix",
+          "tokenPrefix": {
+            "title": "Tokenprefix",
             "type": "string"
           },
-          "updated_at": {
+          "updatedAt": {
             "format": "date-time",
-            "title": "Updated At",
+            "title": "Updatedat",
             "type": "string"
           },
-          "user_id": {
+          "userId": {
             "format": "uuid",
-            "title": "User Id",
+            "title": "Userid",
             "type": "string"
           },
           "workspaceIds": {
@@ -6069,17 +6069,17 @@
         },
         "required": [
           "id",
-          "user_id",
+          "userId",
           "name",
           "description",
-          "token_prefix",
+          "tokenPrefix",
           "organizationIds",
           "workspaceIds",
-          "is_active",
-          "expires_at",
-          "last_used_at",
-          "created_at",
-          "updated_at"
+          "isActive",
+          "expiresAt",
+          "lastUsedAt",
+          "createdAt",
+          "updatedAt"
         ],
         "title": "UserAPITokenRead",
         "type": "object"
@@ -6098,7 +6098,7 @@
             ],
             "title": "Description"
           },
-          "expires_at": {
+          "expiresAt": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -6108,9 +6108,9 @@
                 "type": "null"
               }
             ],
-            "title": "Expires At"
+            "title": "Expiresat"
           },
-          "is_active": {
+          "isActive": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -6119,7 +6119,7 @@
                 "type": "null"
               }
             ],
-            "title": "Is Active"
+            "title": "Isactive"
           },
           "name": {
             "anyOf": [
@@ -6170,13 +6170,13 @@
       },
       "UserRead": {
         "properties": {
-          "created_at": {
+          "createdAt": {
             "format": "date-time",
-            "title": "Created At",
+            "title": "Createdat",
             "type": "string"
           },
-          "display_name": {
-            "title": "Display Name",
+          "displayName": {
+            "title": "Displayname",
             "type": "string"
           },
           "email": {
@@ -6184,8 +6184,8 @@
             "title": "Email",
             "type": "string"
           },
-          "first_name": {
-            "title": "First Name",
+          "firstName": {
+            "title": "Firstname",
             "type": "string"
           },
           "id": {
@@ -6193,15 +6193,15 @@
             "title": "Id",
             "type": "string"
           },
-          "is_active": {
-            "title": "Is Active",
+          "isActive": {
+            "title": "Isactive",
             "type": "boolean"
           },
-          "is_superuser": {
-            "title": "Is Superuser",
+          "isSuperuser": {
+            "title": "Issuperuser",
             "type": "boolean"
           },
-          "last_login_at": {
+          "lastLoginAt": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -6211,29 +6211,29 @@
                 "type": "null"
               }
             ],
-            "title": "Last Login At"
+            "title": "Lastloginat"
           },
-          "last_name": {
-            "title": "Last Name",
+          "lastName": {
+            "title": "Lastname",
             "type": "string"
           },
-          "updated_at": {
+          "updatedAt": {
             "format": "date-time",
-            "title": "Updated At",
+            "title": "Updatedat",
             "type": "string"
           }
         },
         "required": [
           "id",
           "email",
-          "first_name",
-          "last_name",
-          "display_name",
-          "is_active",
-          "is_superuser",
-          "last_login_at",
-          "created_at",
-          "updated_at"
+          "firstName",
+          "lastName",
+          "displayName",
+          "isActive",
+          "isSuperuser",
+          "lastLoginAt",
+          "createdAt",
+          "updatedAt"
         ],
         "title": "UserRead",
         "type": "object"

@@ -2,16 +2,18 @@ import base64
 import json
 from collections.abc import Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.core.schemas import APIModel
 
 
 class InvalidCursorError(ValueError):
     pass
 
 
-class CursorPageMetadata(BaseModel):
+class CursorPageMetadata(APIModel):
     count: int = Field(ge=0)
-    next_cursor: str = Field(default="", alias="nextCursor")
+    next_cursor: str = ""
 
 
 def encode_cursor(*values: str) -> str:

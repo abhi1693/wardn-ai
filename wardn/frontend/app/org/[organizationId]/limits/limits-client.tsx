@@ -57,7 +57,7 @@ export function LimitsClient({
     [filter, initialLimits]
   );
 
-  if (!currentUser?.is_superuser) {
+  if (!currentUser?.isSuperuser) {
     return (
       <Card>
         <CardHeader>

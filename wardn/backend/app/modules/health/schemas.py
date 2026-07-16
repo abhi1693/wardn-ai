@@ -1,5 +1,5 @@
-from pydantic import BaseModel
+from app.core.schemas import APIModel
 
 
-class HealthStatus(BaseModel):
+class HealthStatus(APIModel):
     status: str
