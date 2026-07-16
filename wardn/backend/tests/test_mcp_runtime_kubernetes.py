@@ -725,7 +725,7 @@ def test_kubernetes_provider_runtime_spec_uses_streamable_http_transport(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
         lambda: FakeSettings(),
     )
     monkeypatch.setattr(
@@ -2286,7 +2286,7 @@ def test_kubernetes_reconciler_waits_for_gateway_ready(monkeypatch) -> None:
         return next(statuses)
 
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_gateway_health",
+        "app.modules.mcp_runtime.providers.kubernetes_reconciler.get_gateway_health",
         get_gateway_health,
     )
     ticks = iter([0, 1, 2])
@@ -2318,7 +2318,7 @@ def test_kubernetes_reconciler_can_skip_ingress_tls_verification(monkeypatch) ->
         return {"ready": True, "status": 200, "body": "ok"}
 
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_gateway_health",
+        "app.modules.mcp_runtime.providers.kubernetes_reconciler.get_gateway_health",
         get_gateway_health,
     )
     ticks = iter([0, 1])
@@ -2344,7 +2344,11 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.get_settings",
         lambda: FakeSettings(),
     )
     monkeypatch.setattr(
@@ -2417,7 +2421,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.mcp_client.call_tool",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.mcp_client.call_tool",
         call_tool,
     )
 
@@ -2460,7 +2464,11 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: IngressUnverifiedTlsSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.get_settings",
         lambda: IngressUnverifiedTlsSettings(),
     )
     monkeypatch.setattr(
@@ -2528,7 +2536,7 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.mcp_client.call_tool",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.mcp_client.call_tool",
         call_tool,
     )
 
@@ -2547,7 +2555,11 @@ def test_kubernetes_provider_bubbles_supergateway_call_errors(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.get_settings",
         lambda: FakeSettings(),
     )
     monkeypatch.setattr(
@@ -2596,7 +2608,7 @@ def test_kubernetes_provider_bubbles_supergateway_call_errors(
         raise RuntimeError("gateway failed")
 
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.mcp_client.call_tool",
+        "app.modules.mcp_runtime.providers.kubernetes_provider.mcp_client.call_tool",
         call_tool,
     )
 
@@ -2648,7 +2660,7 @@ def test_kubernetes_provider_does_not_load_client_without_runtime_session(
 
 def test_kubernetes_provider_stop_runtime_scales_session_deployment_down(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_reconciler.get_settings",
         lambda: FakeSettings(),
     )
     workspace_id = uuid.uuid4()
@@ -2682,7 +2694,7 @@ def test_kubernetes_provider_stop_runtime_scales_session_deployment_down(monkeyp
 
 def test_kubernetes_provider_stop_runtime_can_delete_session_resources(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.modules.mcp_runtime.providers.kubernetes.get_settings",
+        "app.modules.mcp_runtime.providers.kubernetes_reconciler.get_settings",
         lambda: FakeSettings(),
     )
     workspace_id = uuid.uuid4()
