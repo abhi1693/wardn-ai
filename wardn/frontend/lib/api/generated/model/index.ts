@@ -56,6 +56,7 @@ export * from './conversationMessageReadPartsItem';
 export * from './conversationMessageReadRole';
 export * from './cursorPageMetadata';
 export * from './errorResponse';
+export * from './errorResponseErrors';
 export * from './guardrailPolicyCreate';
 export * from './guardrailPolicyCreateConditions';
 export * from './guardrailPolicyCreateMode';

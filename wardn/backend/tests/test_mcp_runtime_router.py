@@ -195,7 +195,9 @@ def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
     )
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "runtime session not found"}
+    assert response.json()["detail"] == "runtime session not found"
+    assert response.json()["code"] == "http_404"
+    assert response.json()["requestId"] == response.headers["x-request-id"]
 
 
 def test_stop_runtime_session_route_leaves_transaction_to_dependency(monkeypatch) -> None:
@@ -459,7 +461,9 @@ def test_workspace_get_runtime_session_route_returns_404_for_out_of_scope_sessio
     )
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "runtime session not found"}
+    assert response.json()["detail"] == "runtime session not found"
+    assert response.json()["code"] == "http_404"
+    assert response.json()["requestId"] == response.headers["x-request-id"]
 
 
 def test_workspace_list_runtime_session_events_route_filters_workspace(monkeypatch) -> None:

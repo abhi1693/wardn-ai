@@ -1,27 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
-from app.modules.limits.exceptions import LimitExceededError
-from app.modules.organizations.exceptions import (
-    OrganizationAccessDeniedError,
-    OrganizationNotFoundError,
-    WorkspaceAccessDeniedError,
-    WorkspaceNotFoundError,
-)
-from app.modules.secrets.exceptions import (
-    DuplicateSecretHandleError,
-    DuplicateSecretStoreError,
-    InvalidSecretHandleError,
-    InvalidSecretStoreError,
-    SecretHandleNotFoundError,
-    SecretProviderError,
-    SecretStoreNotFoundError,
-)
 from app.modules.secrets.schemas import (
     SecretHandleCreate,
     SecretHandleListResponse,
@@ -56,18 +40,6 @@ router = APIRouter(
 )
 
 
-def raise_access_error(exc: Exception) -> None:
-    if isinstance(exc, (OrganizationNotFoundError, WorkspaceNotFoundError)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    if isinstance(exc, (OrganizationAccessDeniedError, WorkspaceAccessDeniedError)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, LimitExceededError):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, (InvalidSecretStoreError, InvalidSecretHandleError, SecretProviderError)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    raise exc
-
-
 @router.get(
     "/stores",
     response_model=SecretStoreListResponse,
@@ -83,16 +55,12 @@ async def list_secret_stores_route(
     current_user: Annotated[User, Depends(get_current_user)],
     workspace_id: Annotated[UUID | None, Query(alias="workspaceId")] = None,
 ) -> SecretStoreListResponse:
-    try:
-        return await list_secret_stores(
-            session,
-            current_user,
-            organization_id,
-            workspace_id=workspace_id,
-        )
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_secret_stores(
+        session,
+        current_user,
+        organization_id,
+        workspace_id=workspace_id,
+    )
 
 
 @router.post(
@@ -113,14 +81,7 @@ async def create_secret_store_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretStoreRead:
-    try:
-        response = await create_secret_store(session, current_user, organization_id, payload)
-    except DuplicateSecretStoreError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await create_secret_store(session, current_user, organization_id, payload)
 
 
 @router.get(
@@ -138,13 +99,7 @@ async def get_secret_store_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretStoreRead:
-    try:
-        return await get_secret_store(session, current_user, organization_id, store_id)
-    except SecretStoreNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await get_secret_store(session, current_user, organization_id, store_id)
 
 
 @router.patch(
@@ -165,22 +120,13 @@ async def update_secret_store_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretStoreRead:
-    try:
-        response = await update_secret_store(
-            session,
-            current_user,
-            organization_id,
-            store_id,
-            payload,
-        )
-    except SecretStoreNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DuplicateSecretStoreError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await update_secret_store(
+        session,
+        current_user,
+        organization_id,
+        store_id,
+        payload,
+    )
 
 
 @router.delete(
@@ -198,13 +144,7 @@ async def delete_secret_store_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    try:
-        await delete_secret_store(session, current_user, organization_id, store_id)
-    except SecretStoreNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    await delete_secret_store(session, current_user, organization_id, store_id)
 
 
 @router.post(
@@ -222,13 +162,7 @@ async def validate_secret_store_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretValidationResponse:
-    try:
-        return await validate_secret_store(session, current_user, organization_id, store_id)
-    except SecretStoreNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await validate_secret_store(session, current_user, organization_id, store_id)
 
 
 @router.get(
@@ -246,16 +180,12 @@ async def list_secret_handles_route(
     current_user: Annotated[User, Depends(get_current_user)],
     workspace_id: Annotated[UUID | None, Query(alias="workspaceId")] = None,
 ) -> SecretHandleListResponse:
-    try:
-        return await list_secret_handles(
-            session,
-            current_user,
-            organization_id,
-            workspace_id=workspace_id,
-        )
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_secret_handles(
+        session,
+        current_user,
+        organization_id,
+        workspace_id=workspace_id,
+    )
 
 
 @router.post(
@@ -276,14 +206,7 @@ async def create_secret_handle_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretHandleRead:
-    try:
-        response = await create_secret_handle(session, current_user, organization_id, payload)
-    except DuplicateSecretHandleError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await create_secret_handle(session, current_user, organization_id, payload)
 
 
 @router.get(
@@ -301,13 +224,7 @@ async def get_secret_handle_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretHandleRead:
-    try:
-        return await get_secret_handle(session, current_user, organization_id, handle_id)
-    except SecretHandleNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await get_secret_handle(session, current_user, organization_id, handle_id)
 
 
 @router.patch(
@@ -328,22 +245,13 @@ async def update_secret_handle_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretHandleRead:
-    try:
-        response = await update_secret_handle(
-            session,
-            current_user,
-            organization_id,
-            handle_id,
-            payload,
-        )
-    except SecretHandleNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DuplicateSecretHandleError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await update_secret_handle(
+        session,
+        current_user,
+        organization_id,
+        handle_id,
+        payload,
+    )
 
 
 @router.delete(
@@ -361,13 +269,7 @@ async def delete_secret_handle_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    try:
-        await delete_secret_handle(session, current_user, organization_id, handle_id)
-    except SecretHandleNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    await delete_secret_handle(session, current_user, organization_id, handle_id)
 
 
 @router.post(
@@ -386,10 +288,4 @@ async def validate_secret_handle_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SecretValidationResponse:
-    try:
-        return await validate_secret_handle(session, current_user, organization_id, handle_id)
-    except SecretHandleNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await validate_secret_handle(session, current_user, organization_id, handle_id)

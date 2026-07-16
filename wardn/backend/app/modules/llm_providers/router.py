@@ -1,18 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
-from app.modules.limits.exceptions import LimitExceededError
-from app.modules.llm_providers.exceptions import (
-    DuplicateLLMProviderCredentialError,
-    InvalidLLMProviderCredentialAuthError,
-    InvalidLLMProviderCredentialScopeError,
-    LLMProviderCredentialNotFoundError,
-)
 from app.modules.llm_providers.schemas import (
     ChatGPTDeviceAuthorizationCompleteRequest,
     ChatGPTDeviceAuthorizationCompleteResponse,
@@ -34,12 +27,6 @@ from app.modules.llm_providers.service import (
     update_provider_credential,
     validate_provider_credential_by_id,
 )
-from app.modules.organizations.exceptions import (
-    OrganizationAccessDeniedError,
-    OrganizationNotFoundError,
-    WorkspaceAccessDeniedError,
-    WorkspaceNotFoundError,
-)
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
 
@@ -47,20 +34,6 @@ router = APIRouter(
     prefix="/organizations/{organization_id}/llm/provider-credentials",
     tags=["llm-provider-credentials"],
 )
-
-
-def raise_access_error(exc: Exception) -> None:
-    if isinstance(exc, (OrganizationNotFoundError, WorkspaceNotFoundError)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    if isinstance(exc, (OrganizationAccessDeniedError, WorkspaceAccessDeniedError)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, LimitExceededError):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, InvalidLLMProviderCredentialScopeError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    if isinstance(exc, InvalidLLMProviderCredentialAuthError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    raise exc
 
 
 @router.get(
@@ -77,11 +50,7 @@ async def list_provider_credentials_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LLMProviderCredentialListResponse:
-    try:
-        return await list_provider_credentials(session, current_user, organization_id)
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_provider_credentials(session, current_user, organization_id)
 
 
 @router.post(
@@ -102,19 +71,12 @@ async def create_provider_credential_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LLMProviderCredentialRead:
-    try:
-        response = await create_provider_credential(
-            session,
-            current_user,
-            organization_id,
-            payload,
-        )
-    except DuplicateLLMProviderCredentialError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await create_provider_credential(
+        session,
+        current_user,
+        organization_id,
+        payload,
+    )
 
 
 @router.post(
@@ -132,11 +94,7 @@ async def start_chatgpt_device_authorization_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatGPTDeviceAuthorizationStartResponse:
-    try:
-        return await start_chatgpt_device_authorization(session, current_user, organization_id)
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await start_chatgpt_device_authorization(session, current_user, organization_id)
 
 
 @router.post(
@@ -156,21 +114,12 @@ async def complete_chatgpt_device_authorization_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatGPTDeviceAuthorizationCompleteResponse:
-    try:
-        response = await complete_chatgpt_device_authorization(
-            session,
-            current_user,
-            organization_id,
-            payload,
-        )
-    except LLMProviderCredentialNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DuplicateLLMProviderCredentialError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await complete_chatgpt_device_authorization(
+        session,
+        current_user,
+        organization_id,
+        payload,
+    )
 
 
 @router.patch(
@@ -191,22 +140,13 @@ async def update_provider_credential_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LLMProviderCredentialRead:
-    try:
-        response = await update_provider_credential(
-            session,
-            current_user,
-            organization_id,
-            credential_id,
-            payload,
-        )
-    except LLMProviderCredentialNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DuplicateLLMProviderCredentialError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await update_provider_credential(
+        session,
+        current_user,
+        organization_id,
+        credential_id,
+        payload,
+    )
 
 
 @router.get(
@@ -225,18 +165,12 @@ async def list_provider_credential_models_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LLMProviderModelListResponse:
-    try:
-        return await list_provider_credential_models(
-            session,
-            current_user,
-            organization_id,
-            credential_id,
-        )
-    except LLMProviderCredentialNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_provider_credential_models(
+        session,
+        current_user,
+        organization_id,
+        credential_id,
+    )
 
 
 @router.post(
@@ -254,18 +188,12 @@ async def validate_provider_credential_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LLMProviderCredentialValidationResponse:
-    try:
-        return await validate_provider_credential_by_id(
-            session,
-            current_user,
-            organization_id,
-            credential_id,
-        )
-    except LLMProviderCredentialNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await validate_provider_credential_by_id(
+        session,
+        current_user,
+        organization_id,
+        credential_id,
+    )
 
 
 @router.delete(
@@ -283,10 +211,4 @@ async def delete_provider_credential_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    try:
-        await delete_provider_credential(session, current_user, organization_id, credential_id)
-    except LLMProviderCredentialNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    await delete_provider_credential(session, current_user, organization_id, credential_id)

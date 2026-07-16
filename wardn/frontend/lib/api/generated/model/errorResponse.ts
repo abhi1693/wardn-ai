@@ -4,7 +4,15 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { ErrorResponseErrors } from './errorResponseErrors';
 
 export interface ErrorResponse {
+  code: string;
   detail: string;
+  errors?: ErrorResponseErrors;
+  instance: string;
+  requestId: string;
+  status: number;
+  title: string;
+  type: string;
 }

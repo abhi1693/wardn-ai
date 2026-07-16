@@ -1,19 +1,12 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from app.core.pagination import InvalidCursorError
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
-from app.modules.agents.exceptions import (
-    AgentNotFoundError,
-    DuplicateAgentError,
-    InvalidAgentScopeError,
-    InvalidAgentToolAssignmentError,
-)
 from app.modules.agents.schemas import (
     AgentAvailableToolListResponse,
     AgentChatRequest,
@@ -30,7 +23,6 @@ from app.modules.agents.schemas import (
     AgentUpdate,
 )
 from app.modules.agents.service import (
-    AgentChatProviderError,
     create_workspace_agent,
     decide_agent_tool_approval,
     delete_agent,
@@ -45,13 +37,6 @@ from app.modules.agents.service import (
     replace_agent_tools,
     stream_agent_chat,
     update_agent,
-)
-from app.modules.limits.exceptions import LimitExceededError
-from app.modules.organizations.exceptions import (
-    OrganizationAccessDeniedError,
-    OrganizationNotFoundError,
-    WorkspaceAccessDeniedError,
-    WorkspaceNotFoundError,
 )
 from app.modules.users.dependencies import get_current_user, get_stream_current_user
 from app.modules.users.models import User
@@ -82,18 +67,6 @@ async def prime_stream(stream):
     return iterator()
 
 
-def raise_access_error(exc: Exception) -> None:
-    if isinstance(exc, (OrganizationNotFoundError, WorkspaceNotFoundError)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    if isinstance(exc, (OrganizationAccessDeniedError, WorkspaceAccessDeniedError)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, LimitExceededError):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    if isinstance(exc, (InvalidAgentScopeError, InvalidAgentToolAssignmentError)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    raise exc
-
-
 @workspace_router.get(
     "",
     response_model=AgentListResponse,
@@ -111,20 +84,14 @@ async def list_workspace_agents_route(
     cursor: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> AgentListResponse:
-    try:
-        return await list_agents(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-            cursor=cursor,
-            limit=limit,
-        )
-    except InvalidCursorError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_agents(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @workspace_router.post(
@@ -146,20 +113,13 @@ async def create_workspace_agent_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRead:
-    try:
-        response = await create_workspace_agent(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-            payload,
-        )
-    except DuplicateAgentError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await create_workspace_agent(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
 
 
 @workspace_router.post(
@@ -178,17 +138,12 @@ async def quick_start_workspace_agent_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentConversationResponse:
-    try:
-        response = await quick_start_workspace_agent(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-        )
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await quick_start_workspace_agent(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+    )
 
 
 @workspace_router.get(
@@ -207,19 +162,13 @@ async def get_workspace_conversation_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentConversationResponse:
-    try:
-        return await get_workspace_conversation(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-            conversation_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await get_workspace_conversation(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        conversation_id,
+    )
 
 
 @workspace_runs_router.get(
@@ -237,16 +186,12 @@ async def list_workspace_agent_runs_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRunListResponse:
-    try:
-        return await list_workspace_agent_runs(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-        )
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_workspace_agent_runs(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+    )
 
 
 @workspace_runs_router.get(
@@ -265,19 +210,13 @@ async def get_workspace_agent_run_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRunDetailResponse:
-    try:
-        return await get_workspace_agent_run(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-            agent_run_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await get_workspace_agent_run(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_run_id,
+    )
 
 
 @workspace_router.get(
@@ -295,16 +234,12 @@ async def list_workspace_agent_available_tools_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentAvailableToolListResponse:
-    try:
-        return await list_available_agent_tools(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-        )
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_available_agent_tools(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+    )
 
 
 @workspace_router.get(
@@ -323,13 +258,7 @@ async def get_workspace_agent_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRead:
-    try:
-        return await get_agent(session, current_user, organization_id, agent_id, workspace_id)
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await get_agent(session, current_user, organization_id, agent_id, workspace_id)
 
 
 @workspace_router.patch(
@@ -354,23 +283,14 @@ async def update_workspace_agent_route(
     workspace_payload = payload.model_copy(
         update={"scope": "workspace", "workspace_id": workspace_id}
     )
-    try:
-        response = await update_agent(
-            session,
-            current_user,
-            organization_id,
-            agent_id,
-            workspace_payload,
-            workspace_id=workspace_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DuplicateAgentError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await update_agent(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        workspace_payload,
+        workspace_id=workspace_id,
+    )
 
 
 @workspace_router.delete(
@@ -389,19 +309,13 @@ async def delete_workspace_agent_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    try:
-        await delete_agent(
-            session,
-            current_user,
-            organization_id,
-            agent_id,
-            workspace_id=workspace_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    await delete_agent(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        workspace_id=workspace_id,
+    )
 
 
 @workspace_router.post(
@@ -430,26 +344,15 @@ async def chat_workspace_agent_route(
     ],
     current_user: Annotated[User, Depends(get_stream_current_user)],
 ) -> StreamingResponse:
-    try:
-        stream = await stream_agent_chat(
-            session,
-            current_user,
-            organization_id,
-            agent_id,
-            payload,
-            workspace_id=workspace_id,
-        )
-        stream = await prime_stream(stream)
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except AgentChatProviderError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    stream = await stream_agent_chat(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        payload,
+        workspace_id=workspace_id,
+    )
+    stream = await prime_stream(stream)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
@@ -481,22 +384,15 @@ async def decide_workspace_agent_tool_approval_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentToolApprovalDecisionResponse:
-    try:
-        response = await decide_agent_tool_approval(
-            session,
-            current_user,
-            organization_id,
-            workspace_id,
-            agent_id,
-            approval_id,
-            payload,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await decide_agent_tool_approval(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_id,
+        approval_id,
+        payload,
+    )
 
 
 @workspace_router.get(
@@ -516,19 +412,13 @@ async def list_workspace_agent_tools_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentToolListResponse:
-    try:
-        return await list_agent_tools(
-            session,
-            current_user,
-            organization_id,
-            agent_id,
-            workspace_id=workspace_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
+    return await list_agent_tools(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        workspace_id=workspace_id,
+    )
 
 
 @workspace_router.put(
@@ -549,18 +439,11 @@ async def replace_workspace_agent_tools_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentToolListResponse:
-    try:
-        response = await replace_agent_tools(
-            session,
-            current_user,
-            organization_id,
-            agent_id,
-            payload,
-            workspace_id=workspace_id,
-        )
-    except AgentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise_access_error(exc)
-        raise
-    return response
+    return await replace_agent_tools(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        payload,
+        workspace_id=workspace_id,
+    )
