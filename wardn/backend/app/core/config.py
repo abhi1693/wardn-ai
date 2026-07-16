@@ -2,7 +2,7 @@ from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_PACKAGE_NAME = "wardn-api"
@@ -122,6 +122,17 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [email.strip().casefold() for email in value.split(",") if email.strip()]
         return value
+
+    @model_validator(mode="after")
+    def require_isolated_mcp_runtime_outside_local(self) -> "Settings":
+        environment = self.environment.strip().casefold()
+        runtime_provider = self.mcp_runtime_provider.strip().casefold()
+        if environment != "local" and runtime_provider in {"auto", "local"}:
+            raise ValueError(
+                "local MCP process runtimes are only allowed when WARDN_ENVIRONMENT=local; "
+                "configure WARDN_MCP_RUNTIME_PROVIDER=kubernetes or remote"
+            )
+        return self
 
 
 @lru_cache

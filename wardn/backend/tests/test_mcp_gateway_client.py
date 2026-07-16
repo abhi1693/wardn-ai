@@ -8,6 +8,7 @@ from app.modules.mcp_gateway.client import (
     call_stdio_tool,
     list_stdio_tools,
     send_remote_request,
+    stdio_process_environment,
 )
 
 
@@ -196,3 +197,25 @@ def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
     )
 
     assert seen["headers"]["mcp-protocol-version"] == "2025-06-18"
+
+
+def test_stdio_process_environment_only_inherits_allowlisted_values() -> None:
+    environment = stdio_process_environment(
+        {"MCP_API_KEY": "explicit-secret", "PATH": "/custom/bin"},
+        ambient_environment={
+            "HOME": "/home/wardn",
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin",
+            "WARDN_DATABASE_URL": "database-secret",
+            "WARDN_SESSION_SECRET": "session-secret",
+            "KUBERNETES_SERVICE_HOST": "10.0.0.1",
+            "HTTPS_PROXY": "https://user:password@proxy.example",
+        },
+    )
+
+    assert environment == {
+        "HOME": "/home/wardn",
+        "LANG": "C.UTF-8",
+        "PATH": "/custom/bin",
+        "MCP_API_KEY": "explicit-secret",
+    }

@@ -4,7 +4,7 @@ import select
 import ssl
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Event
 from typing import Any
@@ -17,6 +17,16 @@ from app.modules.mcp_registry.installer import parse_mcp_response_body
 PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     {PROTOCOL_VERSION, "2025-03-26", "2024-11-05", "2024-10-07"}
+)
+STDIO_AMBIENT_ENVIRONMENT_KEYS = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TMPDIR",
+    "TZ",
 )
 
 
@@ -149,6 +159,21 @@ def open_remote_session(
     )
 
 
+def stdio_process_environment(
+    environment: Mapping[str, str],
+    *,
+    ambient_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a minimal child environment without leaking backend credentials."""
+    ambient = os.environ if ambient_environment is None else ambient_environment
+    child_environment = {
+        key: ambient[key] for key in STDIO_AMBIENT_ENVIRONMENT_KEYS if key in ambient
+    }
+    child_environment.setdefault("PATH", os.defpath)
+    child_environment.update(environment)
+    return child_environment
+
+
 def start_stdio_session(
     command: str,
     args: list[str],
@@ -156,7 +181,7 @@ def start_stdio_session(
     cwd: str,
     environment: dict[str, str],
 ) -> MCPStdioSession:
-    env = {**os.environ, **environment}
+    env = stdio_process_environment(environment)
     try:
         process = subprocess.Popen(
             [command, *args],
