@@ -667,6 +667,19 @@ def test_mcp_operation_job_openapi_contract() -> None:
         }
 
 
+def test_mcp_catalog_sync_is_an_accepted_operation() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    sync = schema["paths"][
+        "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync"
+    ]["post"]
+
+    assert sync["operationId"] == "organization_mcp_catalog_sync_source"
+    assert sync["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPOperationJobRead"
+    }
+    assert "200" not in sync["responses"]
+
+
 def test_mcp_gateway_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     top_level_gateway = schema["paths"]["/api/v1/mcp/gateway"]["post"]

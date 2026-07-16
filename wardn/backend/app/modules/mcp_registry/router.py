@@ -10,6 +10,7 @@ from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.limits.exceptions import LimitExceededError
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.mcp_registry.catalog_jobs import enqueue_catalog_source_sync
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPCatalogSourceError,
     DuplicateMCPServerVersionError,
@@ -31,7 +32,6 @@ from app.modules.mcp_registry.schemas import (
     MCPCatalogSourceCreate,
     MCPCatalogSourceListResponse,
     MCPCatalogSourceRead,
-    MCPCatalogSourceSyncResponse,
     MCPCatalogSourceUpdate,
     MCPOperationJobRead,
     MCPRegistryServerListResponse,
@@ -59,7 +59,6 @@ from app.modules.mcp_registry.service import (
     list_servers,
     list_versions,
     set_default_server_version,
-    sync_catalog_source,
     uninstall_installation,
     uninstall_server,
     update_catalog_source,
@@ -294,7 +293,8 @@ async def delete_organization_mcp_catalog_source(
 
 @organization_catalog_router.post(
     "/sources/{source_id}/sync",
-    response_model=MCPCatalogSourceSyncResponse,
+    response_model=MCPOperationJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
     operation_id="organization_mcp_catalog_sync_source",
     responses={
         status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
@@ -306,14 +306,18 @@ async def sync_organization_mcp_catalog_source(
     source_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> MCPCatalogSourceSyncResponse:
+) -> MCPOperationJobRead:
     await require_organization_admin_or_404(session, current_user, organization_id)
     try:
-        response = await sync_catalog_source(session, organization_id, source_id)
+        response = await enqueue_catalog_source_sync(
+            session,
+            organization_id=organization_id,
+            source_id=source_id,
+            user=current_user,
+        )
     except MCPCatalogSourceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        await session.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await session.commit()
     return response

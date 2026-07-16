@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { MCPOperationJobRead } from "@/lib/api/generated/model";
 
 import type { MCPCatalogSource } from "./catalog-source-types";
 
@@ -22,6 +23,18 @@ type CatalogSourcesClientProps = {
   organizationId: string;
   sources: MCPCatalogSource[];
 };
+
+type CatalogSyncResult = {
+  source: MCPCatalogSource;
+  syncedCount: number;
+};
+
+const JOB_POLL_INTERVAL_MS = 1_000;
+const JOB_POLL_ATTEMPTS = 600;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
 
 function providerLabel(provider: string) {
   if (provider === "wardn_hub") {
@@ -58,6 +71,39 @@ async function responseErrorMessage(response: Response, fallback: string) {
   }
 }
 
+async function waitForCatalogSync(
+  organizationId: string,
+  initialJob: MCPOperationJobRead,
+  onProgress: (message: string) => void
+): Promise<CatalogSyncResult> {
+  let job = initialJob;
+  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
+    onProgress(job.progressMessage || "Catalog synchronization queued");
+    if (job.status === "succeeded") {
+      const result = job.result;
+      if (!result?.source || typeof result.syncedCount !== "number") {
+        throw new Error("Catalog synchronization completed without a result.");
+      }
+      return result as CatalogSyncResult;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.errorMessage || "Catalog synchronization failed.");
+    }
+    await wait(JOB_POLL_INTERVAL_MS);
+    const response = await fetch(
+      `/api/organizations/${encodeURIComponent(
+        organizationId
+      )}/mcp/catalog/jobs/${encodeURIComponent(job.jobId)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, "Failed to read catalog sync status."));
+    }
+    job = (await response.json()) as MCPOperationJobRead;
+  }
+  throw new Error("Catalog synchronization is still running. Check again shortly.");
+}
+
 export function CatalogSourcesClient({
   organizationId,
   sources: initialSources,
@@ -79,10 +125,8 @@ export function CatalogSourcesClient({
       if (!response.ok) {
         throw new Error(await responseErrorMessage(response, "Catalog sync failed."));
       }
-      const payload = (await response.json()) as {
-        source: MCPCatalogSource;
-        syncedCount: number;
-      };
+      const job = (await response.json()) as MCPOperationJobRead;
+      const payload = await waitForCatalogSync(organizationId, job, setNotice);
       setSources((current) =>
         current.map((item) => (item.id === source.id ? payload.source : item))
       );

@@ -100,7 +100,6 @@ export * from './mCPCatalogSourceCreateProvider';
 export * from './mCPCatalogSourceCreateSyncMode';
 export * from './mCPCatalogSourceListResponse';
 export * from './mCPCatalogSourceRead';
-export * from './mCPCatalogSourceSyncResponse';
 export * from './mCPCatalogSourceUpdate';
 export * from './mCPCatalogSourceUpdateProvider';
 export * from './mCPCatalogSourceUpdateSyncMode';

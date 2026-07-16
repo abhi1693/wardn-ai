@@ -2931,23 +2931,6 @@
         "title": "MCPCatalogSourceRead",
         "type": "object"
       },
-      "MCPCatalogSourceSyncResponse": {
-        "properties": {
-          "source": {
-            "$ref": "#/components/schemas/MCPCatalogSourceRead"
-          },
-          "syncedCount": {
-            "title": "Syncedcount",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "source",
-          "syncedCount"
-        ],
-        "title": "MCPCatalogSourceSyncResponse",
-        "type": "object"
-      },
       "MCPCatalogSourceUpdate": {
         "properties": {
           "apiToken": {
@@ -9229,11 +9212,11 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MCPCatalogSourceSyncResponse"
+                  "$ref": "#/components/schemas/MCPOperationJobRead"
                 }
               }
             },

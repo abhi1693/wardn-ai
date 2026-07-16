@@ -10,7 +10,6 @@ import type {
   MCPCatalogSourceCreate,
   MCPCatalogSourceListResponse,
   MCPCatalogSourceRead,
-  MCPCatalogSourceSyncResponse,
   MCPCatalogSourceUpdate,
   MCPOperationJobRead
 } from '../model';
@@ -350,9 +349,9 @@ export const organizationMcpCatalogUpdateSource = async (organizationId: string,
 }
 
 
-export type organizationMcpCatalogSyncSourceResponse200 = {
-  data: MCPCatalogSourceSyncResponse
-  status: 200
+export type organizationMcpCatalogSyncSourceResponse202 = {
+  data: MCPOperationJobRead
+  status: 202
 }
 
 export type organizationMcpCatalogSyncSourceResponse400 = {
@@ -370,7 +369,7 @@ export type organizationMcpCatalogSyncSourceResponse422 = {
   status: 422
 }
 
-export type organizationMcpCatalogSyncSourceResponseSuccess = (organizationMcpCatalogSyncSourceResponse200) & {
+export type organizationMcpCatalogSyncSourceResponseSuccess = (organizationMcpCatalogSyncSourceResponse202) & {
   headers: Headers;
 };
 export type organizationMcpCatalogSyncSourceResponseError = (organizationMcpCatalogSyncSourceResponse400 | organizationMcpCatalogSyncSourceResponse404 | organizationMcpCatalogSyncSourceResponse422) & {

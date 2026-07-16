@@ -1,3 +1,7 @@
+from app.modules.mcp_registry.catalog_jobs import (
+    SYNC_CATALOG_SOURCE_OPERATION,
+    execute_catalog_source_sync,
+)
 from app.modules.mcp_registry.installation_jobs import (
     BULK_UPDATE_SERVERS_OPERATION,
     INSTALL_SERVER_OPERATION,
@@ -13,6 +17,7 @@ def build_job_handlers() -> MCPJobHandlers:
         executors={
             INSTALL_SERVER_OPERATION: execute_server_installation,
             BULK_UPDATE_SERVERS_OPERATION: execute_installed_server_updates,
+            SYNC_CATALOG_SOURCE_OPERATION: execute_catalog_source_sync,
         },
         cleanup_executors={
             INSTALL_SERVER_OPERATION: cleanup_server_installation,
