@@ -47,6 +47,15 @@ async def require_new_installation_capacity(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
 ) -> None:
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.MCP_SERVER_INSTALLATIONS_PER_WORKSPACE,
+                workspace_id,
+            )
+        ],
+    )
     installation_count = await repository.count_installations_for_workspace(
         session,
         workspace_id,

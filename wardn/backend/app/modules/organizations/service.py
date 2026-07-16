@@ -308,6 +308,20 @@ async def create_workspace(
     if await repository.get_workspace_by_slug(session, organization_id, slug):
         raise DuplicateWorkspaceError("workspace slug already exists")
 
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.WORKSPACES_PER_ORGANIZATION,
+                organization_id,
+            ),
+            limits_service.quota_scope(
+                limits_service.WORKSPACES_CREATED_PER_USER,
+                organization_id,
+                user.id,
+            ),
+        ],
+    )
     organization_workspace_count = await repository.count_active_workspaces_for_organization(
         session,
         organization_id,

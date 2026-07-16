@@ -544,7 +544,6 @@ async def create_agent(
         name=name,
     ):
         raise DuplicateAgentError("agent name already exists")
-    await require_agent_create_limit(session, user, organization_id, workspace_id)
     provider_credential = await validate_provider_credential(
         session,
         user,
@@ -553,6 +552,7 @@ async def create_agent(
         provider_credential_id=payload.provider_credential_id,
     )
     model_name = await validate_agent_model(session, provider_credential, payload.model_name)
+    await require_agent_create_limit(session, user, organization_id, workspace_id)
     agent = Agent(
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -585,6 +585,8 @@ async def require_agent_create_limit(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
 ) -> None:
+    quota_scopes = agent_quota_scopes(user, organization_id, workspace_id)
+    await limits_service.lock_quota_capacity(session, quota_scopes)
     organization_agent_count = await repository.count_active_agents_for_organization(
         session,
         organization_id,
@@ -629,6 +631,34 @@ async def require_agent_create_limit(
         ],
         current_count=user_workspace_agent_count,
     )
+
+
+def agent_quota_scopes(
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+) -> list[limits_service.QuotaScope]:
+    scopes = [
+        limits_service.quota_scope(
+            limits_service.AGENTS_PER_ORGANIZATION,
+            organization_id,
+        )
+    ]
+    if workspace_id is not None:
+        scopes.extend(
+            [
+                limits_service.quota_scope(
+                    limits_service.AGENTS_PER_WORKSPACE,
+                    workspace_id,
+                ),
+                limits_service.quota_scope(
+                    limits_service.AGENTS_PER_WORKSPACE_PER_USER,
+                    workspace_id,
+                    user.id,
+                ),
+            ]
+        )
+    return scopes
 
 
 async def create_workspace_agent(
@@ -740,6 +770,10 @@ async def quick_start_workspace_agent(
     workspace_id: uuid.UUID,
 ) -> AgentConversationResponse:
     await require_workspace_member(session, user, organization_id, workspace_id)
+    await limits_service.lock_quota_capacity(
+        session,
+        agent_quota_scopes(user, organization_id, workspace_id),
+    )
     agent = await repository.get_agent_by_name(
         session,
         organization_id=organization_id,
@@ -819,6 +853,20 @@ async def require_workspace_conversation_create_limit(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
 ) -> None:
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.WORKSPACE_CONVERSATIONS_PER_WORKSPACE,
+                workspace_id,
+            ),
+            limits_service.quota_scope(
+                limits_service.WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER,
+                workspace_id,
+                user.id,
+            ),
+        ],
+    )
     workspace_conversation_count = await repository.count_active_workspace_conversations(
         session,
         workspace_id,

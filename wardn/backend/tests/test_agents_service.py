@@ -73,6 +73,70 @@ class FakeSession:
         return FakeTransaction(self)
 
 
+@pytest.mark.asyncio
+async def test_agent_quota_locks_are_acquired_before_counts(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com")
+    events: list[str] = []
+    captured_scopes = []
+
+    async def lock_quota_capacity(session, scopes):
+        events.append("lock")
+        captured_scopes.extend(scopes)
+
+    async def count_organization(*args, **kwargs):
+        events.append("organization_count")
+        return 0
+
+    async def count_workspace(*args, **kwargs):
+        events.append("workspace_count")
+        return 0
+
+    async def count_user(*args, **kwargs):
+        events.append("user_count")
+        return 0
+
+    async def require_limit_available(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.limits_service, "lock_quota_capacity", lock_quota_capacity)
+    monkeypatch.setattr(
+        service.repository,
+        "count_active_agents_for_organization",
+        count_organization,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "count_active_agents_for_workspace",
+        count_workspace,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "count_active_agents_created_by_user_for_workspace",
+        count_user,
+    )
+    monkeypatch.setattr(
+        service.limits_service,
+        "require_limit_available",
+        require_limit_available,
+    )
+
+    await service.require_agent_create_limit(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+    )
+
+    assert events == ["lock", "organization_count", "workspace_count", "user_count"]
+    assert {scope.limit_key for scope in captured_scopes} == {
+        service.limits_service.AGENTS_PER_ORGANIZATION,
+        service.limits_service.AGENTS_PER_WORKSPACE,
+        service.limits_service.AGENTS_PER_WORKSPACE_PER_USER,
+    }
+
+
 class FakeTransaction:
     def __init__(self, session: FakeSession) -> None:
         self.session = session

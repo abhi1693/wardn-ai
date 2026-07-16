@@ -1,9 +1,11 @@
+import hashlib
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.limits import repository
@@ -89,6 +91,43 @@ class LLMBudgetContext:
     agent_id: uuid.UUID | None
     model: str
     now: datetime | None = None
+
+
+@dataclass(frozen=True)
+class QuotaScope:
+    """A count domain that must be serialized while capacity is checked and consumed."""
+
+    limit_key: str
+    subject_ids: tuple[uuid.UUID, ...]
+
+
+def quota_scope(limit_key: str, *subject_ids: uuid.UUID) -> QuotaScope:
+    if not subject_ids:
+        raise ValueError("quota scope requires at least one subject")
+    return QuotaScope(normalize_limit_key(limit_key), subject_ids)
+
+
+def quota_lock_id(scope: QuotaScope) -> int:
+    canonical = ":".join((scope.limit_key, *(str(value) for value in scope.subject_ids)))
+    digest = hashlib.blake2b(
+        canonical.encode(),
+        digest_size=8,
+        person=b"wardnquota",
+    ).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
+
+
+async def lock_quota_capacity(
+    session: AsyncSession,
+    scopes: Iterable[QuotaScope],
+) -> None:
+    """Acquire deadlock-safe PostgreSQL transaction locks for quota count domains."""
+    execute = getattr(session, "execute", None)
+    if not callable(execute):
+        return
+    lock_ids = sorted({quota_lock_id(scope) for scope in scopes})
+    for lock_id in lock_ids:
+        await execute(select(func.pg_advisory_xact_lock(lock_id)))
 
 
 def require_limits_admin(user: User) -> None:

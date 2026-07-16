@@ -184,6 +184,20 @@ async def create_secret_store(
         provider,
         config,
     )
+    quota_scopes = [
+        limits_service.quota_scope(
+            limits_service.SECRET_STORES_PER_ORGANIZATION,
+            organization_id,
+        )
+    ]
+    if payload.workspace_id is not None:
+        quota_scopes.append(
+            limits_service.quota_scope(
+                limits_service.SECRET_STORES_PER_WORKSPACE,
+                payload.workspace_id,
+            )
+        )
+    await limits_service.lock_quota_capacity(session, quota_scopes)
     store_count = await repository.count_stores_for_organization(session, organization_id)
     await limits_service.require_limit_available(
         session,
@@ -412,6 +426,20 @@ async def create_secret_handle(
         display_name=display_name,
     ):
         raise DuplicateSecretHandleError("secret handle display name already exists")
+    quota_scopes = [
+        limits_service.quota_scope(
+            limits_service.SECRET_HANDLES_PER_ORGANIZATION,
+            organization_id,
+        )
+    ]
+    if payload.workspace_id is not None:
+        quota_scopes.append(
+            limits_service.quota_scope(
+                limits_service.SECRET_HANDLES_PER_WORKSPACE,
+                payload.workspace_id,
+            )
+        )
+    await limits_service.lock_quota_capacity(session, quota_scopes)
     handle_count = await repository.count_handles_for_organization(session, organization_id)
     await limits_service.require_limit_available(
         session,

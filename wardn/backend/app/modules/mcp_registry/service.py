@@ -719,6 +719,15 @@ async def create_catalog_source(
         raise DuplicateMCPCatalogSourceError("catalog source name already exists")
     if await repository.get_catalog_source_by_url(session, organization_id, base_url):
         raise DuplicateMCPCatalogSourceError("catalog source URL already exists")
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.MCP_CATALOG_SOURCES_PER_ORGANIZATION,
+                organization_id,
+            )
+        ],
+    )
     source_count = await repository.count_catalog_sources_for_organization(
         session,
         organization_id,
@@ -1150,6 +1159,16 @@ async def create_server_version(
     organization_id: uuid.UUID | None = None,
 ) -> MCPRegistryServerResponse:
     organization_id = await catalog_organization_id(session, organization_id)
+    if organization_id is not None:
+        await limits_service.lock_quota_capacity(
+            session,
+            [
+                limits_service.quota_scope(
+                    limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
+                    organization_id,
+                )
+            ],
+        )
     existing = await repository.get_server_version(
         session,
         payload.name,
@@ -1287,6 +1306,21 @@ async def sync_supported_servers(
     organization_id: uuid.UUID | None = None,
 ) -> int:
     organization_id = await catalog_organization_id(session, organization_id)
+    current_version_count = 0
+    if organization_id is not None:
+        await limits_service.lock_quota_capacity(
+            session,
+            [
+                limits_service.quota_scope(
+                    limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
+                    organization_id,
+                )
+            ],
+        )
+        current_version_count = await repository.count_server_versions_for_organization(
+            session,
+            organization_id,
+        )
     upstream_latest_by_name = {
         payload.name: payload.version
         for payload in payloads
@@ -1297,6 +1331,7 @@ async def sync_supported_servers(
         for payload in payloads
     }
     cleared_names: set[str] = set()
+    activated_version_count = 0
 
     for payload in payloads:
         if payload.name not in cleared_names:
@@ -1320,10 +1355,22 @@ async def sync_supported_servers(
         )
         if existing is None:
             session.add(MCPServerVersion(organization_id=organization_id, **values))
+            if values["status"] != "deleted":
+                activated_version_count += 1
         else:
+            if existing.status == "deleted" and values["status"] != "deleted":
+                activated_version_count += 1
             for key, value in values.items():
                 setattr(existing, key, value)
 
+    if organization_id is not None:
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
+            scope_chain=[("organization", organization_id)],
+            current_count=current_version_count,
+            requested=activated_version_count,
+        )
     await session.flush()
     return len(payloads)
 
@@ -1598,6 +1645,15 @@ async def install_server_version(
     if server is None:
         raise MCPServerNotFoundError("server version not found")
 
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.MCP_SERVER_INSTALLATIONS_PER_WORKSPACE,
+                workspace_id,
+            )
+        ],
+    )
     installation = await repository.get_installation(
         session,
         name,

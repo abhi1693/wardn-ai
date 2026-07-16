@@ -1208,6 +1208,28 @@ async def create_provider_credential(
         name=name,
     ):
         raise DuplicateLLMProviderCredentialError("provider credential name already exists")
+    quota_scopes = [
+        limits_service.quota_scope(
+            limits_service.LLM_PROVIDER_CREDENTIALS_PER_ORGANIZATION,
+            organization_id,
+        )
+    ]
+    if workspace_id is not None:
+        quota_scopes.append(
+            limits_service.quota_scope(
+                limits_service.LLM_PROVIDER_CREDENTIALS_PER_WORKSPACE,
+                workspace_id,
+            )
+        )
+    if payload.visibility == "user":
+        quota_scopes.append(
+            limits_service.quota_scope(
+                limits_service.LLM_PROVIDER_CREDENTIALS_PER_USER,
+                organization_id,
+                user.id,
+            )
+        )
+    await limits_service.lock_quota_capacity(session, quota_scopes)
     credential_count = await repository.count_credentials_for_organization(
         session,
         organization_id,

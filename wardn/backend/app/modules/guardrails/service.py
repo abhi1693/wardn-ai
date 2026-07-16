@@ -283,6 +283,20 @@ async def create_guardrail_policy(
         workspace_id=workspace_id,
         name=name,
     )
+    await limits_service.lock_quota_capacity(
+        session,
+        [
+            limits_service.quota_scope(
+                limits_service.GUARDRAIL_POLICIES_PER_WORKSPACE,
+                workspace_id,
+            ),
+            limits_service.quota_scope(
+                limits_service.GUARDRAIL_POLICIES_PER_WORKSPACE_PER_USER,
+                workspace_id,
+                user.id,
+            ),
+        ],
+    )
     policy_count = await repository.count_policies_for_workspace(session, workspace_id)
     await limits_service.require_limit_available(
         session,

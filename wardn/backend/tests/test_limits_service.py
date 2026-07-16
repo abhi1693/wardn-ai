@@ -13,6 +13,14 @@ class FakeSession:
     execute = None
 
 
+class RecordingSession:
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def execute(self, statement) -> None:
+        self.statements.append(statement)
+
+
 def usage_budget(
     *,
     scope_type: str = "user",
@@ -55,6 +63,42 @@ def test_usage_budget_unit_period_matches_key() -> None:
 
     with pytest.raises(InvalidLimitKeyError):
         service.usage_budget_unit_period("llm.tokens.per_day", "cost_usd", "day")
+
+
+def test_quota_lock_id_is_stable_and_scope_specific() -> None:
+    organization_id = uuid.uuid4()
+    first = service.quota_scope(service.AGENTS_PER_ORGANIZATION, organization_id)
+    same = service.quota_scope(service.AGENTS_PER_ORGANIZATION, organization_id)
+    different = service.quota_scope(service.WORKSPACES_PER_ORGANIZATION, organization_id)
+
+    assert service.quota_lock_id(first) == service.quota_lock_id(same)
+    assert service.quota_lock_id(first) != service.quota_lock_id(different)
+
+
+@pytest.mark.asyncio
+async def test_lock_quota_capacity_acquires_unique_locks_in_sorted_order() -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    scopes = [
+        service.quota_scope(service.AGENTS_PER_WORKSPACE, workspace_id),
+        service.quota_scope(service.AGENTS_PER_ORGANIZATION, organization_id),
+        service.quota_scope(service.AGENTS_PER_WORKSPACE, workspace_id),
+    ]
+    session = RecordingSession()
+
+    await service.lock_quota_capacity(session, scopes)
+
+    lock_ids = [next(iter(statement.compile().params.values())) for statement in session.statements]
+    assert lock_ids == sorted({service.quota_lock_id(scope) for scope in scopes})
+    assert all("pg_advisory_xact_lock" in str(statement) for statement in session.statements)
+
+
+@pytest.mark.asyncio
+async def test_lock_quota_capacity_ignores_non_database_test_session() -> None:
+    await service.lock_quota_capacity(
+        FakeSession(),
+        [service.quota_scope(service.AGENTS_PER_ORGANIZATION, uuid.uuid4())],
+    )
 
 
 @pytest.mark.asyncio
