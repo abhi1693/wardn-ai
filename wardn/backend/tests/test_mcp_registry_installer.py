@@ -59,7 +59,10 @@ def test_install_commands_receive_minimal_environment(tmp_path, monkeypatch) -> 
         seen["command"] = command
         seen["kwargs"] = kwargs
 
-    monkeypatch.setattr("app.modules.mcp_registry.installer.subprocess.run", run)
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.support.subprocess.run",
+        run,
+    )
 
     run_install_command(["installer", "package"], cwd=tmp_path)
 
@@ -139,7 +142,7 @@ def test_remote_mcp_request_maps_rejected_url_to_install_error(monkeypatch) -> N
         raise UnsafeOutboundURLError("outbound URL resolves to a non-public address")
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.open_outbound_request",
+        "app.modules.mcp_registry.installers.remote.open_outbound_request",
         reject_url,
     )
 
@@ -170,7 +173,7 @@ def test_verify_remote_mcp_server_uses_negotiated_protocol_header(monkeypatch) -
         }, None
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.send_remote_mcp_request",
+        "app.modules.mcp_registry.installers.remote.send_remote_mcp_request",
         send_remote_mcp_request,
     )
 
@@ -193,7 +196,7 @@ def test_install_server_runtime_creates_verified_remote_runtime_manifest(
         remotes=[{"type": "streamable-http", "url": "https://example.com/mcp"}]
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.verify_remote_mcp_server",
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
         lambda remote, **kwargs: {
             "protocolVersion": "2025-06-18",
             "serverInfo": {"name": "example"},
@@ -254,7 +257,7 @@ def test_install_server_runtime_uses_prompted_remote_config(tmp_path, monkeypatc
     )
     seen_headers = []
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.verify_remote_mcp_server",
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
             "protocolVersion": "2025-06-18",
@@ -294,7 +297,7 @@ def test_install_server_runtime_uses_optional_remote_config(tmp_path, monkeypatc
     )
     seen_headers = []
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.verify_remote_mcp_server",
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
             "protocolVersion": "2025-06-18",
@@ -321,7 +324,7 @@ def test_install_server_runtime_uses_custom_remote_header(tmp_path, monkeypatch)
     )
     seen_headers = []
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.verify_remote_mcp_server",
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
         lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
         or {
             "protocolVersion": "2025-06-18",
@@ -351,7 +354,7 @@ def test_install_server_runtime_fails_when_remote_verification_fails(
         remotes=[{"type": "streamable-http", "url": "https://example.com/mcp"}]
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.verify_remote_mcp_server",
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
         lambda remote, **kwargs: (_ for _ in ()).throw(
             MCPServerInstallationFailedError("remote MCP initialize failed")
         ),
@@ -379,11 +382,11 @@ def test_install_server_runtime_creates_oci_runtime_manifest(tmp_path, monkeypat
     )
     seen_commands = []
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda command, **kwargs: seen_commands.append(command),
     )
 
@@ -424,11 +427,11 @@ def test_install_server_runtime_passes_custom_headers_to_oci_container(
         ]
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda *args, **kwargs: None,
     )
 
@@ -496,11 +499,11 @@ def test_install_server_runtime_adds_configured_oci_package_arguments(
         ],
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda *args, **kwargs: None,
     )
 
@@ -591,11 +594,11 @@ def test_install_server_runtime_strips_docker_wrapper_args_from_oci_container_ar
         ],
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda *args, **kwargs: None,
     )
 
@@ -633,11 +636,11 @@ def test_install_server_runtime_materializes_file_package_arguments(
         ],
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda *args, **kwargs: None,
     )
 
@@ -718,7 +721,10 @@ def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(
             }
         ],
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.shutil.which",
+        lambda name: "/bin/uvx",
+    )
 
     install = install_server_runtime(
         server,
@@ -750,11 +756,11 @@ def test_install_server_runtime_uses_explicit_package_index(tmp_path, monkeypatc
     )
     seen_commands = []
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.shutil.which",
+        "app.modules.mcp_registry.installers.oci.shutil.which",
         lambda name: "/bin/docker",
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.oci.run_install_command",
         lambda command, **kwargs: seen_commands.append(command),
     )
 
@@ -811,7 +817,10 @@ def test_install_server_runtime_creates_uvx_runtime_manifest(tmp_path, monkeypat
             }
         ]
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.shutil.which",
+        lambda name: "/bin/uvx",
+    )
 
     install = install_server_runtime(
         server,
@@ -851,7 +860,10 @@ def test_install_server_runtime_creates_uvx_source_runtime_manifest(tmp_path, mo
             }
         ]
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.shutil.which",
+        lambda name: "/bin/uvx",
+    )
 
     install = install_server_runtime(
         server,
@@ -882,7 +894,10 @@ def test_install_server_runtime_stores_custom_package_headers(tmp_path, monkeypa
             }
         ]
     )
-    monkeypatch.setattr("app.modules.mcp_registry.installer.shutil.which", lambda name: "/bin/uvx")
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.shutil.which",
+        lambda name: "/bin/uvx",
+    )
 
     install = install_server_runtime(
         server,
@@ -914,11 +929,11 @@ def test_install_server_runtime_rewrites_package_tmp_paths(tmp_path, monkeypatch
     )
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.npm.run_install_command",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.npm_package_bin",
+        "app.modules.mcp_registry.installers.npm.npm_package_bin",
         lambda install_path, identifier: install_path / "node_modules" / ".bin" / "weather-mcp",
     )
 
@@ -950,11 +965,11 @@ def test_install_server_runtime_uses_latest_for_npm_placeholder_version(
         seen["package_json"] = json.loads((cwd / "package.json").read_text(encoding="utf-8"))
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.npm.run_install_command",
         run_install_command,
     )
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.npm_package_bin",
+        "app.modules.mcp_registry.installers.npm.npm_package_bin",
         lambda install_path, identifier: (
             install_path / "node_modules" / ".bin" / "kubernetes-mcp-server"
         ),
@@ -998,7 +1013,7 @@ def test_install_server_runtime_runs_npm_js_bin_without_shebang_with_node(
         bin_link.symlink_to("../alertmanager-mcp/build/index.js")
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.npm.run_install_command",
         run_install_command,
     )
 
@@ -1038,7 +1053,7 @@ def test_install_server_runtime_runs_npm_shebang_bin_directly(
         bin_link.symlink_to("../weather-mcp/dist/index.js")
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.npm.run_install_command",
         run_install_command,
     )
 
@@ -1068,7 +1083,7 @@ def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(
         commands.append(command)
 
     monkeypatch.setattr(
-        "app.modules.mcp_registry.installer.run_install_command",
+        "app.modules.mcp_registry.installers.python.run_install_command",
         run_install_command,
     )
 
