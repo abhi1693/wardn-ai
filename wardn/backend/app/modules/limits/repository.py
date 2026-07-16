@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.limits.models import ResourceLimit, UsageBudget
@@ -53,6 +54,33 @@ async def get_limit(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def upsert_resource_limit(
+    session: AsyncSession,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID,
+    limit_key: str,
+    value: int,
+) -> ResourceLimit:
+    statement = (
+        insert(ResourceLimit)
+        .values(
+            id=uuid.uuid4(),
+            scope_type=scope_type,
+            scope_id=scope_id,
+            limit_key=limit_key,
+            value=value,
+        )
+        .on_conflict_do_update(
+            constraint="uq_resource_limits_scope_key",
+            set_={"value": value, "updated_at": func.now()},
+        )
+        .returning(ResourceLimit)
+    )
+    result = await session.execute(statement.execution_options(populate_existing=True))
+    return result.scalar_one()
 
 
 async def list_usage_budgets(
@@ -124,6 +152,47 @@ async def get_usage_budget(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def upsert_usage_budget(
+    session: AsyncSession,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID,
+    budget_key: str,
+    value: Decimal,
+    unit: str,
+    period: str,
+    period_anchor: datetime | None,
+    model_filter: str,
+) -> UsageBudget:
+    statement = (
+        insert(UsageBudget)
+        .values(
+            id=uuid.uuid4(),
+            scope_type=scope_type,
+            scope_id=scope_id,
+            budget_key=budget_key,
+            value=value,
+            unit=unit,
+            period=period,
+            period_anchor=period_anchor,
+            model_filter=model_filter,
+        )
+        .on_conflict_do_update(
+            constraint="uq_usage_budgets_scope_key_model",
+            set_={
+                "value": value,
+                "unit": unit,
+                "period": period,
+                "period_anchor": period_anchor,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(UsageBudget)
+    )
+    result = await session.execute(statement.execution_options(populate_existing=True))
+    return result.scalar_one()
 
 
 async def llm_usage_budget_spend(

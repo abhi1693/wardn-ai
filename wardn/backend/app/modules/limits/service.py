@@ -16,7 +16,7 @@ from app.modules.limits.exceptions import (
     LimitExceededError,
     LimitNotFoundError,
 )
-from app.modules.limits.models import ResourceLimit, UsageBudget
+from app.modules.limits.models import ResourceLimit
 from app.modules.limits.schemas import (
     ResourceLimitListResponse,
     ResourceLimitRead,
@@ -256,24 +256,13 @@ async def upsert_resource_limit(
     require_limits_admin(user)
     scope_type, scope_id = normalize_scope(payload.scope_type, payload.scope_id)
     limit_key = normalize_limit_key(payload.limit_key)
-    limit = await repository.get_limit(
+    limit = await repository.upsert_resource_limit(
         session,
         scope_type=scope_type,
         scope_id=scope_id,
         limit_key=limit_key,
+        value=payload.value,
     )
-    if limit is None:
-        limit = ResourceLimit(
-            scope_type=scope_type,
-            scope_id=scope_id,
-            limit_key=limit_key,
-            value=payload.value,
-        )
-        session.add(limit)
-    else:
-        limit.value = payload.value
-    await session.flush()
-    await session.refresh(limit)
     return limit_response(limit)
 
 
@@ -321,32 +310,17 @@ async def upsert_usage_budget(
     budget_key = normalize_usage_budget_key(payload.budget_key)
     unit, period = usage_budget_unit_period(budget_key, payload.unit, payload.period)
     model_filter = normalize_model_filter(payload.model_filter)
-    budget = await repository.get_usage_budget(
+    budget = await repository.upsert_usage_budget(
         session,
         scope_type=scope_type,
         scope_id=payload.scope_id,
         budget_key=budget_key,
+        value=payload.value,
+        unit=unit,
+        period=period,
+        period_anchor=payload.period_anchor,
         model_filter=model_filter,
     )
-    if budget is None:
-        budget = UsageBudget(
-            scope_type=scope_type,
-            scope_id=payload.scope_id,
-            budget_key=budget_key,
-            value=payload.value,
-            unit=unit,
-            period=period,
-            period_anchor=payload.period_anchor,
-            model_filter=model_filter,
-        )
-        session.add(budget)
-    else:
-        budget.value = payload.value
-        budget.unit = unit
-        budget.period = period
-        budget.period_anchor = payload.period_anchor
-    await session.flush()
-    await session.refresh(budget)
     return usage_budget_response(budget)
 
 
