@@ -10,6 +10,14 @@ MCPServerStatus = Literal["active", "deprecated", "deleted"]
 MCPServerValidationStatus = Literal["passed", "failed"]
 MCPCatalogSourceProvider = Literal["wardn_hub", "official", "pulsemcp", "custom"]
 MCPCatalogSyncMode = Literal["latest_only", "all_versions"]
+MCPOperationJobStatus = Literal["queued", "running", "succeeded", "failed"]
+MCPOperationCleanupStatus = Literal[
+    "not_required",
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+]
 
 
 class MCPFileConfigValue(BaseModel):
@@ -159,6 +167,46 @@ class MCPServerInstallationRead(BaseModel):
 
 class MCPServerInstallationListResponse(BaseModel):
     installations: list[MCPServerInstallationRead]
+
+
+class MCPOperationJobEventRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    event_type: str = Field(alias="eventType")
+    level: str
+    message: str
+    progress_current: int | None = Field(default=None, alias="progressCurrent")
+    progress_total: int | None = Field(default=None, alias="progressTotal")
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(alias="createdAt")
+
+
+class MCPOperationJobRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    job_id: UUID = Field(alias="jobId")
+    organization_id: UUID = Field(alias="organizationId")
+    workspace_id: UUID | None = Field(default=None, alias="workspaceId")
+    operation: str
+    resource_key: str = Field(alias="resourceKey")
+    status: MCPOperationJobStatus
+    progress_current: int = Field(alias="progressCurrent")
+    progress_total: int = Field(alias="progressTotal")
+    progress_message: str = Field(alias="progressMessage")
+    attempt_count: int = Field(alias="attemptCount")
+    max_attempts: int = Field(alias="maxAttempts")
+    result: dict[str, Any] = Field(default_factory=dict)
+    error_code: str = Field(default="", alias="errorCode")
+    error_message: str = Field(default="", alias="errorMessage")
+    cleanup_status: MCPOperationCleanupStatus = Field(alias="cleanupStatus")
+    cleanup_attempt_count: int = Field(alias="cleanupAttemptCount")
+    cleanup_error: str = Field(default="", alias="cleanupError")
+    started_at: datetime | None = Field(default=None, alias="startedAt")
+    completed_at: datetime | None = Field(default=None, alias="completedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    events: list[MCPOperationJobEventRead] = Field(default_factory=list)
 
 
 class MCPServerInstallationToolValidationRequest(BaseModel):

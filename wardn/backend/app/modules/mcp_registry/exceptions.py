@@ -36,3 +36,7 @@ class MCPCatalogSourceNotFoundError(MCPRegistryError):
 
 class DuplicateMCPCatalogSourceError(MCPRegistryError):
     pass
+
+
+class MCPOperationJobNotFoundError(MCPRegistryError):
+    pass

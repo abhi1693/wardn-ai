@@ -11,8 +11,65 @@ import type {
   MCPCatalogSourceListResponse,
   MCPCatalogSourceRead,
   MCPCatalogSourceSyncResponse,
-  MCPCatalogSourceUpdate
+  MCPCatalogSourceUpdate,
+  MCPOperationJobRead
 } from '../model';
+
+
+export type organizationMcpCatalogGetOperationJobResponse200 = {
+  data: MCPOperationJobRead
+  status: 200
+}
+
+export type organizationMcpCatalogGetOperationJobResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type organizationMcpCatalogGetOperationJobResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type organizationMcpCatalogGetOperationJobResponseSuccess = (organizationMcpCatalogGetOperationJobResponse200) & {
+  headers: Headers;
+};
+export type organizationMcpCatalogGetOperationJobResponseError = (organizationMcpCatalogGetOperationJobResponse404 | organizationMcpCatalogGetOperationJobResponse422) & {
+  headers: Headers;
+};
+
+export type organizationMcpCatalogGetOperationJobResponse = (organizationMcpCatalogGetOperationJobResponseSuccess | organizationMcpCatalogGetOperationJobResponseError)
+
+export const getOrganizationMcpCatalogGetOperationJobUrl = (organizationId: string,
+    jobId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/jobs/${jobId}`
+}
+
+/**
+ * @summary Get Organization Mcp Catalog Operation Job
+ */
+export const organizationMcpCatalogGetOperationJob = async (organizationId: string,
+    jobId: string, options?: RequestInit): Promise<organizationMcpCatalogGetOperationJobResponse> => {
+
+  const res = await fetch(getOrganizationMcpCatalogGetOperationJobUrl(organizationId,jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: organizationMcpCatalogGetOperationJobResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogGetOperationJobResponse
+}
 
 
 export type organizationMcpCatalogListSourcesResponse200 = {

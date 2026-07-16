@@ -3094,6 +3094,226 @@
         "title": "MCPFileConfigValue",
         "type": "object"
       },
+      "MCPOperationJobEventRead": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "eventType": {
+            "title": "Eventtype",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progressCurrent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progresscurrent"
+          },
+          "progressTotal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progresstotal"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "level",
+          "message",
+          "createdAt"
+        ],
+        "title": "MCPOperationJobEventRead",
+        "type": "object"
+      },
+      "MCPOperationJobRead": {
+        "properties": {
+          "attemptCount": {
+            "title": "Attemptcount",
+            "type": "integer"
+          },
+          "cleanupAttemptCount": {
+            "title": "Cleanupattemptcount",
+            "type": "integer"
+          },
+          "cleanupError": {
+            "default": "",
+            "title": "Cleanuperror",
+            "type": "string"
+          },
+          "cleanupStatus": {
+            "enum": [
+              "not_required",
+              "pending",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Cleanupstatus",
+            "type": "string"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "errorCode": {
+            "default": "",
+            "title": "Errorcode",
+            "type": "string"
+          },
+          "errorMessage": {
+            "default": "",
+            "title": "Errormessage",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/MCPOperationJobEventRead"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "jobId": {
+            "format": "uuid",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "maxAttempts": {
+            "title": "Maxattempts",
+            "type": "integer"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "title": "Organizationid",
+            "type": "string"
+          },
+          "progressCurrent": {
+            "title": "Progresscurrent",
+            "type": "integer"
+          },
+          "progressMessage": {
+            "title": "Progressmessage",
+            "type": "string"
+          },
+          "progressTotal": {
+            "title": "Progresstotal",
+            "type": "integer"
+          },
+          "resourceKey": {
+            "title": "Resourcekey",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceid"
+          }
+        },
+        "required": [
+          "jobId",
+          "organizationId",
+          "operation",
+          "resourceKey",
+          "status",
+          "progressCurrent",
+          "progressTotal",
+          "progressMessage",
+          "attemptCount",
+          "maxAttempts",
+          "cleanupStatus",
+          "cleanupAttemptCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "MCPOperationJobRead",
+        "type": "object"
+      },
       "MCPRegistryListMetadata": {
         "properties": {
           "count": {
@@ -8486,6 +8706,85 @@
         "summary": "Validate Provider Credential Route",
         "tags": [
           "llm-provider-credentials"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/mcp/catalog/jobs/{job_id}": {
+      "get": {
+        "operationId": "organization_mcp_catalog_get_operation_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPOperationJobRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Organization Mcp Catalog Operation Job",
+        "tags": [
+          "organization-mcp-catalog"
         ]
       }
     },
@@ -14442,6 +14741,95 @@
           }
         },
         "summary": "Install Workspace Mcp Server Version",
+        "tags": [
+          "workspace-mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/registry/jobs/{job_id}": {
+      "get": {
+        "operationId": "workspace_mcp_registry_get_operation_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPOperationJobRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Mcp Operation Job",
         "tags": [
           "workspace-mcp-registry"
         ]

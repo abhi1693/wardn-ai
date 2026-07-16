@@ -15,18 +15,21 @@ from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
     MCPCatalogSourceNotFoundError,
+    MCPOperationJobNotFoundError,
     MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
     MCPServerInstallationUnsupportedError,
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
 )
+from app.modules.mcp_registry.job_service import get_operation_job
 from app.modules.mcp_registry.schemas import (
     MCPCatalogSourceCreate,
     MCPCatalogSourceListResponse,
     MCPCatalogSourceRead,
     MCPCatalogSourceSyncResponse,
     MCPCatalogSourceUpdate,
+    MCPOperationJobRead,
     MCPRegistryServerListResponse,
     MCPRegistryServerResponse,
     MCPServerBulkUpdateRequest,
@@ -145,6 +148,30 @@ async def require_organization_admin_or_404(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except OrganizationAccessDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@organization_catalog_router.get(
+    "/jobs/{job_id}",
+    response_model=MCPOperationJobRead,
+    operation_id="organization_mcp_catalog_get_operation_job",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_organization_mcp_catalog_operation_job(
+    organization_id: UUID,
+    job_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPOperationJobRead:
+    await require_organization_member_or_404(session, current_user, organization_id)
+    try:
+        return await get_operation_job(
+            session,
+            job_id,
+            organization_id=organization_id,
+            workspace_id=None,
+        )
+    except MCPOperationJobNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @organization_catalog_router.get(
@@ -494,6 +521,31 @@ async def delete_organization_mcp_server_version(
     except MCPServerVersionInUseError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
+
+
+@workspace_router.get(
+    "/jobs/{job_id}",
+    response_model=MCPOperationJobRead,
+    operation_id="workspace_mcp_registry_get_operation_job",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_workspace_mcp_operation_job(
+    organization_id: UUID,
+    workspace_id: UUID,
+    job_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPOperationJobRead:
+    await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
+    try:
+        return await get_operation_job(
+            session,
+            job_id,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+    except MCPOperationJobNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @workspace_router.get(

@@ -2,7 +2,18 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -121,6 +132,104 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
         nullable=False,
+    )
+
+
+class MCPOperationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "mcp_operation_jobs"
+    __table_args__ = (
+        Index(
+            "uq_mcp_operation_jobs_active_dedupe",
+            "deduplication_key",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        Index(
+            "ix_mcp_operation_jobs_claimable",
+            "status",
+            "available_at",
+            "created_at",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    requested_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    operation: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    resource_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    deduplication_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    progress_current: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    progress_total: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    progress_message: Mapped[str] = mapped_column(Text, default="Queued", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    cleanup_status: Mapped[str] = mapped_column(
+        String(32),
+        default="not_required",
+        nullable=False,
+        index=True,
+    )
+    cleanup_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    cleanup_attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cleanup_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class MCPOperationJobEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "mcp_operation_job_events"
+
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_operation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    level: Mapped[str] = mapped_column(String(20), default="info", nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    progress_current: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
     )
 
 

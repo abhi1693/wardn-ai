@@ -7,6 +7,7 @@
 import type {
   ErrorResponse,
   HTTPValidationError,
+  MCPOperationJobRead,
   MCPServerBulkUpdateRequest,
   MCPServerInstallRequest,
   MCPServerInstallationListResponse,
@@ -439,6 +440,64 @@ export const workspaceMcpRegistryInstallServerVersion = async (organizationId: s
 
   const data: workspaceMcpRegistryInstallServerVersionResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryInstallServerVersionResponse
+}
+
+
+export type workspaceMcpRegistryGetOperationJobResponse200 = {
+  data: MCPOperationJobRead
+  status: 200
+}
+
+export type workspaceMcpRegistryGetOperationJobResponse404 = {
+  data: ErrorResponse
+  status: 404
+}
+
+export type workspaceMcpRegistryGetOperationJobResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type workspaceMcpRegistryGetOperationJobResponseSuccess = (workspaceMcpRegistryGetOperationJobResponse200) & {
+  headers: Headers;
+};
+export type workspaceMcpRegistryGetOperationJobResponseError = (workspaceMcpRegistryGetOperationJobResponse404 | workspaceMcpRegistryGetOperationJobResponse422) & {
+  headers: Headers;
+};
+
+export type workspaceMcpRegistryGetOperationJobResponse = (workspaceMcpRegistryGetOperationJobResponseSuccess | workspaceMcpRegistryGetOperationJobResponseError)
+
+export const getWorkspaceMcpRegistryGetOperationJobUrl = (organizationId: string,
+    workspaceId: string,
+    jobId: string,) => {
+
+
+
+
+  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/jobs/${jobId}`
+}
+
+/**
+ * @summary Get Workspace Mcp Operation Job
+ */
+export const workspaceMcpRegistryGetOperationJob = async (organizationId: string,
+    workspaceId: string,
+    jobId: string, options?: RequestInit): Promise<workspaceMcpRegistryGetOperationJobResponse> => {
+
+  const res = await fetch(getWorkspaceMcpRegistryGetOperationJobUrl(organizationId,workspaceId,jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: workspaceMcpRegistryGetOperationJobResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryGetOperationJobResponse
 }
 
 

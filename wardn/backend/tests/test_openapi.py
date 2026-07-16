@@ -58,6 +58,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
+        "/api/v1/organizations/{organization_id}/mcp/catalog/jobs/{job_id}",
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
         (
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
@@ -187,6 +188,10 @@ def test_openapi_exposes_expected_paths() -> None:
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/mcp/registry/installed-servers/{server_name}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/jobs/{job_id}"
         ),
         "/api/v1/users/bootstrap",
     }
@@ -629,6 +634,29 @@ def test_mcp_registry_openapi_contract() -> None:
     assert workspace_update["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"
     }
+
+
+def test_mcp_operation_job_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    organization_job = schema["paths"][
+        "/api/v1/organizations/{organization_id}/mcp/catalog/jobs/{job_id}"
+    ]["get"]
+    workspace_job = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/registry/jobs/{job_id}"
+        )
+    ]["get"]
+
+    assert organization_job["operationId"] == "organization_mcp_catalog_get_operation_job"
+    assert workspace_job["operationId"] == "workspace_mcp_registry_get_operation_job"
+    for operation in (organization_job, workspace_job):
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/MCPOperationJobRead"
+        }
+        assert operation["responses"]["404"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorResponse"
+        }
 
 
 def test_mcp_gateway_openapi_contract() -> None:
