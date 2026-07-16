@@ -1,20 +1,101 @@
-import base64
-import hashlib
-import json
-import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any
-from urllib.parse import urlencode
 
-import httpx
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_DEVICE_AUTH_CALLBACK_URL as CHATGPT_DEVICE_AUTH_CALLBACK_URL,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_DEVICE_AUTH_TOKEN_URL as CHATGPT_DEVICE_AUTH_TOKEN_URL,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_DEVICE_AUTH_USER_AGENT as CHATGPT_DEVICE_AUTH_USER_AGENT,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_DEVICE_AUTH_USERCODE_URL as CHATGPT_DEVICE_AUTH_USERCODE_URL,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_DEVICE_AUTH_VERIFICATION_URL as CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_OAUTH_AUTHORIZE_URL as CHATGPT_OAUTH_AUTHORIZE_URL,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_OAUTH_CLIENT_ID as CHATGPT_OAUTH_CLIENT_ID,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_OAUTH_SCOPE as CHATGPT_OAUTH_SCOPE,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS as CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    OPENAI_CODEX_AUTH_CLAIM as OPENAI_CODEX_AUTH_CLAIM,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    OPENAI_CODEX_PROFILE_CLAIM as OPENAI_CODEX_PROFILE_CLAIM,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    ChatGPTDeviceAuthorization as ChatGPTDeviceAuthorization,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    ChatGPTDeviceCode as ChatGPTDeviceCode,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    base64url_bytes as base64url_bytes,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    build_chatgpt_authorization_url as build_chatgpt_authorization_url,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    chatgpt_device_auth_headers as chatgpt_device_auth_headers,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    chatgpt_oauth_metadata as chatgpt_oauth_metadata,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    decode_jwt_payload as decode_jwt_payload,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    exchange_chatgpt_oauth_code as exchange_chatgpt_oauth_code,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    expires_at_from_seconds as expires_at_from_seconds,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    generate_oauth_state as generate_oauth_state,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    generate_pkce_pair as generate_pkce_pair,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    optional_string as optional_string,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    poll_chatgpt_device_authorization as poll_chatgpt_device_authorization,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    positive_int as positive_int,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    read_record as read_record,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    refresh_chatgpt_oauth_token as refresh_chatgpt_oauth_token,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    request_chatgpt_device_code as request_chatgpt_device_code,
+)
+from app.modules.llm_providers.chatgpt_oauth import (
+    utc_now as utc_now,
+)
 from app.modules.llm_providers.exceptions import (
     DuplicateLLMProviderCredentialError,
     InvalidLLMProviderCredentialAuthError,
@@ -22,6 +103,39 @@ from app.modules.llm_providers.exceptions import (
     LLMProviderCredentialNotFoundError,
 )
 from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.llm_providers.provider_clients import (
+    OPENAI_API_KEY_PROVIDER as OPENAI_API_KEY_PROVIDER,
+)
+from app.modules.llm_providers.provider_clients import (
+    OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS as OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS,
+)
+from app.modules.llm_providers.provider_clients import (
+    OPENAI_CHATGPT_MODEL_IDS as OPENAI_CHATGPT_MODEL_IDS,
+)
+from app.modules.llm_providers.provider_clients import (
+    OPENAI_CHATGPT_PROVIDER as OPENAI_CHATGPT_PROVIDER,
+)
+from app.modules.llm_providers.provider_clients import (
+    OPENAI_MODELS_URL as OPENAI_MODELS_URL,
+)
+from app.modules.llm_providers.provider_clients import (
+    SUPPORTED_OAUTH_PROVIDERS as SUPPORTED_OAUTH_PROVIDERS,
+)
+from app.modules.llm_providers.provider_clients import (
+    fetch_openai_models as fetch_openai_models,
+)
+from app.modules.llm_providers.provider_clients import (
+    openai_chatgpt_models as openai_chatgpt_models,
+)
+from app.modules.llm_providers.provider_clients import (
+    validate_auth_settings as validate_auth_settings,
+)
+from app.modules.llm_providers.provider_clients import (
+    validate_chatgpt_oauth_credential as validate_chatgpt_oauth_credential,
+)
+from app.modules.llm_providers.provider_clients import (
+    validate_openai_api_key as validate_openai_api_key,
+)
 from app.modules.llm_providers.schemas import (
     ChatGPTDeviceAuthorizationCompleteRequest,
     ChatGPTDeviceAuthorizationCompleteResponse,
@@ -32,7 +146,6 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialUpdate,
     LLMProviderCredentialValidationResponse,
     LLMProviderModelListResponse,
-    LLMProviderModelRead,
 )
 from app.modules.organizations.service import (
     require_organization_admin,
@@ -47,53 +160,12 @@ from app.modules.secrets.schemas import SecretHandleCreate
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
 
-SUPPORTED_OAUTH_PROVIDERS = {"chatgpt"}
-OPENAI_API_KEY_PROVIDER = "openai"
-OPENAI_CHATGPT_PROVIDER = "openai_chatgpt"
-CHATGPT_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CHATGPT_OAUTH_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
-CHATGPT_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
-CHATGPT_OAUTH_SCOPE = "openid profile email offline_access"
-CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS = 30.0
-CHATGPT_DEVICE_AUTH_USERCODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode"
-CHATGPT_DEVICE_AUTH_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token"
-CHATGPT_DEVICE_AUTH_VERIFICATION_URL = "https://auth.openai.com/codex/device"
-CHATGPT_DEVICE_AUTH_CALLBACK_URL = "https://auth.openai.com/deviceauth/callback"
-CHATGPT_DEVICE_AUTH_USER_AGENT = "wardn-chatgpt-auth/1.0"
-OPENAI_CODEX_AUTH_CLAIM = "https://api.openai.com/auth"
-OPENAI_CODEX_PROFILE_CLAIM = "https://api.openai.com/profile"
-OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
-OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS = 15.0
-OPENAI_CHATGPT_MODEL_IDS = (
-    "gpt-5.5",
-    "gpt-5.5-pro",
-    "gpt-5.4",
-    "gpt-5.4-pro",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex-spark",
-)
-
 
 @dataclass(frozen=True)
 class ResolvedLLMCredentialSecrets:
     api_key: str = ""
     oauth_access_token: str = ""
     oauth_refresh_token: str = ""
-
-
-@dataclass(frozen=True)
-class ChatGPTDeviceAuthorization:
-    authorization_code: str
-    code_verifier: str
-
-
-@dataclass(frozen=True)
-class ChatGPTDeviceCode:
-    device_auth_id: str
-    user_code: str
-    verification_url: str
-    interval_seconds: int = 5
-
 
 def normalize_provider(value: str) -> str:
     return value.strip().casefold()
@@ -153,291 +225,6 @@ def normalize_credential_provider(
     if auth_method == "oauth" and oauth_provider == "chatgpt":
         return OPENAI_CHATGPT_PROVIDER
     return normalize_provider(value)
-
-
-def base64url_bytes(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def generate_pkce_pair() -> tuple[str, str]:
-    verifier = base64url_bytes(secrets.token_bytes(32))
-    challenge = base64url_bytes(hashlib.sha256(verifier.encode("ascii")).digest())
-    return verifier, challenge
-
-
-def generate_oauth_state() -> str:
-    return base64url_bytes(secrets.token_bytes(32))
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def build_chatgpt_authorization_url(
-    *,
-    state: str,
-    code_challenge: str,
-    redirect_uri: str,
-) -> str:
-    query = urlencode(
-        {
-            "response_type": "code",
-            "client_id": CHATGPT_OAUTH_CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "scope": CHATGPT_OAUTH_SCOPE,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-            "state": state,
-            "id_token_add_organizations": "true",
-            "codex_cli_simplified_flow": "true",
-            "originator": "wardn",
-        }
-    )
-    return f"{CHATGPT_OAUTH_AUTHORIZE_URL}?{query}"
-
-
-def decode_jwt_payload(token: str) -> dict[str, Any]:
-    payload = token.split(".")[1] if "." in token else ""
-    if not payload:
-        return {}
-    padded = payload + ("=" * (-len(payload) % 4))
-    try:
-        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
-        parsed = json.loads(decoded)
-    except (ValueError, json.JSONDecodeError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def read_record(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def optional_string(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def chatgpt_oauth_metadata(access_token: str) -> dict[str, Any]:
-    payload = decode_jwt_payload(access_token)
-    auth = read_record(payload.get(OPENAI_CODEX_AUTH_CLAIM))
-    profile = read_record(payload.get(OPENAI_CODEX_PROFILE_CLAIM))
-    metadata = {
-        "accountId": optional_string(auth.get("chatgpt_account_id")),
-        "chatgptPlanType": optional_string(auth.get("chatgpt_plan_type")),
-        "email": optional_string(profile.get("email")),
-        "subject": optional_string(payload.get("sub")),
-    }
-    return {key: value for key, value in metadata.items() if value}
-
-
-def expires_at_from_seconds(value: Any) -> datetime | None:
-    if isinstance(value, bool):
-        return None
-    try:
-        seconds = int(value)
-    except (TypeError, ValueError):
-        return None
-    if seconds <= 0:
-        return None
-    return utc_now() + timedelta(seconds=seconds)
-
-
-async def exchange_chatgpt_oauth_code(
-    *,
-    code: str,
-    code_verifier: str,
-    redirect_uri: str,
-) -> dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                CHATGPT_OAUTH_TOKEN_URL,
-                data={
-                    "grant_type": "authorization_code",
-                    "client_id": CHATGPT_OAUTH_CLIENT_ID,
-                    "code": code,
-                    "code_verifier": code_verifier,
-                    "redirect_uri": redirect_uri,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth token exchange failed"
-        ) from exc
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"ChatGPT OAuth token exchange failed with HTTP {response.status_code}"
-        )
-    try:
-        payload = response.json()
-    except json.JSONDecodeError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth token response is invalid"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth token response is invalid")
-    if not isinstance(payload.get("access_token"), str) or not isinstance(
-        payload.get("refresh_token"), str
-    ):
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth token response did not include access and refresh tokens"
-        )
-    return payload
-
-
-def chatgpt_device_auth_headers() -> dict[str, str]:
-    return {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": CHATGPT_DEVICE_AUTH_USER_AGENT,
-    }
-
-
-def positive_int(value: Any, fallback: int) -> int:
-    if isinstance(value, bool):
-        return fallback
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return fallback
-    return parsed if parsed > 0 else fallback
-
-
-async def request_chatgpt_device_code() -> ChatGPTDeviceCode:
-    try:
-        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                CHATGPT_DEVICE_AUTH_USERCODE_URL,
-                json={"client_id": CHATGPT_OAUTH_CLIENT_ID},
-                headers=chatgpt_device_auth_headers(),
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization could not reach OpenAI"
-        ) from exc
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"ChatGPT device authorization failed with HTTP {response.status_code}"
-        )
-    try:
-        payload = response.json()
-    except json.JSONDecodeError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization response is invalid"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization response is invalid"
-        )
-    device_auth_id = payload.get("device_auth_id")
-    user_code = payload.get("user_code") or payload.get("usercode")
-    if not isinstance(device_auth_id, str) or not device_auth_id.strip():
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization response did not include a device id"
-        )
-    if not isinstance(user_code, str) or not user_code.strip():
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization response did not include a user code"
-        )
-    return ChatGPTDeviceCode(
-        device_auth_id=device_auth_id.strip(),
-        user_code=user_code.strip(),
-        verification_url=CHATGPT_DEVICE_AUTH_VERIFICATION_URL,
-        interval_seconds=positive_int(payload.get("interval"), 5),
-    )
-
-
-async def poll_chatgpt_device_authorization(
-    device_code: ChatGPTDeviceCode,
-) -> ChatGPTDeviceAuthorization | None:
-    try:
-        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                CHATGPT_DEVICE_AUTH_TOKEN_URL,
-                json={
-                    "device_auth_id": device_code.device_auth_id,
-                    "user_code": device_code.user_code,
-                },
-                headers=chatgpt_device_auth_headers(),
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization polling could not reach OpenAI"
-        ) from exc
-    if response.status_code in {403, 404, 429}:
-        return None
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"ChatGPT device authorization polling failed with HTTP {response.status_code}"
-        )
-    try:
-        payload = response.json()
-    except json.JSONDecodeError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization polling response is invalid"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT device authorization polling response is invalid"
-        )
-    error = payload.get("error")
-    if isinstance(error, str) and error.strip():
-        normalized_error = error.strip().casefold()
-        if normalized_error in {"authorization_pending", "pending", "slow_down"}:
-            return None
-        if "expired" in normalized_error:
-            raise InvalidLLMProviderCredentialAuthError("ChatGPT device authorization expired")
-        raise InvalidLLMProviderCredentialAuthError(error.strip())
-    authorization_code = payload.get("authorization_code")
-    code_verifier = payload.get("code_verifier")
-    if not isinstance(authorization_code, str) or not authorization_code.strip():
-        return None
-    if not isinstance(code_verifier, str) or not code_verifier.strip():
-        return None
-    return ChatGPTDeviceAuthorization(
-        authorization_code=authorization_code.strip(),
-        code_verifier=code_verifier.strip(),
-    )
-
-
-async def refresh_chatgpt_oauth_token(refresh_token: str) -> dict[str, Any]:
-    if not refresh_token.strip():
-        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth refresh token is missing")
-    try:
-        async with httpx.AsyncClient(timeout=CHATGPT_OAUTH_TOKEN_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                CHATGPT_OAUTH_TOKEN_URL,
-                data={
-                    "grant_type": "refresh_token",
-                    "client_id": CHATGPT_OAUTH_CLIENT_ID,
-                    "refresh_token": refresh_token,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth token refresh could not reach OpenAI"
-        ) from exc
-    if response.status_code in {400, 401, 403}:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth refresh token was rejected; reconnect the credential"
-        )
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"ChatGPT OAuth token refresh failed with HTTP {response.status_code}"
-        )
-    try:
-        payload = response.json()
-    except json.JSONDecodeError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth refresh response is invalid"
-        ) from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth refresh response did not include an access token"
-        )
-    return payload
 
 
 async def get_oauth_secret_handle(
@@ -808,121 +595,6 @@ async def complete_chatgpt_device_authorization(
         status="connected",
         credential=credential_response_payload,
     )
-
-
-def validate_auth_settings(
-    *,
-    auth_method: str,
-    secret_value: str,
-    oauth_provider: str,
-) -> None:
-    if auth_method == "api_key":
-        if not secret_value:
-            raise InvalidLLMProviderCredentialAuthError(
-                "secret is required for api_key credentials"
-            )
-        return
-    if auth_method == "oauth":
-        if oauth_provider not in SUPPORTED_OAUTH_PROVIDERS:
-            supported = ", ".join(sorted(SUPPORTED_OAUTH_PROVIDERS))
-            raise InvalidLLMProviderCredentialAuthError(
-                f"oauthProvider must be one of: {supported}"
-            )
-        return
-    raise InvalidLLMProviderCredentialAuthError("invalid credential auth method")
-
-
-async def validate_openai_api_key(secret_value: str) -> None:
-    try:
-        async with httpx.AsyncClient(
-            timeout=OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS
-        ) as client:
-            response = await client.get(
-                OPENAI_MODELS_URL,
-                headers={"Authorization": f"Bearer {secret_value}"},
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "OpenAI API key validation could not reach OpenAI"
-        ) from exc
-
-    if response.status_code in {401, 403}:
-        raise InvalidLLMProviderCredentialAuthError("OpenAI API key was rejected")
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"OpenAI API key validation failed with HTTP {response.status_code}"
-        )
-
-
-async def fetch_openai_models(bearer_token: str) -> list[LLMProviderModelRead]:
-    try:
-        async with httpx.AsyncClient(
-            timeout=OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS
-        ) as client:
-            response = await client.get(
-                OPENAI_MODELS_URL,
-                headers={"Authorization": f"Bearer {bearer_token}"},
-            )
-    except httpx.HTTPError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "OpenAI model discovery could not reach OpenAI"
-        ) from exc
-
-    if response.status_code in {401, 403}:
-        raise InvalidLLMProviderCredentialAuthError("OpenAI credential was rejected")
-    if not response.is_success:
-        raise InvalidLLMProviderCredentialAuthError(
-            f"OpenAI model discovery failed with HTTP {response.status_code}"
-        )
-
-    try:
-        payload = response.json()
-    except json.JSONDecodeError as exc:
-        raise InvalidLLMProviderCredentialAuthError(
-            "OpenAI model discovery response is invalid"
-        ) from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-        raise InvalidLLMProviderCredentialAuthError(
-            "OpenAI model discovery response is invalid"
-        )
-
-    models = []
-    seen: set[str] = set()
-    for entry in payload["data"]:
-        if not isinstance(entry, dict):
-            continue
-        model_id = entry.get("id")
-        if not isinstance(model_id, str) or not model_id.strip() or model_id in seen:
-            continue
-        seen.add(model_id)
-        models.append(LLMProviderModelRead(id=model_id, name=model_id))
-    return sorted(models, key=lambda model: model.id)
-
-
-def openai_chatgpt_models() -> list[LLMProviderModelRead]:
-    return [
-        LLMProviderModelRead(id=model_id, name=model_id)
-        for model_id in OPENAI_CHATGPT_MODEL_IDS
-    ]
-
-
-def validate_chatgpt_oauth_credential(
-    *,
-    oauth_access_token: str,
-    oauth_refresh_token: str,
-    oauth_expires_at: datetime | None,
-) -> None:
-    if not oauth_access_token or not oauth_refresh_token:
-        raise InvalidLLMProviderCredentialAuthError(
-            "ChatGPT OAuth credentials require access and refresh tokens"
-        )
-    if oauth_expires_at is not None and oauth_expires_at <= utc_now():
-        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth access token is expired")
-
-    payload = decode_jwt_payload(oauth_access_token)
-    expires_at = payload.get("exp")
-    if isinstance(expires_at, int) and datetime.fromtimestamp(expires_at, UTC) <= utc_now():
-        raise InvalidLLMProviderCredentialAuthError("ChatGPT OAuth access token is expired")
 
 
 async def validate_provider_credential(

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.llm_providers import service
+from app.modules.llm_providers import chatgpt_oauth, service
 from app.modules.llm_providers.exceptions import (
     DuplicateLLMProviderCredentialError,
     InvalidLLMProviderCredentialAuthError,
@@ -94,7 +94,7 @@ async def test_chatgpt_device_authorization_requests_user_code(monkeypatch) -> N
                 },
             )
 
-    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(chatgpt_oauth.httpx, "AsyncClient", FakeAsyncClient)
 
     device_code = await service.request_chatgpt_device_code()
 
@@ -136,7 +136,7 @@ async def test_chatgpt_device_authorization_polls_for_authorization(monkeypatch)
                 },
             )
 
-    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(chatgpt_oauth.httpx, "AsyncClient", FakeAsyncClient)
 
     authorization = await service.poll_chatgpt_device_authorization(
         service.ChatGPTDeviceCode(
