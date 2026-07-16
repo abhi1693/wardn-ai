@@ -3166,10 +3166,26 @@
             "title": "Cleanupattemptcount",
             "type": "integer"
           },
+          "cleanupAvailableAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanupavailableat"
+          },
           "cleanupError": {
             "default": "",
             "title": "Cleanuperror",
             "type": "string"
+          },
+          "cleanupMaxAttempts": {
+            "title": "Cleanupmaxattempts",
+            "type": "integer"
           },
           "cleanupStatus": {
             "enum": [
@@ -3308,6 +3324,7 @@
           "maxAttempts",
           "cleanupStatus",
           "cleanupAttemptCount",
+          "cleanupMaxAttempts",
           "createdAt",
           "updatedAt"
         ],

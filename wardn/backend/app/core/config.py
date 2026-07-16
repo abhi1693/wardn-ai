@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     outbound_http_allowed_ports: list[int] = [443]
     outbound_http_private_host_allowlist: list[str] = []
     mcp_install_root: str = "data/mcp-installations"
+    mcp_job_worker_isolation: Literal["process", "container"] = "process"
+    mcp_job_worker_poll_interval_seconds: float = 2.0
+    mcp_job_worker_lease_seconds: int = 120
+    mcp_job_worker_heartbeat_seconds: int = 30
+    mcp_job_worker_retry_base_seconds: int = 15
+    mcp_job_worker_retry_max_seconds: int = 15 * 60
     mcp_runtime_provider: str = "local"
     mcp_runtime_namespace: str = "wardn-runtimes"
     mcp_runtime_kubernetes_namespace_prefix: str = "wardn"

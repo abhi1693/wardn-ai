@@ -12,7 +12,9 @@ import type { MCPOperationJobReadStatus } from './mCPOperationJobReadStatus';
 export interface MCPOperationJobRead {
   attemptCount: number;
   cleanupAttemptCount: number;
+  cleanupAvailableAt?: string | null;
   cleanupError?: string;
+  cleanupMaxAttempts: number;
   cleanupStatus: MCPOperationJobReadCleanupStatus;
   completedAt?: string | null;
   createdAt: string;

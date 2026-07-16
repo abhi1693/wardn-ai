@@ -99,6 +99,20 @@ cd wardn/backend
 ../../.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+Run the durable MCP operation worker in a separate terminal for local development:
+
+```bash
+cd wardn/backend
+../../.venv/bin/python -m app.manage runmcpjobs
+```
+
+The API never starts this worker in-process. In non-local environments, deploy the command in a
+dedicated container or pod and set `WARDN_MCP_JOB_WORKER_ISOLATION=container` there. Give that
+workload a separate service identity, explicit CPU/memory and process limits, a read-only root
+filesystem with only the installation volume writable, and egress limited to approved package,
+catalog, secret-store, and database destinations. Do not copy the API's full environment into the
+worker deployment.
+
 Useful endpoints:
 
 - `GET /api/v1/health/live`
@@ -222,6 +236,8 @@ Runtime settings use the `WARDN_` prefix. Common local values include:
 - `WARDN_CORS_ORIGINS`
 - `WARDN_SESSION_SECRET`
 - `WARDN_MCP_INSTALL_ROOT`
+- `WARDN_MCP_JOB_WORKER_ISOLATION`
+- `WARDN_MCP_JOB_WORKER_LEASE_SECONDS`
 - `WARDN_MCP_RUNTIME_PROVIDER`
 
 OpenBao credentials are configured by operators, not organization administrators. Set

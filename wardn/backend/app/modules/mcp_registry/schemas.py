@@ -201,6 +201,8 @@ class MCPOperationJobRead(BaseModel):
     error_message: str = Field(default="", alias="errorMessage")
     cleanup_status: MCPOperationCleanupStatus = Field(alias="cleanupStatus")
     cleanup_attempt_count: int = Field(alias="cleanupAttemptCount")
+    cleanup_max_attempts: int = Field(alias="cleanupMaxAttempts")
+    cleanup_available_at: datetime | None = Field(default=None, alias="cleanupAvailableAt")
     cleanup_error: str = Field(default="", alias="cleanupError")
     started_at: datetime | None = Field(default=None, alias="startedAt")
     completed_at: datetime | None = Field(default=None, alias="completedAt")

@@ -206,6 +206,18 @@ class MCPOperationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     cleanup_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     cleanup_attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cleanup_max_attempts: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    cleanup_available_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    cleanup_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    cleanup_worker_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     cleanup_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 

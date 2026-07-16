@@ -3,6 +3,7 @@ import sys
 from app.commands.registry import registry
 from app.modules.llm_providers.commands import register_llm_provider_commands
 from app.modules.mcp_registry.commands import register_mcp_registry_commands
+from app.modules.mcp_registry.job_commands import register_mcp_job_commands
 from app.modules.mcp_runtime.commands import register_mcp_runtime_commands
 from app.modules.users.commands import register_user_commands
 
@@ -10,6 +11,7 @@ from app.modules.users.commands import register_user_commands
 def register_commands() -> None:
     register_llm_provider_commands(registry)
     register_mcp_registry_commands(registry)
+    register_mcp_job_commands(registry)
     register_mcp_runtime_commands(registry)
     register_user_commands(registry)
 

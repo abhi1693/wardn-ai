@@ -33,6 +33,8 @@ def make_job(*, workspace_id: uuid.UUID | None = None) -> MCPOperationJob:
         cleanup_status="not_required",
         cleanup_payload={},
         cleanup_attempt_count=0,
+        cleanup_max_attempts=5,
+        cleanup_worker_id="",
         cleanup_error="",
         created_at=timestamp,
         updated_at=timestamp,
@@ -73,6 +75,69 @@ def test_job_response_includes_persisted_progress_and_events() -> None:
             "createdAt": job.created_at,
         }
     ]
+
+
+def test_operation_deduplication_key_is_stable_for_equivalent_payloads() -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+
+    first = job_service.operation_deduplication_key(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        operation="install_server",
+        resource_key="server:example",
+        request_payload={"version": "1.0.0", "config": {"a": 1, "b": 2}},
+    )
+    second = job_service.operation_deduplication_key(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        operation="install_server",
+        resource_key="server:example",
+        request_payload={"config": {"b": 2, "a": 1}, "version": "1.0.0"},
+    )
+
+    assert first == second
+    assert len(first) == 64
+
+
+@pytest.mark.asyncio
+async def test_enqueue_operation_job_reuses_active_equivalent_job(monkeypatch) -> None:
+    job = make_job(workspace_id=uuid.uuid4())
+    seen: dict[str, object] = {}
+
+    async def find_existing(session, deduplication_key):
+        seen["deduplication_key"] = deduplication_key
+        return job
+
+    async def list_events(session, job_id):
+        return []
+
+    monkeypatch.setattr(
+        job_service.job_repository,
+        "get_active_job_by_deduplication_key",
+        find_existing,
+    )
+    monkeypatch.setattr(job_service.job_repository, "list_job_events", list_events)
+
+    response = await job_service.enqueue_operation_job(
+        object(),
+        organization_id=job.organization_id,
+        workspace_id=job.workspace_id,
+        requested_by_id=job.requested_by_id,
+        operation=job.operation,
+        resource_key=job.resource_key,
+        request_payload=job.request_payload,
+        progress_total=4,
+    )
+
+    assert response.job_id == job.id
+    assert seen["deduplication_key"] == job_service.operation_deduplication_key(
+        organization_id=job.organization_id,
+        workspace_id=job.workspace_id,
+        operation=job.operation,
+        resource_key=job.resource_key,
+        request_payload=job.request_payload,
+    )
 
 
 @pytest.mark.asyncio
