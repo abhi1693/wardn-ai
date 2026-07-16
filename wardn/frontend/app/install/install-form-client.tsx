@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type {
   MCPRegistryServerListResponse,
   MCPRegistryServerResponse,
+  MCPOperationJobRead,
   MCPServerInstallRequestConfigValues,
   MCPServerInstallationRead,
   SecretStoreRead,
@@ -74,12 +75,48 @@ type InstallFormClientProps = {
 };
 
 const SERVER_PICKER_PAGE_SIZE = 12;
+const JOB_POLL_INTERVAL_MS = 1_000;
+const JOB_POLL_ATTEMPTS = 600;
 
 function installUrl(serverName: string) {
   return `/api/mcp/registry/installed-servers/${serverName
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForInstallationJob(
+  initialJob: MCPOperationJobRead,
+  onProgress: (message: string) => void
+): Promise<MCPServerInstallationRead> {
+  let job = initialJob;
+  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
+    onProgress(job.progressMessage || "Installation queued");
+    if (job.status === "succeeded") {
+      const installation = job.result?.installation;
+      if (!installation || typeof installation !== "object" || !("id" in installation)) {
+        throw new Error("Installation completed without an installation result.");
+      }
+      return installation as MCPServerInstallationRead;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.errorMessage || "Server installation failed.");
+    }
+    await wait(JOB_POLL_INTERVAL_MS);
+    const response = await fetch(
+      `/api/mcp/registry/jobs/${encodeURIComponent(job.jobId)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, "Failed to read installation status."));
+    }
+    job = (await response.json()) as MCPOperationJobRead;
+  }
+  throw new Error("Installation is still running. Check the installation list shortly.");
 }
 
 function encodedServerName(serverName: string) {
@@ -706,6 +743,7 @@ export function InstallFormClient({
   const [isSearching, setIsSearching] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
+  const [jobProgress, setJobProgress] = useState("");
   const [selectedServer, setSelectedServer] = useState<MCPRegistryServerResponse | null>(() =>
     initialInstallation
       ? serverResponseFromInstallation(initialInstallation)
@@ -1042,6 +1080,7 @@ export function InstallFormClient({
 
     setIsMutating(true);
     setError("");
+    setJobProgress("Queueing installation");
     try {
       const body: Record<string, unknown> = {
         version: selectedServer.server.version,
@@ -1060,7 +1099,8 @@ export function InstallFormClient({
       if (!response.ok) {
         throw new Error(await responseErrorMessage(response, isEdit ? "Failed to save instance." : "Failed to add instance."));
       }
-      const installation = (await response.json()) as MCPServerInstallationRead;
+      const job = (await response.json()) as MCPOperationJobRead;
+      const installation = await waitForInstallationJob(job, setJobProgress);
       setInstallations((current) => [...current.filter((item) => item.id !== installation.id), installation]);
       router.push(basePath);
       router.refresh();
@@ -1068,6 +1108,7 @@ export function InstallFormClient({
       setError(caught instanceof Error ? caught.message : "Server instance could not be saved.");
     } finally {
       setIsMutating(false);
+      setJobProgress("");
     }
   }
 
@@ -1079,6 +1120,7 @@ export function InstallFormClient({
   return (
     <form className="space-y-5" onSubmit={submitConfiguration}>
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      {jobProgress ? <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">{jobProgress}</div> : null}
 
       {!selectedServer ? (
         <section className="space-y-4">

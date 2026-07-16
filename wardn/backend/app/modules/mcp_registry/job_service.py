@@ -46,6 +46,7 @@ async def enqueue_operation_job(
     progress_total: int,
     max_attempts: int = 3,
     cleanup_max_attempts: int = 5,
+    deduplication_key: str | None = None,
 ) -> MCPOperationJobRead:
     if not operation or len(operation) > 50:
         raise ValueError("MCP operation name must contain at most 50 characters")
@@ -56,13 +57,15 @@ async def enqueue_operation_job(
     if max_attempts < 1 or cleanup_max_attempts < 1:
         raise ValueError("MCP operation retry limits must be greater than 0")
 
-    deduplication_key = operation_deduplication_key(
+    deduplication_key = deduplication_key or operation_deduplication_key(
         organization_id=organization_id,
         workspace_id=workspace_id,
         operation=operation,
         resource_key=resource_key,
         request_payload=request_payload,
     )
+    if len(deduplication_key) != 64:
+        raise ValueError("MCP operation deduplication key must be a SHA-256 digest")
     existing = await job_repository.get_active_job_by_deduplication_key(
         session,
         deduplication_key,

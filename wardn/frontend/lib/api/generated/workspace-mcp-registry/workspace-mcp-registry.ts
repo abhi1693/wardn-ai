@@ -11,7 +11,6 @@ import type {
   MCPServerBulkUpdateRequest,
   MCPServerInstallRequest,
   MCPServerInstallationListResponse,
-  MCPServerInstallationRead,
   MCPServerInstallationToolValidationRequest,
   MCPServerInstallationToolValidationResponse,
   MCPServerInstallationToolsResponse
@@ -249,9 +248,9 @@ export const workspaceMcpRegistryListInstalledServers = async (organizationId: s
 }
 
 
-export type workspaceMcpRegistryUpdateInstalledServersResponse200 = {
-  data: MCPServerInstallationListResponse
-  status: 200
+export type workspaceMcpRegistryUpdateInstalledServersResponse202 = {
+  data: MCPOperationJobRead
+  status: 202
 }
 
 export type workspaceMcpRegistryUpdateInstalledServersResponse400 = {
@@ -269,15 +268,10 @@ export type workspaceMcpRegistryUpdateInstalledServersResponse422 = {
   status: 422
 }
 
-export type workspaceMcpRegistryUpdateInstalledServersResponse500 = {
-  data: ErrorResponse
-  status: 500
-}
-
-export type workspaceMcpRegistryUpdateInstalledServersResponseSuccess = (workspaceMcpRegistryUpdateInstalledServersResponse200) & {
+export type workspaceMcpRegistryUpdateInstalledServersResponseSuccess = (workspaceMcpRegistryUpdateInstalledServersResponse202) & {
   headers: Headers;
 };
-export type workspaceMcpRegistryUpdateInstalledServersResponseError = (workspaceMcpRegistryUpdateInstalledServersResponse400 | workspaceMcpRegistryUpdateInstalledServersResponse404 | workspaceMcpRegistryUpdateInstalledServersResponse422 | workspaceMcpRegistryUpdateInstalledServersResponse500) & {
+export type workspaceMcpRegistryUpdateInstalledServersResponseError = (workspaceMcpRegistryUpdateInstalledServersResponse400 | workspaceMcpRegistryUpdateInstalledServersResponse404 | workspaceMcpRegistryUpdateInstalledServersResponse422) & {
   headers: Headers;
 };
 
@@ -374,9 +368,9 @@ export const workspaceMcpRegistryUninstallServer = async (organizationId: string
 }
 
 
-export type workspaceMcpRegistryInstallServerVersionResponse200 = {
-  data: MCPServerInstallationRead
-  status: 200
+export type workspaceMcpRegistryInstallServerVersionResponse202 = {
+  data: MCPOperationJobRead
+  status: 202
 }
 
 export type workspaceMcpRegistryInstallServerVersionResponse400 = {
@@ -394,15 +388,10 @@ export type workspaceMcpRegistryInstallServerVersionResponse422 = {
   status: 422
 }
 
-export type workspaceMcpRegistryInstallServerVersionResponse500 = {
-  data: ErrorResponse
-  status: 500
-}
-
-export type workspaceMcpRegistryInstallServerVersionResponseSuccess = (workspaceMcpRegistryInstallServerVersionResponse200) & {
+export type workspaceMcpRegistryInstallServerVersionResponseSuccess = (workspaceMcpRegistryInstallServerVersionResponse202) & {
   headers: Headers;
 };
-export type workspaceMcpRegistryInstallServerVersionResponseError = (workspaceMcpRegistryInstallServerVersionResponse400 | workspaceMcpRegistryInstallServerVersionResponse404 | workspaceMcpRegistryInstallServerVersionResponse422 | workspaceMcpRegistryInstallServerVersionResponse500) & {
+export type workspaceMcpRegistryInstallServerVersionResponseError = (workspaceMcpRegistryInstallServerVersionResponse400 | workspaceMcpRegistryInstallServerVersionResponse404 | workspaceMcpRegistryInstallServerVersionResponse422) & {
   headers: Headers;
 };
 

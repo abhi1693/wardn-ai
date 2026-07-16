@@ -22,6 +22,10 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
 )
+from app.modules.mcp_registry.installation_jobs import (
+    enqueue_installed_server_updates,
+    enqueue_server_installation,
+)
 from app.modules.mcp_registry.job_service import get_operation_job
 from app.modules.mcp_registry.schemas import (
     MCPCatalogSourceCreate,
@@ -565,12 +569,12 @@ async def list_workspace_installed_mcp_servers(
 
 @workspace_router.post(
     "/installed-servers/updates",
-    response_model=MCPServerInstallationListResponse,
+    response_model=MCPOperationJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
     operation_id="workspace_mcp_registry_update_installed_servers",
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
     },
 )
 async def update_workspace_installed_mcp_servers(
@@ -579,31 +583,32 @@ async def update_workspace_installed_mcp_servers(
     payload: MCPServerBulkUpdateRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> MCPServerInstallationListResponse:
+) -> MCPOperationJobRead:
     await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
     try:
-        response = await update_installed_servers(session, payload, workspace_id)
+        response = await enqueue_installed_server_updates(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user=current_user,
+            payload=payload,
+        )
     except (MCPServerInstallationNotFoundError, MCPServerNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except MCPServerInstallationFailedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"server installation failed: {exc}",
-        ) from exc
     await session.commit()
     return response
 
 
 @workspace_router.put(
     "/installed-servers/{server_name:path}",
-    response_model=MCPServerInstallationRead,
+    response_model=MCPOperationJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
     operation_id="workspace_mcp_registry_install_server_version",
     responses={
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
     },
 )
 async def install_workspace_mcp_server_version(
@@ -613,15 +618,16 @@ async def install_workspace_mcp_server_version(
     payload: MCPServerInstallRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> MCPServerInstallationRead:
+) -> MCPOperationJobRead:
     await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
     try:
-        response = await install_server_version(
+        response = await enqueue_server_installation(
             session,
-            server_name,
-            payload,
-            workspace_id,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
             user=current_user,
+            server_name=server_name,
+            payload=payload,
         )
     except MCPServerNotFoundError as exc:
         raise HTTPException(
@@ -632,11 +638,6 @@ async def install_workspace_mcp_server_version(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except MCPServerInstallationFailedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"server installation failed: {exc}",
-        ) from exc
     await session.commit()
     return response
 

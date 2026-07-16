@@ -617,10 +617,27 @@ def verify_remote_mcp_server(
 
 
 def run_install_command(command: list[str], *, cwd: Path) -> None:
+    cache_root = cwd / ".installer-cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    environment = {
+        "PATH": os.environ.get("PATH", os.defpath),
+        "HOME": str(cache_root),
+        "TMPDIR": str(cache_root),
+        "XDG_CACHE_HOME": str(cache_root),
+        "NPM_CONFIG_CACHE": str(cache_root / "npm"),
+        "PIP_CACHE_DIR": str(cache_root / "pip"),
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PIP_NO_INPUT": "1",
+        "UV_CACHE_DIR": str(cache_root / "uv"),
+        "CI": "true",
+        "NO_COLOR": "1",
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+    }
     try:
         subprocess.run(
             command,
             cwd=cwd,
+            env=environment,
             check=True,
             capture_output=True,
             text=True,
@@ -1159,7 +1176,11 @@ def install_server_runtime(
     config_values = config_values or {}
     install_path = server_install_path(server, install_root, config_name, workspace_id)
     temporary_path = install_path.with_name(f"{install_path.name}.tmp")
+    backup_path = install_path.with_name(f"{install_path.name}.backup")
+    if backup_path.exists() and not install_path.exists():
+        backup_path.rename(install_path)
     shutil.rmtree(temporary_path, ignore_errors=True)
+    shutil.rmtree(backup_path, ignore_errors=True)
     temporary_path.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -1184,8 +1205,14 @@ def install_server_runtime(
                 "MCP server does not define a remote or package installation target"
             )
 
-        shutil.rmtree(install_path, ignore_errors=True)
-        temporary_path.rename(install_path)
+        if install_path.exists():
+            install_path.rename(backup_path)
+        try:
+            temporary_path.rename(install_path)
+        except Exception:
+            if backup_path.exists() and not install_path.exists():
+                backup_path.rename(install_path)
+            raise
         runtime_config = rewrite_path_prefix(
             runtime_install.runtime_config,
             temporary_path,
@@ -1199,6 +1226,7 @@ def install_server_runtime(
         runtime_config["installPath"] = str(install_path)
         write_runtime_manifest(install_path, runtime_config)
         write_secret_manifest(install_path, secret_config)
+        shutil.rmtree(backup_path, ignore_errors=True)
         return MCPRuntimeInstall(
             install_type=runtime_install.install_type,
             install_path=str(install_path),
@@ -1209,4 +1237,7 @@ def install_server_runtime(
         )
     except Exception:
         shutil.rmtree(temporary_path, ignore_errors=True)
+        if backup_path.exists():
+            shutil.rmtree(install_path, ignore_errors=True)
+            backup_path.rename(install_path)
         raise

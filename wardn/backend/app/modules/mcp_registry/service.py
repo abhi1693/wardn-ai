@@ -1603,7 +1603,8 @@ async def install_server_version(
         workspace_id,
         config_values,
     )
-    runtime_install = install_server_runtime(
+    runtime_install = await asyncio.to_thread(
+        install_server_runtime,
         server,
         config_values=resolved_config_values,
         install_target=payload.install_target,
@@ -1720,7 +1721,8 @@ async def update_installed_servers(
                 workspace_id,
                 config_values,
             )
-            runtime_install = install_server_runtime(
+            runtime_install = await asyncio.to_thread(
+                install_server_runtime,
                 latest,
                 config_values=resolved_config_values,
                 install_target=install_target,

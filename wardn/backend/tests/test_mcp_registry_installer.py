@@ -8,8 +8,10 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationUnsupportedError,
 )
 from app.modules.mcp_registry.installer import (
+    MCPRuntimeInstall,
     install_server_runtime,
     parse_mcp_response_body,
+    run_install_command,
     safe_path_component,
     send_remote_mcp_request,
     verify_remote_mcp_server,
@@ -46,6 +48,68 @@ def server_version(
 
 def test_safe_path_component_removes_path_separators() -> None:
     assert safe_path_component("io.github.example/weather") == "io.github.example__weather"
+
+
+def test_install_commands_receive_minimal_environment(tmp_path, monkeypatch) -> None:
+    seen = {}
+    monkeypatch.setenv("WARDN_DATABASE_URL", "postgresql://secret")
+    monkeypatch.setenv("WARDN_SESSION_SECRET", "session-secret")
+
+    def run(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.modules.mcp_registry.installer.subprocess.run", run)
+
+    run_install_command(["installer", "package"], cwd=tmp_path)
+
+    environment = seen["kwargs"]["env"]
+    assert seen["command"] == ["installer", "package"]
+    assert environment["HOME"].startswith(str(tmp_path))
+    assert environment["PIP_NO_INPUT"] == "1"
+    assert "WARDN_DATABASE_URL" not in environment
+    assert "WARDN_SESSION_SECRET" not in environment
+    assert not any(name.startswith("WARDN_") for name in environment)
+
+
+def test_install_swap_restores_previous_artifact_when_finalization_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(remotes=[{"url": "https://mcp.example.com"}])
+    install_path = (
+        tmp_path / "io.github.example__weather" / "default" / "1.0.0"
+    )
+    install_path.mkdir(parents=True)
+    (install_path / "old-runtime").write_text("old", encoding="utf-8")
+
+    def build_remote(_server, temporary_path, config_values, target_index):
+        (temporary_path / "new-runtime").write_text("new", encoding="utf-8")
+        return MCPRuntimeInstall(
+            install_type="remote",
+            install_path=str(temporary_path),
+            runtime_config={"kind": "remote"},
+            secret_config={},
+            status="enabled",
+        )
+
+    def fail_final_manifest(path, runtime_config):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.build_remote_install",
+        build_remote,
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.write_runtime_manifest",
+        fail_final_manifest,
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        install_server_runtime(server, install_root=tmp_path)
+
+    assert (install_path / "old-runtime").read_text(encoding="utf-8") == "old"
+    assert not install_path.with_name("1.0.0.backup").exists()
 
 
 def test_parse_mcp_response_body_reads_json_and_sse() -> None:

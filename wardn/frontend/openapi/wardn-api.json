@@ -14509,11 +14509,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MCPServerInstallationListResponse"
+                  "$ref": "#/components/schemas/MCPOperationJobRead"
                 }
               }
             },
@@ -14548,16 +14548,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
           }
         },
         "summary": "Update Workspace Installed Mcp Servers",
@@ -14706,11 +14696,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MCPServerInstallationRead"
+                  "$ref": "#/components/schemas/MCPOperationJobRead"
                 }
               }
             },
@@ -14745,16 +14735,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
           }
         },
         "summary": "Install Workspace Mcp Server Version",

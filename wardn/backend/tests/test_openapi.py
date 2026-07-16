@@ -588,6 +588,10 @@ def test_mcp_registry_openapi_contract() -> None:
     assert workspace_install["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerInstallRequest"
     }
+    assert workspace_install["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPOperationJobRead"
+    }
+    assert "200" not in workspace_install["responses"]
     assert workspace_uninstall["operationId"] == "workspace_mcp_registry_uninstall_server"
     assert workspace_uninstall["responses"]["204"]["description"] == "Successful Response"
     assert (
@@ -634,6 +638,10 @@ def test_mcp_registry_openapi_contract() -> None:
     assert workspace_update["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MCPServerBulkUpdateRequest"
     }
+    assert workspace_update["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/MCPOperationJobRead"
+    }
+    assert "200" not in workspace_update["responses"]
 
 
 def test_mcp_operation_job_openapi_contract() -> None:
