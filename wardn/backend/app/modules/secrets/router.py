@@ -120,7 +120,6 @@ async def create_secret_store_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -181,7 +180,6 @@ async def update_secret_store_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -207,7 +205,6 @@ async def delete_secret_store_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
 
 
 @router.post(
@@ -286,7 +283,6 @@ async def create_secret_handle_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -347,7 +343,6 @@ async def update_secret_handle_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -373,7 +368,6 @@ async def delete_secret_handle_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
 
 
 @router.post(

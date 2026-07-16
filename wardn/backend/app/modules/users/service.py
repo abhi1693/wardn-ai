@@ -119,7 +119,6 @@ async def bootstrap_superuser(session: AsyncSession, payload: UserCreate) -> Use
     if await repository.count_users(session) > 0:
         raise BootstrapUserExistsError("bootstrap user already exists")
     user = await create_user(session, payload, is_superuser=True)
-    await session.commit()
     await session.refresh(user)
     return user
 

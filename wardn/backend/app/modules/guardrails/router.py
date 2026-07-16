@@ -111,7 +111,6 @@ async def create_workspace_guardrail_policy_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -181,7 +180,6 @@ async def update_workspace_guardrail_policy_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -214,4 +212,3 @@ async def delete_workspace_guardrail_policy_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()

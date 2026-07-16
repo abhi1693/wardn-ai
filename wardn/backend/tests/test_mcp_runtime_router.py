@@ -198,7 +198,7 @@ def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
     assert response.json() == {"detail": "runtime session not found"}
 
 
-def test_stop_runtime_session_route_commits(monkeypatch) -> None:
+def test_stop_runtime_session_route_leaves_transaction_to_dependency(monkeypatch) -> None:
     seen = {}
 
     async def stop_runtime_session(session, runtime_session_id, *, workspace_id=None):
@@ -219,7 +219,7 @@ def test_stop_runtime_session_route_commits(monkeypatch) -> None:
     assert response.json()["status"] == "stopped"
     assert seen["runtime_session_id"] == runtime_session_id
     assert seen["workspace_id"] == TEST_WORKSPACE_ID
-    assert seen["session"].committed is True
+    assert seen["session"].committed is False
 
 
 def test_get_runtime_session_health_route(monkeypatch) -> None:
@@ -358,7 +358,7 @@ def test_workspace_get_runtime_summary_route_filters_workspace(monkeypatch) -> N
     }
 
 
-def test_workspace_stop_runtime_session_route_requires_admin_and_commits(monkeypatch) -> None:
+def test_workspace_stop_runtime_session_route_requires_admin(monkeypatch) -> None:
     organization_id = uuid.uuid4()
     workspace_id = uuid.uuid4()
     runtime_session_id = uuid.uuid4()
@@ -393,7 +393,7 @@ def test_workspace_stop_runtime_session_route_requires_admin_and_commits(monkeyp
     assert seen["admin_check"] == (organization_id, workspace_id)
     assert seen["runtime_session_id"] == runtime_session_id
     assert seen["workspace_id"] == workspace_id
-    assert seen["session"].committed is True
+    assert seen["session"].committed is False
 
 
 def test_workspace_get_runtime_session_health_route_filters_workspace(monkeypatch) -> None:

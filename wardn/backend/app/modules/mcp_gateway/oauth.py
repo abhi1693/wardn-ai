@@ -628,7 +628,6 @@ async def authorize_with_password(
         response = await consent_form(session, user, form)
         if just_logged_in:
             set_session_cookie(response, user)
-            await session.commit()
         return response
 
     try:
@@ -637,10 +636,7 @@ async def authorize_with_password(
         response = await consent_form(session, user, form, error=str(exc))
         if just_logged_in:
             set_session_cookie(response, user)
-            await session.commit()
         return response
-
-    await session.commit()
     response = authorize_redirect(user, form, token_scope)
     if just_logged_in:
         set_session_cookie(response, user)
@@ -704,8 +700,6 @@ async def exchange_token(
         )
     except InvalidAPITokenScopeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await session.commit()
     return JSONResponse(
         {
             "access_token": access_token,

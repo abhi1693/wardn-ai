@@ -70,7 +70,6 @@ async def create_organization_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except DuplicateOrganizationError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -117,7 +116,6 @@ async def update_organization_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except OrganizationAccessDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -170,7 +168,6 @@ async def create_workspace_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except DuplicateWorkspaceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -225,5 +222,4 @@ async def update_workspace_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    await session.commit()
     return response

@@ -431,7 +431,6 @@ async def search_mcp_tools(
         )
         if tool_count == 0:
             await refresh_tool_schemas(session, server_name, workspace_id=installation.workspace_id)
-            await session.commit()
             refreshed = True
 
     tools, next_cursor = await tool_repository.search_enabled_tool_schemas(
@@ -488,7 +487,6 @@ async def get_mcp_tool(
     refreshed = False
     if cached_tool is None:
         await refresh_tool_schemas(session, server_name, workspace_id=installation.workspace_id)
-        await session.commit()
         refreshed = True
         cached_tool = await tool_repository.get_enabled_tool_schema(
             session,
@@ -548,14 +546,12 @@ async def run_mcp_tool(
         scope=scope,
     )
     if decision.mode in (GUARDRAIL_MODE_DENY, GUARDRAIL_MODE_REQUIRE_CONFIRMATION):
-        await session.commit()
         return guardrail_tool_result(
             decision,
             server_name=server_name,
             tool_name=tool_name,
         )
     if decision.mode != GUARDRAIL_MODE_ALLOW:
-        await session.commit()
         return error_tool_result(
             "Unsupported guardrail decision.",
             {
@@ -576,9 +572,7 @@ async def run_mcp_tool(
             arguments=tool_arguments,
             request_meta=request_meta,
         )
-        await session.commit()
     except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
-        await session.commit()
         return error_tool_result(
             str(exc),
             {
@@ -587,9 +581,6 @@ async def run_mcp_tool(
                 "error": str(exc),
             },
         )
-    except Exception:
-        await session.commit()
-        raise
     return {
         **upstream_result,
         "structuredContent": {

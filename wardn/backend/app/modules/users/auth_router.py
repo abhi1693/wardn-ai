@@ -164,7 +164,6 @@ async def login(
         ) from exc
 
     _set_session_cookie(response, user)
-    await session.commit()
     await session.refresh(user)
     return user
 
@@ -285,7 +284,6 @@ async def oidc_callback(
     )
     _set_session_cookie(response, user)
     _clear_oidc_state_cookie(response, oidc_state.state)
-    await session.commit()
     return response
 
 
@@ -337,7 +335,6 @@ async def create_api_token(
         record, token = await create_user_api_token(session, current_user.id, payload)
     except InvalidAPITokenScopeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     await session.refresh(record)
     return UserAPITokenCreated(
         token=token,
@@ -387,7 +384,6 @@ async def update_api_token(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except UserAPITokenNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()
     await session.refresh(record)
     return UserAPITokenRead.model_validate(record)
 
@@ -412,4 +408,3 @@ async def delete_api_token(
         await delete_user_api_token(session, current_user.id, token_id)
     except UserAPITokenNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()

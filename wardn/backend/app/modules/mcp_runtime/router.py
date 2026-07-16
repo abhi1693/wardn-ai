@@ -122,7 +122,6 @@ async def stop_mcp_runtime_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="runtime session not found",
         ) from exc
-    await session.commit()
     return response
 
 
@@ -254,7 +253,6 @@ async def stop_workspace_mcp_runtime_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="runtime session not found",
         ) from exc
-    await session.commit()
     return response
 
 

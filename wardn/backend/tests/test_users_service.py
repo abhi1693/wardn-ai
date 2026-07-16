@@ -106,7 +106,7 @@ async def test_bootstrap_superuser_rejects_existing_users(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_superuser_commits_first_user(monkeypatch) -> None:
+async def test_bootstrap_superuser_leaves_transaction_to_caller(monkeypatch) -> None:
     async def no_users(*args, **kwargs):
         return 0
 
@@ -126,7 +126,7 @@ async def test_bootstrap_superuser_commits_first_user(monkeypatch) -> None:
     )
 
     assert user.is_superuser is True
-    assert session.committed is True
+    assert session.committed is False
     assert session.refreshed == [user]
 
 

@@ -11,10 +11,10 @@ from app.modules.users.models import User
 from app.modules.users.service import authenticate_api_token
 
 
-async def get_current_user(
+async def resolve_current_user(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    authorization: Annotated[str | None, Header()] = None,
+    session: AsyncSession,
+    authorization: str | None,
 ) -> User:
     user_id = None
     settings = get_settings()
@@ -42,3 +42,22 @@ async def get_current_user(
             detail="authentication required",
         )
     return user
+
+
+async def get_current_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> User:
+    return await resolve_current_user(request, session, authorization)
+
+
+async def get_stream_current_user(
+    request: Request,
+    session: Annotated[
+        AsyncSession,
+        Depends(get_db_session, scope="function"),
+    ],
+    authorization: Annotated[str | None, Header()] = None,
+) -> User:
+    return await resolve_current_user(request, session, authorization)

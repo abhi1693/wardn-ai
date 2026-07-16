@@ -5,7 +5,8 @@ import platform
 import re
 import threading
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import InvalidStatus, WebSocketException
 
+from app.db.session import AsyncSessionLocal
 from app.modules.agents import repository
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
@@ -69,6 +71,7 @@ from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.service import (
     OPENAI_API_KEY_PROVIDER,
     OPENAI_CHATGPT_PROVIDER,
+    ResolvedLLMCredentialSecrets,
     credential_supports_model,
     list_models_for_credential,
     read_record,
@@ -127,6 +130,18 @@ QUICK_START_AGENT_INSTRUCTIONS = (
     "You are a workspace assistant. Use available tools when they help answer accurately. "
     "Ask before destructive actions."
 )
+
+AgentSessionFactory = Callable[[], AsyncSession]
+
+
+@asynccontextmanager
+async def agent_stream_unit_of_work(
+    session_factory: AgentSessionFactory | None = None,
+) -> AsyncIterator[AsyncSession]:
+    factory = session_factory or AsyncSessionLocal
+    async with factory() as session:
+        async with session.begin():
+            yield session
 
 
 class AgentChatProviderError(Exception):
@@ -1362,7 +1377,7 @@ def tool_approval_payload(approval: AgentToolApproval, tool: AgentRuntimeTool) -
     }
 
 
-async def execute_agent_tool_call(
+async def _execute_agent_tool_call(
     session: AsyncSession,
     tools: dict[str, AgentRuntimeTool],
     tool_call: AgentToolCall,
@@ -1426,14 +1441,12 @@ async def execute_agent_tool_call(
                 ),
             )
         if decision.mode == GUARDRAIL_MODE_DENY:
-            await session.commit()
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} {decision.message}",
             )
         if decision.mode == GUARDRAIL_MODE_REQUIRE_CONFIRMATION:
             if agent is None:
-                await session.commit()
                 return tool_execution_result(
                     tool.tool_schema.tool_name,
                     f"{AGENT_TOOL_BLOCKED_PREFIX} confirmation requires an agent context",
@@ -1452,14 +1465,12 @@ async def execute_agent_tool_call(
                 tool_name=tool.tool_schema.tool_name,
                 arguments=tool_call.arguments,
             )
-            await session.commit()
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_CONFIRMATION_PREFIX} {decision.message}",
                 approval=tool_approval_payload(approval, tool),
             )
         if decision.mode != GUARDRAIL_MODE_ALLOW:
-            await session.commit()
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} unsupported guardrail decision",
@@ -1479,17 +1490,46 @@ async def execute_agent_tool_call(
             request_meta=request_meta,
             progress_callback=progress_callback,
         )
-        await session.commit()
     except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
-        await session.commit()
         return tool_execution_result(
             tool.tool_schema.tool_name,
             f"Tool {tool.tool_schema.tool_name} failed: {exc}",
         )
-    except Exception:
-        await session.commit()
-        raise
     return tool_execution_result(tool.tool_schema.tool_name, mcp_result_text(result))
+
+
+async def execute_agent_tool_call(
+    tools: dict[str, AgentRuntimeTool],
+    tool_call: AgentToolCall,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent: Agent | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+    request_meta: dict[str, Any] | None = None,
+    cancel_event: threading.Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
+    progress_callback=None,
+) -> AgentToolExecutionResult:
+    async with agent_stream_unit_of_work(session_factory) as session:
+        return await _execute_agent_tool_call(
+            session,
+            tools,
+            tool_call,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent=agent,
+            conversation=conversation,
+            agent_run=agent_run,
+            request_meta=request_meta,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
+            progress_callback=progress_callback,
+        )
 
 
 def chatgpt_codex_messages(messages: list[AgentChatMessage]) -> list[dict[str, Any]]:
@@ -1548,10 +1588,10 @@ def progress_activity_event(
 
 
 async def execute_agent_tool_call_with_progress(
-    session: AsyncSession,
     tools: dict[str, AgentRuntimeTool],
     tool_call: AgentToolCall,
     *,
+    session_factory: AgentSessionFactory | None = None,
     activity_id: str,
     tool_name: str,
     user: User | None = None,
@@ -1571,9 +1611,9 @@ async def execute_agent_tool_call_with_progress(
 
     task = asyncio.create_task(
         execute_agent_tool_call(
-            session,
             tools,
             tool_call,
+            session_factory=session_factory,
             user=user,
             organization_id=organization_id,
             workspace_id=workspace_id,
@@ -1736,10 +1776,10 @@ def websocket_error_message(payload: dict[str, Any]) -> str | None:
 
 
 async def stream_chatgpt_codex_response_text(
-    session: AsyncSession,
     agent: Agent,
     credential: LLMProviderCredential,
     *,
+    session_factory: AgentSessionFactory | None = None,
     user: User | None = None,
     organization_id: uuid.UUID | None = None,
     workspace_id: uuid.UUID | None = None,
@@ -1773,13 +1813,14 @@ async def stream_chatgpt_codex_response_text(
                 call_started_at = datetime.now(UTC)
                 call_usage: observability_service.LLMTokenUsage | None = None
                 tool_calls: list[AgentToolCall] = []
-                await require_agent_llm_budget_available(
-                    session,
-                    agent=agent,
-                    user=user,
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                )
+                async with agent_stream_unit_of_work(session_factory) as session:
+                    await require_agent_llm_budget_available(
+                        session,
+                        agent=agent,
+                        user=user,
+                        organization_id=organization_id,
+                        workspace_id=workspace_id,
+                    )
 
                 try:
                     await websocket.send(json.dumps(body, separators=(",", ":")))
@@ -1813,6 +1854,24 @@ async def stream_chatgpt_codex_response_text(
                         if payload.get("type") == "response.completed":
                             break
                 except Exception as exc:
+                    async with agent_stream_unit_of_work(session_factory) as session:
+                        await record_agent_llm_usage(
+                            session,
+                            credential=credential,
+                            agent=agent,
+                            user=user,
+                            organization_id=organization_id,
+                            workspace_id=workspace_id,
+                            agent_run=agent_run,
+                            usage=call_usage,
+                            started_at=call_started_at,
+                            finished_at=datetime.now(UTC),
+                            status="failed",
+                            error=str(exc),
+                        )
+                    raise
+
+                async with agent_stream_unit_of_work(session_factory) as session:
                     await record_agent_llm_usage(
                         session,
                         credential=credential,
@@ -1824,24 +1883,8 @@ async def stream_chatgpt_codex_response_text(
                         usage=call_usage,
                         started_at=call_started_at,
                         finished_at=datetime.now(UTC),
-                        status="failed",
-                        error=str(exc),
+                        status="succeeded",
                     )
-                    raise
-
-                await record_agent_llm_usage(
-                    session,
-                    credential=credential,
-                    agent=agent,
-                    user=user,
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                    agent_run=agent_run,
-                    usage=call_usage,
-                    started_at=call_started_at,
-                    finished_at=datetime.now(UTC),
-                    status="succeeded",
-                )
 
                 if not tool_calls:
                     return
@@ -1863,9 +1906,9 @@ async def stream_chatgpt_codex_response_text(
                     )
                     execution: AgentToolExecutionResult | None = None
                     async for update in execute_agent_tool_call_with_progress(
-                        session,
                         tools,
                         tool_call,
+                        session_factory=session_factory,
                         activity_id=activity_id,
                         tool_name=tool_name,
                         user=user,
@@ -1919,13 +1962,35 @@ async def stream_chatgpt_codex_response_text(
         raise AgentChatProviderError("LLM provider websocket timed out") from exc
 
 
+async def refresh_agent_chat_credential(
+    credential: LLMProviderCredential,
+    secrets: ResolvedLLMCredentialSecrets,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+) -> tuple[ResolvedLLMCredentialSecrets, str]:
+    async with agent_stream_unit_of_work(session_factory) as session:
+        stored_credential = await llm_provider_repository.get_credential(
+            session,
+            organization_id=credential.organization_id,
+            credential_id=credential.id,
+        )
+        if stored_credential is None:
+            raise InvalidAgentScopeError("agent credential is no longer available")
+        refreshed = await refresh_chatgpt_oauth_credential(
+            session,
+            stored_credential,
+            secrets,
+        )
+        return refreshed, chatgpt_account_id(stored_credential)
+
+
 async def run_agent_chat(
-    session: AsyncSession,
     agent: Agent,
     credential: LLMProviderCredential,
     payload: AgentChatRequest,
     tools: dict[str, AgentRuntimeTool],
     *,
+    session_factory: AgentSessionFactory | None = None,
     user: User | None = None,
     organization_id: uuid.UUID | None = None,
     workspace_id: uuid.UUID | None = None,
@@ -1942,18 +2007,20 @@ async def run_agent_chat(
         "input": messages,
         "stream": True,
     }
-    credential_secrets = await resolve_credential_secrets(session, credential)
+    async with agent_stream_unit_of_work(session_factory) as session:
+        credential_secrets = await resolve_credential_secrets(session, credential)
 
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
         call_started_at = datetime.now(UTC)
         call_usage: observability_service.LLMTokenUsage | None = None
-        await require_agent_llm_budget_available(
-            session,
-            agent=agent,
-            user=user,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-        )
+        async with agent_stream_unit_of_work(session_factory) as session:
+            await require_agent_llm_budget_available(
+                session,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+            )
 
         def capture_usage(usage: observability_service.LLMTokenUsage) -> None:
             nonlocal call_usage
@@ -1971,6 +2038,23 @@ async def run_agent_chat(
             ):
                 yield AgentChatTextEvent(text=text)
         except Exception as exc:
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await record_agent_llm_usage(
+                    session,
+                    credential=credential,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run=agent_run,
+                    usage=call_usage,
+                    started_at=call_started_at,
+                    finished_at=datetime.now(UTC),
+                    status="failed",
+                    error=str(exc),
+                )
+            raise
+        async with agent_stream_unit_of_work(session_factory) as session:
             await record_agent_llm_usage(
                 session,
                 credential=credential,
@@ -1982,23 +2066,8 @@ async def run_agent_chat(
                 usage=call_usage,
                 started_at=call_started_at,
                 finished_at=datetime.now(UTC),
-                status="failed",
-                error=str(exc),
+                status="succeeded",
             )
-            raise
-        await record_agent_llm_usage(
-            session,
-            credential=credential,
-            agent=agent,
-            user=user,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            agent_run=agent_run,
-            usage=call_usage,
-            started_at=call_started_at,
-            finished_at=datetime.now(UTC),
-            status="succeeded",
-        )
         return
 
     if (
@@ -2015,20 +2084,20 @@ async def run_agent_chat(
         except InvalidLLMProviderCredentialAuthError as exc:
             if "expired" not in str(exc).casefold():
                 raise
-            credential_secrets = await refresh_chatgpt_oauth_credential(
-                session,
+            credential_secrets, account_id = await refresh_agent_chat_credential(
                 credential,
                 credential_secrets,
+                session_factory=session_factory,
             )
-            await session.commit()
-        account_id = chatgpt_account_id(credential)
+        else:
+            account_id = chatgpt_account_id(credential)
         if not account_id:
             raise InvalidAgentScopeError("ChatGPT OAuth credential is missing account metadata")
         try:
             async for text in stream_chatgpt_codex_response_text(
-                session,
                 agent,
                 credential,
+                session_factory=session_factory,
                 user=user,
                 organization_id=organization_id,
                 workspace_id=workspace_id,
@@ -2045,21 +2114,19 @@ async def run_agent_chat(
         except AgentChatProviderError as exc:
             if exc.status_code != 401:
                 raise
-            credential_secrets = await refresh_chatgpt_oauth_credential(
-                session,
+            credential_secrets, account_id = await refresh_agent_chat_credential(
                 credential,
                 credential_secrets,
+                session_factory=session_factory,
             )
-            await session.commit()
-            account_id = chatgpt_account_id(credential)
             if not account_id:
                 raise InvalidAgentScopeError(
                     "ChatGPT OAuth credential is missing account metadata"
                 ) from exc
             async for text in stream_chatgpt_codex_response_text(
-                session,
                 agent,
                 credential,
+                session_factory=session_factory,
                 user=user,
                 organization_id=organization_id,
                 workspace_id=workspace_id,
@@ -2124,10 +2191,11 @@ def chat_stream_error_text(exc: Exception) -> str:
 
 
 async def persisted_agent_chat_stream(
-    session: AsyncSession,
     conversation: WorkspaceConversation | None,
     stream: AsyncGenerator[AgentChatStreamEvent, None],
     agent_run: AgentRun | None = None,
+    *,
+    session_factory: AgentSessionFactory | None = None,
 ) -> AsyncGenerator[str, None]:
     message_id = str(uuid.uuid4())
     text_id = f"text-{message_id}"
@@ -2180,15 +2248,17 @@ async def persisted_agent_chat_stream(
             activity_parts[event.id] = activity_part
             is_progress_update = event.progress is not None or event.message is not None
             if agent_run is not None and not is_progress_update:
-                await repository.append_agent_run_step(
-                    session,
-                    agent_run_id=agent_run.id,
-                    step_type="tool_call" if event.status == "running" else "tool_result",
-                    status=event.status,
-                    title=event.tool_name,
-                    payload=sanitize_run_payload(data),
-                )
-                await session.commit()
+                async with agent_stream_unit_of_work(session_factory) as session:
+                    await repository.append_agent_run_step(
+                        session,
+                        agent_run_id=agent_run.id,
+                        step_type="tool_call"
+                        if event.status == "running"
+                        else "tool_result",
+                        status=event.status,
+                        title=event.tool_name,
+                        payload=sanitize_run_payload(data),
+                    )
             yield ui_message_sse_chunk(activity_part)
     except Exception as exc:
         stream_error = str(exc)
@@ -2201,15 +2271,15 @@ async def persisted_agent_chat_stream(
             {"type": "text-delta", "id": text_id, "delta": error_text}
         )
         if agent_run is not None:
-            await repository.append_agent_run_step(
-                session,
-                agent_run_id=agent_run.id,
-                step_type="error",
-                status="failed",
-                title=exc.__class__.__name__,
-                payload={"message": str(exc)},
-            )
-            await session.commit()
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await repository.append_agent_run_step(
+                    session,
+                    agent_run_id=agent_run.id,
+                    step_type="error",
+                    status="failed",
+                    title=exc.__class__.__name__,
+                    payload={"message": str(exc)},
+                )
     if text_started:
         yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
     yield ui_message_sse_chunk(
@@ -2219,37 +2289,44 @@ async def persisted_agent_chat_stream(
     parts = list(activity_parts.values())
     if content:
         parts.append({"type": "text", "text": content})
-    if agent_run is not None and content:
-        await repository.append_agent_run_step(
-            session,
-            agent_run_id=agent_run.id,
-            step_type="model_output",
-            status="failed" if stream_error else "succeeded",
-            title="Assistant response" if stream_error is None else "Assistant error",
-            payload={"content": sanitize_run_payload(content)},
-        )
-    if conversation is not None and parts:
-        await repository.append_conversation_message(
-            session,
-            conversation_id=conversation.id,
-            role="assistant",
-            content=content,
-            parts=parts,
-            agent_run_id=agent_run.id if agent_run else None,
-        )
-    if agent_run is not None:
-        run_status = "failed" if stream_error else "succeeded"
-        run_error = stream_error or ""
-        if paused_for_confirmation and stream_error is None:
-            run_status = "waiting_confirmation"
-            run_error = ""
-        await repository.finish_agent_run(
-            session,
-            agent_run,
-            status=run_status,
-            error=run_error,
-        )
-    await session.commit()
+    async with agent_stream_unit_of_work(session_factory) as session:
+        if agent_run is not None and content:
+            await repository.append_agent_run_step(
+                session,
+                agent_run_id=agent_run.id,
+                step_type="model_output",
+                status="failed" if stream_error else "succeeded",
+                title="Assistant response" if stream_error is None else "Assistant error",
+                payload={"content": sanitize_run_payload(content)},
+            )
+        if conversation is not None and parts:
+            await repository.append_conversation_message(
+                session,
+                conversation_id=conversation.id,
+                role="assistant",
+                content=content,
+                parts=parts,
+                agent_run_id=agent_run.id if agent_run else None,
+            )
+        if agent_run is not None:
+            run_status = "failed" if stream_error else "succeeded"
+            run_error = stream_error or ""
+            if paused_for_confirmation and stream_error is None:
+                run_status = "waiting_confirmation"
+                run_error = ""
+            stored_run = await repository.get_agent_run(
+                session,
+                organization_id=agent_run.organization_id,
+                workspace_id=agent_run.workspace_id,
+                agent_run_id=agent_run.id,
+            )
+            if stored_run is not None:
+                await repository.finish_agent_run(
+                    session,
+                    stored_run,
+                    status=run_status,
+                    error=run_error,
+                )
 
 
 def conversation_message_to_chat_message(message: ConversationMessage) -> AgentChatMessage:
@@ -2299,7 +2376,6 @@ async def generate_approval_continuation_message(
         AgentChatMessage(role="user", parts=text_parts(approval_continuation_prompt(approval)))
     )
     stream = run_agent_chat(
-        session,
         agent,
         credential,
         AgentChatRequest(id=str(approval.conversation_id), messages=chat_messages),
@@ -2536,10 +2612,6 @@ async def refresh_wildcard_agent_server_tools(
             raise InvalidAgentScopeError(
                 f"MCP server tools could not be loaded for {installation.config_name}: {exc}"
             ) from exc
-    if rows:
-        await session.commit()
-
-
 async def stream_agent_chat(
     session: AsyncSession,
     user: User,
@@ -2547,6 +2619,8 @@ async def stream_agent_chat(
     agent_id: uuid.UUID,
     payload: AgentChatRequest,
     workspace_id: uuid.UUID | None = None,
+    *,
+    session_factory: AgentSessionFactory | None = None,
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
         session,
@@ -2596,7 +2670,6 @@ async def stream_agent_chat(
     )
     if conversation is not None:
         await persist_chat_turn_user_message(session, conversation, payload, agent_run)
-    await session.commit()
     await refresh_wildcard_agent_server_tools(session, agent.id)
     tools = agent_runtime_tools(
         await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
@@ -2614,18 +2687,23 @@ async def stream_agent_chat(
         stream = preflight_blocked_tool_stream(guardrail_filter)
     else:
         stream = run_agent_chat(
-            session,
             agent,
             credential,
             AgentChatRequest(id=payload.id, messages=payload.messages),
             guardrail_filter.allowed_tools,
+            session_factory=session_factory,
             user=user,
             organization_id=organization_id,
             workspace_id=workspace_id,
             conversation=conversation,
             agent_run=agent_run,
         )
-    return persisted_agent_chat_stream(session, conversation, stream, agent_run)
+    return persisted_agent_chat_stream(
+        conversation,
+        stream,
+        agent_run,
+        session_factory=session_factory,
+    )
 
 
 async def update_agent(

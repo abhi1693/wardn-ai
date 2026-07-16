@@ -213,7 +213,6 @@ async def create_organization_mcp_catalog_source(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except (SecretsError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -267,7 +266,6 @@ async def update_organization_mcp_catalog_source(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (SecretsError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -288,7 +286,6 @@ async def delete_organization_mcp_catalog_source(
         await delete_catalog_source(session, organization_id, source_id)
     except MCPCatalogSourceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()
 
 
 @organization_catalog_router.post(
@@ -319,7 +316,6 @@ async def sync_organization_mcp_catalog_source(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -381,7 +377,6 @@ async def create_organization_mcp_server_version(
         ) from exc
     except LimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -468,7 +463,6 @@ async def update_organization_mcp_server_version(
         )
     except MCPServerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -498,7 +492,6 @@ async def set_default_organization_mcp_server_version(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server version not found",
         ) from exc
-    await session.commit()
     return response
 
 
@@ -528,7 +521,6 @@ async def delete_organization_mcp_server_version(
         ) from exc
     except MCPServerVersionInUseError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
 
 
 @workspace_router.get(
@@ -601,7 +593,6 @@ async def update_workspace_installed_mcp_servers(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -642,7 +633,6 @@ async def install_workspace_mcp_server_version(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except MCPServerInstallationUnsupportedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -667,7 +657,6 @@ async def uninstall_workspace_mcp_server_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server configuration is not installed",
         ) from exc
-    await session.commit()
 
 
 @workspace_router.get(
@@ -692,7 +681,6 @@ async def list_workspace_installed_mcp_server_tools(
     except (MCPServerInstallationNotFoundError, MCPServerNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MCPGatewayUpstreamError as exc:
-        await session.commit()
         logger.warning(
             "Installed MCP server tool discovery failed",
             extra={
@@ -706,8 +694,6 @@ async def list_workspace_installed_mcp_server_tools(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"installed MCP server could not list tools: {exc}",
         ) from exc
-    if response.cache.get("refreshed"):
-        await session.commit()
     return response
 
 
@@ -730,7 +716,6 @@ async def validate_workspace_installed_mcp_server_tool(
         response = await validate_installation_tool(session, installation_id, payload, workspace_id)
     except (MCPServerInstallationNotFoundError, MCPServerNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -755,7 +740,6 @@ async def uninstall_workspace_mcp_server(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server is not installed",
         ) from exc
-    await session.commit()
 
 
 @router.get(
@@ -803,7 +787,6 @@ async def update_installed_mcp_servers(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"server installation failed: {exc}",
         ) from exc
-    await session.commit()
     return response
 
 
@@ -847,7 +830,6 @@ async def install_mcp_server_version(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"server installation failed: {exc}",
         ) from exc
-    await session.commit()
     return response
 
 
@@ -873,7 +855,6 @@ async def uninstall_mcp_server_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server configuration is not installed",
         ) from exc
-    await session.commit()
 
 
 @router.get(
@@ -903,7 +884,6 @@ async def list_installed_mcp_server_tools(
             detail=str(exc),
         ) from exc
     except MCPGatewayUpstreamError as exc:
-        await session.commit()
         logger.warning(
             "Installed MCP server tool discovery failed",
             extra={
@@ -915,8 +895,6 @@ async def list_installed_mcp_server_tools(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"installed MCP server could not list tools: {exc}",
         ) from exc
-    if response.cache.get("refreshed"):
-        await session.commit()
     return response
 
 
@@ -943,7 +921,6 @@ async def validate_installed_mcp_server_tool(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    await session.commit()
     return response
 
 
@@ -969,7 +946,6 @@ async def uninstall_mcp_server(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="server is not installed",
         ) from exc
-    await session.commit()
 
 
 @router.get(
@@ -1028,7 +1004,6 @@ async def create_mcp_server_version(
         ) from exc
     except LimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -1081,7 +1056,6 @@ async def update_mcp_server_version(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    await session.commit()
     return response
 
 
@@ -1114,7 +1088,6 @@ async def delete_mcp_server_version(
         ) from exc
     except MCPServerVersionInUseError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
 
 
 @router.get(

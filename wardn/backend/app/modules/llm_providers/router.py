@@ -114,7 +114,6 @@ async def create_provider_credential_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -171,8 +170,6 @@ async def complete_chatgpt_device_authorization_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    if response.status == "connected":
-        await session.commit()
     return response
 
 
@@ -209,7 +206,6 @@ async def update_provider_credential_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -294,4 +290,3 @@ async def delete_provider_credential_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()

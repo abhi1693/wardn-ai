@@ -52,7 +52,7 @@ from app.modules.organizations.exceptions import (
     WorkspaceAccessDeniedError,
     WorkspaceNotFoundError,
 )
-from app.modules.users.dependencies import get_current_user
+from app.modules.users.dependencies import get_current_user, get_stream_current_user
 from app.modules.users.models import User
 
 workspace_router = APIRouter(
@@ -147,7 +147,6 @@ async def create_workspace_agent_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -177,7 +176,6 @@ async def quick_start_workspace_agent_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -360,7 +358,6 @@ async def update_workspace_agent_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -393,7 +390,6 @@ async def delete_workspace_agent_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
 
 
 @workspace_router.post(
@@ -416,8 +412,11 @@ async def chat_workspace_agent_route(
     workspace_id: UUID,
     agent_id: UUID,
     payload: AgentChatRequest,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[
+        AsyncSession,
+        Depends(get_db_session, scope="function"),
+    ],
+    current_user: Annotated[User, Depends(get_stream_current_user)],
 ) -> StreamingResponse:
     try:
         stream = await stream_agent_chat(
@@ -485,7 +484,6 @@ async def decide_workspace_agent_tool_approval_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response
 
 
@@ -553,5 +551,4 @@ async def replace_workspace_agent_tools_route(
     except Exception as exc:
         raise_access_error(exc)
         raise
-    await session.commit()
     return response

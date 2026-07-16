@@ -45,6 +45,31 @@ class FakeSession:
     async def commit(self) -> None:
         self.commits += 1
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def begin(self):
+        return FakeTransaction(self)
+
+
+class FakeTransaction:
+    def __init__(self, session: FakeSession) -> None:
+        self.session = session
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        if exc_type is None:
+            self.session.commits += 1
+
+
+def fake_session_factory(session: FakeSession):
+    return lambda: session
+
 
 def make_policy(mode: str, *, name: str, priority: int = 100) -> GuardrailPolicy:
     return GuardrailPolicy(
@@ -313,13 +338,13 @@ async def test_agent_tool_call_guardrail_block_skips_runtime(monkeypatch) -> Non
 
     session = FakeSession()
     execution = await agent_service.execute_agent_tool_call(
-        session,
         {"delete_repo": runtime_tool},
         agent_service.AgentToolCall(
             name="delete_repo",
             call_id="call-1",
             arguments={"repo": "prod"},
         ),
+        session_factory=fake_session_factory(session),
         user=user,
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -439,13 +464,13 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
 
     session = FakeSession()
     execution = await agent_service.execute_agent_tool_call(
-        session,
         {"search_repositories": runtime_tool},
         agent_service.AgentToolCall(
             name="search_repositories",
             call_id="call-1",
             arguments={"query": "wardn"},
         ),
+        session_factory=fake_session_factory(session),
         user=user,
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -663,6 +688,9 @@ async def test_persisted_chat_stream_leaves_confirmation_run_waiting(monkeypatch
         captured["run_error"] = kwargs["error"]
         return agent_run
 
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(
         agent_service.repository,
@@ -670,14 +698,16 @@ async def test_persisted_chat_stream_leaves_confirmation_run_waiting(monkeypatch
         append_conversation_message,
     )
     monkeypatch.setattr(agent_service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
 
+    session = FakeSession()
     chunks = [
         chunk
         async for chunk in agent_service.persisted_agent_chat_stream(
-            FakeSession(),
             conversation,
             stream(),
             agent_run,
+            session_factory=fake_session_factory(session),
         )
     ]
 

@@ -226,7 +226,6 @@ async def create_llm_model_price_route(
         response = await service.create_llm_model_price(session, payload)
     except service.DuplicateLLMModelPriceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -278,7 +277,6 @@ async def update_llm_model_price_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except service.DuplicateLLMModelPriceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -302,4 +300,3 @@ async def delete_llm_model_price_route(
         await service.delete_llm_model_price(session, price_id=price_id)
     except service.LLMModelPriceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()

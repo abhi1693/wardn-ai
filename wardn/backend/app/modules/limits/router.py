@@ -84,7 +84,6 @@ async def upsert_limit_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except (InvalidLimitScopeError, InvalidLimitKeyError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -138,7 +137,6 @@ async def upsert_usage_budget_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except (InvalidLimitScopeError, InvalidLimitKeyError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await session.commit()
     return response
 
 
@@ -162,7 +160,6 @@ async def delete_usage_budget_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LimitNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()
 
 
 @router.delete(
@@ -185,4 +182,3 @@ async def delete_limit_route(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LimitNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await session.commit()

@@ -40,6 +40,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
         self.commits = 0
+        self.in_transaction = False
 
     def add(self, instance: object) -> None:
         self.added.append(instance)
@@ -61,6 +62,43 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def begin(self):
+        return FakeTransaction(self)
+
+
+class FakeTransaction:
+    def __init__(self, session: FakeSession) -> None:
+        self.session = session
+
+    async def __aenter__(self):
+        self.session.in_transaction = True
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        self.session.in_transaction = False
+        if exc_type is None:
+            self.session.commits += 1
+
+
+def fake_session_factory(session: FakeSession):
+    return lambda: session
+
+
+class FreshSessionFactory:
+    def __init__(self) -> None:
+        self.sessions: list[FakeSession] = []
+
+    def __call__(self) -> FakeSession:
+        session = FakeSession()
+        self.sessions.append(session)
+        return session
 
 
 def test_provider_messages_keeps_text_user_and_assistant_messages() -> None:
@@ -156,9 +194,9 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
     raw_chunks = [
         chunk
         async for chunk in service.persisted_agent_chat_stream(
-            session,
             conversation,
             provider_stream(),
+            session_factory=fake_session_factory(session),
         )
     ]
     chunks = ui_stream_chunks(raw_chunks)
@@ -250,6 +288,9 @@ async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
     async def finish_agent_run(*args, **kwargs):
         finished.append(kwargs)
 
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
     async def provider_stream():
         raise service.AgentChatProviderError(
             "LLM provider websocket failed with HTTP 401",
@@ -264,16 +305,17 @@ async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
     )
     monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
 
     session = FakeSession()
     chunks = ui_stream_chunks(
         [
             chunk
             async for chunk in service.persisted_agent_chat_stream(
-                session,
                 conversation,
                 provider_stream(),
                 agent_run,
+                session_factory=fake_session_factory(session),
             )
         ]
     )
@@ -342,6 +384,9 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     async def finish_agent_run(*args, **kwargs):
         finished.append(kwargs)
 
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
     async def refresh_wildcard_agent_server_tools(*args, **kwargs):
         return None
 
@@ -359,6 +404,7 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
     monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
     monkeypatch.setattr(
         service,
         "refresh_wildcard_agent_server_tools",
@@ -387,6 +433,7 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
             ]
         ),
         workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
     )
     chunks = ui_stream_chunks([chunk async for chunk in stream])
 
@@ -448,6 +495,9 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
             oauth_refresh_token="new-refresh",
         )
 
+    async def get_credential(*args, **kwargs):
+        return credential
+
     async def stream_chatgpt_codex_response_text(*args, **kwargs):
         authorization = kwargs["headers"]["Authorization"]
         calls.append(authorization)
@@ -456,6 +506,7 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
         yield service.AgentChatTextEvent(text="ok")
 
     monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
     monkeypatch.setattr(
         service,
         "refresh_chatgpt_oauth_credential",
@@ -470,7 +521,6 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
     events = [
         event
         async for event in service.run_agent_chat(
-            FakeSession(),
             agent,
             credential,
             AgentChatRequest(
@@ -482,6 +532,7 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
                 ]
             ),
             {},
+            session_factory=fake_session_factory(FakeSession()),
         )
     ]
 
@@ -752,6 +803,85 @@ def test_llm_usage_from_completed_event_parses_response_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_agent_chat_closes_database_transactions_before_external_stream(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="organization",
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    session_factory = FreshSessionFactory()
+    external_transaction_states: list[list[bool]] = []
+
+    async def resolve_credential_secrets(*args, **kwargs):
+        return ResolvedLLMCredentialSecrets(api_key="sk-test")
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    async def stream_response_text(*args, **kwargs):
+        external_transaction_states.append(
+            [session.in_transaction for session in session_factory.sessions]
+        )
+        yield "ok"
+
+    monkeypatch.setattr(service, "resolve_credential_secrets", resolve_credential_secrets)
+    monkeypatch.setattr(
+        service,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(service, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(service, "stream_response_text", stream_response_text)
+
+    events = [
+        event
+        async for event in service.run_agent_chat(
+            agent,
+            credential,
+            AgentChatRequest(
+                messages=[
+                    AgentChatMessage(
+                        role="user",
+                        parts=[{"type": "text", "text": "hi"}],
+                    )
+                ]
+            ),
+            {},
+            session_factory=session_factory,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+    ]
+
+    assert events == [service.AgentChatTextEvent(text="ok")]
+    assert external_transaction_states == [[False, False]]
+    assert len(session_factory.sessions) == 3
+    assert all(session.commits == 1 for session in session_factory.sessions)
+
+
+@pytest.mark.asyncio
 async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
     organization_id = uuid4()
     workspace_id = uuid4()
@@ -802,7 +932,6 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
     events = [
         event
         async for event in service.run_agent_chat(
-            FakeSession(),
             agent,
             credential,
             AgentChatRequest(
@@ -814,6 +943,7 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
                 ]
             ),
             {},
+            session_factory=fake_session_factory(FakeSession()),
             user=user,
             organization_id=organization_id,
             workspace_id=workspace_id,
@@ -961,7 +1091,7 @@ async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monk
     await service.refresh_wildcard_agent_server_tools(session, agent_id)
 
     assert refreshed == [(installation, server)]
-    assert session.commits == 1
+    assert session.commits == 0
 
 
 def patch_org_owner(monkeypatch, organization_id, user):
