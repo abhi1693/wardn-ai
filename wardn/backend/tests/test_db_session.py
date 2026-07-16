@@ -2,6 +2,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from pydantic import SecretStr
 
 from app.db import session as db_session
 from app.modules.users import service as users_service
@@ -49,6 +50,38 @@ class FakeSessionFactory:
 
     def __call__(self) -> FakeSessionContext:
         return FakeSessionContext(self.session)
+
+
+def test_database_engine_uses_configured_pool_settings(monkeypatch) -> None:
+    captured = {}
+    expected_engine = object()
+
+    def create_async_engine(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return expected_engine
+
+    settings = SimpleNamespace(
+        database_url=SecretStr("postgresql+asyncpg://wardn:secret@db/wardn"),
+        database_pool_size=7,
+        database_max_overflow=11,
+        database_pool_timeout_seconds=12.5,
+        database_pool_recycle_seconds=900,
+        database_pool_pre_ping=True,
+        database_pool_use_lifo=True,
+    )
+    monkeypatch.setattr(db_session, "create_async_engine", create_async_engine)
+
+    assert db_session.create_database_engine(settings) is expected_engine
+    assert captured == {
+        "url": "postgresql+asyncpg://wardn:secret@db/wardn",
+        "pool_size": 7,
+        "max_overflow": 11,
+        "pool_timeout": 12.5,
+        "pool_recycle": 900,
+        "pool_pre_ping": True,
+        "pool_use_lifo": True,
+    }
 
 
 @pytest.mark.asyncio

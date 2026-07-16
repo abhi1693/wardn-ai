@@ -133,6 +133,12 @@ class Settings(BaseSettings):
         max_length=4096,
         description="Async SQLAlchemy database URL.",
     )
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=100)
+    database_pool_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86_400)
+    database_pool_pre_ping: bool = True
+    database_pool_use_lifo: bool = True
     cors_origins: list[str] = ["http://localhost:3000"]
 
     @field_validator("cors_origins", mode="before")

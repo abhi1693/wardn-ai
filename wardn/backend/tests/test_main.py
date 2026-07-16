@@ -49,6 +49,9 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
     async def teardown_runtime_sessions(*, limit):
         seen["teardown"] = {"limit": limit}
 
+    async def dispose_engine():
+        seen["engine_disposed"] = True
+
     monkeypatch.setattr(main, "configure_logging", lambda: None)
     monkeypatch.setattr(main, "get_settings", get_settings)
     monkeypatch.setattr(main, "start_runtime_reaper", start_runtime_reaper)
@@ -56,6 +59,7 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
     monkeypatch.setattr(main, "start_runtime_warmup", start_runtime_warmup)
     monkeypatch.setattr(main, "stop_runtime_warmup", stop_runtime_warmup)
     monkeypatch.setattr(main, "teardown_runtime_sessions", teardown_runtime_sessions)
+    monkeypatch.setattr(main, "engine", SimpleNamespace(dispose=dispose_engine))
 
     app = FastAPI()
     async with main.lifespan(app):
@@ -73,4 +77,5 @@ async def test_lifespan_starts_and_stops_runtime_reaper(monkeypatch) -> None:
         "warmup_stop": warmup_task,
         "stop": task,
         "teardown": {"limit": 17},
+        "engine_disposed": True,
     }

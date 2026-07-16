@@ -78,6 +78,8 @@ def test_settings_require_complete_oidc_config_in_production() -> None:
         ("session_ttl_seconds", 60),
         ("mcp_runtime_reaper_batch_size", 0),
         ("mcp_runtime_kubernetes_service_port", 70_000),
+        ("database_pool_size", 0),
+        ("database_pool_timeout_seconds", 0),
     ],
 )
 def test_settings_reject_out_of_bounds_values(setting_name: str, value: int) -> None:
