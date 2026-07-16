@@ -2,10 +2,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.modules.limits.exceptions import LimitExceededError
 from app.modules.organizations import service
 from app.modules.organizations.exceptions import (
+    DuplicateOrganizationError,
     OrganizationAccessDeniedError,
     WorkspaceAccessDeniedError,
 )
@@ -41,6 +43,15 @@ class FakeSession:
         instance.created_at = now
         instance.updated_at = now
         self.refreshed.append(instance)
+
+
+class ConstraintFailureSession(FakeSession):
+    def __init__(self, constraint_name: str) -> None:
+        super().__init__()
+        self.constraint_name = constraint_name
+
+    async def flush(self) -> None:
+        raise IntegrityError("insert", {}, Exception(self.constraint_name))
 
 
 @pytest.mark.asyncio
@@ -95,6 +106,38 @@ async def test_regular_user_can_create_and_own_organization(monkeypatch) -> None
     assert membership.user_id == user.id
     assert membership.role == "owner"
     assert membership.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_create_organization_translates_slug_constraint_race(monkeypatch) -> None:
+    async def missing_organization(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_organization_by_slug", missing_organization)
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=True)
+
+    with pytest.raises(DuplicateOrganizationError, match="slug already exists"):
+        await service.create_organization(
+            ConstraintFailureSession("uq_organizations_slug"),
+            user,
+            OrganizationCreate(name="Platform", slug="platform"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_organization_preserves_unrelated_integrity_error(monkeypatch) -> None:
+    async def missing_organization(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service.repository, "get_organization_by_slug", missing_organization)
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=True)
+
+    with pytest.raises(IntegrityError):
+        await service.create_organization(
+            ConstraintFailureSession("fk_organizations_created_by_id"),
+            user,
+            OrganizationCreate(name="Platform", slug="platform"),
+        )
 
 
 @pytest.mark.asyncio

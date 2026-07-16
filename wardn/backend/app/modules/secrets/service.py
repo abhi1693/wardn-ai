@@ -1,7 +1,9 @@
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.organizations.service import require_organization_admin, require_workspace_admin
 from app.modules.secrets import repository
@@ -217,7 +219,19 @@ async def create_secret_store(
     )
     await validate_provider_store(store)
     session.add(store)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_secret_stores_org_workspace_name",
+                "uq_secret_stores_org_name",
+                "uq_secret_stores_org_provider_base_url",
+            },
+        ):
+            raise DuplicateSecretStoreError("secret store already exists") from exc
+        raise
     await session.refresh(store)
     return store_response(store)
 
@@ -264,7 +278,19 @@ async def update_secret_store(
     if payload.is_active is not None:
         store.is_active = payload.is_active
     await validate_provider_store(store)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_secret_stores_org_workspace_name",
+                "uq_secret_stores_org_name",
+                "uq_secret_stores_org_provider_base_url",
+            },
+        ):
+            raise DuplicateSecretStoreError("secret store already exists") from exc
+        raise
     await session.refresh(store)
     return store_response(store)
 
@@ -422,7 +448,20 @@ async def create_secret_handle(
         handle_metadata=payload.metadata,
     )
     session.add(handle)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_secret_handles_org_workspace_display_name",
+                "uq_secret_handles_org_display_name",
+            },
+        ):
+            raise DuplicateSecretHandleError(
+                "secret handle display name already exists"
+            ) from exc
+        raise
     await session.refresh(handle)
     return handle_response(handle)
 
@@ -468,7 +507,20 @@ async def update_secret_handle(
         handle.version = payload.version.strip()
     if payload.metadata is not None:
         handle.handle_metadata = payload.metadata
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_secret_handles_org_workspace_display_name",
+                "uq_secret_handles_org_display_name",
+            },
+        ):
+            raise DuplicateSecretHandleError(
+                "secret handle display name already exists"
+            ) from exc
+        raise
     await session.refresh(handle)
     return handle_response(handle)
 

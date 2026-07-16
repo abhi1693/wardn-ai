@@ -2,8 +2,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.errors import is_constraint_violation
 from app.modules.guardrails import repository
 from app.modules.guardrails.exceptions import (
     DuplicateGuardrailPolicyError,
@@ -317,7 +319,14 @@ async def create_guardrail_policy(
         is_active=payload.is_active,
     )
     session.add(policy)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_guardrail_policies_workspace_name"}):
+            raise DuplicateGuardrailPolicyError(
+                "guardrail policy name already exists"
+            ) from exc
+        raise
     await session.refresh(policy)
     return policy_response(policy)
 
@@ -363,7 +372,14 @@ async def update_guardrail_policy(
         policy.conditions = conditions
     if "is_active" in update_fields and payload.is_active is not None:
         policy.is_active = payload.is_active
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_guardrail_policies_workspace_name"}):
+            raise DuplicateGuardrailPolicyError(
+                "guardrail policy name already exists"
+            ) from exc
+        raise
     await session.refresh(policy)
     return policy_response(policy)
 

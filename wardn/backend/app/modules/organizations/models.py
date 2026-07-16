@@ -10,9 +10,10 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "organizations"
+    __table_args__ = (UniqueConstraint("slug", name="uq_organizations_slug"),)
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
-    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

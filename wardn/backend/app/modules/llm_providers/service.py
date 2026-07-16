@@ -9,8 +9,10 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository
 from app.modules.llm_providers.exceptions import (
@@ -1352,7 +1354,14 @@ async def create_provider_credential(
         is_active=True,
     )
     session.add(credential)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_llm_provider_credentials_org_name"}):
+            raise DuplicateLLMProviderCredentialError(
+                "provider credential name already exists"
+            ) from exc
+        raise
     await session.refresh(credential)
     return credential_response(credential)
 
@@ -1464,7 +1473,14 @@ async def update_provider_credential(
         oauth_expires_at=credential.oauth_expires_at,
     )
 
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_llm_provider_credentials_org_name"}):
+            raise DuplicateLLMProviderCredentialError(
+                "provider credential name already exists"
+            ) from exc
+        raise
     await session.refresh(credential)
     return credential_response(credential)
 

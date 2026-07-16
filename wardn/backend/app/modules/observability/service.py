@@ -5,8 +5,10 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.errors import is_constraint_violation
 from app.modules.agents.models import Agent
 from app.modules.mcp_runtime.models import MCPToolInvocation
 from app.modules.observability import repository
@@ -302,9 +304,16 @@ async def create_llm_model_price(
         cache_read_usd_per_1m_tokens=payload.cache_read_usd_per_1m_tokens,
         cache_write_usd_per_1m_tokens=payload.cache_write_usd_per_1m_tokens,
     )
-    return model_price_read(
-        await repository.save_model_price(session, model_price=model_price)
-    )
+    try:
+        saved_model_price = await repository.save_model_price(
+            session,
+            model_price=model_price,
+        )
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_llm_model_prices_provider_model"}):
+            raise DuplicateLLMModelPriceError("model price already exists") from exc
+        raise
+    return model_price_read(saved_model_price)
 
 
 async def update_llm_model_price(
@@ -343,9 +352,16 @@ async def update_llm_model_price(
             "cache_write_usd_per_1m_tokens"
         ]
 
-    return model_price_read(
-        await repository.save_model_price(session, model_price=model_price)
-    )
+    try:
+        saved_model_price = await repository.save_model_price(
+            session,
+            model_price=model_price,
+        )
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_llm_model_prices_provider_model"}):
+            raise DuplicateLLMModelPriceError("model price already exists") from exc
+        raise
+    return model_price_read(saved_model_price)
 
 
 async def delete_llm_model_price(

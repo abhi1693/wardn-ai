@@ -1,7 +1,9 @@
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.organizations import repository
 from app.modules.organizations.exceptions import (
@@ -159,7 +161,12 @@ async def create_organization(
         created_by_id=user.id,
     )
     session.add(organization)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_organizations_slug"}):
+            raise DuplicateOrganizationError("organization slug already exists") from exc
+        raise
     membership = OrganizationMembership(
         organization_id=organization.id,
         user_id=user.id,
@@ -339,7 +346,12 @@ async def create_workspace(
         created_by_id=user.id,
     )
     session.add(workspace)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_workspaces_org_slug"}):
+            raise DuplicateWorkspaceError("workspace slug already exists") from exc
+        raise
     membership = WorkspaceMembership(
         workspace_id=workspace.id,
         user_id=user.id,

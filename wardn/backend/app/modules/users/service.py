@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -11,6 +12,7 @@ from app.core.security import (
     verify_api_token,
     verify_password,
 )
+from app.db.errors import is_constraint_violation
 from app.modules.organizations import repository as organizations_repository
 from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
@@ -111,7 +113,12 @@ async def create_user(
     )
 
     session.add(user)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, {"uq_users_email", "uq_users_email_lower"}):
+            raise DuplicateUserError("email already exists") from exc
+        raise
     return user
 
 

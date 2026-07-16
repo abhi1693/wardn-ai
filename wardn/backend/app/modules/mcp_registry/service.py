@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from sqlalchemy.exc import IntegrityError
+
+from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository, tool_repository
@@ -750,7 +753,18 @@ async def create_catalog_source(
         last_error="",
     )
     session.add(source)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_mcp_catalog_sources_org_name",
+                "uq_mcp_catalog_sources_org_base_url",
+            },
+        ):
+            raise DuplicateMCPCatalogSourceError("catalog source already exists") from exc
+        raise
     await session.refresh(source)
     return catalog_source_response(source)
 
@@ -827,7 +841,18 @@ async def update_catalog_source(
     if token_handle_id is not None:
         source.auth_secret_handle_id = token_handle_id
 
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {
+                "uq_mcp_catalog_sources_org_name",
+                "uq_mcp_catalog_sources_org_base_url",
+            },
+        ):
+            raise DuplicateMCPCatalogSourceError("catalog source already exists") from exc
+        raise
     await session.refresh(source)
     return catalog_source_response(source)
 
@@ -1167,7 +1192,15 @@ async def create_server_version(
         **server_values(payload, is_latest=True),
     )
     session.add(server)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {"uq_mcp_server_versions_org_name_version"},
+        ):
+            raise DuplicateMCPServerVersionError("server version already exists") from exc
+        raise
     await session.refresh(server)
     return server_response(server)
 

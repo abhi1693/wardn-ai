@@ -73,6 +73,11 @@ class MCPCatalogSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "name",
             name="uq_mcp_catalog_sources_org_name",
         ),
+        UniqueConstraint(
+            "organization_id",
+            "base_url",
+            name="uq_mcp_catalog_sources_org_base_url",
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(

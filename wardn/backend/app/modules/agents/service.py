@@ -12,10 +12,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import InvalidStatus, WebSocketException
 
+from app.db.errors import is_constraint_violation
 from app.db.session import AsyncSessionLocal
 from app.modules.agents import repository
 from app.modules.agents.exceptions import (
@@ -564,7 +566,15 @@ async def create_agent(
         is_active=True,
     )
     session.add(agent)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {"uq_agents_org_name", "uq_agents_workspace_name"},
+        ):
+            raise DuplicateAgentError("agent name already exists") from exc
+        raise
     await session.refresh(agent)
     return agent_response(agent, server_count=0, tool_count=0)
 
@@ -2804,7 +2814,15 @@ async def update_agent(
     if payload.is_active is not None:
         agent.is_active = payload.is_active
 
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(
+            exc,
+            {"uq_agents_org_name", "uq_agents_workspace_name"},
+        ):
+            raise DuplicateAgentError("agent name already exists") from exc
+        raise
     await session.refresh(agent)
     return agent_response(
         agent,
