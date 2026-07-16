@@ -3,6 +3,7 @@ from threading import Event
 
 import pytest
 
+from app.core.outbound_http import UnsafeOutboundURLError
 from app.modules.mcp_gateway.client import (
     MCPGatewayUpstreamError,
     call_stdio_tool,
@@ -184,11 +185,14 @@ def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
         def read(self):
             return b'{"jsonrpc":"2.0","id":2,"result":{}}'
 
-    def urlopen(request, *args, **kwargs):
+    def open_outbound_request(request, *args, **kwargs):
         seen["headers"] = {key.lower(): value for key, value in request.header_items()}
         return FakeResponse()
 
-    monkeypatch.setattr("app.modules.mcp_gateway.client.urlopen", urlopen)
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        open_outbound_request,
+    )
 
     send_remote_request(
         "https://example.com/mcp",
@@ -197,6 +201,22 @@ def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
     )
 
     assert seen["headers"]["mcp-protocol-version"] == "2025-06-18"
+
+
+def test_send_remote_request_maps_rejected_url_to_gateway_error(monkeypatch) -> None:
+    def reject_url(*args, **kwargs):
+        raise UnsafeOutboundURLError("outbound URL resolves to a non-public address")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        reject_url,
+    )
+
+    with pytest.raises(MCPGatewayUpstreamError, match="MCP URL was rejected"):
+        send_remote_request(
+            "http://169.254.169.254/latest/meta-data",
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        )
 
 
 def test_stdio_process_environment_only_inherits_allowlisted_values() -> None:

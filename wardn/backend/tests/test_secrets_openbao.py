@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.outbound_http import UnsafeOutboundURLError
 from app.modules.secrets.exceptions import InvalidSecretStoreError
 from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import SecretResolutionContext
@@ -25,6 +26,7 @@ def kubernetes_provider(tmp_path) -> OpenBaoSecretProvider:
             )
         },
         auth_file_root=str(tmp_path),
+        url_validator=lambda _url: None,
     )
 
 
@@ -42,6 +44,7 @@ def approle_provider(tmp_path) -> OpenBaoSecretProvider:
             )
         },
         auth_file_root=str(tmp_path),
+        url_validator=lambda _url: None,
     )
 
 
@@ -57,9 +60,10 @@ class FakeResponse:
 
 class FakeAsyncClient:
     requests: list[tuple[str, str, dict | None]] = []
+    client_options: list[dict] = []
 
     def __init__(self, *args, **kwargs) -> None:
-        pass
+        self.client_options.append(kwargs)
 
     async def __aenter__(self):
         return self
@@ -211,6 +215,7 @@ async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
     token_file = tmp_path / "token"
     token_file.write_text("service-account-jwt", encoding="utf-8")
     FakeAsyncClient.requests = []
+    FakeAsyncClient.client_options = []
     monkeypatch.setattr("app.modules.secrets.providers.openbao.httpx.AsyncClient", FakeAsyncClient)
 
     organization_id = uuid4()
@@ -264,6 +269,7 @@ async def test_openbao_resolves_kv_v2_secret(monkeypatch, tmp_path) -> None:
             {},
         ),
     ]
+    assert all(options["follow_redirects"] is False for options in FakeAsyncClient.client_options)
 
 
 @pytest.mark.asyncio
@@ -500,3 +506,41 @@ def test_openbao_profile_file_rejects_symlink_outside_operator_root(tmp_path) ->
         match="must be inside the operator credential root",
     ):
         read_profile_file(str(credential_root), "token", "Kubernetes service account token")
+
+
+@pytest.mark.asyncio
+async def test_openbao_store_applies_outbound_url_policy(tmp_path) -> None:
+    profile = OpenBaoAuthProfile.model_validate(
+        {
+            "baseUrl": "https://bao.internal:8200",
+            "method": "kubernetes",
+            "role": "wardn-prod",
+            "tokenFile": "token",
+        }
+    )
+
+    def reject_url(_url: str) -> None:
+        raise UnsafeOutboundURLError("outbound URL resolves to a non-public address")
+
+    provider = OpenBaoSecretProvider(
+        auth_profiles={"production": profile},
+        auth_file_root=str(tmp_path),
+        url_validator=reject_url,
+    )
+    store = SecretStore(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=None,
+        provider="openbao",
+        name="Production OpenBao",
+        config={"baseUrl": "https://bao.internal:8200"},
+        auth_config={"profile": "production"},
+        is_active=True,
+    )
+
+    result = await provider.validate_store(store)
+
+    assert result.ok is False
+    assert result.message == (
+        "OpenBao baseUrl was rejected: outbound URL resolves to a non-public address"
+    )

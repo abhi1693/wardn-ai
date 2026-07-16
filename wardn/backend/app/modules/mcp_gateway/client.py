@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from app.core.config import get_settings
+from app.core.outbound_http import UnsafeOutboundURLError, open_outbound_request
 from app.modules.mcp_registry.installer import parse_mcp_response_body
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -79,9 +80,11 @@ def send_remote_request(
     )
     try:
         context = None if verify_tls else ssl._create_unverified_context()
-        with urlopen(request, timeout=30, context=context) as response:
+        with open_outbound_request(request, timeout=30, context=context) as response:
             body = response.read().decode("utf-8", "replace")
             return parse_mcp_response_body(body), response.headers.get("Mcp-Session-Id")
+    except UnsafeOutboundURLError as exc:
+        raise MCPGatewayUpstreamError(f"upstream MCP URL was rejected: {exc}") from exc
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()
         if detail:

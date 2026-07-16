@@ -243,6 +243,14 @@ is bound to its OpenBao destination. For example:
 Secret-store API callers select the profile with `authConfig.profile`; they cannot configure
 credential paths, authentication methods, namespaces, or TLS behavior.
 
+Outbound OpenBao, catalog-sync, and remote MCP requests use a shared SSRF policy. It allows public
+HTTPS destinations on port `443` by default, rejects URL credentials and non-public DNS
+results, and does not follow redirects. Operators can add nonstandard ports with
+`WARDN_OUTBOUND_HTTP_ALLOWED_PORTS` and exact internal destinations with
+`WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST`. Plain HTTP requires the explicit
+`WARDN_OUTBOUND_HTTP_ALLOW_HTTP=true` override. Network-level egress controls should enforce the
+same destination policy in production.
+
 Do not commit credentials, service tokens, `.env` files with real secrets, local
 database dumps, or private research notes. MCP credentials should be treated as
 secrets even when used only for validation.

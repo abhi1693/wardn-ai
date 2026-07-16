@@ -266,12 +266,12 @@ def test_fetch_registry_payload_sends_default_user_agent(monkeypatch) -> None:
         def read(self):
             return b'{"servers":[],"metadata":{"count":0}}'
 
-    def urlopen(request, timeout):
+    def open_outbound_request(request, *, timeout):
         captured_headers.update(dict(request.header_items()))
         assert timeout == 30
         return FakeResponse()
 
-    monkeypatch.setattr(commands, "urlopen", urlopen)
+    monkeypatch.setattr(commands, "open_outbound_request", open_outbound_request)
 
     payload = commands.fetch_registry_payload("https://hub.wardnai.dev/api/v1/mcp/catalog")
 
@@ -293,11 +293,11 @@ def test_fetch_registry_payload_allows_user_agent_override(monkeypatch) -> None:
         def read(self):
             return b'{"servers":[],"metadata":{"count":0}}'
 
-    def urlopen(request, timeout):
+    def open_outbound_request(request, *, timeout):
         captured_headers.update(dict(request.header_items()))
         return FakeResponse()
 
-    monkeypatch.setattr(commands, "urlopen", urlopen)
+    monkeypatch.setattr(commands, "open_outbound_request", open_outbound_request)
 
     commands.fetch_registry_payload(
         "https://hub.wardnai.dev/api/v1/mcp/catalog",

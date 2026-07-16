@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from app.core.config import get_settings
+from app.core.outbound_http import UnsafeOutboundURLError, open_outbound_request
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationUnsupportedError,
@@ -510,9 +511,13 @@ def send_remote_mcp_request(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=20) as response:
+        with open_outbound_request(request, timeout=20) as response:
             body = response.read().decode("utf-8", "replace")
             return parse_mcp_response_body(body), response.headers.get("Mcp-Session-Id")
+    except UnsafeOutboundURLError as exc:
+        raise MCPServerInstallationFailedError(
+            f"remote MCP server URL was rejected: {exc}"
+        ) from exc
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()
         if detail:

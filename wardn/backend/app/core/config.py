@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     oidc_superuser_emails: list[str] = []
     openbao_auth_file_root: str = "/var/run/secrets"
     openbao_auth_profiles_json: str = "{}"
+    outbound_http_allow_http: bool = False
+    outbound_http_allowed_ports: list[int] = [443]
+    outbound_http_private_host_allowlist: list[str] = []
     mcp_install_root: str = "data/mcp-installations"
     mcp_runtime_provider: str = "local"
     mcp_runtime_namespace: str = "wardn-runtimes"
@@ -123,6 +126,34 @@ class Settings(BaseSettings):
     def parse_oidc_superuser_emails(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [email.strip().casefold() for email in value.split(",") if email.strip()]
+        return value
+
+    @field_validator("outbound_http_allowed_ports", mode="before")
+    @classmethod
+    def parse_outbound_http_allowed_ports(cls, value: str | list[int]) -> list[int]:
+        if isinstance(value, str):
+            return [int(port.strip()) for port in value.split(",") if port.strip()]
+        return value
+
+    @field_validator("outbound_http_allowed_ports")
+    @classmethod
+    def validate_outbound_http_allowed_ports(cls, value: list[int]) -> list[int]:
+        if not value or any(port < 1 or port > 65535 for port in value):
+            raise ValueError("outbound HTTP allowed ports must be between 1 and 65535")
+        return value
+
+    @field_validator("outbound_http_private_host_allowlist", mode="before")
+    @classmethod
+    def parse_outbound_http_private_host_allowlist(
+        cls,
+        value: str | list[str],
+    ) -> list[str]:
+        if isinstance(value, str):
+            return [
+                host.strip().casefold().rstrip(".")
+                for host in value.split(",")
+                if host.strip()
+            ]
         return value
 
     @model_validator(mode="after")

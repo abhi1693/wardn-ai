@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.commands.registry import CommandRegistry
+from app.core.outbound_http import open_outbound_request
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry.schemas import MCPServerCreate
@@ -434,7 +435,7 @@ def fetch_github_readme(
         headers["Authorization"] = f"Bearer {github_token}"
 
     request = Request(url, headers=headers)
-    with urlopen(request, timeout=timeout) as response:
+    with open_outbound_request(request, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="replace").strip()
 
 
@@ -557,7 +558,7 @@ def fetch_registry_payload(url: str, headers: dict[str, str] | None = None):
     if headers:
         request_headers.update(headers)
     request = Request(url, headers=request_headers)
-    with urlopen(request, timeout=30) as response:
+    with open_outbound_request(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

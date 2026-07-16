@@ -661,7 +661,7 @@ def test_send_remote_request_preserves_jsonrpc_http_error(monkeypatch) -> None:
         }
     ).encode("utf-8")
 
-    def urlopen_raises_http_error(*args, **kwargs):
+    def open_outbound_request_raises_http_error(*args, **kwargs):
         raise HTTPError(
             "https://example.com/mcp",
             401,
@@ -670,7 +670,11 @@ def test_send_remote_request_preserves_jsonrpc_http_error(monkeypatch) -> None:
             BytesIO(body),
         )
 
-    monkeypatch.setattr(gateway_client_module, "urlopen", urlopen_raises_http_error)
+    monkeypatch.setattr(
+        gateway_client_module,
+        "open_outbound_request",
+        open_outbound_request_raises_http_error,
+    )
 
     response, session_id = gateway_client_module.send_remote_request(
         "https://example.com/mcp",

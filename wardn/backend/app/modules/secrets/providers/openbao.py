@@ -1,12 +1,13 @@
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from app.core.config import get_settings
+from app.core.outbound_http import UnsafeOutboundURLError, validate_outbound_url
 from app.modules.secrets.exceptions import InvalidSecretHandleError, InvalidSecretStoreError
 from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import (
@@ -47,10 +48,12 @@ class OpenBaoSecretProvider:
         *,
         auth_profiles: Mapping[str, OpenBaoAuthProfile] | None = None,
         auth_file_root: str | None = None,
+        url_validator: Callable[[str], Any] | None = None,
     ) -> None:
         self._token_cache: dict[str, OpenBaoToken] = {}
         self._configured_auth_profiles = auth_profiles
         self._configured_auth_file_root = auth_file_root
+        self._url_validator = url_validator or validate_outbound_url
 
     async def validate_store(self, store: SecretStore) -> SecretValidationResult:
         try:
@@ -122,6 +125,7 @@ class OpenBaoSecretProvider:
         async with httpx.AsyncClient(
             timeout=float(settings["timeout_seconds"]),
             verify=settings["tls_verify"],
+            follow_redirects=False,
         ) as client:
             response = await client.get(url, headers=headers, params=params)
             if response.status_code in {401, 403}:
@@ -170,6 +174,7 @@ class OpenBaoSecretProvider:
         async with httpx.AsyncClient(
             timeout=float(settings["timeout_seconds"]),
             verify=settings["tls_verify"],
+            follow_redirects=False,
         ) as client:
             response = await client.post(url, headers=headers, json={"data": values})
             if response.status_code in {401, 403}:
@@ -199,6 +204,10 @@ class OpenBaoSecretProvider:
             raise InvalidSecretStoreError(
                 "OpenBao baseUrl must match the operator-defined authentication profile"
             )
+        try:
+            self._url_validator(base_url)
+        except UnsafeOutboundURLError as exc:
+            raise InvalidSecretStoreError(f"OpenBao baseUrl was rejected: {exc}") from exc
         kv_mount = string_value(
             config.get("kvMount") or config.get("kv_mount") or STANDARD_KV_MOUNT
         )
@@ -280,7 +289,11 @@ class OpenBaoSecretProvider:
         timeout = float(settings["timeout_seconds"])
         tls_verify = settings["tls_verify"]
 
-        async with httpx.AsyncClient(timeout=timeout, verify=tls_verify) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            verify=tls_verify,
+            follow_redirects=False,
+        ) as client:
             write_response = await client.post(
                 f"{base_url}/v1/{mount}/data/{secret_path}",
                 headers=headers,
@@ -351,6 +364,7 @@ class OpenBaoSecretProvider:
         async with httpx.AsyncClient(
             timeout=float(settings["timeout_seconds"]),
             verify=settings["tls_verify"],
+            follow_redirects=False,
         ) as client:
             response = await client.post(url, headers=self._headers(settings), json=payload)
         if not response.is_success:

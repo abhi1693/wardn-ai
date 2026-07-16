@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.core.outbound_http import UnsafeOutboundURLError
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationUnsupportedError,
@@ -10,6 +11,7 @@ from app.modules.mcp_registry.installer import (
     install_server_runtime,
     parse_mcp_response_body,
     safe_path_component,
+    send_remote_mcp_request,
     verify_remote_mcp_server,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
@@ -66,6 +68,22 @@ def test_parse_mcp_response_body_skips_sse_progress_notifications() -> None:
     )
 
     assert parse_mcp_response_body(body) == payload
+
+
+def test_remote_mcp_request_maps_rejected_url_to_install_error(monkeypatch) -> None:
+    def reject_url(*args, **kwargs):
+        raise UnsafeOutboundURLError("outbound URL resolves to a non-public address")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.open_outbound_request",
+        reject_url,
+    )
+
+    with pytest.raises(MCPServerInstallationFailedError, match="URL was rejected"):
+        send_remote_mcp_request(
+            "http://169.254.169.254/latest/meta-data",
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        )
 
 
 def test_verify_remote_mcp_server_uses_negotiated_protocol_header(monkeypatch) -> None:
