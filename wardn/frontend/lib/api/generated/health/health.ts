@@ -56,12 +56,19 @@ export type healthReadyResponse200 = {
   status: 200
 }
 
+export type healthReadyResponse503 = {
+  data: HealthStatus
+  status: 503
+}
+
 export type healthReadyResponseSuccess = (healthReadyResponse200) & {
   headers: Headers;
 };
-;
+export type healthReadyResponseError = (healthReadyResponse503) & {
+  headers: Headers;
+};
 
-export type healthReadyResponse = (healthReadyResponseSuccess)
+export type healthReadyResponse = (healthReadyResponseSuccess | healthReadyResponseError)
 
 export const getHealthReadyUrl = () => {
 
