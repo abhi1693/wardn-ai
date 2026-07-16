@@ -13,6 +13,7 @@
     "web:e2e": "npm --workspace wardn/frontend run e2e",
     "web:e2e:update": "npm --workspace wardn/frontend run e2e:update",
     "backend:test": "cd wardn/backend && uv run --extra dev pytest",
-    "backend:lint": "cd wardn/backend && uv run --extra dev ruff check ."
+    "backend:lint": "cd wardn/backend && uv run --extra dev ruff check .",
+    "backend:typecheck": "cd wardn/backend && uv run --extra dev mypy"
   }
 }

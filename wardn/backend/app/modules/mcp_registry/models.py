@@ -32,7 +32,7 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=True,

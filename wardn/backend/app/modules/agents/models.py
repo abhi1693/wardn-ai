@@ -168,7 +168,10 @@ class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     trigger_type: Mapped[str] = mapped_column(String(32), default="chat", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="running", nullable=False, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
