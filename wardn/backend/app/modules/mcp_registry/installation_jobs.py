@@ -7,7 +7,13 @@ from typing import Any
 from app.db.session import AsyncSessionLocal
 from app.modules.limits import service as limits_service
 from app.modules.limits.exceptions import LimitExceededError
-from app.modules.mcp_registry import job_repository, repository, service
+from app.modules.mcp_registry import (
+    installation_service as service,
+)
+from app.modules.mcp_registry import (
+    job_repository,
+    repository,
+)
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,

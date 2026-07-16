@@ -1,8 +1,9 @@
 import uuid
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.organizations.models import (
@@ -14,8 +15,8 @@ from app.modules.organizations.models import (
 ADMIN_ROLES = ("owner", "admin")
 
 
-def apply_gateway_scope(statement, scope: GatewayScope):
-    joined_workspace = False
+def apply_gateway_scope(statement, scope: GatewayScope, *, workspace_joined: bool = False):
+    joined_workspace = workspace_joined
 
     def ensure_workspace_join(current_statement):
         nonlocal joined_workspace
@@ -77,37 +78,68 @@ async def search_enabled_installations(
     *,
     scope: GatewayScope,
     search: str,
-    offset: int,
+    cursor: str | None,
     limit: int,
 ) -> tuple[list[tuple[MCPServerInstallation, MCPServerVersion]], str]:
     statement = (
         select(MCPServerInstallation, MCPServerVersion)
+        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
         .join(
             MCPServerVersion,
             and_(
                 MCPServerVersion.name == MCPServerInstallation.server_name,
                 MCPServerVersion.version == MCPServerInstallation.installed_version,
+                MCPServerVersion.organization_id == Workspace.organization_id,
             ),
         )
         .where(MCPServerInstallation.status == "enabled")
-        .order_by(MCPServerInstallation.server_name.asc())
+        .order_by(
+            MCPServerInstallation.server_name.asc(),
+            MCPServerInstallation.id.asc(),
+        )
     )
-    statement = apply_gateway_scope(statement, scope)
+    statement = apply_gateway_scope(statement, scope, workspace_joined=True)
 
     if search:
-        pattern = f"%{search.strip()}%"
         statement = statement.where(
-            or_(
-                MCPServerVersion.name.ilike(pattern),
-                MCPServerVersion.title.ilike(pattern),
-                MCPServerVersion.description.ilike(pattern),
+            MCPServerVersion.search_vector.op("@@")(
+                func.websearch_to_tsquery(
+                    literal_column("'simple'::regconfig"),
+                    search.strip(),
+                )
             )
         )
 
-    result = await session.execute(statement.offset(offset).limit(limit + 1))
-    rows = list(result.all())
-    next_cursor = str(offset + limit) if len(rows) > limit else ""
-    return rows[:limit], next_cursor
+    try:
+        cursor_values = decode_cursor(cursor, fields=2)
+    except InvalidCursorError as exc:
+        raise ValueError("invalid cursor") from exc
+    if cursor_values is not None:
+        after_name, after_id_value = cursor_values
+        try:
+            after_id = uuid.UUID(after_id_value)
+        except ValueError as exc:
+            raise ValueError("invalid cursor") from exc
+        statement = statement.where(
+            or_(
+                MCPServerInstallation.server_name > after_name,
+                and_(
+                    MCPServerInstallation.server_name == after_name,
+                    MCPServerInstallation.id > after_id,
+                ),
+            )
+        )
+    result = await session.execute(statement.limit(limit + 1))
+    rows = [(row[0], row[1]) for row in result.all()]
+    page = rows[:limit]
+    next_cursor = ""
+    if len(rows) > limit and page:
+        last_installation = page[-1][0]
+        next_cursor = encode_cursor(
+            last_installation.server_name,
+            str(last_installation.id),
+        )
+    return page, next_cursor
 
 
 async def get_enabled_installation(
@@ -119,11 +151,13 @@ async def get_enabled_installation(
 ) -> tuple[MCPServerInstallation, MCPServerVersion] | None:
     statement = (
         select(MCPServerInstallation, MCPServerVersion)
+        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
         .join(
             MCPServerVersion,
             and_(
                 MCPServerVersion.name == MCPServerInstallation.server_name,
                 MCPServerVersion.version == MCPServerInstallation.installed_version,
+                MCPServerVersion.organization_id == Workspace.organization_id,
             ),
         )
         .where(
@@ -133,9 +167,9 @@ async def get_enabled_installation(
     )
     if installation_id is not None:
         statement = statement.where(MCPServerInstallation.id == installation_id)
-    statement = apply_gateway_scope(statement, scope)
+    statement = apply_gateway_scope(statement, scope, workspace_joined=True)
     result = await session.execute(statement)
     rows = result.all()
     if len(rows) > 1:
         raise LookupError("enabled MCP server is ambiguous; pass installationId")
-    return rows[0] if rows else None
+    return (rows[0][0], rows[0][1]) if rows else None

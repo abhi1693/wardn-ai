@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, desc, func, literal, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents.models import Agent
@@ -57,6 +58,8 @@ def llm_usage_scope_filters(
     workspace_id: UUID | None = None,
     user_id: UUID | None = None,
     agent_run_id: UUID | None = None,
+    started_at_from: datetime | None = None,
+    started_at_to: datetime | None = None,
 ):
     filters = []
     if organization_id is not None:
@@ -67,6 +70,10 @@ def llm_usage_scope_filters(
         filters.append(LLMUsageRecord.user_id == user_id)
     if agent_run_id is not None:
         filters.append(LLMUsageRecord.agent_run_id == agent_run_id)
+    if started_at_from is not None:
+        filters.append(LLMUsageRecord.started_at >= started_at_from)
+    if started_at_to is not None:
+        filters.append(LLMUsageRecord.started_at < started_at_to)
     return filters
 
 
@@ -76,6 +83,8 @@ def mcp_tool_scope_filters(
     workspace_id: UUID | None = None,
     user_id: UUID | None = None,
     agent_run_id: UUID | None = None,
+    started_at_from: datetime | None = None,
+    started_at_to: datetime | None = None,
 ):
     filters = []
     if organization_id is not None:
@@ -86,6 +95,10 @@ def mcp_tool_scope_filters(
         filters.append(MCPToolInvocation.user_id == user_id)
     if agent_run_id is not None:
         filters.append(MCPToolInvocation.agent_run_id == agent_run_id)
+    if started_at_from is not None:
+        filters.append(MCPToolInvocation.started_at >= started_at_from)
+    if started_at_to is not None:
+        filters.append(MCPToolInvocation.started_at < started_at_to)
     return filters
 
 
@@ -107,13 +120,6 @@ def llm_usage_aggregate_columns():
         func.coalesce(func.sum(LLMUsageRecord.input_tokens), 0).label("input_tokens"),
         func.coalesce(func.sum(LLMUsageRecord.output_tokens), 0).label("output_tokens"),
         func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0).label("cost_usd"),
-    )
-
-
-def llm_usage_order_columns():
-    return (
-        desc(func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0)),
-        desc(func.count(LLMUsageRecord.id)),
     )
 
 
@@ -159,100 +165,30 @@ async def mcp_tool_call_count(
     return int(result.scalar_one() or 0)
 
 
-async def llm_usage_by_user(
+async def llm_usage_summary_rows(
     session: AsyncSession,
     *,
+    started_at_from: datetime,
+    started_at_to: datetime,
+    breakdown_limit: int,
     organization_id: UUID | None = None,
     workspace_id: UUID | None = None,
     user_id: UUID | None = None,
 ):
-    result = await session.execute(
+    usage_day = func.date(func.timezone("UTC", LLMUsageRecord.started_at))
+    grouped = (
         select(
             LLMUsageRecord.user_id,
-            User.first_name,
-            User.last_name,
-            User.email,
-            *llm_usage_aggregate_columns(),
-        )
-        .outerjoin(User, LLMUsageRecord.user_id == User.id)
-        .where(
-            *llm_usage_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-        )
-        .group_by(LLMUsageRecord.user_id, User.first_name, User.last_name, User.email)
-        .order_by(*llm_usage_order_columns())
-    )
-    return list(result.all())
-
-
-async def llm_usage_by_workspace(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
-    result = await session.execute(
-        select(
             LLMUsageRecord.workspace_id,
-            Workspace.name,
-            *llm_usage_aggregate_columns(),
-        )
-        .outerjoin(Workspace, LLMUsageRecord.workspace_id == Workspace.id)
-        .where(
-            *llm_usage_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-        )
-        .group_by(LLMUsageRecord.workspace_id, Workspace.name)
-        .order_by(*llm_usage_order_columns())
-    )
-    return list(result.all())
-
-
-async def llm_usage_by_agent(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
-    result = await session.execute(
-        select(
             LLMUsageRecord.agent_id,
-            Agent.name,
-            *llm_usage_aggregate_columns(),
-        )
-        .outerjoin(Agent, LLMUsageRecord.agent_id == Agent.id)
-        .where(
-            *llm_usage_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-        )
-        .group_by(LLMUsageRecord.agent_id, Agent.name)
-        .order_by(*llm_usage_order_columns())
-    )
-    return list(result.all())
-
-
-async def llm_usage_by_model(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
-    result = await session.execute(
-        select(
             LLMUsageRecord.provider,
             LLMUsageRecord.model,
+            usage_day.label("usage_day"),
+            func.grouping(LLMUsageRecord.user_id).label("group_user"),
+            func.grouping(LLMUsageRecord.workspace_id).label("group_workspace"),
+            func.grouping(LLMUsageRecord.agent_id).label("group_agent"),
+            func.grouping(LLMUsageRecord.provider).label("group_model"),
+            func.grouping(usage_day).label("group_day"),
             *llm_usage_aggregate_columns(),
         )
         .where(
@@ -260,141 +196,144 @@ async def llm_usage_by_model(
                 organization_id=organization_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
             )
         )
-        .group_by(LLMUsageRecord.provider, LLMUsageRecord.model)
-        .order_by(*llm_usage_order_columns())
-    )
-    return list(result.all())
-
-
-async def llm_usage_by_day(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
-    usage_date = func.date(LLMUsageRecord.started_at).label("usage_date")
-    result = await session.execute(
-        select(
-            usage_date,
-            *llm_usage_aggregate_columns(),
-        )
-        .where(
-            *llm_usage_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
+        .group_by(
+            func.grouping_sets(
+                tuple_(),
+                tuple_(LLMUsageRecord.user_id),
+                tuple_(LLMUsageRecord.workspace_id),
+                tuple_(LLMUsageRecord.agent_id),
+                tuple_(LLMUsageRecord.provider, LLMUsageRecord.model),
+                tuple_(usage_day),
             )
         )
-        .group_by(usage_date)
-        .order_by(usage_date.asc())
+        .cte("llm_usage_grouped")
     )
-    return list(result.all())
-
-
-async def mcp_tool_calls_by_user(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
+    group_key = case(
+        (grouped.c.group_user == 0, literal("user")),
+        (grouped.c.group_workspace == 0, literal("workspace")),
+        (grouped.c.group_agent == 0, literal("agent")),
+        (grouped.c.group_model == 0, literal("model")),
+        (grouped.c.group_day == 0, literal("day")),
+        else_=literal("total"),
+    ).label("group_key")
+    ranked = select(
+        grouped,
+        group_key,
+        func.row_number()
+        .over(
+            partition_by=group_key,
+            order_by=(grouped.c.cost_usd.desc(), grouped.c.requests.desc()),
+        )
+        .label("group_rank"),
+    ).cte("llm_usage_ranked")
     result = await session.execute(
         select(
-            MCPToolInvocation.user_id,
+            ranked,
             User.first_name,
             User.last_name,
             User.email,
-            func.count(MCPToolInvocation.id),
+            Workspace.name.label("workspace_name"),
+            Agent.name.label("agent_name"),
         )
-        .outerjoin(User, MCPToolInvocation.user_id == User.id)
+        .outerjoin(User, ranked.c.user_id == User.id)
+        .outerjoin(Workspace, ranked.c.workspace_id == Workspace.id)
+        .outerjoin(Agent, ranked.c.agent_id == Agent.id)
         .where(
-            *mcp_tool_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
+            or_(
+                ranked.c.group_key.in_(("total", "day")),
+                ranked.c.group_rank <= max(1, breakdown_limit),
             )
         )
-        .group_by(MCPToolInvocation.user_id, User.first_name, User.last_name, User.email)
+        .order_by(ranked.c.group_key, ranked.c.group_rank)
     )
-    return list(result.all())
+    return list(result.mappings().all())
 
 
-async def mcp_tool_calls_by_workspace(
+async def mcp_tool_usage_summary_rows(
     session: AsyncSession,
     *,
+    started_at_from: datetime,
+    started_at_to: datetime,
+    breakdown_limit: int,
     organization_id: UUID | None = None,
     workspace_id: UUID | None = None,
     user_id: UUID | None = None,
 ):
-    result = await session.execute(
+    usage_day = func.date(func.timezone("UTC", MCPToolInvocation.started_at))
+    grouped = (
         select(
+            MCPToolInvocation.user_id,
             MCPToolInvocation.workspace_id,
-            Workspace.name,
-            func.count(MCPToolInvocation.id),
+            MCPToolInvocation.agent_id,
+            usage_day.label("usage_day"),
+            func.grouping(MCPToolInvocation.user_id).label("group_user"),
+            func.grouping(MCPToolInvocation.workspace_id).label("group_workspace"),
+            func.grouping(MCPToolInvocation.agent_id).label("group_agent"),
+            func.grouping(usage_day).label("group_day"),
+            func.count(MCPToolInvocation.id).label("tool_calls"),
         )
-        .outerjoin(Workspace, MCPToolInvocation.workspace_id == Workspace.id)
         .where(
             *mcp_tool_scope_filters(
                 organization_id=organization_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
             )
         )
-        .group_by(MCPToolInvocation.workspace_id, Workspace.name)
+        .group_by(
+            func.grouping_sets(
+                tuple_(),
+                tuple_(MCPToolInvocation.user_id),
+                tuple_(MCPToolInvocation.workspace_id),
+                tuple_(MCPToolInvocation.agent_id),
+                tuple_(usage_day),
+            )
+        )
+        .cte("mcp_tool_usage_grouped")
     )
-    return list(result.all())
-
-
-async def mcp_tool_calls_by_agent(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
+    group_key = case(
+        (grouped.c.group_user == 0, literal("user")),
+        (grouped.c.group_workspace == 0, literal("workspace")),
+        (grouped.c.group_agent == 0, literal("agent")),
+        (grouped.c.group_day == 0, literal("day")),
+        else_=literal("total"),
+    ).label("group_key")
+    ranked = select(
+        grouped,
+        group_key,
+        func.row_number()
+        .over(
+            partition_by=group_key,
+            order_by=grouped.c.tool_calls.desc(),
+        )
+        .label("group_rank"),
+    ).cte("mcp_tool_usage_ranked")
     result = await session.execute(
         select(
-            MCPToolInvocation.agent_id,
-            Agent.name,
-            func.count(MCPToolInvocation.id),
+            ranked,
+            User.first_name,
+            User.last_name,
+            User.email,
+            Workspace.name.label("workspace_name"),
+            Agent.name.label("agent_name"),
         )
-        .outerjoin(Agent, MCPToolInvocation.agent_id == Agent.id)
+        .outerjoin(User, ranked.c.user_id == User.id)
+        .outerjoin(Workspace, ranked.c.workspace_id == Workspace.id)
+        .outerjoin(Agent, ranked.c.agent_id == Agent.id)
         .where(
-            *mcp_tool_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
+            or_(
+                ranked.c.group_key.in_(("total", "day")),
+                ranked.c.group_rank <= max(1, breakdown_limit),
             )
         )
-        .group_by(MCPToolInvocation.agent_id, Agent.name)
+        .order_by(ranked.c.group_key, ranked.c.group_rank)
     )
-    return list(result.all())
-
-
-async def mcp_tool_calls_by_day(
-    session: AsyncSession,
-    *,
-    organization_id: UUID | None = None,
-    workspace_id: UUID | None = None,
-    user_id: UUID | None = None,
-):
-    usage_date = func.date(MCPToolInvocation.started_at).label("usage_date")
-    result = await session.execute(
-        select(usage_date, func.count(MCPToolInvocation.id))
-        .where(
-            *mcp_tool_scope_filters(
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-        )
-        .group_by(usage_date)
-        .order_by(usage_date.asc())
-    )
-    return list(result.all())
+    return list(result.mappings().all())
 
 
 async def list_llm_usage_records_for_agent_run(

@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_runtime import repository
+from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
 from app.modules.mcp_runtime.manager import (
     MCPRuntimeManager,
     get_runtime_manager,
@@ -344,7 +345,7 @@ async def ensure_runtime_session(
                 else "expired"
             )
             if deferred_runtime_stops is None:
-                manager.stop_runtime(existing)
+                await run_in_threadpool(manager.stop_runtime, existing)
             else:
                 deferred_runtime_stops.append(existing)
             existing.status = "stopped"
@@ -440,12 +441,14 @@ async def warm_runtime_session(
         name=installation.server_name,
         version=installation.installed_version,
     )
+    deferred_runtime_stops: list[MCPRuntimeSession] = []
     runtime_session = await ensure_runtime_session(
         session,
         runtime_installation,
         server,
         manager=manager,
         now=now,
+        deferred_runtime_stops=deferred_runtime_stops,
     )
     runtime_session.status = "running"
     runtime_session.last_error = ""
@@ -458,8 +461,11 @@ async def warm_runtime_session(
         now=now,
     )
     await session.flush()
+    await session.commit()
 
     try:
+        for deferred_runtime_session in deferred_runtime_stops:
+            await run_in_threadpool(manager.stop_runtime, deferred_runtime_session)
         health = await run_in_threadpool(
             manager.ensure_runtime,
             runtime_installation,
@@ -788,7 +794,12 @@ async def call_tool_with_isolated_tracking(
     tool_name: str,
     arguments: dict[str, Any],
     user_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    agent_run_id: UUID | None = None,
+    cancel_event: Event | None = None,
+    cancel_reason: str = "Tool call cancelled.",
     request_meta: dict[str, Any] | None = None,
+    progress_callback=None,
     manager: MCPRuntimeManager | None = None,
     tracking_session_factory=AsyncSessionLocal,
 ) -> dict[str, Any]:
@@ -800,6 +811,8 @@ async def call_tool_with_isolated_tracking(
         tool_name=tool_name,
         arguments=arguments,
         user_id=user_id,
+        agent_id=agent_id,
+        agent_run_id=agent_run_id,
         manager=manager,
         defer_runtime_stops=True,
     )
@@ -812,7 +825,10 @@ async def call_tool_with_isolated_tracking(
             prepared,
             tool_name=tool_name,
             arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
             request_meta=request_meta,
+            progress_callback=progress_callback,
             manager=manager,
         )
     except BaseException as exc:
@@ -856,12 +872,14 @@ async def list_tools_with_tracking(
         installation,
     )
     now = datetime.now(UTC)
+    deferred_runtime_stops: list[MCPRuntimeSession] = []
     runtime_session = await ensure_runtime_session(
         session,
         runtime_installation,
         server,
         manager=manager,
         now=now,
+        deferred_runtime_stops=deferred_runtime_stops,
     )
     runtime_session.status = "running"
     runtime_session.last_error = ""
@@ -874,8 +892,11 @@ async def list_tools_with_tracking(
         now=now,
     )
     await session.flush()
+    await session.commit()
 
     try:
+        for deferred_runtime_session in deferred_runtime_stops:
+            await run_in_threadpool(manager.stop_runtime, deferred_runtime_session)
         tools = await run_in_threadpool(
             manager.list_tools,
             runtime_installation,
@@ -935,8 +956,10 @@ async def reap_expired_runtime_sessions(
         now=now,
         limit=limit,
     )
+    await session.commit()
+    stopped_count = 0
     for runtime_session in expired_sessions:
-        manager.stop_runtime(runtime_session)
+        await run_in_threadpool(manager.stop_runtime, runtime_session)
         runtime_session.status = "stopped"
         runtime_session.stopped_at = now
         runtime_session.last_error = ""
@@ -948,21 +971,27 @@ async def reap_expired_runtime_sessions(
             metadata={"reason": "expired"},
             now=now,
         )
-    await session.flush()
-    return MCPRuntimeReapResult(stopped_count=len(expired_sessions))
+        await session.commit()
+        stopped_count += 1
+    return MCPRuntimeReapResult(stopped_count=stopped_count)
 
 
 async def prune_runtime_events(
     session: AsyncSession,
     *,
     retention_days: int,
+    limit: int = 100,
     now: datetime | None = None,
 ) -> int:
     if retention_days < 1:
         return 0
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=retention_days)
-    return await repository.delete_runtime_events_before(session, cutoff=cutoff)
+    return await repository.delete_runtime_events_before(
+        session,
+        cutoff=cutoff,
+        limit=limit,
+    )
 
 
 async def recover_stale_tool_invocations(
@@ -995,13 +1024,18 @@ async def prune_tool_invocations(
     session: AsyncSession,
     *,
     retention_days: int,
+    limit: int = 100,
     now: datetime | None = None,
 ) -> int:
     if retention_days < 1:
         return 0
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=retention_days)
-    return await repository.delete_tool_invocations_before(session, cutoff=cutoff)
+    return await repository.delete_tool_invocations_before(
+        session,
+        cutoff=cutoff,
+        limit=limit,
+    )
 
 
 async def list_runtime_sessions(
@@ -1110,7 +1144,7 @@ async def get_runtime_session(
         workspace_id=workspace_id,
     )
     if runtime_session is None:
-        raise LookupError("runtime session not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
     return runtime_session_read(runtime_session)
 
 
@@ -1127,10 +1161,11 @@ async def get_runtime_session_health(
         workspace_id=workspace_id,
     )
     if runtime_session is None:
-        raise LookupError("runtime session not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
 
     manager = manager or get_runtime_manager()
-    health = manager.health_runtime(runtime_session)
+    await session.commit()
+    health = await run_in_threadpool(manager.health_runtime, runtime_session)
     return MCPRuntimeSessionHealthResponse(
         runtimeSessionId=runtime_session.id,
         runtimeProvider=runtime_session.runtime_provider,
@@ -1157,11 +1192,12 @@ async def stop_runtime_session(
         workspace_id=workspace_id,
     )
     if runtime_session is None:
-        raise LookupError("runtime session not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
 
     now = datetime.now(UTC)
     if runtime_session.status in repository.ACTIVE_RUNTIME_STATUSES:
-        manager.stop_runtime(runtime_session)
+        await session.commit()
+        await run_in_threadpool(manager.stop_runtime, runtime_session)
         runtime_session.status = "stopped"
         runtime_session.stopped_at = now
         runtime_session.expires_at = now
@@ -1191,7 +1227,7 @@ async def list_runtime_events(
         workspace_id=workspace_id,
     )
     if runtime_session is None:
-        raise LookupError("runtime session not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
     events = await repository.list_runtime_events(session, runtime_session.id, limit=limit)
     return MCPRuntimeEventListResponse(
         events=[runtime_event_read(runtime_event) for runtime_event in events]

@@ -6,6 +6,7 @@
  */
 import type { UsageSummaryBreakdownRow } from './usageSummaryBreakdownRow';
 import type { UsageSummaryTotals } from './usageSummaryTotals';
+import type { UsageSummaryWindow } from './usageSummaryWindow';
 import type { UsageTrendPoint } from './usageTrendPoint';
 
 export interface UsageSummaryResponse {
@@ -15,4 +16,5 @@ export interface UsageSummaryResponse {
   byWorkspace: UsageSummaryBreakdownRow[];
   daily: UsageTrendPoint[];
   summary: UsageSummaryTotals;
+  window: UsageSummaryWindow;
 }

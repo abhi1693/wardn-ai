@@ -261,6 +261,41 @@ def test_register_mcp_job_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> None:
+    settings = Settings(_env_file=None)
+    seen: dict[str, object] = {}
+
+    async def no_mcp_job(**kwargs):
+        return False
+
+    async def clean_secret(**kwargs):
+        seen.update(kwargs)
+        return True
+
+    monkeypatch.setattr(job_commands, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        job_commands,
+        "build_job_handlers",
+        lambda: job_worker.MCPJobHandlers(executors={}, cleanup_executors={}),
+    )
+    monkeypatch.setattr(job_commands, "run_job_worker_once", no_mcp_job)
+    monkeypatch.setattr(job_commands, "run_cleanup_worker_once", clean_secret)
+
+    result = await job_commands.run_mcp_jobs_from_args(
+        argparse.Namespace(
+            once=True,
+            worker_id="worker-1",
+            poll_interval=3.0,
+            verbose=False,
+        )
+    )
+
+    assert result == 0
+    assert seen["worker_id"] == "worker-1:secrets"
+    assert seen["lease_seconds"] == settings.secret_cleanup_worker_lease_seconds
+
+
+@pytest.mark.asyncio
 async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
     settings = Settings(_env_file=None)
     warmup_task = object()

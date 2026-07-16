@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from contextlib import suppress
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -15,6 +16,10 @@ from app.modules.mcp_registry.job_worker import (
 )
 from app.modules.mcp_runtime.reaper import start_runtime_reaper, stop_runtime_reaper
 from app.modules.mcp_runtime.warmup import start_runtime_warmup, stop_runtime_warmup
+from app.modules.secrets.cleanup_worker import (
+    run_cleanup_worker_loop,
+    run_cleanup_worker_once,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +91,26 @@ async def run_mcp_jobs_from_args(args: argparse.Namespace) -> int:
     }
     logger.info("Starting isolated MCP operation worker %s.", worker_id)
     if args.once:
-        await run_job_worker_once(**kwargs)
+        worked = await run_job_worker_once(**kwargs)
+        if not worked:
+            await run_cleanup_worker_once(
+                worker_id=f"{worker_id}:secrets",
+                lease_seconds=settings.secret_cleanup_worker_lease_seconds,
+                provisioning_grace_seconds=settings.secret_cleanup_provisioning_grace_seconds,
+                retry_base_seconds=settings.secret_cleanup_worker_retry_base_seconds,
+                retry_max_seconds=settings.secret_cleanup_worker_retry_max_seconds,
+            )
         return 0
+    secret_cleanup_task = asyncio.create_task(
+        run_cleanup_worker_loop(
+            worker_id=f"{worker_id}:secrets",
+            poll_interval_seconds=settings.secret_cleanup_worker_poll_interval_seconds,
+            lease_seconds=settings.secret_cleanup_worker_lease_seconds,
+            provisioning_grace_seconds=settings.secret_cleanup_provisioning_grace_seconds,
+            retry_base_seconds=settings.secret_cleanup_worker_retry_base_seconds,
+            retry_max_seconds=settings.secret_cleanup_worker_retry_max_seconds,
+        )
+    )
     warmup_task = start_runtime_warmup(
         concurrency=settings.mcp_runtime_warm_startup_concurrency,
     )
@@ -100,6 +123,9 @@ async def run_mcp_jobs_from_args(args: argparse.Namespace) -> int:
     try:
         await run_job_worker_loop(poll_interval_seconds=poll_interval_seconds, **kwargs)
     finally:
+        secret_cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await secret_cleanup_task
         await stop_runtime_warmup(warmup_task)
         await stop_runtime_reaper(reaper_task)
     return 0

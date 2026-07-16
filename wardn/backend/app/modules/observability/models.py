@@ -79,6 +79,21 @@ class LLMUsageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "model",
             "started_at",
         ),
+        Index(
+            "ix_llm_usage_records_org_started",
+            "organization_id",
+            "started_at",
+        ),
+        Index(
+            "ix_llm_usage_records_workspace_started",
+            "workspace_id",
+            "started_at",
+        ),
+        Index(
+            "ix_llm_usage_records_user_started",
+            "user_id",
+            "started_at",
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(

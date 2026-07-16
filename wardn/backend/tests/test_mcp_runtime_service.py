@@ -20,6 +20,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
         self.flushed = False
+        self.committed = False
         self.rolled_back = False
 
     def add(self, instance: object) -> None:
@@ -29,6 +30,9 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flushed = True
+
+    async def commit(self) -> None:
+        self.committed = True
 
     async def rollback(self) -> None:
         self.rolled_back = True
@@ -1012,9 +1016,10 @@ async def test_prune_runtime_events_deletes_events_before_cutoff(monkeypatch) ->
     now = datetime.now(UTC)
     seen = {}
 
-    async def delete_runtime_events_before(session, *, cutoff):
+    async def delete_runtime_events_before(session, *, cutoff, limit):
         seen["session"] = session
         seen["cutoff"] = cutoff
+        seen["limit"] = limit
         return 4
 
     monkeypatch.setattr(
@@ -1027,6 +1032,7 @@ async def test_prune_runtime_events_deletes_events_before_cutoff(monkeypatch) ->
     deleted_count = await service.prune_runtime_events(
         fake_session,
         retention_days=14,
+        limit=250,
         now=now,
     )
 
@@ -1034,6 +1040,7 @@ async def test_prune_runtime_events_deletes_events_before_cutoff(monkeypatch) ->
     assert seen == {
         "session": fake_session,
         "cutoff": now - timedelta(days=14),
+        "limit": 250,
     }
 
 
@@ -1061,9 +1068,10 @@ async def test_prune_tool_invocations_deletes_invocations_before_cutoff(monkeypa
     now = datetime.now(UTC)
     seen = {}
 
-    async def delete_tool_invocations_before(session, *, cutoff):
+    async def delete_tool_invocations_before(session, *, cutoff, limit):
         seen["session"] = session
         seen["cutoff"] = cutoff
+        seen["limit"] = limit
         return 6
 
     monkeypatch.setattr(
@@ -1076,6 +1084,7 @@ async def test_prune_tool_invocations_deletes_invocations_before_cutoff(monkeypa
     deleted_count = await service.prune_tool_invocations(
         fake_session,
         retention_days=30,
+        limit=175,
         now=now,
     )
 
@@ -1083,6 +1092,7 @@ async def test_prune_tool_invocations_deletes_invocations_before_cutoff(monkeypa
     assert seen == {
         "session": fake_session,
         "cutoff": now - timedelta(days=30),
+        "limit": 175,
     }
 
 

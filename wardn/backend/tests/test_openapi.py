@@ -250,6 +250,19 @@ def test_bootstrap_openapi_contract() -> None:
     }
 
 
+def test_secret_delete_openapi_contract_includes_conflict() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+
+    for path in (
+        "/api/v1/organizations/{organization_id}/secrets/handles/{handle_id}",
+        "/api/v1/organizations/{organization_id}/secrets/stores/{store_id}",
+    ):
+        delete_operation = schema["paths"][path]["delete"]
+        assert delete_operation["responses"]["409"]["content"]["application/json"][
+            "schema"
+        ] == {"$ref": "#/components/schemas/ErrorResponse"}
+
+
 def test_limits_openapi_contract() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     limits = schema["paths"]["/api/v1/limits"]

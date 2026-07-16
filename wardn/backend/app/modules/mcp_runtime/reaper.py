@@ -39,36 +39,49 @@ async def run_runtime_reaper_once(
         if invocation_retention_days is None
         else invocation_retention_days
     )
-    async with session_factory() as session:
-        if acquire_leadership and not await try_advisory_transaction_lock(
-            session,
-            RUNTIME_REAPER_LOCK_ID,
-        ):
-            await session.rollback()
-            logger.debug("Skipping MCP runtime reaper; another worker owns maintenance.")
-            return MCPRuntimeReapResult(stopped_count=0)
-        reap_result = await reap_expired_runtime_sessions(session, limit=limit)
-        recovered_invocation_count = await recover_stale_tool_invocations(
-            session,
-            stale_after_seconds=settings.mcp_runtime_invocation_stale_seconds,
-            limit=limit,
-        )
-        deleted_event_count = await prune_runtime_events(
-            session,
-            retention_days=event_retention_days,
-        )
-        deleted_invocation_count = await prune_tool_invocations(
-            session,
-            retention_days=invocation_retention_days,
-        )
-        await session.commit()
 
-    result = MCPRuntimeReapResult(
-        stopped_count=reap_result.stopped_count,
-        deleted_event_count=deleted_event_count,
-        deleted_invocation_count=deleted_invocation_count,
-        recovered_invocation_count=recovered_invocation_count,
-    )
+    async def run_maintenance() -> MCPRuntimeReapResult:
+        async with session_factory() as session:
+            reap_result = await reap_expired_runtime_sessions(session, limit=limit)
+            recovered_invocation_count = await recover_stale_tool_invocations(
+                session,
+                stale_after_seconds=settings.mcp_runtime_invocation_stale_seconds,
+                limit=limit,
+            )
+            deleted_event_count = await prune_runtime_events(
+                session,
+                retention_days=event_retention_days,
+                limit=limit,
+            )
+            deleted_invocation_count = await prune_tool_invocations(
+                session,
+                retention_days=invocation_retention_days,
+                limit=limit,
+            )
+            await session.commit()
+        return MCPRuntimeReapResult(
+            stopped_count=reap_result.stopped_count,
+            deleted_event_count=deleted_event_count,
+            deleted_invocation_count=deleted_invocation_count,
+            recovered_invocation_count=recovered_invocation_count,
+        )
+
+    if acquire_leadership:
+        async with session_factory() as leadership_session:
+            if not await try_advisory_transaction_lock(
+                leadership_session,
+                RUNTIME_REAPER_LOCK_ID,
+            ):
+                await leadership_session.rollback()
+                logger.debug("Skipping MCP runtime reaper; another worker owns maintenance.")
+                return MCPRuntimeReapResult(stopped_count=0)
+            try:
+                result = await run_maintenance()
+            finally:
+                await leadership_session.rollback()
+    else:
+        result = await run_maintenance()
+
     if (
         result.stopped_count
         or result.recovered_invocation_count

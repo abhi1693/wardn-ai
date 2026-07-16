@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.modules.mcp_gateway import repository as gateway_repository
 from app.modules.mcp_gateway.scope import GatewayScope
@@ -64,7 +65,8 @@ async def refresh_tool_schemas_for_installation(
         )
     else:
         try:
-            tools = manager.list_tools(installation)
+            await session.commit()
+            tools = await run_in_threadpool(manager.list_tools, installation)
         except NotImplementedError:
             tools = await list_tools_with_tracking(
                 session,

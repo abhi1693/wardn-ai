@@ -1221,3 +1221,62 @@ async def test_update_rejects_duplicate_provider_credential_name(monkeypatch) ->
             credential_id,
             LLMProviderCredentialUpdate(name="Duplicate"),
         )
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_credential_queues_only_owned_secret_cleanup(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=None,
+        user_id=None,
+        name="Owned secret",
+        provider="openai_api_key",
+        visibility="organization",
+        auth_method="api_key",
+        api_key_secret_handle_id=uuid4(),
+        oauth_provider="",
+        oauth_scopes=[],
+        oauth_metadata={},
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    managed_secret_id = uuid4()
+    seen: dict[str, object] = {}
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    async def require_scope(*args, **kwargs):
+        return None
+
+    async def owner_secrets(*args, **kwargs):
+        return [SimpleNamespace(id=managed_secret_id)]
+
+    async def delete_handles(session, managed_secret_ids):
+        seen["handles"] = managed_secret_ids
+
+    async def queue_cleanup(session, managed_secret_ids):
+        seen["cleanup"] = managed_secret_ids
+
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "require_scope_permission", require_scope)
+    monkeypatch.setattr(service, "owner_managed_secrets", owner_secrets)
+    monkeypatch.setattr(service, "delete_managed_secret_handles", delete_handles)
+    monkeypatch.setattr(service, "queue_managed_secret_cleanup", queue_cleanup)
+    session = FakeSession()
+
+    await service.delete_provider_credential(
+        session,
+        User(id=uuid4(), email="admin@example.com", is_superuser=True),
+        organization_id,
+        credential.id,
+    )
+
+    assert session.deleted == [credential]
+    assert seen == {
+        "handles": {managed_secret_id},
+        "cleanup": {managed_secret_id},
+    }

@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     Index,
@@ -15,7 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -43,6 +44,33 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('active', 'deprecated', 'deleted')",
             name="ck_mcp_server_versions_status",
         ),
+        Index(
+            "ix_mcp_server_versions_org_latest_page",
+            "organization_id",
+            "is_latest",
+            "name",
+            "version",
+            "id",
+            postgresql_where=text("status <> 'deleted'"),
+        ),
+        Index(
+            "ix_mcp_server_versions_org_page",
+            "organization_id",
+            "name",
+            "version",
+            "id",
+        ),
+        Index(
+            "ix_mcp_server_versions_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_mcp_server_versions_catalog_source",
+            "organization_id",
+            "catalog_source_id",
+            postgresql_where=text("catalog_source_id IS NOT NULL"),
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -51,9 +79,28 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    catalog_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "mcp_catalog_sources.id",
+            name="fk_mcp_server_versions_catalog_source",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple'::regconfig, "
+            "coalesce(name, '') || ' ' || coalesce(title, '') || ' ' || "
+            "coalesce(description, ''))",
+            persisted=True,
+        ),
+        nullable=False,
+    )
     version: Mapped[str] = mapped_column(String(255), nullable=False)
     website_url: Mapped[str] = mapped_column(String(2048), default="", nullable=False)
     status: Mapped[MCPServerStatus] = mapped_column(
@@ -152,6 +199,12 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "status IN ('enabled', 'disabled')",
             name="ck_mcp_server_installations_status",
+        ),
+        Index(
+            "ix_mcp_server_installations_enabled_page",
+            "server_name",
+            "id",
+            postgresql_where=text("status = 'enabled'"),
         ),
     )
 
@@ -324,6 +377,18 @@ class MCPServerToolSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "tool_name",
             name="uq_mcp_server_tool_schemas_installation_tool",
         ),
+        Index(
+            "ix_mcp_server_tool_schemas_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_mcp_server_tool_schemas_active_page",
+            "server_name",
+            "tool_name",
+            "id",
+            postgresql_where=text("is_active IS TRUE"),
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -343,6 +408,16 @@ class MCPServerToolSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple'::regconfig, "
+            "coalesce(server_name, '') || ' ' || coalesce(tool_name, '') || ' ' || "
+            "coalesce(title, '') || ' ' || coalesce(description, ''))",
+            persisted=True,
+        ),
+        nullable=False,
+    )
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     output_schema: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     annotations: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)

@@ -154,6 +154,12 @@ from app.modules.organizations.service import (
 )
 from app.modules.secrets import repository as secrets_repository
 from app.modules.secrets.exceptions import InvalidSecretHandleError, SecretsError
+from app.modules.secrets.managed import (
+    activate_managed_secret,
+    delete_managed_secret_handles,
+    owner_managed_secrets,
+    queue_managed_secret_cleanup,
+)
 from app.modules.secrets.provider import SecretResolutionContext
 from app.modules.secrets.providers.registry import get_secret_provider
 from app.modules.secrets.schemas import SecretHandleCreate
@@ -445,6 +451,7 @@ async def create_chatgpt_oauth_credential_from_tokens(
         workspace_id=workspace_id,
     )
     user_id = user.id if visibility == "user" else None
+    credential_id = uuid.uuid4()
     handle_workspace_id = scoped_workspace_id if visibility == "workspace" else None
     external_ref = llm_secret_path(
         organization_id=organization_id,
@@ -453,7 +460,7 @@ async def create_chatgpt_oauth_credential_from_tokens(
         provider=OPENAI_CHATGPT_PROVIDER,
         name=normalized_name,
     )
-    await write_secret_values(
+    write_result = await write_secret_values(
         session,
         user,
         organization_id,
@@ -465,7 +472,10 @@ async def create_chatgpt_oauth_credential_from_tokens(
             "refresh_token": refresh_token,
         },
         purpose="oauth_token",
+        owner_type="llm_provider_credential",
+        owner_id=credential_id,
     )
+    managed_secret_id = getattr(write_result, "managed_secret_id", None)
     access_handle = await create_secret_handle(
         session,
         user,
@@ -479,6 +489,7 @@ async def create_chatgpt_oauth_credential_from_tokens(
             keyName="access_token",
             metadata={"provider": "chatgpt", "credentialName": normalized_name},
         ),
+        managed_secret_id=managed_secret_id,
     )
     refresh_handle = await create_secret_handle(
         session,
@@ -493,8 +504,9 @@ async def create_chatgpt_oauth_credential_from_tokens(
             keyName="refresh_token",
             metadata={"provider": "chatgpt", "credentialName": normalized_name},
         ),
+        managed_secret_id=managed_secret_id,
     )
-    return await create_provider_credential(
+    response = await create_provider_credential(
         session,
         user,
         organization_id,
@@ -511,7 +523,10 @@ async def create_chatgpt_oauth_credential_from_tokens(
             oauthScopes=chatgpt_oauth_scopes(token_payload),
             oauthMetadata=chatgpt_oauth_metadata(access_token),
         ),
+        credential_id=credential_id,
     )
+    await activate_managed_secret(session, managed_secret_id)
+    return response
 
 
 async def start_chatgpt_device_authorization(
@@ -865,7 +880,10 @@ async def create_provider_credential(
     user: User,
     organization_id: uuid.UUID,
     payload: LLMProviderCredentialCreate,
+    *,
+    credential_id: uuid.UUID | None = None,
 ) -> LLMProviderCredentialRead:
+    credential_id = credential_id or uuid.uuid4()
     name = normalize_name(payload.name)
     workspace_id = await require_scope_permission(
         session,
@@ -972,7 +990,7 @@ async def create_provider_credential(
             name=name,
         )
         handle_workspace_id = workspace_id if payload.visibility == "workspace" else None
-        await write_secret_values(
+        write_result = await write_secret_values(
             session,
             user,
             organization_id,
@@ -981,7 +999,10 @@ async def create_provider_credential(
             external_ref=external_ref,
             values={"api_key": api_key_value},
             purpose="llm_credential",
+            owner_type="llm_provider_credential",
+            owner_id=credential_id,
         )
+        managed_secret_id = getattr(write_result, "managed_secret_id", None)
         api_key_handle = await create_secret_handle(
             session,
             user,
@@ -995,6 +1016,7 @@ async def create_provider_credential(
                 keyName="api_key",
                 metadata={"provider": provider, "credentialName": name},
             ),
+            managed_secret_id=managed_secret_id,
         )
         api_key_secret_handle_id = api_key_handle.id
     else:
@@ -1029,6 +1051,7 @@ async def create_provider_credential(
         )
 
     credential = LLMProviderCredential(
+        id=credential_id,
         organization_id=organization_id,
         workspace_id=workspace_id,
         user_id=user_id,
@@ -1057,6 +1080,8 @@ async def create_provider_credential(
             ) from exc
         raise
     await session.refresh(credential)
+    if auth_method == "api_key" and api_key_value:
+        await activate_managed_secret(session, managed_secret_id)
     return credential_response(credential)
 
 
@@ -1199,4 +1224,13 @@ async def delete_provider_credential(
         visibility=credential.visibility,
         workspace_id=credential.workspace_id,
     )
+    managed_secrets = await owner_managed_secrets(
+        session,
+        owner_type="llm_provider_credential",
+        owner_id=credential.id,
+    )
+    managed_secret_ids = {managed_secret.id for managed_secret in managed_secrets}
     await session.delete(credential)
+    await session.flush()
+    await delete_managed_secret_handles(session, managed_secret_ids)
+    await queue_managed_secret_cleanup(session, managed_secret_ids)

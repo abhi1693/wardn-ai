@@ -1,9 +1,11 @@
+import logging
 import uuid
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.errors import is_constraint_violation
+from app.db.session import defer_session_work
 from app.modules.limits import service as limits_service
 from app.modules.organizations.service import require_organization_admin, require_workspace_admin
 from app.modules.secrets import repository
@@ -13,9 +15,15 @@ from app.modules.secrets.exceptions import (
     InvalidSecretHandleError,
     InvalidSecretStoreError,
     SecretHandleNotFoundError,
+    SecretInUseError,
     SecretStoreNotFoundError,
 )
-from app.modules.secrets.models import SecretHandle, SecretStore
+from app.modules.secrets.managed import (
+    persist_managed_secret_intent,
+    queue_managed_secret_cleanup_independently,
+    reconcile_managed_secret_after_request,
+)
+from app.modules.secrets.models import ManagedSecret, SecretHandle, SecretStore
 from app.modules.secrets.provider import ResolvedSecret, SecretResolutionContext, SecretWriteResult
 from app.modules.secrets.providers.registry import get_secret_provider, supported_secret_providers
 from app.modules.secrets.schemas import (
@@ -30,6 +38,30 @@ from app.modules.secrets.schemas import (
     SecretValidationResponse,
 )
 from app.modules.users.models import User
+
+logger = logging.getLogger(__name__)
+
+SECRET_HANDLE_IN_USE_CONSTRAINTS = frozenset(
+    {
+        "fk_llm_provider_credentials_api_key_secret_handle",
+        "fk_llm_provider_credentials_oauth_access_secret_handle",
+        "fk_llm_provider_credentials_oauth_refresh_secret_handle",
+        "fk_managed_secrets_store",
+    }
+)
+
+
+async def flush_secret_deletion(
+    session: AsyncSession,
+    *,
+    in_use_message: str,
+) -> None:
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if is_constraint_violation(exc, SECRET_HANDLE_IN_USE_CONSTRAINTS):
+            raise SecretInUseError(in_use_message) from exc
+        raise
 
 
 def normalize_name(value: str) -> str:
@@ -265,6 +297,12 @@ async def update_secret_store(
     if store is None:
         raise SecretStoreNotFoundError("secret store not found")
     await require_secret_scope_admin(session, user, organization_id, store.workspace_id)
+    if (
+        payload.config is not None or payload.auth_config is not None
+    ) and await repository.has_managed_secrets_for_store(session, store.id):
+        raise SecretInUseError(
+            "secret store configuration cannot change while managed secrets exist"
+        )
 
     if payload.name is not None:
         name = normalize_name(payload.name)
@@ -324,6 +362,10 @@ async def delete_secret_store(
         raise SecretStoreNotFoundError("secret store not found")
     await require_secret_scope_admin(session, user, organization_id, store.workspace_id)
     await session.delete(store)
+    await flush_secret_deletion(
+        session,
+        in_use_message="secret store contains a handle or managed secret that is still in use",
+    )
 
 
 async def validate_secret_store(
@@ -409,6 +451,8 @@ async def create_secret_handle(
     user: User,
     organization_id: uuid.UUID,
     payload: SecretHandleCreate,
+    *,
+    managed_secret_id: uuid.UUID | None = None,
 ) -> SecretHandleRead:
     display_name = normalize_name(payload.display_name)
     external_ref = normalize_external_ref(payload.external_ref)
@@ -426,6 +470,17 @@ async def create_secret_handle(
         display_name=display_name,
     ):
         raise DuplicateSecretHandleError("secret handle display name already exists")
+    if managed_secret_id is not None:
+        managed_secret = await session.get(ManagedSecret, managed_secret_id)
+        if (
+            managed_secret is None
+            or managed_secret.status != "provisioning"
+            or managed_secret.organization_id != organization_id
+            or managed_secret.workspace_id != payload.workspace_id
+            or managed_secret.store_id != store.id
+            or managed_secret.external_ref != external_ref
+        ):
+            raise InvalidSecretHandleError("managed secret does not match this handle")
     quota_scopes = [
         limits_service.quota_scope(
             limits_service.SECRET_HANDLES_PER_ORGANIZATION,
@@ -467,6 +522,7 @@ async def create_secret_handle(
         organization_id=organization_id,
         workspace_id=payload.workspace_id,
         store_id=store.id,
+        managed_secret_id=managed_secret_id,
         created_by_id=user.id,
         purpose=payload.purpose,
         display_name=display_name,
@@ -567,7 +623,13 @@ async def delete_secret_handle(
     if handle is None:
         raise SecretHandleNotFoundError("secret handle not found")
     await require_secret_scope_admin(session, user, organization_id, handle.workspace_id)
+    if handle.managed_secret_id is not None:
+        raise SecretInUseError("managed secret handles must be deleted with their owner")
     await session.delete(handle)
+    await flush_secret_deletion(
+        session,
+        in_use_message="secret handle is used by an LLM provider credential",
+    )
 
 
 async def validate_secret_handle(
@@ -639,6 +701,8 @@ async def write_secret_values(
     external_ref: str,
     values: dict[str, str],
     purpose: str = "other",
+    owner_type: str | None = None,
+    owner_id: uuid.UUID | None = None,
 ) -> SecretWriteResult:
     await require_secret_scope_admin(session, user, organization_id, workspace_id)
     store = await validate_handle_store_scope(session, organization_id, workspace_id, store_id)
@@ -652,13 +716,53 @@ async def write_secret_values(
     }
     if not sanitized_values:
         raise InvalidSecretHandleError("secret values are required")
-    return await get_secret_provider(store.provider).write(
-        store,
-        normalized_ref,
-        sanitized_values,
-        SecretResolutionContext(
-            organization_id=str(organization_id),
-            workspace_id=str(workspace_id) if workspace_id else None,
+    if (owner_type is None) != (owner_id is None):
+        raise ValueError("owner_type and owner_id must be provided together")
+
+    managed_secret_id = None
+    if owner_type is not None and owner_id is not None:
+        managed_secret_id = await persist_managed_secret_intent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            store_id=store.id,
+            created_by_id=user.id,
+            owner_type=owner_type,
+            owner_id=owner_id,
             purpose=purpose,
-        ),
+            external_ref=normalized_ref,
+        )
+
+        async def reconcile(deferred_session: AsyncSession) -> None:
+            await reconcile_managed_secret_after_request(
+                deferred_session,
+                managed_secret_id,
+            )
+
+        defer_session_work(session, reconcile)
+
+    try:
+        result = await get_secret_provider(store.provider).write(
+            store,
+            normalized_ref,
+            sanitized_values,
+            SecretResolutionContext(
+                organization_id=str(organization_id),
+                workspace_id=str(workspace_id) if workspace_id else None,
+                purpose=purpose,
+            ),
+        )
+    except BaseException:
+        if managed_secret_id is not None:
+            try:
+                await queue_managed_secret_cleanup_independently(managed_secret_id)
+            except BaseException:
+                logger.exception(
+                    "Could not immediately queue cleanup for managed secret %s; "
+                    "the stale-provisioning worker will retry it.",
+                    managed_secret_id,
+                )
+        raise
+    return SecretWriteResult(
+        version=result.version,
+        managed_secret_id=managed_secret_id,
     )

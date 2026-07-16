@@ -5794,9 +5794,13 @@
           },
           "summary": {
             "$ref": "#/components/schemas/UsageSummaryTotals"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageSummaryWindow"
           }
         },
         "required": [
+          "window",
           "summary",
           "byUser",
           "byWorkspace",
@@ -5859,6 +5863,36 @@
           "toolCalls"
         ],
         "title": "UsageSummaryTotals",
+        "type": "object"
+      },
+      "UsageSummaryWindow": {
+        "properties": {
+          "breakdownLimit": {
+            "title": "Breakdownlimit",
+            "type": "integer"
+          },
+          "endDate": {
+            "format": "date",
+            "title": "Enddate",
+            "type": "string"
+          },
+          "startDate": {
+            "format": "date",
+            "title": "Startdate",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate",
+          "timezone",
+          "breakdownLimit"
+        ],
+        "title": "UsageSummaryWindow",
         "type": "object"
       },
       "UsageTrendPoint": {
@@ -7673,6 +7707,52 @@
       "get": {
         "operationId": "me_usage_summary",
         "parameters": [
+          {
+            "in": "query",
+            "name": "startDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "breakdownLimit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Breakdownlimit",
+              "type": "integer"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -10764,6 +10844,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11352,6 +11442,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11674,6 +11774,52 @@
               "format": "uuid",
               "title": "Organization Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "breakdownLimit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Breakdownlimit",
+              "type": "integer"
             }
           },
           {
@@ -15711,6 +15857,52 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "breakdownLimit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Breakdownlimit",
+              "type": "integer"
             }
           },
           {

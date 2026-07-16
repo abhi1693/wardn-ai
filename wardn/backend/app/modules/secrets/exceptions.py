@@ -18,6 +18,10 @@ class DuplicateSecretHandleError(SecretsError):
     pass
 
 
+class SecretInUseError(SecretsError):
+    pass
+
+
 class InvalidSecretStoreError(SecretsError):
     pass
 

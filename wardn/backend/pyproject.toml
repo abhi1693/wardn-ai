@@ -59,9 +59,23 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["app/db/mixins.py", "app/modules/*/models.py"]
+files = [
+  "app/api/*.py",
+  "app/main.py",
+  "app/db/mixins.py",
+  "app/modules/*/models.py",
+  "app/modules/mcp_registry/catalog_service.py",
+  "app/modules/mcp_registry/config_service.py",
+  "app/modules/mcp_registry/installation_service.py",
+  "app/modules/mcp_registry/router.py",
+  "app/modules/mcp_registry/scope_service.py",
+  "app/modules/mcp_registry/service.py",
+  "app/modules/mcp_runtime/router.py",
+  "app/modules/observability/router.py",
+]
 exclude = ["app/db/migrations/versions"]
 check_untyped_defs = true
+follow_imports = "silent"
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_configs = true

@@ -6,8 +6,9 @@ type RouteContext = {
 
 export async function GET(request: Request, context: RouteContext) {
   const { organizationId } = await context.params;
+  const search = new URL(request.url).search;
   return proxyBackend(
     request,
-    `/api/v1/organizations/${encodeURIComponent(organizationId)}/usage/summary`
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/usage/summary${search}`
   );
 }

@@ -4,9 +4,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
@@ -96,7 +97,7 @@ async def search_enabled_tool_schemas(
     scope: GatewayScope,
     server_name: str,
     search: str,
-    offset: int,
+    cursor: str | None,
     limit: int,
 ) -> tuple[list[MCPServerToolSchema], str]:
     statement = select(MCPServerToolSchema).where(MCPServerToolSchema.is_active.is_(True))
@@ -105,26 +106,58 @@ async def search_enabled_tool_schemas(
     statement = statement.order_by(
         MCPServerToolSchema.server_name.asc(),
         MCPServerToolSchema.tool_name.asc(),
+        MCPServerToolSchema.id.asc(),
     )
 
     if server_name:
         statement = statement.where(MCPServerToolSchema.server_name == server_name)
 
     if search:
-        pattern = f"%{search.strip()}%"
         statement = statement.where(
-            or_(
-                MCPServerToolSchema.server_name.ilike(pattern),
-                MCPServerToolSchema.tool_name.ilike(pattern),
-                MCPServerToolSchema.title.ilike(pattern),
-                MCPServerToolSchema.description.ilike(pattern),
+            MCPServerToolSchema.search_vector.op("@@")(
+                func.websearch_to_tsquery(
+                    literal_column("'simple'::regconfig"),
+                    search.strip(),
+                )
             )
         )
 
-    result = await session.execute(statement.offset(offset).limit(limit + 1))
+    try:
+        cursor_values = decode_cursor(cursor, fields=3)
+    except InvalidCursorError as exc:
+        raise ValueError("invalid cursor") from exc
+    if cursor_values is not None:
+        after_server_name, after_tool_name, after_id_value = cursor_values
+        try:
+            after_id = uuid.UUID(after_id_value)
+        except ValueError as exc:
+            raise ValueError("invalid cursor") from exc
+        statement = statement.where(
+            or_(
+                MCPServerToolSchema.server_name > after_server_name,
+                and_(
+                    MCPServerToolSchema.server_name == after_server_name,
+                    MCPServerToolSchema.tool_name > after_tool_name,
+                ),
+                and_(
+                    MCPServerToolSchema.server_name == after_server_name,
+                    MCPServerToolSchema.tool_name == after_tool_name,
+                    MCPServerToolSchema.id > after_id,
+                ),
+            )
+        )
+    result = await session.execute(statement.limit(limit + 1))
     tools = list(result.scalars().all())
-    next_cursor = str(offset + limit) if len(tools) > limit else ""
-    return tools[:limit], next_cursor
+    page = tools[:limit]
+    next_cursor = ""
+    if len(tools) > limit and page:
+        last_tool = page[-1]
+        next_cursor = encode_cursor(
+            last_tool.server_name,
+            last_tool.tool_name,
+            str(last_tool.id),
+        )
+    return page, next_cursor
 
 
 async def get_enabled_tool_schema(

@@ -342,7 +342,7 @@ async def test_agent_tool_call_guardrail_block_skips_runtime(monkeypatch) -> Non
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(
         agent_tool_execution,
-        "call_tool_with_tracking",
+        "call_tool_with_isolated_tracking",
         call_tool_with_tracking,
     )
 
@@ -472,7 +472,7 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(
         agent_tool_execution,
-        "call_tool_with_tracking",
+        "call_tool_with_isolated_tracking",
         call_tool_with_tracking,
     )
 
@@ -621,7 +621,11 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
         "list_agent_tool_runtime_rows",
         list_agent_tool_runtime_rows,
     )
-    monkeypatch.setattr(agent_approvals, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        agent_approvals,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
     monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(
         agent_service.repository,

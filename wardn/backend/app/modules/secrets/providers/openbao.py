@@ -189,6 +189,39 @@ class OpenBaoSecretProvider:
         version = data.get("version")
         return SecretWriteResult(version=str(version) if version is not None else None)
 
+    async def delete(
+        self,
+        store: SecretStore,
+        external_ref: str,
+        context: SecretResolutionContext,
+    ) -> None:
+        """Delete all KV v2 versions and metadata; a missing path is already clean."""
+        settings = self._store_settings(store)
+        token = await self._client_token(store)
+        mount = str(settings["kv_mount"]).strip("/")
+        secret_path = external_ref.strip().strip("/")
+        if not secret_path:
+            raise InvalidSecretHandleError("OpenBao secret path is required")
+        url = f"{settings['base_url']}/v1/{mount}/metadata/{secret_path}"
+        headers = self._headers(settings, token.token)
+
+        async with httpx.AsyncClient(
+            timeout=float(settings["timeout_seconds"]),
+            verify=settings["tls_verify"],
+            follow_redirects=False,
+        ) as client:
+            response = await client.delete(url, headers=headers)
+            if response.status_code in {401, 403}:
+                token = await self._refresh_client_token(store)
+                headers = self._headers(settings, token.token)
+                response = await client.delete(url, headers=headers)
+        if response.status_code == 404:
+            return
+        if not response.is_success:
+            raise InvalidSecretHandleError(
+                f"OpenBao secret deletion failed with HTTP {response.status_code}"
+            )
+
     def _store_settings(self, store: SecretStore) -> dict[str, Any]:
         config = store.config or {}
         operator_managed_keys = OPERATOR_MANAGED_STORE_KEYS.intersection(config)

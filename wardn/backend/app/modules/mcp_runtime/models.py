@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,6 +11,24 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 class MCPRuntimeSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_runtime_sessions"
+    __table_args__ = (
+        Index(
+            "ix_mcp_runtime_sessions_status_expires_at",
+            "status",
+            "expires_at",
+        ),
+        Index(
+            "uq_mcp_runtime_sessions_one_active_per_installation",
+            "installation_id",
+            unique=True,
+            postgresql_where=text("status in ('pending', 'starting', 'running', 'idle')"),
+        ),
+        Index(
+            "ix_mcp_runtime_sessions_installation_config_fingerprint",
+            "installation_id",
+            "config_fingerprint",
+        ),
+    )
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -50,6 +68,40 @@ class MCPRuntimeSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class MCPToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_tool_invocations"
+    __table_args__ = (
+        Index(
+            "ix_mcp_tool_invocations_org_started",
+            "organization_id",
+            "started_at",
+        ),
+        Index(
+            "ix_mcp_tool_invocations_workspace_started",
+            "workspace_id",
+            "started_at",
+        ),
+        Index(
+            "ix_mcp_tool_invocations_user_started",
+            "user_id",
+            "started_at",
+        ),
+        Index(
+            "ix_mcp_tool_invocations_workspace_user_started",
+            "workspace_id",
+            "user_id",
+            "started_at",
+        ),
+        Index(
+            "ix_mcp_tool_invocations_workspace_agent_started",
+            "workspace_id",
+            "agent_id",
+            "started_at",
+        ),
+        Index(
+            "ix_mcp_tool_invocations_retention",
+            "started_at",
+            "id",
+        ),
+    )
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -113,6 +165,18 @@ class MCPToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class MCPRuntimeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_runtime_events"
+    __table_args__ = (
+        Index(
+            "ix_mcp_runtime_events_retention",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_mcp_runtime_events_session_created",
+            "runtime_session_id",
+            "created_at",
+        ),
+    )
 
     runtime_session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -44,6 +44,7 @@ from app.modules.organizations.exceptions import (
     WorkspaceNotFoundError,
 )
 from app.modules.secrets.exceptions import SecretsError
+from app.modules.secrets.managed import activate_managed_secret
 from app.modules.secrets.schemas import SecretHandleCreate
 from app.modules.secrets.service import create_secret_handle, write_secret_values
 from app.modules.users import repository as user_repository
@@ -385,7 +386,8 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
             )
         )
         run_id = uuid4().hex[:8]
-        await write_secret_values(
+        new_credential_id = uuid4()
+        write_result = await write_secret_values(
             session,
             user,
             organization_id,
@@ -397,7 +399,10 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
                 "refresh_token": token_payload["refresh_token"],
             },
             purpose="oauth_token",
+            owner_type="llm_provider_credential",
+            owner_id=new_credential_id,
         )
+        managed_secret_id = getattr(write_result, "managed_secret_id", None)
         access_handle = await create_secret_handle(
             session,
             user,
@@ -411,6 +416,7 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
                 keyName="access_token",
                 metadata={"provider": "chatgpt", "credentialName": name},
             ),
+            managed_secret_id=managed_secret_id,
         )
         refresh_handle = await create_secret_handle(
             session,
@@ -425,6 +431,7 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
                 keyName="refresh_token",
                 metadata={"provider": "chatgpt", "credentialName": name},
             ),
+            managed_secret_id=managed_secret_id,
         )
         credential = await create_provider_credential(
             session,
@@ -443,7 +450,9 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
                 oauthScopes=CHATGPT_OAUTH_SCOPE.split(),
                 oauthMetadata=chatgpt_oauth_metadata(token_payload["access_token"]),
             ),
+            credential_id=new_credential_id,
         )
+        await activate_managed_secret(session, managed_secret_id)
         await session.commit()
         print(f"ChatGPT tokens written to secret store path: {external_ref}")
         print(f"ChatGPT credential connected: {credential.name} ({credential.id})")

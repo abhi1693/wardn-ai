@@ -277,22 +277,57 @@ async def delete_runtime_events_before(
     session: AsyncSession,
     *,
     cutoff: datetime,
+    limit: int = 100,
 ) -> int:
-    result = await session.execute(
-        delete(MCPRuntimeEvent).where(MCPRuntimeEvent.created_at < cutoff)
+    return await _delete_rows_before(
+        session,
+        model=MCPRuntimeEvent,
+        timestamp_column=MCPRuntimeEvent.created_at,
+        cutoff=cutoff,
+        limit=limit,
     )
-    return result.rowcount or 0
 
 
 async def delete_tool_invocations_before(
     session: AsyncSession,
     *,
     cutoff: datetime,
+    limit: int = 100,
 ) -> int:
-    result = await session.execute(
-        delete(MCPToolInvocation).where(MCPToolInvocation.started_at < cutoff)
+    return await _delete_rows_before(
+        session,
+        model=MCPToolInvocation,
+        timestamp_column=MCPToolInvocation.started_at,
+        cutoff=cutoff,
+        limit=limit,
     )
-    return result.rowcount or 0
+
+
+async def _delete_rows_before(
+    session: AsyncSession,
+    *,
+    model: type[MCPRuntimeEvent] | type[MCPToolInvocation],
+    timestamp_column: Any,
+    cutoff: datetime,
+    limit: int,
+) -> int:
+    if limit < 1:
+        return 0
+    expired_rows = (
+        select(model.id.label("id"))
+        .where(timestamp_column < cutoff)
+        .order_by(timestamp_column.asc(), model.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+        .cte("expired_rows")
+    )
+    result = await session.execute(
+        delete(model)
+        .where(model.id.in_(select(expired_rows.c.id)))
+        .returning(model.id)
+        .execution_options(synchronize_session=False)
+    )
+    return len(result.scalars().all())
 
 
 async def list_expired_runtime_sessions(

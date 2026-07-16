@@ -7,6 +7,7 @@ from app.db.session import get_db_session
 from app.main import create_app
 from app.modules.mcp_runtime import router as runtime_router
 from app.modules.mcp_runtime import service as runtime_service
+from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
@@ -149,7 +150,11 @@ def test_list_runtime_sessions_route(monkeypatch) -> None:
             sessions=[runtime_session_read(workspace_id=workspace_id)]
         )
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "list_runtime_sessions", list_runtime_sessions)
 
     response = runtime_client(authenticated=True).get(
@@ -172,7 +177,11 @@ def test_get_runtime_summary_route(monkeypatch) -> None:
         seen["workspace_id"] = workspace_id
         return runtime_summary_response()
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "get_runtime_summary", get_runtime_summary)
 
     response = runtime_client(authenticated=True).get(workspace_runtime_path("/summary"))
@@ -185,9 +194,13 @@ def test_get_runtime_summary_route(monkeypatch) -> None:
 
 def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
     async def get_runtime_session(session, runtime_session_id, *, workspace_id=None):
-        raise LookupError("not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "get_runtime_session", get_runtime_session)
 
     response = runtime_client(authenticated=True).get(
@@ -196,7 +209,7 @@ def test_get_runtime_session_route_returns_404(monkeypatch) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "runtime session not found"
-    assert response.json()["code"] == "http_404"
+    assert response.json()["code"] == "mcp_runtime_session_not_found"
     assert response.json()["requestId"] == response.headers["x-request-id"]
 
 
@@ -209,7 +222,11 @@ def test_stop_runtime_session_route_leaves_transaction_to_dependency(monkeypatch
         seen["workspace_id"] = workspace_id
         return runtime_session_read(workspace_id=workspace_id, status="stopped")
 
-    monkeypatch.setattr(runtime_router, "require_workspace_admin", fake_require_workspace_admin)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_admin_or_404",
+        fake_require_workspace_admin,
+    )
     monkeypatch.setattr(runtime_service, "stop_runtime_session", stop_runtime_session)
     runtime_session_id = uuid.uuid4()
 
@@ -234,7 +251,11 @@ def test_get_runtime_session_health_route(monkeypatch) -> None:
         seen["workspace_id"] = workspace_id
         return runtime_session_health_response(seen_runtime_session_id)
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
     monkeypatch.setattr(
         runtime_service,
         "get_runtime_session_health",
@@ -270,7 +291,11 @@ def test_list_runtime_session_events_route(monkeypatch) -> None:
         seen["limit"] = limit
         return MCPRuntimeEventListResponse(events=[runtime_event_read(seen_runtime_session_id)])
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", fake_require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "list_runtime_events", list_runtime_events)
 
     response = runtime_client(authenticated=True).get(
@@ -307,7 +332,11 @@ def test_workspace_list_runtime_sessions_route_filters_workspace(monkeypatch) ->
             sessions=[runtime_session_read(workspace_id=workspace_id)]
         )
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "list_runtime_sessions", list_runtime_sessions)
 
     response = runtime_client(authenticated=True).get(
@@ -344,7 +373,11 @@ def test_workspace_get_runtime_summary_route_filters_workspace(monkeypatch) -> N
         seen["workspace_id"] = workspace_id
         return runtime_summary_response()
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "get_runtime_summary", get_runtime_summary)
 
     response = runtime_client(authenticated=True).get(
@@ -380,7 +413,11 @@ def test_workspace_stop_runtime_session_route_requires_admin(monkeypatch) -> Non
         seen["workspace_id"] = workspace_id
         return runtime_session_read(workspace_id=workspace_id, status="stopped")
 
-    monkeypatch.setattr(runtime_router, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_admin_or_404",
+        require_workspace_admin,
+    )
     monkeypatch.setattr(runtime_service, "stop_runtime_session", stop_runtime_session)
 
     response = runtime_client(authenticated=True).post(
@@ -417,7 +454,11 @@ def test_workspace_get_runtime_session_health_route_filters_workspace(monkeypatc
         seen["workspace_id"] = workspace_id
         return runtime_session_health_response(seen_runtime_session_id)
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        require_workspace_member,
+    )
     monkeypatch.setattr(
         runtime_service,
         "get_runtime_session_health",
@@ -448,9 +489,13 @@ def test_workspace_get_runtime_session_route_returns_404_for_out_of_scope_sessio
         return None
 
     async def get_runtime_session(session, runtime_session_id, *, workspace_id=None):
-        raise LookupError("not found")
+        raise MCPRuntimeSessionNotFoundError("runtime session not found")
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "get_runtime_session", get_runtime_session)
 
     response = runtime_client(authenticated=True).get(
@@ -462,7 +507,7 @@ def test_workspace_get_runtime_session_route_returns_404_for_out_of_scope_sessio
 
     assert response.status_code == 404
     assert response.json()["detail"] == "runtime session not found"
-    assert response.json()["code"] == "http_404"
+    assert response.json()["code"] == "mcp_runtime_session_not_found"
     assert response.json()["requestId"] == response.headers["x-request-id"]
 
 
@@ -487,7 +532,11 @@ def test_workspace_list_runtime_session_events_route_filters_workspace(monkeypat
         seen["limit"] = limit
         return MCPRuntimeEventListResponse(events=[runtime_event_read(seen_runtime_session_id)])
 
-    monkeypatch.setattr(runtime_router, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        require_workspace_member,
+    )
     monkeypatch.setattr(runtime_service, "list_runtime_events", list_runtime_events)
 
     response = runtime_client(authenticated=True).get(

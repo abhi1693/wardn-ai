@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.secrets.models import SecretHandle, SecretStore
+from app.modules.secrets.models import ManagedSecret, SecretHandle, SecretStore
 
 
 async def list_stores(
@@ -81,6 +81,21 @@ async def count_stores_for_workspace(
         )
     )
     return int(result.scalar_one())
+
+
+async def has_managed_secrets_for_store(
+    session: AsyncSession,
+    store_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(
+            select(ManagedSecret.id)
+            .where(ManagedSecret.store_id == store_id)
+            .limit(1)
+            .exists()
+        )
+    )
+    return bool(result.scalar_one())
 
 
 async def list_handles(

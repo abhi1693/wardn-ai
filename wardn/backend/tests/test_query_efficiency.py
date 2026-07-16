@@ -51,9 +51,11 @@ async def test_agent_listing_loads_assignment_counts_in_one_query() -> None:
     assert next_cursor == ""
     assert len(session.statements) == 1
     sql = str(session.statements[0])
+    assert "WITH visible_agents AS" in sql
     assert "agent_mcp_server_assignments" in sql
     assert "agent_mcp_tool_assignments" in sql
     assert "count(distinct" in sql.lower()
+    assert sql.count("JOIN visible_agents") >= 4
 
 
 @pytest.mark.asyncio

@@ -62,5 +62,11 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
             await run_deferred_session_work(session)
             raise
         else:
-            await session.commit()
-            await run_deferred_session_work(session)
+            try:
+                await session.commit()
+            except BaseException:
+                await session.rollback()
+                await run_deferred_session_work(session)
+                raise
+            else:
+                await run_deferred_session_work(session)

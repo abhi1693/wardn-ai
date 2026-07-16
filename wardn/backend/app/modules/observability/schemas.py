@@ -163,7 +163,15 @@ class UsageTrendPoint(APIModel):
     tool_calls: int
 
 
+class UsageSummaryWindow(APIModel):
+    start_date: date
+    end_date: date
+    timezone: str
+    breakdown_limit: int
+
+
 class UsageSummaryResponse(APIModel):
+    window: UsageSummaryWindow
     summary: UsageSummaryTotals
     by_user: list[UsageSummaryBreakdownRow]
     by_workspace: list[UsageSummaryBreakdownRow]

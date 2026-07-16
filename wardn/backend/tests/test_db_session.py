@@ -46,6 +46,14 @@ class FakeSessionFactory:
         return FakeSessionContext(self.session)
 
 
+class CommitFailingSession(FakeSession):
+    async def commit(self) -> None:
+        self.commit_count += 1
+        if self.commit_count == 1:
+            raise RuntimeError("commit failed")
+        self.committed = True
+
+
 def test_database_engine_uses_configured_pool_settings(monkeypatch) -> None:
     captured = {}
     expected_engine = object()
@@ -104,6 +112,28 @@ async def test_request_session_rolls_back_when_request_fails(monkeypatch) -> Non
 
     assert session_factory.session.committed is False
     assert session_factory.session.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_request_session_runs_compensation_after_commit_failure(monkeypatch) -> None:
+    session_factory = FakeSessionFactory()
+    session_factory.session = CommitFailingSession()
+    compensated: list[object] = []
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", session_factory)
+    dependency = db_session.get_db_session()
+
+    session = await anext(dependency)
+
+    async def compensate(deferred_session):
+        compensated.append(deferred_session)
+
+    db_session.defer_session_work(session, compensate)
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await anext(dependency)
+
+    assert session.rolled_back is True
+    assert compensated == [session]
+    assert session.commit_count == 2
 
 
 @pytest.mark.asyncio

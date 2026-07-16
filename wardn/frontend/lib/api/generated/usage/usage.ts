@@ -7,7 +7,10 @@
 import type {
   ErrorResponse,
   HTTPValidationError,
-  UsageSummaryResponse
+  MeUsageSummaryParams,
+  OrganizationUsageSummaryParams,
+  UsageSummaryResponse,
+  WorkspaceUsageSummaryParams
 } from '../model';
 
 
@@ -35,20 +38,27 @@ export type meUsageSummaryResponseError = (meUsageSummaryResponse401 | meUsageSu
 
 export type meUsageSummaryResponse = (meUsageSummaryResponseSuccess | meUsageSummaryResponseError)
 
-export const getMeUsageSummaryUrl = () => {
+export const getMeUsageSummaryUrl = (params?: MeUsageSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/me/usage`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/me/usage?${stringifiedParams}` : `http://localhost:8000/api/v1/me/usage`
 }
 
 /**
  * @summary Me Usage Summary Route
  */
-export const meUsageSummary = async ( options?: RequestInit): Promise<meUsageSummaryResponse> => {
+export const meUsageSummary = async (params?: MeUsageSummaryParams, options?: RequestInit): Promise<meUsageSummaryResponse> => {
 
-  const res = await fetch(getMeUsageSummaryUrl(),
+  const res = await fetch(getMeUsageSummaryUrl(params),
   {
     ...options,
     method: 'GET'
@@ -94,20 +104,29 @@ export type organizationUsageSummaryResponseError = (organizationUsageSummaryRes
 
 export type organizationUsageSummaryResponse = (organizationUsageSummaryResponseSuccess | organizationUsageSummaryResponseError)
 
-export const getOrganizationUsageSummaryUrl = (organizationId: string,) => {
+export const getOrganizationUsageSummaryUrl = (organizationId: string,
+    params?: OrganizationUsageSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/usage/summary`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/usage/summary?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/usage/summary`
 }
 
 /**
  * @summary Organization Usage Summary Route
  */
-export const organizationUsageSummary = async (organizationId: string, options?: RequestInit): Promise<organizationUsageSummaryResponse> => {
+export const organizationUsageSummary = async (organizationId: string,
+    params?: OrganizationUsageSummaryParams, options?: RequestInit): Promise<organizationUsageSummaryResponse> => {
 
-  const res = await fetch(getOrganizationUsageSummaryUrl(organizationId),
+  const res = await fetch(getOrganizationUsageSummaryUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
@@ -154,21 +173,30 @@ export type workspaceUsageSummaryResponseError = (workspaceUsageSummaryResponse4
 export type workspaceUsageSummaryResponse = (workspaceUsageSummaryResponseSuccess | workspaceUsageSummaryResponseError)
 
 export const getWorkspaceUsageSummaryUrl = (organizationId: string,
-    workspaceId: string,) => {
+    workspaceId: string,
+    params?: WorkspaceUsageSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary`
+  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary`
 }
 
 /**
  * @summary Workspace Usage Summary Route
  */
 export const workspaceUsageSummary = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceUsageSummaryResponse> => {
+    workspaceId: string,
+    params?: WorkspaceUsageSummaryParams, options?: RequestInit): Promise<workspaceUsageSummaryResponse> => {
 
-  const res = await fetch(getWorkspaceUsageSummaryUrl(organizationId,workspaceId),
+  const res = await fetch(getWorkspaceUsageSummaryUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'

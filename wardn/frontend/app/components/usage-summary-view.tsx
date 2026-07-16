@@ -32,46 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type {
+  UsageSummaryBreakdownRow,
+  UsageSummaryResponse as GeneratedUsageSummaryResponse,
+  UsageTrendPoint,
+} from "@/lib/api/generated/model";
 
-export type UsageSummaryBreakdownRow = {
-  id: string;
-  label: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: string | number;
-  toolCalls: number;
-};
-
-export type UsageTrendPoint = {
-  date: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: string | number;
-  toolCalls: number;
-};
-
-export type UsageSummaryResponse = {
-  summary: {
-    requests: number;
-    succeeded: number;
-    failed: number;
-    running: number;
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    costUsd: string | number;
-    toolCalls: number;
-  };
-  byUser: UsageSummaryBreakdownRow[];
-  byWorkspace: UsageSummaryBreakdownRow[];
-  byAgent: UsageSummaryBreakdownRow[];
-  byModel: UsageSummaryBreakdownRow[];
-  daily: UsageTrendPoint[];
-};
+export type UsageSummaryResponse = GeneratedUsageSummaryResponse;
 
 type UsageSummaryViewProps = {
   usage: UsageSummaryResponse;

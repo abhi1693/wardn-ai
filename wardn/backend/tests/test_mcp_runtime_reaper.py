@@ -45,14 +45,16 @@ async def test_run_runtime_reaper_once_reaps_and_commits(monkeypatch) -> None:
         seen["limit"] = limit
         return MCPRuntimeReapResult(stopped_count=2)
 
-    async def prune_runtime_events(session, *, retention_days):
+    async def prune_runtime_events(session, *, retention_days, limit):
         seen["retention_session"] = session
         seen["retention_days"] = retention_days
+        seen["retention_limit"] = limit
         return 5
 
-    async def prune_tool_invocations(session, *, retention_days):
+    async def prune_tool_invocations(session, *, retention_days, limit):
         seen["invocation_retention_session"] = session
         seen["invocation_retention_days"] = retention_days
+        seen["invocation_retention_limit"] = limit
         return 8
 
     async def recover_stale_tool_invocations(session, *, stale_after_seconds, limit):
@@ -92,8 +94,10 @@ async def test_run_runtime_reaper_once_reaps_and_commits(monkeypatch) -> None:
         "limit": 25,
         "retention_session": session_factory.session,
         "retention_days": 9,
+        "retention_limit": 25,
         "invocation_retention_session": session_factory.session,
         "invocation_retention_days": 30,
+        "invocation_retention_limit": 25,
         "recovery_session": session_factory.session,
         "stale_after_seconds": reaper.get_settings().mcp_runtime_invocation_stale_seconds,
         "recovery_limit": 25,

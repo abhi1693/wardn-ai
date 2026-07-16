@@ -26,7 +26,7 @@ from app.modules.guardrails.service import (
 )
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
-from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.users.models import User
 
 AGENT_TOOL_BLOCKED_PREFIX = "Tool blocked by guardrail:"
@@ -132,7 +132,7 @@ async def _execute_agent_tool_call(
                 f"{AGENT_TOOL_BLOCKED_PREFIX} unsupported guardrail decision",
             )
     try:
-        result = await call_tool_with_tracking(
+        result = await call_tool_with_isolated_tracking(
             session,
             tool.installation,
             tool.server,

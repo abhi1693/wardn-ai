@@ -136,6 +136,7 @@ async def update_secret_store_route(
     responses={
         status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
     },
 )
 async def delete_secret_store_route(
@@ -261,6 +262,7 @@ async def update_secret_handle_route(
     responses={
         status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
     },
 )
 async def delete_secret_handle_route(

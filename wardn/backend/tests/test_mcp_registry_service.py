@@ -5,7 +5,15 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.mcp_registry import service, tool_repository, tool_service
+from app.core.pagination import InvalidCursorError
+from app.modules.mcp_registry import (
+    catalog_service,
+    config_service,
+    installation_service,
+    service,
+    tool_repository,
+    tool_service,
+)
 from app.modules.mcp_registry.exceptions import (
     DuplicateMCPServerVersionError,
     InvalidRegistryCursorError,
@@ -41,6 +49,7 @@ class FakeSession:
         self.added: list[object] = []
         self.deleted: list[object] = []
         self.flushed = False
+        self.committed = False
         self.refreshed: list[object] = []
 
     def add(self, instance: object) -> None:
@@ -51,6 +60,9 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flushed = True
+
+    async def commit(self) -> None:
+        self.committed = True
 
     async def refresh(self, instance) -> None:
         now = datetime(2026, 6, 21, tzinfo=UTC)
@@ -71,6 +83,38 @@ class FakeSession:
 
     async def get(self, *args, **kwargs) -> None:
         return None
+
+
+def patch_bulk_sync_dependencies(monkeypatch, *, statuses=None):
+    captured = {"cleared": [], "batches": []}
+
+    async def no_op(*args, **kwargs):
+        return None
+
+    async def count_versions(*args, **kwargs):
+        return 0
+
+    async def get_statuses(*args, **kwargs):
+        return statuses or {}
+
+    async def clear_names(session, names, **kwargs):
+        captured["cleared"].append(names)
+
+    async def bulk_upsert(session, rows, *, update_published_metadata):
+        if rows:
+            captured["batches"].append((update_published_metadata, rows))
+
+    monkeypatch.setattr(service.limits_service, "lock_quota_capacity", no_op)
+    monkeypatch.setattr(service.limits_service, "require_limit_available", no_op)
+    monkeypatch.setattr(
+        service.repository,
+        "count_server_versions_for_organization",
+        count_versions,
+    )
+    monkeypatch.setattr(service.repository, "get_server_version_statuses", get_statuses)
+    monkeypatch.setattr(service.repository, "clear_latest_for_names", clear_names)
+    monkeypatch.setattr(service.repository, "bulk_upsert_server_versions", bulk_upsert)
+    return captured
 
 
 class FakeScalarResult:
@@ -196,15 +240,21 @@ def pulsemcp_registry_payload(version: str, *, is_latest: bool) -> MCPServerCrea
     )
 
 
-def test_parse_cursor() -> None:
-    assert service.parse_cursor(None) == 0
-    assert service.parse_cursor("25") == 25
+@pytest.mark.asyncio
+async def test_list_servers_translates_invalid_keyset_cursor(monkeypatch) -> None:
+    async def invalid_cursor(*args, **kwargs):
+        raise InvalidCursorError("invalid cursor")
+
+    monkeypatch.setattr(service.repository, "list_servers", invalid_cursor)
 
     with pytest.raises(InvalidRegistryCursorError):
-        service.parse_cursor("-1")
-
-    with pytest.raises(InvalidRegistryCursorError):
-        service.parse_cursor("not-a-cursor")
+        await service.list_servers(
+            FakeSession(),
+            cursor="invalid",
+            limit=50,
+            include_deleted=False,
+            organization_id=ORGANIZATION_ID,
+        )
 
 
 @pytest.mark.asyncio
@@ -275,28 +325,23 @@ async def test_create_server_version_reactivates_deleted_version(monkeypatch) ->
 
 @pytest.mark.asyncio
 async def test_sync_supported_servers_upserts_curated_entries(monkeypatch) -> None:
-    calls: list[tuple[str, str]] = []
-
-    async def missing_server(*args, **kwargs):
-        return None
-
-    async def clear_latest(*args, **kwargs):
-        calls.append(("clear_latest", args[1]))
-
-    monkeypatch.setattr(service.repository, "get_server_version", missing_server)
-    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    captured = patch_bulk_sync_dependencies(monkeypatch)
     session = FakeSession()
 
     count = await service.sync_supported_servers(
         session,
         [registry_payload("1.0.0"), registry_payload("1.1.0")],
+        organization_id=ORGANIZATION_ID,
     )
 
     assert count == 2
-    assert calls == [("clear_latest", "io.github.example/weather")]
+    assert captured["cleared"] == [{"io.github.example/weather"}]
     assert session.flushed is True
-    assert [server.version for server in session.added] == ["1.0.0", "1.1.0"]
-    assert [server.is_latest for server in session.added] == [False, True]
+    assert len(captured["batches"]) == 1
+    update_metadata, rows = captured["batches"][0]
+    assert update_metadata is False
+    assert [row["version"] for row in rows] == ["1.0.0", "1.1.0"]
+    assert [row["is_latest"] for row in rows] == [False, True]
 
 
 @pytest.mark.asyncio
@@ -309,12 +354,12 @@ async def test_create_catalog_source_stores_source_url(monkeypatch) -> None:
 
     async def create_catalog_source_token_handle(*args, **kwargs):
         calls["token"] = kwargs
-        return handle_id
+        return service.CatalogSourceTokenHandle(handle_id=handle_id)
 
     monkeypatch.setattr(service.repository, "get_catalog_source_by_name", missing_source)
     monkeypatch.setattr(service.repository, "get_catalog_source_by_url", missing_source)
     monkeypatch.setattr(
-        service,
+        catalog_service,
         "create_catalog_source_token_handle",
         create_catalog_source_token_handle,
     )
@@ -365,19 +410,20 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     async def sync_supported_servers(*args, **kwargs):
         calls["servers"] = args[1]
         calls["organization_id"] = kwargs["organization_id"]
+        calls["catalog_source_id"] = kwargs["catalog_source_id"]
         return 1
 
     from app.modules.mcp_registry import commands
 
     monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
-    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(catalog_service, "resolve_secret", resolve_secret)
     monkeypatch.setattr(commands, "registry_headers", registry_headers)
     monkeypatch.setattr(
         commands,
         "load_supported_servers_from_registry_url",
         load_supported_servers_from_registry_url,
     )
-    monkeypatch.setattr(service, "sync_supported_servers", sync_supported_servers)
+    monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
     session = FakeSession()
 
     response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
@@ -397,6 +443,7 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
         "sourceUrl": "https://hub.wardnai.dev/api/v1/mcp/catalog",
     }
     assert calls["organization_id"] == ORGANIZATION_ID
+    assert calls["catalog_source_id"] == source.id
     assert source.last_success_at is not None
     assert source.last_error == ""
 
@@ -497,14 +544,7 @@ async def test_delete_catalog_source_deletes_legacy_single_source_catalog_rows(
 
 @pytest.mark.asyncio
 async def test_sync_supported_servers_uses_official_latest_metadata(monkeypatch) -> None:
-    async def missing_server(*args, **kwargs):
-        return None
-
-    async def clear_latest(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(service.repository, "get_server_version", missing_server)
-    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    captured = patch_bulk_sync_dependencies(monkeypatch)
     session = FakeSession()
 
     count = await service.sync_supported_servers(
@@ -513,23 +553,18 @@ async def test_sync_supported_servers_uses_official_latest_metadata(monkeypatch)
             official_registry_payload("1.1.0", is_latest=True),
             official_registry_payload("1.0.0", is_latest=False),
         ],
+        organization_id=ORGANIZATION_ID,
     )
 
     assert count == 2
-    assert [server.version for server in session.added] == ["1.1.0", "1.0.0"]
-    assert [server.is_latest for server in session.added] == [True, False]
+    _, rows = captured["batches"][0]
+    assert [row["version"] for row in rows] == ["1.1.0", "1.0.0"]
+    assert [row["is_latest"] for row in rows] == [True, False]
 
 
 @pytest.mark.asyncio
 async def test_sync_supported_servers_uses_pulsemcp_latest_metadata(monkeypatch) -> None:
-    async def missing_server(*args, **kwargs):
-        return None
-
-    async def clear_latest(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(service.repository, "get_server_version", missing_server)
-    monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    captured = patch_bulk_sync_dependencies(monkeypatch)
     session = FakeSession()
 
     count = await service.sync_supported_servers(
@@ -538,15 +573,17 @@ async def test_sync_supported_servers_uses_pulsemcp_latest_metadata(monkeypatch)
             pulsemcp_registry_payload("1.1.0", is_latest=True),
             pulsemcp_registry_payload("1.0.0", is_latest=False),
         ],
+        organization_id=ORGANIZATION_ID,
     )
 
     assert count == 2
-    assert [server.version for server in session.added] == ["1.1.0", "1.0.0"]
-    assert [server.is_latest for server in session.added] == [True, False]
-    assert session.added[0].published_at == datetime(2026, 6, 21, tzinfo=UTC)
-    assert session.added[0].status_changed_at == datetime(2026, 6, 22, tzinfo=UTC)
+    _, rows = captured["batches"][0]
+    assert [row["version"] for row in rows] == ["1.1.0", "1.0.0"]
+    assert [row["is_latest"] for row in rows] == [True, False]
+    assert rows[0]["published_at"] == datetime(2026, 6, 21, tzinfo=UTC)
+    assert rows[0]["status_changed_at"] == datetime(2026, 6, 22, tzinfo=UTC)
     assert (
-        session.added[0].server_json["_meta"]["com.pulsemcp/server"]["isOfficial"] is True
+        rows[0]["server_json"]["_meta"]["com.pulsemcp/server"]["isOfficial"] is True
     )
 
 
@@ -798,7 +835,7 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
     monkeypatch.setattr(
-        service,
+        installation_service,
         "install_server_runtime",
         lambda server, **kwargs: runtime_install(),
     )
@@ -849,7 +886,7 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
     session = FakeSession()
 
     await service.install_server_version(
@@ -909,7 +946,7 @@ async def test_install_server_version_preserves_existing_file_config_values(monk
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
 
     await service.install_server_version(
         FakeSession(),
@@ -988,13 +1025,17 @@ async def test_install_server_version_writes_raw_secrets_to_backend(monkeypatch)
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
-    monkeypatch.setattr(service, "write_secret_values", write_secret_values)
-    monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
-    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
-    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
     monkeypatch.setattr(
-        service,
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
+    monkeypatch.setattr(config_service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(config_service, "create_secret_handle", create_secret_handle)
+    monkeypatch.setattr(config_service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        config_service,
         "get_runtime_manager",
         lambda: SimpleNamespace(provider_name=lambda installation: "local"),
     )
@@ -1059,7 +1100,11 @@ async def test_install_server_version_rejects_raw_secrets_without_backend(monkey
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
+    monkeypatch.setattr(
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
 
     with pytest.raises(MCPServerInstallationUnsupportedError, match="secret backend is required"):
         await service.install_server_version(
@@ -1089,7 +1134,7 @@ async def test_install_server_version_validates_kubernetes_package_runtime(monke
     class FakeRuntimeManager:
         def provider_name(self, installation):
             seen["provider_installation"] = installation
-            return service.RUNTIME_PROVIDER_KUBERNETES
+            return config_service.RUNTIME_PROVIDER_KUBERNETES
 
     async def get_server_version(*args, **kwargs):
         return server
@@ -1118,11 +1163,15 @@ async def test_install_server_version_validates_kubernetes_package_runtime(monke
     manager = FakeRuntimeManager()
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
-    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
-    monkeypatch.setattr(service, "get_runtime_manager", lambda: manager)
     monkeypatch.setattr(
-        service,
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(config_service, "get_runtime_manager", lambda: manager)
+    monkeypatch.setattr(
+        config_service,
         "refresh_tool_schemas_for_installation",
         refresh_tool_schemas_for_installation,
     )
@@ -1159,7 +1208,7 @@ async def test_install_server_version_surfaces_kubernetes_package_validation_err
 
     class FakeRuntimeManager:
         def provider_name(self, installation):
-            return service.RUNTIME_PROVIDER_KUBERNETES
+            return config_service.RUNTIME_PROVIDER_KUBERNETES
 
     async def get_server_version(*args, **kwargs):
         return server
@@ -1184,15 +1233,23 @@ async def test_install_server_version_surfaces_kubernetes_package_validation_err
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "organization_id_for_workspace", organization_id_for_workspace)
-    monkeypatch.setattr(service, "install_server_runtime", install_runtime)
-    monkeypatch.setattr(service, "get_runtime_manager", lambda: FakeRuntimeManager())
     monkeypatch.setattr(
-        service,
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        config_service,
+        "get_runtime_manager",
+        lambda: FakeRuntimeManager(),
+    )
+    monkeypatch.setattr(
+        config_service,
         "refresh_tool_schemas_for_installation",
         refresh_tool_schemas_for_installation,
     )
-    monkeypatch.setattr(service, "remove_installation_artifacts", removed_paths.append)
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", removed_paths.append)
 
     with pytest.raises(
         MCPServerInstallationFailedError,
@@ -1221,7 +1278,7 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
         return installation
 
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", lambda path: None)
     session = FakeSession()
 
     await service.uninstall_server(session, "io.github.example/weather", workspace_id=WORKSPACE_ID)
@@ -1245,7 +1302,7 @@ async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> No
         return installation
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
-    monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", lambda path: None)
     session = FakeSession()
 
     await service.uninstall_installation(session, installation.id, workspace_id=WORKSPACE_ID)
@@ -1277,7 +1334,11 @@ async def test_validate_installation_tool_reports_passed_result(monkeypatch) -> 
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
-    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        installation_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = await service.validate_installation_tool(
         FakeSession(),
@@ -1348,7 +1409,7 @@ async def test_list_installation_tools_refreshes_empty_cache(monkeypatch) -> Non
         count_active_tool_schemas,
     )
     monkeypatch.setattr(
-        service,
+        installation_service,
         "refresh_tool_schemas_for_installation",
         refresh_tool_schemas_for_installation,
     )
@@ -1411,7 +1472,7 @@ async def test_list_installation_tools_refreshes_existing_cache(monkeypatch) -> 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(
-        service,
+        installation_service,
         "refresh_tool_schemas_for_installation",
         refresh_tool_schemas_for_installation,
     )
@@ -1491,7 +1552,11 @@ async def test_validate_installation_tool_reports_upstream_tool_error(monkeypatc
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
-    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        installation_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = await service.validate_installation_tool(
         FakeSession(),
@@ -1533,7 +1598,11 @@ async def test_validate_installation_tool_reports_text_only_invalid_input(monkey
 
     monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
-    monkeypatch.setattr(service, "call_tool_with_tracking", call_tool_with_tracking)
+    monkeypatch.setattr(
+        installation_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
 
     response = await service.validate_installation_tool(
         FakeSession(),
@@ -1552,7 +1621,7 @@ async def test_uninstall_server_rejects_missing_installation(monkeypatch) -> Non
         return None
 
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
-    monkeypatch.setattr(service, "remove_installation_artifacts", lambda path: None)
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", lambda path: None)
 
     with pytest.raises(MCPServerInstallationNotFoundError):
         await service.uninstall_server(
@@ -1587,7 +1656,7 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
     )
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(
-        service,
+        installation_service,
         "install_server_runtime",
         lambda server, **kwargs: runtime_install("1.1.0"),
     )

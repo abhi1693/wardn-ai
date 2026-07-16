@@ -1,9 +1,16 @@
+from dataclasses import dataclass
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.authorization import (
+    require_organization_admin_or_404,
+    require_organization_member_or_404,
+    require_workspace_member_or_404,
+)
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.observability import service
@@ -17,17 +24,6 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     UsageSummaryResponse,
 )
-from app.modules.organizations.exceptions import (
-    OrganizationAccessDeniedError,
-    OrganizationNotFoundError,
-    WorkspaceAccessDeniedError,
-    WorkspaceNotFoundError,
-)
-from app.modules.organizations.service import (
-    require_organization_admin,
-    require_organization_member,
-    require_workspace_member,
-)
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
 
@@ -35,51 +31,39 @@ workspace_router = APIRouter(
     prefix="/organizations/{organization_id}/workspaces/{workspace_id}/observability",
     tags=["workspace-observability"],
 )
+
+
+@dataclass(frozen=True)
+class UsageSummaryQuery:
+    start_date: date | None
+    end_date: date | None
+    breakdown_limit: int
+
+
+def usage_summary_query(
+    start_date: Annotated[date | None, Query(alias="startDate")] = None,
+    end_date: Annotated[date | None, Query(alias="endDate")] = None,
+    breakdown_limit: Annotated[int, Query(alias="breakdownLimit", ge=1, le=100)] = 25,
+) -> UsageSummaryQuery:
+    try:
+        service.resolve_usage_summary_window(start_date=start_date, end_date=end_date)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return UsageSummaryQuery(
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
+
+
 organization_router = APIRouter(
     prefix="/organizations/{organization_id}/observability",
     tags=["organization-observability"],
 )
 usage_router = APIRouter(tags=["usage"])
-
-
-async def require_organization_member_or_404(
-    session: AsyncSession,
-    current_user: User,
-    organization_id: UUID,
-) -> None:
-    try:
-        await require_organization_member(session, current_user, organization_id)
-    except OrganizationNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except OrganizationAccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-
-
-async def require_organization_admin_or_404(
-    session: AsyncSession,
-    current_user: User,
-    organization_id: UUID,
-) -> None:
-    try:
-        await require_organization_admin(session, current_user, organization_id)
-    except OrganizationNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except OrganizationAccessDeniedError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-
-
-async def require_workspace_member_or_404(
-    session: AsyncSession,
-    current_user: User,
-    organization_id: UUID,
-    workspace_id: UUID,
-) -> None:
-    try:
-        await require_workspace_member(session, current_user, organization_id, workspace_id)
-    except (OrganizationNotFoundError, WorkspaceNotFoundError) as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @usage_router.get(
@@ -95,9 +79,16 @@ async def organization_usage_summary_route(
     organization_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[UsageSummaryQuery, Depends(usage_summary_query)],
 ) -> UsageSummaryResponse:
     await require_organization_admin_or_404(session, current_user, organization_id)
-    return await service.organization_usage_summary(session, organization_id=organization_id)
+    return await service.organization_usage_summary(
+        session,
+        organization_id=organization_id,
+        start_date=query.start_date,
+        end_date=query.end_date,
+        breakdown_limit=query.breakdown_limit,
+    )
 
 
 @usage_router.get(
@@ -114,12 +105,16 @@ async def workspace_usage_summary_route(
     workspace_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[UsageSummaryQuery, Depends(usage_summary_query)],
 ) -> UsageSummaryResponse:
     await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
     return await service.workspace_usage_summary(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
+        start_date=query.start_date,
+        end_date=query.end_date,
+        breakdown_limit=query.breakdown_limit,
     )
 
 
@@ -132,8 +127,15 @@ async def workspace_usage_summary_route(
 async def me_usage_summary_route(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[UsageSummaryQuery, Depends(usage_summary_query)],
 ) -> UsageSummaryResponse:
-    return await service.user_usage_summary(session, user_id=current_user.id)
+    return await service.user_usage_summary(
+        session,
+        user_id=current_user.id,
+        start_date=query.start_date,
+        end_date=query.end_date,
+        breakdown_limit=query.breakdown_limit,
+    )
 
 
 @workspace_router.get(

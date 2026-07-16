@@ -174,6 +174,11 @@ export type secretHandlesDeleteResponse404 = {
   status: 404
 }
 
+export type secretHandlesDeleteResponse409 = {
+  data: ErrorResponse
+  status: 409
+}
+
 export type secretHandlesDeleteResponse422 = {
   data: HTTPValidationError
   status: 422
@@ -182,7 +187,7 @@ export type secretHandlesDeleteResponse422 = {
 export type secretHandlesDeleteResponseSuccess = (secretHandlesDeleteResponse204) & {
   headers: Headers;
 };
-export type secretHandlesDeleteResponseError = (secretHandlesDeleteResponse403 | secretHandlesDeleteResponse404 | secretHandlesDeleteResponse422) & {
+export type secretHandlesDeleteResponseError = (secretHandlesDeleteResponse403 | secretHandlesDeleteResponse404 | secretHandlesDeleteResponse409 | secretHandlesDeleteResponse422) & {
   headers: Headers;
 };
 
@@ -572,6 +577,11 @@ export type secretStoresDeleteResponse404 = {
   status: 404
 }
 
+export type secretStoresDeleteResponse409 = {
+  data: ErrorResponse
+  status: 409
+}
+
 export type secretStoresDeleteResponse422 = {
   data: HTTPValidationError
   status: 422
@@ -580,7 +590,7 @@ export type secretStoresDeleteResponse422 = {
 export type secretStoresDeleteResponseSuccess = (secretStoresDeleteResponse204) & {
   headers: Headers;
 };
-export type secretStoresDeleteResponseError = (secretStoresDeleteResponse403 | secretStoresDeleteResponse404 | secretStoresDeleteResponse422) & {
+export type secretStoresDeleteResponseError = (secretStoresDeleteResponse403 | secretStoresDeleteResponse404 | secretStoresDeleteResponse409 | secretStoresDeleteResponse422) & {
   headers: Headers;
 };
 

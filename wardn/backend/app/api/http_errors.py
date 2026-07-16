@@ -1,6 +1,7 @@
 import logging
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any
@@ -49,6 +50,7 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerNotFoundError,
     MCPServerVersionInUseError,
 )
+from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
 from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
     DuplicateWorkspaceError,
@@ -63,6 +65,7 @@ from app.modules.secrets.exceptions import (
     InvalidSecretHandleError,
     InvalidSecretStoreError,
     SecretHandleNotFoundError,
+    SecretInUseError,
     SecretProviderError,
     SecretStoreNotFoundError,
 )
@@ -127,6 +130,7 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     SecretHandleNotFoundError: _definition(404, "secret_handle_not_found"),
     DuplicateSecretStoreError: _definition(409, "secret_store_already_exists"),
     DuplicateSecretHandleError: _definition(409, "secret_handle_already_exists"),
+    SecretInUseError: _definition(409, "secret_in_use"),
     InvalidSecretStoreError: _definition(400, "invalid_secret_store"),
     InvalidSecretHandleError: _definition(400, "invalid_secret_handle"),
     SecretProviderError: _definition(400, "secret_provider_error"),
@@ -143,6 +147,7 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     MCPCatalogSourceNotFoundError: _definition(404, "mcp_catalog_source_not_found"),
     DuplicateMCPCatalogSourceError: _definition(409, "mcp_catalog_source_already_exists"),
     MCPOperationJobNotFoundError: _definition(404, "mcp_operation_job_not_found"),
+    MCPRuntimeSessionNotFoundError: _definition(404, "mcp_runtime_session_not_found"),
     InvalidCursorError: _definition(400, "invalid_cursor"),
     DuplicateUserError: _definition(409, "user_already_exists"),
     BootstrapUserExistsError: _definition(409, "bootstrap_user_already_exists"),
@@ -169,7 +174,7 @@ def _problem_response(
     definition: ErrorDefinition,
     detail: str,
     *,
-    headers: dict[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
     errors: list[dict[str, Any]] | None = None,
 ) -> JSONResponse:
     request_id = request_id_for(request)
@@ -206,7 +211,8 @@ async def domain_exception_handler(request: Request, exc: Exception) -> JSONResp
     return _problem_response(request, definition, str(exc))
 
 
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, HTTPException)
     definition = _definition(exc.status_code, f"http_{exc.status_code}")
     detail = exc.detail if isinstance(exc.detail, str) else definition.title
     return _problem_response(request, definition, detail, headers=exc.headers)
@@ -214,8 +220,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 async def validation_exception_handler(
     request: Request,
-    exc: RequestValidationError | ValidationError,
+    exc: Exception,
 ) -> JSONResponse:
+    assert isinstance(exc, RequestValidationError | ValidationError)
     definition = _definition(422, "request_validation_error")
     return _problem_response(
         request,

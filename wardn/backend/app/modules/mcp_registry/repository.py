@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select, update
+from sqlalchemy import Select, and_, func, literal_column, or_, select, tuple_, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -12,6 +14,8 @@ from app.modules.mcp_registry.models import (
     MCPServerVersion,
 )
 from app.modules.organizations.models import Workspace
+
+SYNC_QUERY_BATCH_SIZE = 500
 
 
 def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
@@ -61,7 +65,7 @@ async def list_server_versions(
 async def list_servers(
     session: AsyncSession,
     *,
-    offset: int,
+    cursor: str | None,
     limit: int,
     include_deleted: bool,
     search: str | None = None,
@@ -72,13 +76,14 @@ async def list_servers(
     statement = _visible_query(include_deleted or updated_since is not None)
     if organization_id is not None:
         statement = statement.where(MCPServerVersion.organization_id == organization_id)
-    if search:
-        pattern = f"%{search.strip()}%"
+    normalized_search = search.strip() if search else ""
+    if normalized_search:
         statement = statement.where(
-            or_(
-                MCPServerVersion.name.ilike(pattern),
-                MCPServerVersion.title.ilike(pattern),
-                MCPServerVersion.description.ilike(pattern),
+            MCPServerVersion.search_vector.op("@@")(
+                func.websearch_to_tsquery(
+                    literal_column("'simple'::regconfig"),
+                    normalized_search,
+                )
             )
         )
     if updated_since:
@@ -88,11 +93,34 @@ async def list_servers(
     else:
         statement = statement.where(MCPServerVersion.version == version)
 
-    statement = statement.order_by(MCPServerVersion.name.asc(), MCPServerVersion.version.asc())
-    result = await session.execute(statement.offset(offset).limit(limit + 1))
+    statement = statement.order_by(
+        MCPServerVersion.name.asc(),
+        MCPServerVersion.version.asc(),
+        MCPServerVersion.id.asc(),
+    )
+    cursor_values = decode_cursor(cursor, fields=3)
+    if cursor_values is not None:
+        after_name, after_version, after_id_value = cursor_values
+        try:
+            after_id = uuid.UUID(after_id_value)
+        except ValueError as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        statement = statement.where(
+            tuple_(
+                MCPServerVersion.name,
+                MCPServerVersion.version,
+                MCPServerVersion.id,
+            )
+            > tuple_(after_name, after_version, after_id)
+        )
+    result = await session.execute(statement.limit(limit + 1))
     rows = list(result.scalars().all())
-    next_cursor = str(offset + limit) if len(rows) > limit else ""
-    return rows[:limit], next_cursor
+    page = rows[:limit]
+    next_cursor = ""
+    if len(rows) > limit and page:
+        last = page[-1]
+        next_cursor = encode_cursor(last.name, last.version, str(last.id))
+    return page, next_cursor
 
 
 async def count_versions_for_name(
@@ -149,9 +177,7 @@ async def list_server_versions_for_catalog_source(
 ) -> list[MCPServerVersion]:
     statement = _visible_query(False).where(
         MCPServerVersion.organization_id == organization_id,
-        MCPServerVersion.server_json.contains(
-            {"_meta": {"wardnCatalogSource": {"id": str(source_id)}}}
-        ),
+        MCPServerVersion.catalog_source_id == source_id,
     )
     result = await session.execute(statement)
     return list(result.scalars().all())
@@ -164,6 +190,7 @@ async def list_legacy_catalog_server_versions(
 ) -> list[MCPServerVersion]:
     statement = _visible_query(False).where(
         MCPServerVersion.organization_id == organization_id,
+        MCPServerVersion.catalog_source_id.is_(None),
         or_(
             MCPServerVersion.server_json.contains(
                 {"_meta": {"io.modelcontextprotocol.registry/official": {}}}
@@ -186,6 +213,108 @@ async def clear_latest_for_name(
     if organization_id is not None:
         statement = statement.where(MCPServerVersion.organization_id == organization_id)
     await session.execute(statement.values(is_latest=False))
+
+
+async def clear_latest_for_names(
+    session: AsyncSession,
+    names: set[str],
+    *,
+    organization_id: uuid.UUID,
+) -> None:
+    if not names:
+        return
+    ordered_names = sorted(names)
+    for start in range(0, len(ordered_names), SYNC_QUERY_BATCH_SIZE):
+        await session.execute(
+            update(MCPServerVersion)
+            .where(
+                MCPServerVersion.organization_id == organization_id,
+                MCPServerVersion.name.in_(
+                    ordered_names[start : start + SYNC_QUERY_BATCH_SIZE]
+                ),
+                MCPServerVersion.is_latest.is_(True),
+            )
+            .values(is_latest=False)
+        )
+
+
+async def get_server_version_statuses(
+    session: AsyncSession,
+    keys: set[tuple[str, str]],
+    *,
+    organization_id: uuid.UUID,
+) -> dict[tuple[str, str], str]:
+    if not keys:
+        return {}
+    statuses: dict[tuple[str, str], str] = {}
+    ordered_keys = sorted(keys)
+    for start in range(0, len(ordered_keys), SYNC_QUERY_BATCH_SIZE):
+        result = await session.execute(
+            select(
+                MCPServerVersion.name,
+                MCPServerVersion.version,
+                MCPServerVersion.status,
+            ).where(
+                MCPServerVersion.organization_id == organization_id,
+                tuple_(MCPServerVersion.name, MCPServerVersion.version).in_(
+                    ordered_keys[start : start + SYNC_QUERY_BATCH_SIZE]
+                ),
+            )
+        )
+        statuses.update(
+            {(name, version): status for name, version, status in result.all()}
+        )
+    return statuses
+
+
+def bulk_upsert_server_versions_statement(
+    rows: list[dict[str, Any]],
+    *,
+    update_published_metadata: bool,
+):
+    statement = postgresql_insert(MCPServerVersion).values(rows)
+    excluded = statement.excluded
+    update_values = {
+        "catalog_source_id": excluded.catalog_source_id,
+        "title": excluded.title,
+        "description": excluded.description,
+        "website_url": excluded.website_url,
+        "repository": excluded.repository,
+        "packages": excluded.packages,
+        "remotes": excluded.remotes,
+        "icons": excluded.icons,
+        "server_json": excluded.server_json,
+        "status": excluded.status,
+        "status_message": excluded.status_message,
+        "is_latest": excluded.is_latest,
+        "updated_at": func.now(),
+    }
+    if update_published_metadata:
+        update_values.update(
+            published_at=excluded.published_at,
+            status_changed_at=excluded.status_changed_at,
+        )
+    return statement.on_conflict_do_update(
+        constraint="uq_mcp_server_versions_org_name_version",
+        set_=update_values,
+    )
+
+
+async def bulk_upsert_server_versions(
+    session: AsyncSession,
+    rows: list[dict[str, Any]],
+    *,
+    update_published_metadata: bool,
+) -> None:
+    if not rows:
+        return
+    for start in range(0, len(rows), SYNC_QUERY_BATCH_SIZE):
+        await session.execute(
+            bulk_upsert_server_versions_statement(
+                rows[start : start + SYNC_QUERY_BATCH_SIZE],
+                update_published_metadata=update_published_metadata,
+            )
+        )
 
 
 async def get_installation(

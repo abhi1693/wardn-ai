@@ -46,16 +46,12 @@ def request_meta(params: dict[str, Any]) -> dict[str, Any]:
     return dict(meta)
 
 
-def parse_cursor(cursor: str | None) -> int:
-    if not cursor:
-        return 0
-    try:
-        offset = int(cursor)
-    except ValueError as exc:
-        raise ValueError("invalid cursor") from exc
-    if offset < 0:
+def parse_cursor(cursor: Any) -> str | None:
+    if cursor in (None, ""):
+        return None
+    if not isinstance(cursor, str):
         raise ValueError("invalid cursor")
-    return offset
+    return cursor
 
 
 def bounded_limit(value: Any, *, default: int = 10) -> int:
@@ -357,14 +353,14 @@ async def search_mcp_servers(
     *,
     scope: GatewayScope,
 ) -> dict[str, Any]:
-    offset = parse_cursor(arguments.get("cursor"))
+    cursor = parse_cursor(arguments.get("cursor"))
     limit = bounded_limit(arguments.get("limit"))
     query = str(arguments.get("query") or "").strip()
     rows, next_cursor = await repository.search_enabled_installations(
         session,
         scope=scope,
         search=query,
-        offset=offset,
+        cursor=cursor,
         limit=limit,
     )
     return text_tool_result(
@@ -406,7 +402,7 @@ async def search_mcp_tools(
     *,
     scope: GatewayScope,
 ) -> dict[str, Any]:
-    offset = parse_cursor(arguments.get("cursor"))
+    cursor = parse_cursor(arguments.get("cursor"))
     limit = bounded_limit(arguments.get("limit"))
     query = str(arguments.get("query") or "").strip()
     server_name = str(arguments.get("serverName") or "").strip()
@@ -438,7 +434,7 @@ async def search_mcp_tools(
         scope=scope,
         server_name=server_name,
         search=query,
-        offset=offset,
+        cursor=cursor,
         limit=limit,
     )
 

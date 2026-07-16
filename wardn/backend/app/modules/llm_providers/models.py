@@ -74,20 +74,32 @@ class LLMProviderCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     api_key_secret_handle_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("secret_handles.id", ondelete="SET NULL"),
+        ForeignKey(
+            "secret_handles.id",
+            name="fk_llm_provider_credentials_api_key_secret_handle",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
         index=True,
     )
     oauth_provider: Mapped[str] = mapped_column(String(50), default="", nullable=False, index=True)
     oauth_access_token_secret_handle_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("secret_handles.id", ondelete="SET NULL"),
+        ForeignKey(
+            "secret_handles.id",
+            name="fk_llm_provider_credentials_oauth_access_secret_handle",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
         index=True,
     )
     oauth_refresh_token_secret_handle_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("secret_handles.id", ondelete="SET NULL"),
+        ForeignKey(
+            "secret_handles.id",
+            name="fk_llm_provider_credentials_oauth_refresh_secret_handle",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
         index=True,
     )

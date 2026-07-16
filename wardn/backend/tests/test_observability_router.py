@@ -20,6 +20,7 @@ from app.modules.observability.schemas import (
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
+    UsageSummaryWindow,
     UsageTrendPoint,
 )
 from app.modules.users.dependencies import get_current_user
@@ -80,8 +81,7 @@ def organization_usage_path(suffix: str = "") -> str:
 
 def workspace_usage_path(suffix: str = "") -> str:
     return (
-        f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}"
-        f"/usage{suffix}"
+        f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/workspaces/{TEST_WORKSPACE_ID}/usage{suffix}"
     )
 
 
@@ -97,6 +97,12 @@ def usage_summary_response() -> UsageSummaryResponse:
         toolCalls=3,
     )
     return UsageSummaryResponse(
+        window=UsageSummaryWindow(
+            startDate=date(2026, 7, 1),
+            endDate=date(2026, 7, 9),
+            timezone="UTC",
+            breakdownLimit=25,
+        ),
         summary=UsageSummaryTotals(
             requests=2,
             succeeded=2,
@@ -244,13 +250,23 @@ def model_price_prefill_response() -> LLMModelPricePrefillResponse:
 def test_organization_usage_summary_route(monkeypatch) -> None:
     seen = {}
 
-    async def organization_usage_summary(session, *, organization_id):
+    async def organization_usage_summary(
+        session,
+        *,
+        organization_id,
+        start_date,
+        end_date,
+        breakdown_limit,
+    ):
         seen["organization_id"] = organization_id
+        seen["start_date"] = start_date
+        seen["end_date"] = end_date
+        seen["breakdown_limit"] = breakdown_limit
         return usage_summary_response()
 
     monkeypatch.setattr(
         observability_router,
-        "require_organization_admin",
+        "require_organization_admin_or_404",
         fake_require_organization_admin,
     )
     monkeypatch.setattr(
@@ -260,27 +276,48 @@ def test_organization_usage_summary_route(monkeypatch) -> None:
     )
 
     response = observability_client(authenticated=True).get(
-        organization_usage_path("/summary")
+        organization_usage_path("/summary"),
+        params={
+            "startDate": "2026-07-01",
+            "endDate": "2026-07-09",
+            "breakdownLimit": 10,
+        },
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["costUsd"] == "0.000125"
     assert payload["byUser"][0]["toolCalls"] == 3
-    assert seen == {"organization_id": TEST_ORGANIZATION_ID}
+    assert seen == {
+        "organization_id": TEST_ORGANIZATION_ID,
+        "start_date": date(2026, 7, 1),
+        "end_date": date(2026, 7, 9),
+        "breakdown_limit": 10,
+    }
 
 
 def test_workspace_usage_summary_route(monkeypatch) -> None:
     seen = {}
 
-    async def workspace_usage_summary(session, *, organization_id, workspace_id):
+    async def workspace_usage_summary(
+        session,
+        *,
+        organization_id,
+        workspace_id,
+        start_date,
+        end_date,
+        breakdown_limit,
+    ):
         seen["organization_id"] = organization_id
         seen["workspace_id"] = workspace_id
+        seen["start_date"] = start_date
+        seen["end_date"] = end_date
+        seen["breakdown_limit"] = breakdown_limit
         return usage_summary_response()
 
     monkeypatch.setattr(
         observability_router,
-        "require_workspace_member",
+        "require_workspace_member_or_404",
         fake_require_workspace_member,
     )
     monkeypatch.setattr(
@@ -296,14 +333,27 @@ def test_workspace_usage_summary_route(monkeypatch) -> None:
     assert seen == {
         "organization_id": TEST_ORGANIZATION_ID,
         "workspace_id": TEST_WORKSPACE_ID,
+        "start_date": None,
+        "end_date": None,
+        "breakdown_limit": 25,
     }
 
 
 def test_me_usage_summary_route(monkeypatch) -> None:
     seen = {}
 
-    async def user_usage_summary(session, *, user_id):
+    async def user_usage_summary(
+        session,
+        *,
+        user_id,
+        start_date,
+        end_date,
+        breakdown_limit,
+    ):
         seen["user_id"] = user_id
+        seen["start_date"] = start_date
+        seen["end_date"] = end_date
+        seen["breakdown_limit"] = breakdown_limit
         return usage_summary_response()
 
     monkeypatch.setattr(observability_service, "user_usage_summary", user_usage_summary)
@@ -312,7 +362,22 @@ def test_me_usage_summary_route(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["byUser"][0]["label"] == "Test User"
-    assert seen == {"user_id": TEST_USER_ID}
+    assert seen == {
+        "user_id": TEST_USER_ID,
+        "start_date": None,
+        "end_date": None,
+        "breakdown_limit": 25,
+    }
+
+
+def test_usage_summary_route_rejects_ranges_over_366_days() -> None:
+    response = observability_client(authenticated=True).get(
+        organization_usage_path("/summary"),
+        params={"startDate": "2025-07-15", "endDate": "2026-07-16"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "usage summary range cannot exceed 366 days"
 
 
 def test_list_mcp_tool_usage_route(monkeypatch) -> None:
@@ -332,7 +397,7 @@ def test_list_mcp_tool_usage_route(monkeypatch) -> None:
 
     monkeypatch.setattr(
         observability_router,
-        "require_workspace_member",
+        "require_workspace_member_or_404",
         fake_require_workspace_member,
     )
     monkeypatch.setattr(
@@ -375,7 +440,7 @@ def test_list_llm_usage_route(monkeypatch) -> None:
 
     monkeypatch.setattr(
         observability_router,
-        "require_workspace_member",
+        "require_workspace_member_or_404",
         fake_require_workspace_member,
     )
     monkeypatch.setattr(
@@ -407,7 +472,7 @@ def test_list_llm_model_prices_route(monkeypatch) -> None:
 
     monkeypatch.setattr(
         observability_router,
-        "require_organization_member",
+        "require_organization_member_or_404",
         fake_require_organization_member,
     )
     monkeypatch.setattr(
@@ -436,7 +501,7 @@ def test_create_llm_model_price_route(monkeypatch) -> None:
 
     monkeypatch.setattr(
         observability_router,
-        "require_organization_admin",
+        "require_organization_admin_or_404",
         fake_require_organization_admin,
     )
     monkeypatch.setattr(
@@ -470,7 +535,7 @@ def test_prefill_llm_model_price_route(monkeypatch) -> None:
 
     monkeypatch.setattr(
         observability_router,
-        "require_organization_member",
+        "require_organization_member_or_404",
         fake_require_organization_member,
     )
     monkeypatch.setattr(

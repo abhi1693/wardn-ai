@@ -17,8 +17,8 @@ from app.commands.registry import CommandRegistry
 from app.core.outbound_http import open_outbound_request
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.mcp_registry.catalog_service import sync_supported_servers
 from app.modules.mcp_registry.schemas import MCPServerCreate
-from app.modules.mcp_registry.service import sync_supported_servers
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 
 DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"

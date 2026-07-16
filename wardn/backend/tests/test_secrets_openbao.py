@@ -61,6 +61,7 @@ class FakeResponse:
 class FakeAsyncClient:
     requests: list[tuple[str, str, dict | None]] = []
     client_options: list[dict] = []
+    delete_status_code = 204
 
     def __init__(self, *args, **kwargs) -> None:
         self.client_options.append(kwargs)
@@ -99,6 +100,11 @@ class FakeAsyncClient:
                 }
             },
         )
+
+    async def delete(self, url, *, headers=None):
+        self.requests.append(("DELETE", url, None))
+        assert headers["X-Vault-Token"] == "bao-token"
+        return FakeResponse(self.delete_status_code, {})
 
 
 class FakeValidationAsyncClient:
@@ -383,6 +389,50 @@ async def test_openbao_writes_kv_v2_secret(monkeypatch, tmp_path) -> None:
             "POST",
             "https://bao.example.com/v1/secret/data/wardn/orgs/acme/chatgpt",
             {"data": {"access_token": "access", "refresh_token": "refresh"}},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openbao_deletes_kv_v2_metadata_idempotently(monkeypatch, tmp_path) -> None:
+    token_file = tmp_path / "token"
+    token_file.write_text("service-account-jwt", encoding="utf-8")
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.delete_status_code = 404
+    monkeypatch.setattr("app.modules.secrets.providers.openbao.httpx.AsyncClient", FakeAsyncClient)
+
+    organization_id = uuid4()
+    provider = kubernetes_provider(tmp_path)
+    store = SecretStore(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=None,
+        provider="openbao",
+        name="Production OpenBao",
+        config={"baseUrl": "https://bao.example.com", "kvMount": "secret"},
+        auth_config={"profile": "production"},
+        is_active=True,
+    )
+
+    await provider.delete(
+        store,
+        "wardn/orgs/acme/chatgpt",
+        SecretResolutionContext(
+            organization_id=str(organization_id),
+            purpose="oauth_token",
+        ),
+    )
+
+    assert FakeAsyncClient.requests == [
+        (
+            "POST",
+            "https://bao.example.com/v1/auth/kubernetes/login",
+            {"role": "wardn-prod", "jwt": "service-account-jwt"},
+        ),
+        (
+            "DELETE",
+            "https://bao.example.com/v1/secret/metadata/wardn/orgs/acme/chatgpt",
+            None,
         ),
     ]
 

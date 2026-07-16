@@ -81,87 +81,17 @@ async def list_agents(
     cursor: str | None = None,
     limit: int = 50,
 ) -> tuple[list[tuple[Agent, int, int]], str]:
-    server_counts = (
-        select(
-            AgentMCPServerAssignment.agent_id.label("agent_id"),
-            func.count(AgentMCPServerAssignment.id).label("server_count"),
-        )
-        .group_by(AgentMCPServerAssignment.agent_id)
-        .subquery()
-    )
-    explicit_tools = (
-        select(
-            AgentMCPServerAssignment.agent_id.label("agent_id"),
-            MCPServerToolSchema.id.label("tool_schema_id"),
-        )
-        .join(
-            AgentMCPToolAssignment,
-            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
-        )
-        .join(
-            MCPServerToolSchema,
-            MCPServerToolSchema.id == AgentMCPToolAssignment.tool_schema_id,
-        )
-        .join(
-            MCPServerInstallation,
-            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
-        )
-        .where(
-            AgentMCPToolAssignment.wildcard.is_(False),
-            MCPServerToolSchema.is_active.is_(True),
-            MCPServerInstallation.status == "enabled",
-        )
-    )
-    wildcard_tools = (
-        select(
-            AgentMCPServerAssignment.agent_id.label("agent_id"),
-            MCPServerToolSchema.id.label("tool_schema_id"),
-        )
-        .join(
-            MCPServerInstallation,
-            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
-        )
-        .join(
-            MCPServerToolSchema,
-            MCPServerToolSchema.installation_id == MCPServerInstallation.id,
-        )
-        .join(
-            AgentMCPToolAssignment,
-            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
-        )
-        .where(
-            AgentMCPToolAssignment.wildcard.is_(True),
-            MCPServerToolSchema.is_active.is_(True),
-            MCPServerInstallation.status == "enabled",
-        )
-    )
-    effective_tools = union_all(explicit_tools, wildcard_tools).subquery()
-    tool_counts = (
-        select(
-            effective_tools.c.agent_id,
-            func.count(func.distinct(effective_tools.c.tool_schema_id)).label("tool_count"),
-        )
-        .group_by(effective_tools.c.agent_id)
-        .subquery()
-    )
-    statement = (
-        select(
-            Agent,
-            func.coalesce(server_counts.c.server_count, 0),
-            func.coalesce(tool_counts.c.tool_count, 0),
-        )
-        .outerjoin(server_counts, server_counts.c.agent_id == Agent.id)
-        .outerjoin(tool_counts, tool_counts.c.agent_id == Agent.id)
-        .where(Agent.organization_id == organization_id)
-        .order_by(Agent.name.asc(), Agent.id.asc())
-    )
+    visible_statement = select(
+        Agent.id.label("agent_id"),
+        Agent.name.label("agent_name"),
+    ).where(Agent.organization_id == organization_id)
     if workspace_id is not None:
-        statement = statement.where(Agent.workspace_id == workspace_id)
+        visible_statement = visible_statement.where(Agent.workspace_id == workspace_id)
     if not include_inactive:
-        statement = statement.where(Agent.is_active.is_(True))
+        visible_statement = visible_statement.where(Agent.is_active.is_(True))
     if not is_superuser:
-        statement = (
-            statement.outerjoin(
+        visible_statement = (
+            visible_statement.outerjoin(
                 OrganizationMembership,
                 and_(
                     OrganizationMembership.organization_id == Agent.organization_id,
@@ -192,13 +122,104 @@ async def list_agents(
             after_id = uuid.UUID(after_id_value)
         except ValueError as exc:
             raise InvalidCursorError("invalid cursor") from exc
-        statement = statement.where(
+        visible_statement = visible_statement.where(
             or_(
                 Agent.name > after_name,
                 and_(Agent.name == after_name, Agent.id > after_id),
             )
         )
-    result = await session.execute(statement.limit(limit + 1))
+    visible_agents = (
+        visible_statement.order_by(Agent.name.asc(), Agent.id.asc())
+        .limit(limit + 1)
+        .cte("visible_agents")
+    )
+    server_counts = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            func.count(AgentMCPServerAssignment.id).label("server_count"),
+        )
+        .join(
+            visible_agents,
+            visible_agents.c.agent_id == AgentMCPServerAssignment.agent_id,
+        )
+        .group_by(AgentMCPServerAssignment.agent_id)
+        .subquery()
+    )
+    explicit_tools = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            MCPServerToolSchema.id.label("tool_schema_id"),
+        )
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .join(
+            MCPServerToolSchema,
+            MCPServerToolSchema.id == AgentMCPToolAssignment.tool_schema_id,
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .join(
+            visible_agents,
+            visible_agents.c.agent_id == AgentMCPServerAssignment.agent_id,
+        )
+        .where(
+            AgentMCPToolAssignment.wildcard.is_(False),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    wildcard_tools = (
+        select(
+            AgentMCPServerAssignment.agent_id.label("agent_id"),
+            MCPServerToolSchema.id.label("tool_schema_id"),
+        )
+        .join(
+            MCPServerInstallation,
+            MCPServerInstallation.id == AgentMCPServerAssignment.installation_id,
+        )
+        .join(
+            MCPServerToolSchema,
+            MCPServerToolSchema.installation_id == MCPServerInstallation.id,
+        )
+        .join(
+            AgentMCPToolAssignment,
+            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
+        )
+        .join(
+            visible_agents,
+            visible_agents.c.agent_id == AgentMCPServerAssignment.agent_id,
+        )
+        .where(
+            AgentMCPToolAssignment.wildcard.is_(True),
+            MCPServerToolSchema.is_active.is_(True),
+            MCPServerInstallation.status == "enabled",
+        )
+    )
+    effective_tools = union_all(explicit_tools, wildcard_tools).subquery()
+    tool_counts = (
+        select(
+            effective_tools.c.agent_id,
+            func.count(func.distinct(effective_tools.c.tool_schema_id)).label("tool_count"),
+        )
+        .group_by(effective_tools.c.agent_id)
+        .subquery()
+    )
+    statement = (
+        select(
+            Agent,
+            func.coalesce(server_counts.c.server_count, 0),
+            func.coalesce(tool_counts.c.tool_count, 0),
+        )
+        .join(visible_agents, visible_agents.c.agent_id == Agent.id)
+        .outerjoin(server_counts, server_counts.c.agent_id == Agent.id)
+        .outerjoin(tool_counts, tool_counts.c.agent_id == Agent.id)
+        .order_by(visible_agents.c.agent_name.asc(), visible_agents.c.agent_id.asc())
+    )
+    result = await session.execute(statement)
     rows = [
         (agent, int(server_count), int(tool_count))
         for agent, server_count, tool_count in result.all()
@@ -346,6 +367,11 @@ async def append_conversation_message(
     parts: list[dict],
     agent_run_id: uuid.UUID | None = None,
 ) -> ConversationMessage:
+    await session.execute(
+        select(WorkspaceConversation.id)
+        .where(WorkspaceConversation.id == conversation_id)
+        .with_for_update()
+    )
     result = await session.execute(
         select(func.max(ConversationMessage.sequence)).where(
             ConversationMessage.conversation_id == conversation_id
@@ -439,6 +465,9 @@ async def append_agent_run_step(
     payload: dict | None = None,
     mcp_tool_invocation_id: uuid.UUID | None = None,
 ) -> AgentRunStep:
+    await session.execute(
+        select(AgentRun.id).where(AgentRun.id == agent_run_id).with_for_update()
+    )
     result = await session.execute(
         select(func.max(AgentRunStep.sequence)).where(AgentRunStep.agent_run_id == agent_run_id)
     )
@@ -779,37 +808,58 @@ async def list_agent_tool_runtime_rows(
 ]:
     tool_rows = await list_agent_tools(session, agent_id=agent_id)
     version_keys = {
-        (installation.server_name, installation.installed_version)
+        (
+            installation.workspace_id,
+            installation.server_name,
+            installation.installed_version,
+        )
         for _assignment, _tool_schema, installation in tool_rows
     }
     if not version_keys:
         return []
     version_result = await session.execute(
-        select(MCPServerVersion).where(
+        select(Workspace.id, MCPServerVersion)
+        .join(
+            MCPServerVersion,
+            MCPServerVersion.organization_id == Workspace.organization_id,
+        )
+        .where(
             or_(
                 *[
                     and_(
+                        Workspace.id == workspace_id,
                         MCPServerVersion.name == server_name,
                         MCPServerVersion.version == installed_version,
                     )
-                    for server_name, installed_version in version_keys
+                    for workspace_id, server_name, installed_version in version_keys
                 ]
             )
         )
     )
     versions = {
-        (version.name, version.version): version
-        for version in version_result.scalars().all()
+        (workspace_id, version.name, version.version): version
+        for workspace_id, version in version_result.all()
     }
     return [
         (
             assignment,
             tool_schema,
             installation,
-            versions[(installation.server_name, installation.installed_version)],
+            versions[
+                (
+                    installation.workspace_id,
+                    installation.server_name,
+                    installation.installed_version,
+                )
+            ],
         )
         for assignment, tool_schema, installation in tool_rows
-        if (installation.server_name, installation.installed_version) in versions
+        if (
+            installation.workspace_id,
+            installation.server_name,
+            installation.installed_version,
+        )
+        in versions
     ]
 
 

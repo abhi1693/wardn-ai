@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -21,6 +22,7 @@ class ResolvedSecret:
 @dataclass(frozen=True)
 class SecretWriteResult:
     version: str | None = None
+    managed_secret_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -57,4 +59,12 @@ class SecretStoreProvider(Protocol):
         values: dict[str, str],
         context: SecretResolutionContext,
     ) -> SecretWriteResult:
+        ...
+
+    async def delete(
+        self,
+        store: SecretStore,
+        external_ref: str,
+        context: SecretResolutionContext,
+    ) -> None:
         ...

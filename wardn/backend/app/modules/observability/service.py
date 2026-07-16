@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -28,11 +28,16 @@ from app.modules.observability.schemas import (
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
+    UsageSummaryWindow,
     UsageTrendPoint,
 )
 from app.modules.users.models import User
 
 TOKEN_PRICE_DIVISOR = Decimal("1000000")
+USAGE_SUMMARY_DEFAULT_DAYS = 30
+USAGE_SUMMARY_MAX_DAYS = 366
+USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT = 25
+USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT = 100
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_TIMEOUT_SECONDS = 10
 OPENROUTER_PROVIDER_SLUGS = {
@@ -51,6 +56,14 @@ class LLMModelPriceNotFoundError(ValueError):
 
 class LLMModelPricePrefillError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ResolvedUsageSummaryWindow:
+    start_date: date
+    end_date: date
+    started_at_from: datetime
+    started_at_to: datetime
 
 
 @dataclass(frozen=True)
@@ -440,7 +453,8 @@ def llm_usage_summary(records: list[LLMUsageRecord]) -> LLMUsageSummary:
 
 
 def row_value(row, key: str, default=0):
-    return row._mapping.get(key, default)
+    mapping = getattr(row, "_mapping", row)
+    return mapping.get(key, default)
 
 
 def usage_totals_response(row, *, tool_calls: int) -> UsageSummaryTotals:
@@ -525,7 +539,11 @@ def add_tool_breakdown(
     bucket["toolCalls"] += tool_calls
 
 
-def breakdown_rows(buckets: dict[str, dict[str, Any]]) -> list[UsageSummaryBreakdownRow]:
+def breakdown_rows(
+    buckets: dict[str, dict[str, Any]],
+    *,
+    limit: int,
+) -> list[UsageSummaryBreakdownRow]:
     rows = [
         UsageSummaryBreakdownRow(
             id=str(bucket["id"]),
@@ -549,7 +567,7 @@ def breakdown_rows(buckets: dict[str, dict[str, Any]]) -> list[UsageSummaryBreak
             row.label.casefold(),
         ),
         reverse=True,
-    )
+    )[:limit]
 
 
 def usage_date(value: date | datetime | str) -> date:
@@ -565,7 +583,7 @@ def add_llm_daily(
     *,
     row,
 ) -> None:
-    point_date = usage_date(row[0])
+    point_date = usage_date(row_value(row, "usage_day"))
     bucket = buckets.setdefault(
         point_date,
         {
@@ -618,142 +636,140 @@ def trend_points(buckets: dict[date, dict[str, Any]]) -> list[UsageTrendPoint]:
     ]
 
 
+def resolve_usage_summary_window(
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    today: date | None = None,
+) -> ResolvedUsageSummaryWindow:
+    effective_end = end_date or today or datetime.now(UTC).date()
+    effective_start = start_date or effective_end - timedelta(days=USAGE_SUMMARY_DEFAULT_DAYS - 1)
+    if effective_start > effective_end:
+        raise ValueError("startDate must be on or before endDate")
+    day_count = (effective_end - effective_start).days + 1
+    if day_count > USAGE_SUMMARY_MAX_DAYS:
+        raise ValueError(f"usage summary range cannot exceed {USAGE_SUMMARY_MAX_DAYS} days")
+    return ResolvedUsageSummaryWindow(
+        start_date=effective_start,
+        end_date=effective_end,
+        started_at_from=datetime.combine(effective_start, time.min, tzinfo=UTC),
+        started_at_to=datetime.combine(
+            effective_end + timedelta(days=1),
+            time.min,
+            tzinfo=UTC,
+        ),
+    )
+
+
+def usage_breakdown_identity(row, group_key: str) -> tuple[str, str]:
+    if group_key == "user":
+        return (
+            bucket_id(row_value(row, "user_id", None), "unattributed"),
+            person_label(
+                row_value(row, "first_name", None),
+                row_value(row, "last_name", None),
+                row_value(row, "email", None),
+            ),
+        )
+    if group_key == "workspace":
+        return (
+            bucket_id(row_value(row, "workspace_id", None), "unknown-workspace"),
+            display_label(
+                name=row_value(row, "workspace_name", None),
+                fallback="Unknown workspace",
+            ),
+        )
+    if group_key == "agent":
+        return (
+            bucket_id(row_value(row, "agent_id", None), "unattributed-agent"),
+            display_label(
+                name=row_value(row, "agent_name", None),
+                fallback="Unattributed agent",
+            ),
+        )
+    provider = str(row_value(row, "provider", ""))
+    model = str(row_value(row, "model", ""))
+    return f"{provider}:{model}", f"{provider} / {model}"
+
+
 async def usage_summary_response(
     session: AsyncSession,
     *,
     organization_id: UUID | None = None,
     workspace_id: UUID | None = None,
     user_id: UUID | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT,
 ) -> UsageSummaryResponse:
-    totals_row = await repository.llm_usage_totals(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    )
-    total_tool_calls = await repository.mcp_tool_call_count(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    )
+    if not 1 <= breakdown_limit <= USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT:
+        raise ValueError(
+            f"breakdownLimit must be between 1 and {USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT}"
+        )
+    window = resolve_usage_summary_window(start_date=start_date, end_date=end_date)
+    query_limit = USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT
+    scope = {
+        "organization_id": organization_id,
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "started_at_from": window.started_at_from,
+        "started_at_to": window.started_at_to,
+        "breakdown_limit": query_limit,
+    }
+    llm_rows = await repository.llm_usage_summary_rows(session, **scope)
+    tool_rows = await repository.mcp_tool_usage_summary_rows(session, **scope)
 
-    by_user: dict[str, dict[str, Any]] = {}
-    for row in await repository.llm_usage_by_user(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_llm_breakdown(
-            by_user,
-            key=bucket_id(row[0], "unattributed"),
-            label=person_label(row[1], row[2], row[3]),
-            row=row,
-        )
-    for row in await repository.mcp_tool_calls_by_user(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_tool_breakdown(
-            by_user,
-            key=bucket_id(row[0], "unattributed"),
-            label=person_label(row[1], row[2], row[3]),
-            tool_calls=int(row[4] or 0),
-        )
-
-    by_workspace: dict[str, dict[str, Any]] = {}
-    for row in await repository.llm_usage_by_workspace(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_llm_breakdown(
-            by_workspace,
-            key=bucket_id(row[0], "unknown-workspace"),
-            label=display_label(name=row[1], fallback="Unknown workspace"),
-            row=row,
-        )
-    for row in await repository.mcp_tool_calls_by_workspace(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_tool_breakdown(
-            by_workspace,
-            key=bucket_id(row[0], "unknown-workspace"),
-            label=display_label(name=row[1], fallback="Unknown workspace"),
-            tool_calls=int(row[2] or 0),
-        )
-
-    by_agent: dict[str, dict[str, Any]] = {}
-    for row in await repository.llm_usage_by_agent(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_llm_breakdown(
-            by_agent,
-            key=bucket_id(row[0], "unattributed-agent"),
-            label=display_label(name=row[1], fallback="Unattributed agent"),
-            row=row,
-        )
-    for row in await repository.mcp_tool_calls_by_agent(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_tool_breakdown(
-            by_agent,
-            key=bucket_id(row[0], "unattributed-agent"),
-            label=display_label(name=row[1], fallback="Unattributed agent"),
-            tool_calls=int(row[2] or 0),
-        )
-
-    by_model: dict[str, dict[str, Any]] = {}
-    for row in await repository.llm_usage_by_model(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        provider = str(row[0])
-        model = str(row[1])
-        add_llm_breakdown(
-            by_model,
-            key=f"{provider}:{model}",
-            label=f"{provider} / {model}",
-            row=row,
-        )
-
+    totals_row: Any = {}
+    total_tool_calls = 0
+    breakdowns: dict[str, dict[str, dict[str, Any]]] = {
+        "user": {},
+        "workspace": {},
+        "agent": {},
+        "model": {},
+    }
     daily: dict[date, dict[str, Any]] = {}
-    for row in await repository.llm_usage_by_day(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_llm_daily(daily, row=row)
-    for row in await repository.mcp_tool_calls_by_day(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    ):
-        add_tool_daily(daily, point_date=usage_date(row[0]), tool_calls=int(row[1] or 0))
+
+    for row in llm_rows:
+        group_key = str(row_value(row, "group_key", ""))
+        if group_key == "total":
+            totals_row = row
+        elif group_key == "day":
+            add_llm_daily(daily, row=row)
+        elif group_key in breakdowns:
+            key, label = usage_breakdown_identity(row, group_key)
+            add_llm_breakdown(breakdowns[group_key], key=key, label=label, row=row)
+
+    for row in tool_rows:
+        group_key = str(row_value(row, "group_key", ""))
+        if group_key == "total":
+            total_tool_calls = int(row_value(row, "tool_calls"))
+        elif group_key == "day":
+            add_tool_daily(
+                daily,
+                point_date=usage_date(row_value(row, "usage_day")),
+                tool_calls=int(row_value(row, "tool_calls")),
+            )
+        elif group_key in ("user", "workspace", "agent"):
+            key, label = usage_breakdown_identity(row, group_key)
+            add_tool_breakdown(
+                breakdowns[group_key],
+                key=key,
+                label=label,
+                tool_calls=int(row_value(row, "tool_calls")),
+            )
 
     return UsageSummaryResponse(
+        window=UsageSummaryWindow(
+            startDate=window.start_date,
+            endDate=window.end_date,
+            timezone="UTC",
+            breakdownLimit=breakdown_limit,
+        ),
         summary=usage_totals_response(totals_row, tool_calls=total_tool_calls),
-        byUser=breakdown_rows(by_user),
-        byWorkspace=breakdown_rows(by_workspace),
-        byAgent=breakdown_rows(by_agent),
-        byModel=breakdown_rows(by_model),
+        byUser=breakdown_rows(breakdowns["user"], limit=breakdown_limit),
+        byWorkspace=breakdown_rows(breakdowns["workspace"], limit=breakdown_limit),
+        byAgent=breakdown_rows(breakdowns["agent"], limit=breakdown_limit),
+        byModel=breakdown_rows(breakdowns["model"], limit=breakdown_limit),
         daily=trend_points(daily),
     )
 
@@ -762,8 +778,17 @@ async def organization_usage_summary(
     session: AsyncSession,
     *,
     organization_id: UUID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT,
 ) -> UsageSummaryResponse:
-    return await usage_summary_response(session, organization_id=organization_id)
+    return await usage_summary_response(
+        session,
+        organization_id=organization_id,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
 
 
 async def workspace_usage_summary(
@@ -771,11 +796,17 @@ async def workspace_usage_summary(
     *,
     organization_id: UUID,
     workspace_id: UUID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT,
 ) -> UsageSummaryResponse:
     return await usage_summary_response(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
     )
 
 
@@ -783,8 +814,17 @@ async def user_usage_summary(
     session: AsyncSession,
     *,
     user_id: UUID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT,
 ) -> UsageSummaryResponse:
-    return await usage_summary_response(session, user_id=user_id)
+    return await usage_summary_response(
+        session,
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
 
 
 async def agent_run_usage_summary(

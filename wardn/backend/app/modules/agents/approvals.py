@@ -23,7 +23,7 @@ from app.modules.agents.tool_execution import mcp_result_text
 from app.modules.agents.types import AgentChatTextEvent
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
-from app.modules.mcp_runtime.service import call_tool_with_tracking
+from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.organizations.service import require_workspace_member
 from app.modules.users.models import User
 
@@ -213,8 +213,10 @@ async def decide_agent_tool_approval(
         approval.status = "failed"
         approval.error = "Tool is no longer assigned to this agent."
     else:
+        approval.status = "running"
+        await session.flush()
         try:
-            result = await call_tool_with_tracking(
+            result = await call_tool_with_isolated_tracking(
                 session,
                 tool.installation,
                 tool.server,
