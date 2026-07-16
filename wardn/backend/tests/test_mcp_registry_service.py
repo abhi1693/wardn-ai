@@ -29,6 +29,7 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallRequest,
 )
 from app.modules.users.models import User
+from tests.database_fakes import EmptyResult
 
 WORKSPACE_ID = uuid4()
 ORGANIZATION_ID = uuid4()
@@ -64,6 +65,12 @@ class FakeSession:
         if hasattr(instance, "installed_at"):
             instance.installed_at = now
         self.refreshed.append(instance)
+
+    async def execute(self, *args, **kwargs) -> EmptyResult:
+        return EmptyResult()
+
+    async def get(self, *args, **kwargs) -> None:
+        return None
 
 
 class FakeScalarResult:

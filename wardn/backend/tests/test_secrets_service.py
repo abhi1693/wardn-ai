@@ -10,6 +10,7 @@ from app.modules.secrets.models import SecretHandle, SecretStore
 from app.modules.secrets.provider import ResolvedSecret, SecretValidationResult, SecretWriteResult
 from app.modules.secrets.schemas import SecretHandleCreate, SecretStoreCreate, SecretStoreUpdate
 from app.modules.users.models import User
+from tests.database_fakes import EmptyResult
 
 
 class FakeSession:
@@ -37,6 +38,9 @@ class FakeSession:
 
     async def delete(self, instance: object) -> None:
         self.deleted.append(instance)
+
+    async def execute(self, *args, **kwargs) -> EmptyResult:
+        return EmptyResult()
 
 
 class FakeProvider:

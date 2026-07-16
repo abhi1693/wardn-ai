@@ -434,8 +434,6 @@ async def get_model_price(
     provider: str,
     model: str,
 ) -> LLMModelPrice | None:
-    if not hasattr(session, "execute"):
-        return None
     result = await session.execute(
         select(LLMModelPrice).where(
             LLMModelPrice.provider == provider,

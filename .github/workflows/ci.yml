@@ -14,6 +14,23 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    env:
+      WARDN_TEST_DATABASE_URL: postgresql+asyncpg://wardn:wardn@localhost:5432/wardn_test
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: wardn_test
+          POSTGRES_USER: wardn
+          POSTGRES_PASSWORD: wardn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wardn -d wardn_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Check out repository
@@ -35,8 +52,11 @@ jobs:
       - name: Type-check backend
         run: npm run backend:typecheck
 
-      - name: Test backend
-        run: npm run backend:test
+      - name: Test backend units
+        run: npm run backend:test:unit
+
+      - name: Test backend against PostgreSQL
+        run: npm run backend:test:integration
 
   frontend:
     name: Frontend

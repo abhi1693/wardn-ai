@@ -215,8 +215,6 @@ async def count_active_agents_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(Agent).where(
             Agent.organization_id == organization_id,
@@ -230,8 +228,6 @@ async def count_active_agents_for_workspace(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(Agent).where(
             Agent.workspace_id == workspace_id,
@@ -247,8 +243,6 @@ async def count_active_agents_created_by_user_for_workspace(
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(Agent).where(
             Agent.workspace_id == workspace_id,
@@ -263,8 +257,6 @@ async def count_active_workspace_conversations(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(WorkspaceConversation).where(
             WorkspaceConversation.workspace_id == workspace_id,
@@ -280,8 +272,6 @@ async def count_active_workspace_conversations_created_by_user(
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(WorkspaceConversation).where(
             WorkspaceConversation.workspace_id == workspace_id,

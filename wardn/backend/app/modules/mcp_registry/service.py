@@ -93,8 +93,6 @@ async def default_workspace_id(session) -> uuid.UUID:
 
 
 async def default_organization_id(session) -> uuid.UUID | None:
-    if not hasattr(session, "get"):
-        return None
     workspace = await organization_repository.get_default_workspace(session)
     return workspace.organization_id if workspace else None
 
@@ -110,7 +108,7 @@ async def organization_id_for_workspace(
     session,
     workspace_id: uuid.UUID | None,
 ) -> uuid.UUID | None:
-    if workspace_id is None or not hasattr(session, "get"):
+    if workspace_id is None:
         return None
     workspace = await organization_repository.get_workspace_by_id(session, workspace_id)
     return workspace.organization_id if workspace else None

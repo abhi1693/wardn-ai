@@ -63,8 +63,6 @@ async def count_stores_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(SecretStore).where(
             SecretStore.organization_id == organization_id,
@@ -77,8 +75,6 @@ async def count_stores_for_workspace(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(SecretStore).where(
             SecretStore.workspace_id == workspace_id,
@@ -125,8 +121,6 @@ async def count_handles_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(SecretHandle).where(
             SecretHandle.organization_id == organization_id,
@@ -139,8 +133,6 @@ async def count_handles_for_workspace(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(SecretHandle).where(
             SecretHandle.workspace_id == workspace_id,

@@ -218,8 +218,6 @@ async def count_active_workspaces_created_by_user_for_organization(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count())
         .select_from(Workspace)

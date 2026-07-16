@@ -56,8 +56,6 @@ async def count_credentials_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(LLMProviderCredential).where(
             LLMProviderCredential.organization_id == organization_id,
@@ -70,8 +68,6 @@ async def count_credentials_for_workspace(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(LLMProviderCredential).where(
             LLMProviderCredential.workspace_id == workspace_id,
@@ -86,8 +82,6 @@ async def count_credentials_for_user(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(LLMProviderCredential).where(
             LLMProviderCredential.organization_id == organization_id,

@@ -48,8 +48,6 @@ async def count_active_user_api_tokens(
     session: AsyncSession,
     user_id: uuid.UUID,
 ) -> int:
-    if not hasattr(session, "execute"):
-        return 0
     result = await session.execute(
         select(func.count()).select_from(UserAPIToken).where(
             UserAPIToken.user_id == user_id,

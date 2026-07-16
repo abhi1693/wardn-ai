@@ -13,6 +13,8 @@
     "web:e2e": "npm --workspace wardn/frontend run e2e",
     "web:e2e:update": "npm --workspace wardn/frontend run e2e:update",
     "backend:test": "cd wardn/backend && uv run --extra dev pytest",
+    "backend:test:unit": "cd wardn/backend && uv run --extra dev pytest -m 'not integration'",
+    "backend:test:integration": "cd wardn/backend && uv run --extra dev pytest -m integration",
     "backend:lint": "cd wardn/backend && uv run --extra dev ruff check .",
     "backend:typecheck": "cd wardn/backend && uv run --extra dev mypy"
   }

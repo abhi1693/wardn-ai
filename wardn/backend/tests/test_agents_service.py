@@ -34,6 +34,7 @@ from app.modules.mcp_registry.models import (
 )
 from app.modules.organizations.models import Organization, OrganizationMembership, Workspace
 from app.modules.users.models import User
+from tests.database_fakes import EmptyResult
 
 
 class FakeSession:
@@ -62,6 +63,9 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def execute(self, *args, **kwargs) -> EmptyResult:
+        return EmptyResult()
 
     async def __aenter__(self):
         return self

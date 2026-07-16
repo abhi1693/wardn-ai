@@ -19,6 +19,7 @@ from app.modules.llm_providers.schemas import (
 )
 from app.modules.organizations.models import Organization, OrganizationMembership
 from app.modules.users.models import User
+from tests.database_fakes import EmptyResult
 
 
 class FakeSession:
@@ -46,6 +47,9 @@ class FakeSession:
 
     async def delete(self, instance: object) -> None:
         self.deleted.append(instance)
+
+    async def execute(self, *args, **kwargs) -> EmptyResult:
+        return EmptyResult()
 
 
 def patch_resolved_secrets(monkeypatch, values: dict) -> None:

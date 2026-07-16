@@ -122,12 +122,9 @@ async def lock_quota_capacity(
     scopes: Iterable[QuotaScope],
 ) -> None:
     """Acquire deadlock-safe PostgreSQL transaction locks for quota count domains."""
-    execute = getattr(session, "execute", None)
-    if not callable(execute):
-        return
     lock_ids = sorted({quota_lock_id(scope) for scope in scopes})
     for lock_id in lock_ids:
-        await execute(select(func.pg_advisory_xact_lock(lock_id)))
+        await session.execute(select(func.pg_advisory_xact_lock(lock_id)))
 
 
 def require_limits_admin(user: User) -> None:
@@ -343,8 +340,6 @@ async def effective_limit(
     limit_key: str,
     scope_chain: Iterable[tuple[str, uuid.UUID | None]],
 ) -> ResourceLimit | None:
-    if not hasattr(session, "execute"):
-        return None
     normalized_key = normalize_limit_key(limit_key)
     for scope_type, scope_id in scope_chain:
         normalized_type, normalized_id = normalize_scope(scope_type, scope_id)
@@ -465,8 +460,6 @@ async def require_llm_budget_available(
     session: AsyncSession,
     context: LLMBudgetContext,
 ) -> None:
-    if not hasattr(session, "execute"):
-        return
     model = context.model.strip()
     budgets = await repository.list_usage_budgets_for_scopes(
         session,

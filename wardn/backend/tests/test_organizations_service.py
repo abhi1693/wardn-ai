@@ -19,6 +19,7 @@ from app.modules.organizations.models import (
 )
 from app.modules.organizations.schemas import OrganizationCreate, WorkspaceCreate
 from app.modules.users.models import User
+from tests.database_fakes import EmptyResult
 
 
 class FakeSession:
@@ -43,6 +44,9 @@ class FakeSession:
         instance.created_at = now
         instance.updated_at = now
         self.refreshed.append(instance)
+
+    async def execute(self, *args, **kwargs) -> EmptyResult:
+        return EmptyResult()
 
 
 class ConstraintFailureSession(FakeSession):

@@ -9,10 +9,6 @@ from app.modules.limits.exceptions import InvalidLimitKeyError, LimitExceededErr
 from app.modules.limits.models import UsageBudget
 
 
-class FakeSession:
-    execute = None
-
-
 class RecordingSession:
     def __init__(self) -> None:
         self.statements: list[object] = []
@@ -94,14 +90,6 @@ async def test_lock_quota_capacity_acquires_unique_locks_in_sorted_order() -> No
 
 
 @pytest.mark.asyncio
-async def test_lock_quota_capacity_ignores_non_database_test_session() -> None:
-    await service.lock_quota_capacity(
-        FakeSession(),
-        [service.quota_scope(service.AGENTS_PER_ORGANIZATION, uuid.uuid4())],
-    )
-
-
-@pytest.mark.asyncio
 async def test_require_llm_budget_available_rejects_exhausted_budget(monkeypatch) -> None:
     organization_id = uuid.uuid4()
     workspace_id = uuid.uuid4()
@@ -134,7 +122,7 @@ async def test_require_llm_budget_available_rejects_exhausted_budget(monkeypatch
 
     with pytest.raises(LimitExceededError):
         await service.require_llm_budget_available(
-            FakeSession(),
+            RecordingSession(),
             service.LLMBudgetContext(
                 organization_id=organization_id,
                 workspace_id=workspace_id,
@@ -164,7 +152,7 @@ async def test_require_llm_budget_available_allows_remaining_budget(monkeypatch)
     monkeypatch.setattr(service.repository, "llm_usage_budget_spend", llm_usage_budget_spend)
 
     await service.require_llm_budget_available(
-        FakeSession(),
+        RecordingSession(),
         service.LLMBudgetContext(
             organization_id=uuid.uuid4(),
             workspace_id=uuid.uuid4(),
