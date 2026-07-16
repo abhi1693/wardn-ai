@@ -1,20 +1,32 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.domain_types import MembershipRole, OrganizationStatus, WorkspaceStatus
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "organizations"
-    __table_args__ = (UniqueConstraint("slug", name="uq_organizations_slug"),)
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_organizations_slug"),
+        CheckConstraint(
+            "status IN ('active', 'suspended', 'archived')",
+            name="ck_organizations_status",
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     slug: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
+    status: Mapped[OrganizationStatus] = mapped_column(
+        String(32),
+        default=OrganizationStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -40,6 +52,10 @@ class OrganizationMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "user_id",
             name="uq_organization_memberships_org_user",
         ),
+        CheckConstraint(
+            "role IN ('owner', 'admin', 'member')",
+            name="ck_organization_memberships_role",
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -54,7 +70,12 @@ class OrganizationMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(32), default="member", nullable=False, index=True)
+    role: Mapped[MembershipRole] = mapped_column(
+        String(32),
+        default=MembershipRole.MEMBER,
+        nullable=False,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
     organization: Mapped[Organization] = relationship(back_populates="memberships")
@@ -68,6 +89,10 @@ class Workspace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "slug",
             name="uq_workspaces_org_slug",
         ),
+        CheckConstraint(
+            "status IN ('active', 'archived')",
+            name="ck_workspaces_status",
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -79,7 +104,12 @@ class Workspace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     slug: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
+    status: Mapped[WorkspaceStatus] = mapped_column(
+        String(32),
+        default=WorkspaceStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -102,6 +132,10 @@ class WorkspaceMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "user_id",
             name="uq_workspace_memberships_workspace_user",
         ),
+        CheckConstraint(
+            "role IN ('owner', 'admin', 'member')",
+            name="ck_workspace_memberships_role",
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -116,7 +150,12 @@ class WorkspaceMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(32), default="member", nullable=False, index=True)
+    role: Mapped[MembershipRole] = mapped_column(
+        String(32),
+        default=MembershipRole.MEMBER,
+        nullable=False,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
     workspace: Mapped[Workspace] = relationship(back_populates="memberships")

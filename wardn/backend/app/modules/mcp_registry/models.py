@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -18,6 +19,14 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.domain_types import (
+    MCPCatalogSourceProvider,
+    MCPCatalogSyncMode,
+    MCPInstallationStatus,
+    MCPOperationCleanupStatus,
+    MCPOperationJobStatus,
+    MCPServerStatus,
+)
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -30,12 +39,16 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "version",
             name="uq_mcp_server_versions_org_name_version",
         ),
+        CheckConstraint(
+            "status IN ('active', 'deprecated', 'deleted')",
+            name="ck_mcp_server_versions_status",
+        ),
     )
 
-    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+    organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
@@ -43,7 +56,12 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(255), nullable=False)
     website_url: Mapped[str] = mapped_column(String(2048), default="", nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
+    status: Mapped[MCPServerStatus] = mapped_column(
+        String(32),
+        default=MCPServerStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
     status_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     is_latest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     repository: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -73,6 +91,14 @@ class MCPCatalogSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "name",
             name="uq_mcp_catalog_sources_org_name",
         ),
+        CheckConstraint(
+            "provider IN ('wardn_hub', 'official', 'pulsemcp', 'custom')",
+            name="ck_mcp_catalog_sources_provider",
+        ),
+        CheckConstraint(
+            "sync_mode IN ('latest_only', 'all_versions')",
+            name="ck_mcp_catalog_sources_sync_mode",
+        ),
         UniqueConstraint(
             "organization_id",
             "base_url",
@@ -87,10 +113,18 @@ class MCPCatalogSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    provider: Mapped[MCPCatalogSourceProvider] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
     base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     tenant_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    sync_mode: Mapped[str] = mapped_column(String(50), default="latest_only", nullable=False)
+    sync_mode: Mapped[MCPCatalogSyncMode] = mapped_column(
+        String(50),
+        default=MCPCatalogSyncMode.LATEST_ONLY,
+        nullable=False,
+    )
     auth_secret_handle_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("secret_handles.id", ondelete="SET NULL"),
@@ -115,6 +149,10 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "config_name",
             name="uq_mcp_server_installations_workspace_server_config",
         ),
+        CheckConstraint(
+            "status IN ('enabled', 'disabled')",
+            name="ck_mcp_server_installations_status",
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -126,7 +164,12 @@ class MCPServerInstallation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     config_name: Mapped[str] = mapped_column(String(100), default="default", nullable=False)
     installed_version: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="enabled", nullable=False, index=True)
+    status: Mapped[MCPInstallationStatus] = mapped_column(
+        String(32),
+        default=MCPInstallationStatus.ENABLED,
+        nullable=False,
+        index=True,
+    )
     install_type: Mapped[str] = mapped_column(String(32), default="metadata", nullable=False)
     install_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
     runtime_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
@@ -148,6 +191,24 @@ class MCPOperationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "deduplication_key",
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="ck_mcp_operation_jobs_status",
+        ),
+        CheckConstraint(
+            "cleanup_status IN ('not_required', 'pending', 'running', 'succeeded', 'failed')",
+            name="ck_mcp_operation_jobs_cleanup_status",
+        ),
+        CheckConstraint(
+            "progress_current >= 0 AND progress_total >= 1 "
+            "AND progress_current <= progress_total",
+            name="ck_mcp_operation_jobs_progress",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND max_attempts >= 1 "
+            "AND cleanup_attempt_count >= 0 AND cleanup_max_attempts >= 1",
+            name="ck_mcp_operation_jobs_attempts",
         ),
         Index(
             "ix_mcp_operation_jobs_claimable",
@@ -178,7 +239,12 @@ class MCPOperationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     operation: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     resource_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     deduplication_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    status: Mapped[MCPOperationJobStatus] = mapped_column(
+        String(32),
+        default=MCPOperationJobStatus.QUEUED,
+        nullable=False,
+        index=True,
+    )
     request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     result: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     progress_current: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -203,9 +269,9 @@ class MCPOperationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    cleanup_status: Mapped[str] = mapped_column(
+    cleanup_status: Mapped[MCPOperationCleanupStatus] = mapped_column(
         String(32),
-        default="not_required",
+        default=MCPOperationCleanupStatus.NOT_REQUIRED,
         nullable=False,
         index=True,
     )

@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.domain_types import AgentScope, ConversationRole
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -30,6 +31,15 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "name",
             unique=True,
             postgresql_where=text("workspace_id is null"),
+        ),
+        CheckConstraint(
+            "scope IN ('organization', 'workspace')",
+            name="ck_agents_scope",
+        ),
+        CheckConstraint(
+            "(scope = 'organization' AND workspace_id IS NULL) OR "
+            "(scope = 'workspace' AND workspace_id IS NOT NULL)",
+            name="ck_agents_scope_workspace",
         ),
         Index(
             "uq_agents_workspace_name",
@@ -68,7 +78,11 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
-    scope: Mapped[str] = mapped_column(String(32), default="organization", nullable=False)
+    scope: Mapped[AgentScope] = mapped_column(
+        String(32),
+        default=AgentScope.ORGANIZATION,
+        nullable=False,
+    )
     model_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
@@ -112,6 +126,10 @@ class ConversationMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "sequence",
             name="uq_conversation_messages_conversation_sequence",
         ),
+        CheckConstraint(
+            "role IN ('system', 'user', 'assistant')",
+            name="ck_conversation_messages_role",
+        ),
     )
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
@@ -126,7 +144,7 @@ class ConversationMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    role: Mapped[ConversationRole] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     parts: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
