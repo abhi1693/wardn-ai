@@ -7,7 +7,7 @@ from app.core.config import get_settings
 settings = get_settings()
 
 engine = create_async_engine(
-    settings.database_url,
+    settings.database_url.get_secret_value(),
     pool_pre_ping=True,
 )
 

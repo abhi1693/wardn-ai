@@ -164,7 +164,7 @@ def fingerprint_payload(payload: Any) -> str:
 
 
 def secret_fingerprint_payload(payload: Any) -> str:
-    key = get_settings().session_secret.encode("utf-8")
+    key = get_settings().session_secret.get_secret_value().encode("utf-8")
     return hmac.new(key, canonical_json(payload).encode("utf-8"), hashlib.sha256).hexdigest()
 
 

@@ -231,6 +231,8 @@ def test_worker_settings_require_container_isolation_outside_local() -> None:
         environment="production",
         mcp_runtime_provider="kubernetes",
         mcp_job_worker_isolation="process",
+        api_token_secret="production-api-token-secret-that-is-unique",
+        session_secret="production-session-secret-that-is-unique",
     )
 
     with pytest.raises(ValueError, match="isolated container or pod"):

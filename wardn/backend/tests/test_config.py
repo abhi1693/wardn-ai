@@ -1,11 +1,17 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 
 
 def make_settings(**values: object) -> Settings:
     return Settings(_env_file=None, **values)
+
+
+PRODUCTION_SECRETS = {
+    "api_token_secret": "production-api-token-secret-that-is-unique",
+    "session_secret": "production-session-secret-that-is-unique",
+}
 
 
 @pytest.mark.parametrize("runtime_provider", ["auto", "local"])
@@ -23,9 +29,60 @@ def test_settings_allows_local_process_runtime_for_local_development() -> None:
 
 
 def test_settings_allows_isolated_runtime_outside_local() -> None:
-    settings = make_settings(environment="production", mcp_runtime_provider="kubernetes")
+    settings = make_settings(
+        environment="production",
+        mcp_runtime_provider="kubernetes",
+        **PRODUCTION_SECRETS,
+    )
 
     assert settings.mcp_runtime_provider == "kubernetes"
+
+
+def test_settings_reject_development_secrets_in_production() -> None:
+    with pytest.raises(ValidationError, match="WARDN_API_TOKEN_SECRET"):
+        make_settings(environment="production", mcp_runtime_provider="kubernetes")
+
+
+def test_settings_reject_short_production_secrets() -> None:
+    with pytest.raises(ValidationError, match="unique production secret"):
+        make_settings(
+            environment="production",
+            mcp_runtime_provider="kubernetes",
+            api_token_secret="too-short-for-production",
+            session_secret=PRODUCTION_SECRETS["session_secret"],
+        )
+
+
+def test_settings_hide_secret_values() -> None:
+    settings = make_settings(**PRODUCTION_SECRETS)
+
+    assert isinstance(settings.api_token_secret, SecretStr)
+    assert PRODUCTION_SECRETS["api_token_secret"] not in repr(settings)
+    assert settings.api_token_secret.get_secret_value() == PRODUCTION_SECRETS["api_token_secret"]
+    assert "postgresql+asyncpg" not in repr(settings)
+
+
+def test_settings_require_complete_oidc_config_in_production() -> None:
+    with pytest.raises(ValidationError, match="OIDC mode requires"):
+        make_settings(
+            environment="production",
+            mcp_runtime_provider="kubernetes",
+            auth_mode="oidc",
+            **PRODUCTION_SECRETS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("setting_name", "value"),
+    [
+        ("session_ttl_seconds", 60),
+        ("mcp_runtime_reaper_batch_size", 0),
+        ("mcp_runtime_kubernetes_service_port", 70_000),
+    ],
+)
+def test_settings_reject_out_of_bounds_values(setting_name: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(**{setting_name: value})
 
 
 def test_settings_parse_outbound_http_policy_lists() -> None:

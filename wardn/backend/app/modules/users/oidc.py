@@ -54,7 +54,7 @@ def require_oidc_config(settings: Settings) -> None:
         for name, value in {
             "WARDN_OIDC_ISSUER_URL": settings.oidc_issuer_url,
             "WARDN_OIDC_CLIENT_ID": settings.oidc_client_id,
-            "WARDN_OIDC_CLIENT_SECRET": settings.oidc_client_secret,
+            "WARDN_OIDC_CLIENT_SECRET": settings.oidc_client_secret.get_secret_value(),
         }.items()
         if not value.strip()
     ]
@@ -117,7 +117,7 @@ def create_oidc_state(
     }
     payload_data = _base64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(
-        settings.session_secret.encode("utf-8"),
+        settings.session_secret.get_secret_value().encode("utf-8"),
         payload_data.encode("ascii"),
         hashlib.sha256,
     ).digest()
@@ -128,7 +128,7 @@ def verify_oidc_state(settings: Settings, token: str, supplied_state: str) -> OI
     try:
         payload_data, signature_data = token.split(".", 1)
         expected_signature = hmac.new(
-            settings.session_secret.encode("utf-8"),
+            settings.session_secret.get_secret_value().encode("utf-8"),
             payload_data.encode("ascii"),
             hashlib.sha256,
         ).digest()
@@ -198,7 +198,7 @@ async def exchange_oidc_code(
                 "code": code,
                 "redirect_uri": oidc_redirect_uri(settings),
             },
-            auth=(settings.oidc_client_id, settings.oidc_client_secret),
+            auth=(settings.oidc_client_id, settings.oidc_client_secret.get_secret_value()),
             headers={"accept": "application/json"},
         )
     if response.status_code >= 400:

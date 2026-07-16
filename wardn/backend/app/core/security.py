@@ -32,7 +32,7 @@ def generate_api_token() -> tuple[str, str]:
 def hash_api_token(token: str) -> str:
     settings = get_settings()
     return hmac.new(
-        settings.api_token_secret.encode("utf-8"),
+        settings.api_token_secret.get_secret_value().encode("utf-8"),
         token.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -68,7 +68,7 @@ def create_session_token(user_id: uuid.UUID) -> str:
     }
     payload_data = _base64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(
-        settings.session_secret.encode("utf-8"),
+        settings.session_secret.get_secret_value().encode("utf-8"),
         payload_data.encode("ascii"),
         hashlib.sha256,
     ).digest()
@@ -80,7 +80,7 @@ def verify_session_token(token: str) -> uuid.UUID | None:
     try:
         payload_data, signature_data = token.split(".", 1)
         expected_signature = hmac.new(
-            settings.session_secret.encode("utf-8"),
+            settings.session_secret.get_secret_value().encode("utf-8"),
             payload_data.encode("ascii"),
             hashlib.sha256,
         ).digest()

@@ -107,7 +107,7 @@ def b64url_decode(value: str) -> bytes:
 
 
 def signing_secret() -> bytes:
-    return get_settings().session_secret.encode("utf-8")
+    return get_settings().session_secret.get_secret_value().encode("utf-8")
 
 
 def signed_payload(payload: dict[str, Any]) -> str:

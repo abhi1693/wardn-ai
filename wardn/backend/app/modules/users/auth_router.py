@@ -122,7 +122,7 @@ async def auth_config() -> AuthConfigRead:
         [
             settings.oidc_issuer_url.strip(),
             settings.oidc_client_id.strip(),
-            settings.oidc_client_secret.strip(),
+            settings.oidc_client_secret.get_secret_value().strip(),
         ]
     )
     return AuthConfigRead(
