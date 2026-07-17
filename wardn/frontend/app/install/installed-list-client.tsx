@@ -2,6 +2,7 @@
 
 import { Edit2, Play, Trash2 } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import {
@@ -9,7 +10,6 @@ import {
   McpTableCard,
   RuntimeBadge,
   ServerIdentityCell,
-  responseErrorMessage,
   runtimeDisplayName,
   serverIconUrlFromIcons,
 } from "@/app/mcp/mcp-list-ui";
@@ -23,19 +23,63 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { MCPServerInstallationRead } from "@/lib/api/generated/model";
+import { workspaceMcpRegistryUninstallServerConfig } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 
 type InstalledListClientProps = {
   basePath: string;
   initialInstallations: MCPServerInstallationRead[];
+  organizationId: string;
+  workspaceId: string;
 };
 
 function editInstallUrl(basePath: string, installationId: string) {
   return `${basePath}/${encodeURIComponent(installationId)}/edit`;
 }
 
+type InstallationActionLinkProps = {
+  children: ReactNode;
+  disabled: boolean;
+  href: string;
+  label: string;
+  title: string;
+};
+
+function InstallationActionLink({
+  children,
+  disabled,
+  href,
+  label,
+  title,
+}: InstallationActionLinkProps) {
+  if (disabled) {
+    return (
+      <Button
+        aria-label={label}
+        disabled
+        size="icon"
+        title={title}
+        type="button"
+        variant="outline"
+      >
+        {children}
+      </Button>
+    );
+  }
+
+  return (
+    <Button asChild size="icon" variant="outline">
+      <Link aria-label={label} href={href} title={title}>
+        {children}
+      </Link>
+    </Button>
+  );
+}
+
 export function InstalledListClient({
   basePath,
   initialInstallations,
+  organizationId,
+  workspaceId,
 }: InstalledListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
@@ -60,13 +104,11 @@ export function InstalledListClient({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(
-        `/api/mcp/registry/installed-server-configs/${encodeURIComponent(installation.id)}`,
-        { method: "DELETE" }
+      await workspaceMcpRegistryUninstallServerConfig(
+        organizationId,
+        workspaceId,
+        installation.id
       );
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to remove configuration."));
-      }
       setInstallations((current) => current.filter((item) => item.id !== installation.id));
       setNotice("Server instance removed.");
     } catch (caught) {
@@ -130,24 +172,22 @@ export function InstalledListClient({
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
-                        <Button asChild disabled={isMutating} size="icon" type="button" variant="outline">
-                          <Link
-                            aria-label={`Edit ${installation.configName}`}
-                            href={editInstallUrl(basePath, installation.id)}
-                            title="Edit MCP server"
-                          >
-                            <Edit2 className="size-4" />
-                          </Link>
-                        </Button>
-                        <Button asChild disabled={isMutating} size="icon" type="button" variant="outline">
-                          <Link
-                            aria-label={`Validate ${installation.configName}`}
-                            href={`${basePath}/${encodeURIComponent(installation.id)}/validate`}
-                            title="Validate tools"
-                          >
-                            <Play className="size-4" />
-                          </Link>
-                        </Button>
+                        <InstallationActionLink
+                          disabled={isMutating}
+                          href={editInstallUrl(basePath, installation.id)}
+                          label={`Edit ${installation.configName}`}
+                          title="Edit MCP server"
+                        >
+                          <Edit2 className="size-4" />
+                        </InstallationActionLink>
+                        <InstallationActionLink
+                          disabled={isMutating}
+                          href={`${basePath}/${encodeURIComponent(installation.id)}/validate`}
+                          label={`Validate ${installation.configName}`}
+                          title="Validate tools"
+                        >
+                          <Play className="size-4" />
+                        </InstallationActionLink>
                         <Button
                           disabled={isMutating}
                           onClick={() => removeInstallation(installation)}

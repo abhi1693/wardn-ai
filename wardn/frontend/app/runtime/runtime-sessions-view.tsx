@@ -6,9 +6,8 @@ import type {
   MCPRuntimeSessionListResponse,
   MCPRuntimeSummaryResponse,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceMcpRuntimePath,
 } from "@/lib/workspace-context";
@@ -20,20 +19,8 @@ async function getRuntimeSessions(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPRuntimeSessionListResponse;
-    return data.sessions;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPRuntimeSessionListResponse>(path);
+  return data.sessions;
 }
 
 async function getRuntimeSummary(context: WorkspaceContext) {
@@ -41,19 +28,7 @@ async function getRuntimeSummary(context: WorkspaceContext) {
   if (!path) {
     return null;
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as MCPRuntimeSummaryResponse;
-  } catch {
-    return null;
-  }
+  return backendJson<MCPRuntimeSummaryResponse>(path);
 }
 
 type RuntimeSessionsViewProps = {

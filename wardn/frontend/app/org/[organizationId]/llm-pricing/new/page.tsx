@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
+import { getCurrentUser } from "@/lib/current-user";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { getLlmCredentials } from "../../llm-credentials/data";
-import { canManageModelPrices, getCurrentUser } from "../data";
+import { canManageModelPrices } from "../data";
 import { ModelPriceForm } from "../model-price-form";
 
 type NewModelPricePageProps = {
@@ -17,12 +17,12 @@ type NewModelPricePageProps = {
 
 export default async function NewModelPricePage({ params }: NewModelPricePageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, currentUser, credentials] = await Promise.all([
+  const [workspaceContext, currentUser, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
     getLlmCredentials(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization || !canManageModelPrices(currentUser, organization.currentUserRole)) {
     notFound();

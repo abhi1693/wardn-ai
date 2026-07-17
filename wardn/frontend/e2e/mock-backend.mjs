@@ -2,6 +2,9 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
 const port = Number(process.env.WARDN_E2E_BACKEND_PORT ?? 4100);
+const frontendPort = Number(process.env.WARDN_E2E_FRONTEND_PORT ?? 3100);
+const frontendOrigin = `http://127.0.0.1:${frontendPort}`;
+const sessionCookieName = process.env.WARDN_SESSION_COOKIE_NAME ?? "wardn_session";
 const now = "2026-06-30T00:00:00.000Z";
 
 const organization = {
@@ -12,6 +15,13 @@ const organization = {
   currentUserRole: "owner",
   createdAt: now,
   updatedAt: now,
+};
+
+const otherOrganization = {
+  ...organization,
+  id: "org-2",
+  name: "Research Organization",
+  slug: "research",
 };
 
 const workspace = {
@@ -61,8 +71,38 @@ let state = initialState();
 
 function initialState(overrides = {}) {
   return {
+    catalogJobPollsBeforeSuccess: overrides.catalogJobPollsBeforeSuccess ?? 2,
+    catalogStatus: overrides.catalogStatus ?? 200,
+    jobs: new Map(),
+    organizationsStatus: overrides.organizationsStatus ?? 200,
     requests: [],
     sources: overrides.sources ?? [{ ...defaultSource }],
+    tokens: [],
+  };
+}
+
+function operationJob(jobId, status, progressMessage, result = undefined) {
+  return {
+    attemptCount: 1,
+    cleanupAttemptCount: 0,
+    cleanupError: "",
+    cleanupMaxAttempts: 3,
+    cleanupStatus: "not_required",
+    createdAt: now,
+    errorCode: "",
+    errorMessage: "",
+    jobId,
+    maxAttempts: 3,
+    operation: "sync_catalog_source",
+    organizationId: organization.id,
+    progressCurrent: status === "succeeded" ? 1 : 0,
+    progressMessage,
+    progressTotal: 1,
+    resourceKey: "catalog-source:source-1",
+    result,
+    status,
+    updatedAt: now,
+    workspaceId: null,
   };
 }
 
@@ -137,15 +177,49 @@ async function handle(request) {
       body: JSON.stringify({ id: "user-1", email: "owner@example.com", isSuperuser: true }),
       headers: {
         "content-type": "application/json",
-        "set-cookie": "wardn_session=test-session; Path=/; HttpOnly; SameSite=Lax",
+        "set-cookie": `${sessionCookieName}=test-session; Path=/; HttpOnly; SameSite=Lax`,
       },
     };
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/auth/config") {
+    return json({
+      authMode: "local",
+      localLoginEnabled: true,
+      oidcLoginEnabled: false,
+      oidcProviderName: "",
+    });
   }
   if (request.method === "GET" && url.pathname === "/api/v1/auth/me") {
     return json({ id: "user-1", email: "owner@example.com", isSuperuser: true });
   }
+  if (url.pathname === "/api/v1/auth/api-tokens") {
+    if (request.method === "GET") {
+      return json({ tokens: state.tokens });
+    }
+    if (request.method === "POST") {
+      const record = {
+        createdAt: now,
+        description: body.description ?? "",
+        expiresAt: body.expiresAt ?? null,
+        id: randomUUID(),
+        isActive: true,
+        lastUsedAt: null,
+        name: body.name,
+        organizationIds: body.organizationIds ?? [],
+        tokenPrefix: "wardn_test",
+        updatedAt: now,
+        userId: "user-1",
+        workspaceIds: body.workspaceIds ?? [],
+      };
+      state.tokens.push(record);
+      return json({ record, token: "wardn_test_secret_token" }, 201);
+    }
+  }
   if (request.method === "GET" && url.pathname === "/api/v1/organizations") {
-    return json({ organizations: [organization] });
+    if (state.organizationsStatus !== 200) {
+      return json({ detail: "organization request failed" }, state.organizationsStatus);
+    }
+    return json({ organizations: [organization, otherOrganization] });
   }
   if (request.method === "GET" && url.pathname === `/api/v1/organizations/${organization.id}`) {
     return json(organization);
@@ -158,9 +232,32 @@ async function handle(request) {
   }
   if (
     request.method === "GET" &&
+    url.pathname === `/api/v1/organizations/${otherOrganization.id}/workspaces`
+  ) {
+    return json({ workspaces: [] });
+  }
+  if (
+    request.method === "GET" &&
     url.pathname === `/api/v1/organizations/${organization.id}/secrets/stores`
   ) {
     return json({ stores: [secretStore] });
+  }
+
+  const catalogJobMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/([^/]+)\/mcp\/catalog\/jobs\/([^/]+)$/
+  );
+  if (request.method === "GET" && catalogJobMatch?.[1] === organization.id) {
+    const job = state.jobs.get(catalogJobMatch[2]);
+    if (!job) {
+      return json({ detail: "operation job not found" }, 404);
+    }
+    job.pollCount += 1;
+    if (job.pollCount >= job.pollsBeforeSuccess) {
+      return json(
+        operationJob(job.id, "succeeded", "Catalog synchronization completed", job.result)
+      );
+    }
+    return json(operationJob(job.id, "running", "Synchronizing catalog"));
   }
 
   const match = sourcePathMatch(url.pathname);
@@ -170,6 +267,9 @@ async function handle(request) {
 
   const sourceId = match[2];
   const isSync = url.pathname.endsWith("/sync");
+  if (state.catalogStatus !== 200) {
+    return json({ detail: "catalog request failed" }, state.catalogStatus);
+  }
   if (request.method === "GET" && !sourceId) {
     return json({ sources: state.sources });
   }
@@ -226,13 +326,29 @@ async function handle(request) {
       lastError: "",
     };
     state.sources[index] = synced;
-    return json({ source: synced, syncedCount: 2 });
+    const jobId = randomUUID();
+    state.jobs.set(jobId, {
+      id: jobId,
+      pollCount: 0,
+      pollsBeforeSuccess: state.catalogJobPollsBeforeSuccess,
+      result: { source: synced, syncedCount: 2 },
+    });
+    return json(operationJob(jobId, "queued", "Catalog synchronization queued"));
   }
 
   return json({ detail: "method not allowed" }, 405);
 }
 
 const server = createServer(async (request, response) => {
+  response.setHeader("access-control-allow-origin", frontendOrigin);
+  response.setHeader("access-control-allow-credentials", "true");
+  response.setHeader("access-control-allow-headers", "content-type");
+  response.setHeader("access-control-allow-methods", "DELETE, GET, OPTIONS, PATCH, POST, PUT");
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
   try {
     const result = await handle(request);
     response.writeHead(result.status, result.headers);

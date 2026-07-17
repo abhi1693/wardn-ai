@@ -2,11 +2,11 @@ import { BarChart3 } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
+import { getCurrentUser } from "@/lib/current-user";
 import {
   type UsageSummaryResponse,
   UsageSummaryView,
 } from "@/app/components/usage-summary-view";
-import { getOrganization } from "@/app/organizations/data";
 import {
   Card,
   CardContent,
@@ -14,40 +14,28 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
-import { canManageModelPrices, getCurrentUser } from "../llm-pricing/data";
+import { canManageModelPrices } from "../llm-pricing/data";
 
 type OrganizationUsagePageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
 async function getOrganizationUsage(organizationId: string) {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(
-      backendPath(`/api/v1/organizations/${encodeURIComponent(organizationId)}/usage/summary`),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as UsageSummaryResponse;
-  } catch {
-    return null;
-  }
+  return backendJson<UsageSummaryResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/usage/summary`
+  );
 }
 
 export default async function OrganizationUsagePage({ params }: OrganizationUsagePageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, currentUser] = await Promise.all([
+  const [workspaceContext, currentUser] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

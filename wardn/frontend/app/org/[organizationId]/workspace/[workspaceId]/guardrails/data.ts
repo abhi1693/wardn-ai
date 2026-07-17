@@ -4,7 +4,7 @@ import type {
   GuardrailPolicyRead,
   MCPServerInstallationListResponse,
 } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
 
 export type GuardrailPolicyRecord = {
   policy: GuardrailPolicyRead;
@@ -28,32 +28,16 @@ export type GuardrailToolOption = {
   workspaceId: string;
 };
 
-async function fetchBackend<T>(path: string): Promise<T | null> {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  }
-}
-
 export async function getWorkspaceGuardrailPolicies(
   organizationId: string,
   workspaceId: string,
 ) {
-  const payload = await fetchBackend<GuardrailPolicyListResponse>(
+  const payload = await backendJson<GuardrailPolicyListResponse>(
     `/api/v1/organizations/${encodeURIComponent(
       organizationId
     )}/workspaces/${encodeURIComponent(workspaceId)}/guardrails/policies`
   );
-  return payload?.policies ?? [];
+  return payload.policies;
 }
 
 export async function getGuardrailPolicyRecords(
@@ -77,19 +61,19 @@ export async function getGuardrailWorkspaceOptions(
   workspaceId: string,
 ) {
   const [serversPayload, availableToolsPayload] = await Promise.all([
-    fetchBackend<MCPServerInstallationListResponse>(
+    backendJson<MCPServerInstallationListResponse>(
       `/api/v1/organizations/${encodeURIComponent(
         organizationId
       )}/workspaces/${encodeURIComponent(workspaceId)}/mcp/registry/installed-servers`
     ),
-    fetchBackend<AgentAvailableToolListResponse>(
+    backendJson<AgentAvailableToolListResponse>(
       `/api/v1/organizations/${encodeURIComponent(
         organizationId
       )}/workspaces/${encodeURIComponent(workspaceId)}/agents/available-tools`
     ),
   ]);
 
-  const servers: GuardrailServerOption[] = (serversPayload?.installations ?? []).map(
+  const servers: GuardrailServerOption[] = serversPayload.installations.map(
     (installation) => ({
       configName: installation.configName,
       installationId: installation.id,
@@ -98,7 +82,7 @@ export async function getGuardrailWorkspaceOptions(
       workspaceId,
     })
   );
-  const tools: GuardrailToolOption[] = (availableToolsPayload?.tools ?? []).map((tool) => ({
+  const tools: GuardrailToolOption[] = availableToolsPayload.tools.map((tool) => ({
     configName: tool.configName,
     installationId: tool.installationId,
     label: `${tool.toolName} (${tool.configName})`,

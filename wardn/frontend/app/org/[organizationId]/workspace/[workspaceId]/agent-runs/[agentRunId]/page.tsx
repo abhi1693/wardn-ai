@@ -14,7 +14,8 @@ import { AppShell } from "@/app/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { AgentRunDetailResponse, AgentRunStepRead } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type AgentRunPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string; agentRunId: string }>;
@@ -24,29 +25,12 @@ async function getAgentRun(
   organizationId: string,
   workspaceId: string,
   agentRunId: string
-): Promise<AgentRunDetailResponse | null> {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(
-          organizationId
-        )}/workspaces/${encodeURIComponent(workspaceId)}/agent-runs/${encodeURIComponent(
-          agentRunId
-        )}`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as AgentRunDetailResponse;
-  } catch {
-    return null;
-  }
+): Promise<AgentRunDetailResponse> {
+  return backendJson<AgentRunDetailResponse>(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/workspaces/${encodeURIComponent(workspaceId)}/agent-runs/${encodeURIComponent(agentRunId)}`
+  );
 }
 
 function formatDate(value?: string | null) {

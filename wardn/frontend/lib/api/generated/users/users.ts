@@ -6,63 +6,31 @@
  */
 import type {
   BootstrapUserCreate,
-  ErrorResponse,
-  HTTPValidationError,
   UserRead
 } from '../model';
 
-
-export type usersBootstrapResponse201 = {
-  data: UserRead
-  status: 201
-}
-
-export type usersBootstrapResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type usersBootstrapResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type usersBootstrapResponseSuccess = (usersBootstrapResponse201) & {
-  headers: Headers;
-};
-export type usersBootstrapResponseError = (usersBootstrapResponse409 | usersBootstrapResponse422) & {
-  headers: Headers;
-};
-
-export type usersBootstrapResponse = (usersBootstrapResponseSuccess | usersBootstrapResponseError)
+import { apiRequest } from '../../client';
 
 export const getUsersBootstrapUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/users/bootstrap`
+  return `/api/v1/users/bootstrap`
 }
 
 /**
  * @summary Bootstrap User
  */
-export const usersBootstrap = async (bootstrapUserCreate: BootstrapUserCreate, options?: RequestInit): Promise<usersBootstrapResponse> => {
+export const usersBootstrap = async (bootstrapUserCreate: BootstrapUserCreate, options?: RequestInit): Promise<UserRead> => {
 
-  const res = await fetch(getUsersBootstrapUrl(),
+  return apiRequest<UserRead>(getUsersBootstrapUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(bootstrapUserCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: usersBootstrapResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as usersBootstrapResponse
-}
+);}
 
 

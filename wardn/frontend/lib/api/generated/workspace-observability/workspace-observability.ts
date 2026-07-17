@@ -5,43 +5,13 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   LLMUsageListResponse,
   MCPToolUsageListResponse,
   WorkspaceObservabilityListLlmUsageParams,
   WorkspaceObservabilityListMcpToolUsageParams
 } from '../model';
 
-
-export type workspaceObservabilityListLlmUsageResponse200 = {
-  data: LLMUsageListResponse
-  status: 200
-}
-
-export type workspaceObservabilityListLlmUsageResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceObservabilityListLlmUsageResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceObservabilityListLlmUsageResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceObservabilityListLlmUsageResponseSuccess = (workspaceObservabilityListLlmUsageResponse200) & {
-  headers: Headers;
-};
-export type workspaceObservabilityListLlmUsageResponseError = (workspaceObservabilityListLlmUsageResponse403 | workspaceObservabilityListLlmUsageResponse404 | workspaceObservabilityListLlmUsageResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceObservabilityListLlmUsageResponse = (workspaceObservabilityListLlmUsageResponseSuccess | workspaceObservabilityListLlmUsageResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceObservabilityListLlmUsageUrl = (organizationId: string,
     workspaceId: string,
@@ -57,7 +27,7 @@ export const getWorkspaceObservabilityListLlmUsageUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/llm-usage?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/llm-usage`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/llm-usage?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/llm-usage`
 }
 
 /**
@@ -65,53 +35,17 @@ export const getWorkspaceObservabilityListLlmUsageUrl = (organizationId: string,
  */
 export const workspaceObservabilityListLlmUsage = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceObservabilityListLlmUsageParams, options?: RequestInit): Promise<workspaceObservabilityListLlmUsageResponse> => {
+    params?: WorkspaceObservabilityListLlmUsageParams, options?: RequestInit): Promise<LLMUsageListResponse> => {
 
-  const res = await fetch(getWorkspaceObservabilityListLlmUsageUrl(organizationId,workspaceId,params),
+  return apiRequest<LLMUsageListResponse>(getWorkspaceObservabilityListLlmUsageUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceObservabilityListLlmUsageResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceObservabilityListLlmUsageResponse
-}
-
-
-export type workspaceObservabilityListMcpToolUsageResponse200 = {
-  data: MCPToolUsageListResponse
-  status: 200
-}
-
-export type workspaceObservabilityListMcpToolUsageResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceObservabilityListMcpToolUsageResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceObservabilityListMcpToolUsageResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceObservabilityListMcpToolUsageResponseSuccess = (workspaceObservabilityListMcpToolUsageResponse200) & {
-  headers: Headers;
-};
-export type workspaceObservabilityListMcpToolUsageResponseError = (workspaceObservabilityListMcpToolUsageResponse403 | workspaceObservabilityListMcpToolUsageResponse404 | workspaceObservabilityListMcpToolUsageResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceObservabilityListMcpToolUsageResponse = (workspaceObservabilityListMcpToolUsageResponseSuccess | workspaceObservabilityListMcpToolUsageResponseError)
 
 export const getWorkspaceObservabilityListMcpToolUsageUrl = (organizationId: string,
     workspaceId: string,
@@ -127,7 +61,7 @@ export const getWorkspaceObservabilityListMcpToolUsageUrl = (organizationId: str
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/mcp-tool-usage?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/mcp-tool-usage`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/mcp-tool-usage?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/mcp-tool-usage`
 }
 
 /**
@@ -135,22 +69,15 @@ export const getWorkspaceObservabilityListMcpToolUsageUrl = (organizationId: str
  */
 export const workspaceObservabilityListMcpToolUsage = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceObservabilityListMcpToolUsageParams, options?: RequestInit): Promise<workspaceObservabilityListMcpToolUsageResponse> => {
+    params?: WorkspaceObservabilityListMcpToolUsageParams, options?: RequestInit): Promise<MCPToolUsageListResponse> => {
 
-  const res = await fetch(getWorkspaceObservabilityListMcpToolUsageUrl(organizationId,workspaceId,params),
+  return apiRequest<MCPToolUsageListResponse>(getWorkspaceObservabilityListMcpToolUsageUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceObservabilityListMcpToolUsageResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceObservabilityListMcpToolUsageResponse
-}
+);}
 
 

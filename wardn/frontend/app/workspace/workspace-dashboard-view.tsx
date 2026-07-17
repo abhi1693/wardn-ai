@@ -16,9 +16,8 @@ import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceInstallPath,
   workspaceMcpRegistryPath,
@@ -29,20 +28,8 @@ async function getInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 function runtimeLabel(value: string) {

@@ -1,12 +1,13 @@
 import { Settings } from "lucide-react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import type { AgentConversationResponse } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { ApiError, readApiResponseBody } from "@/lib/api/errors";
+import { backendFetch } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type WorkspaceChatPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string }>;
@@ -20,35 +21,32 @@ async function quickStartWorkspaceAgent(
   organizationId: string,
   workspaceId: string
 ): Promise<QuickStartResult> {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(
-          organizationId
-        )}/workspaces/${encodeURIComponent(workspaceId)}/agents/quick-start`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-        method: "POST",
-      }
-    );
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-      return {
-        conversationId: null,
-        error:
-          typeof payload?.detail === "string"
-            ? payload.detail
-            : "Workspace chat could not be started.",
-      };
+  const response = await backendFetch(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/workspaces/${encodeURIComponent(workspaceId)}/agents/quick-start`,
+    { method: "POST" }
+  );
+  const body = await readApiResponseBody(response);
+  if (!response.ok) {
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+      throw new ApiError(
+        response.status,
+        body,
+        `Wardn API request failed (${response.status}).`
+      );
     }
-    const payload = (await response.json()) as AgentConversationResponse;
-    return { conversationId: payload.conversation.id, error: null };
-  } catch {
-    return { conversationId: null, error: "Workspace chat could not be started." };
+    const payload = body as { detail?: unknown } | undefined;
+    return {
+      conversationId: null,
+      error:
+        typeof payload?.detail === "string"
+          ? payload.detail
+          : "Workspace chat could not be started.",
+    };
   }
+  const payload = body as AgentConversationResponse;
+  return { conversationId: payload.conversation.id, error: null };
 }
 
 export default async function WorkspaceChatPage({ params }: WorkspaceChatPageProps) {
@@ -63,13 +61,11 @@ export default async function WorkspaceChatPage({ params }: WorkspaceChatPagePro
     );
   }
 
-  const [workspaceContext, organization] = await Promise.all([
-    getWorkspaceContext({ organizationId, workspaceId }),
-    getOrganization(organizationId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId, workspaceId });
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
-    return null;
+    notFound();
   }
 
   return (

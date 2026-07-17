@@ -6,40 +6,10 @@
  */
 import type {
   AgentRunDetailResponse,
-  AgentRunListResponse,
-  ErrorResponse,
-  HTTPValidationError
+  AgentRunListResponse
 } from '../model';
 
-
-export type workspaceAgentRunsListResponse200 = {
-  data: AgentRunListResponse
-  status: 200
-}
-
-export type workspaceAgentRunsListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentRunsListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentRunsListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentRunsListResponseSuccess = (workspaceAgentRunsListResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentRunsListResponseError = (workspaceAgentRunsListResponse403 | workspaceAgentRunsListResponse404 | workspaceAgentRunsListResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentRunsListResponse = (workspaceAgentRunsListResponseSuccess | workspaceAgentRunsListResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceAgentRunsListUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -47,60 +17,24 @@ export const getWorkspaceAgentRunsListUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs`
 }
 
 /**
  * @summary List Workspace Agent Runs Route
  */
 export const workspaceAgentRunsList = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceAgentRunsListResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<AgentRunListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentRunsListUrl(organizationId,workspaceId),
+  return apiRequest<AgentRunListResponse>(getWorkspaceAgentRunsListUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentRunsListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentRunsListResponse
-}
-
-
-export type workspaceAgentRunsGetResponse200 = {
-  data: AgentRunDetailResponse
-  status: 200
-}
-
-export type workspaceAgentRunsGetResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentRunsGetResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentRunsGetResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentRunsGetResponseSuccess = (workspaceAgentRunsGetResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentRunsGetResponseError = (workspaceAgentRunsGetResponse403 | workspaceAgentRunsGetResponse404 | workspaceAgentRunsGetResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentRunsGetResponse = (workspaceAgentRunsGetResponseSuccess | workspaceAgentRunsGetResponseError)
 
 export const getWorkspaceAgentRunsGetUrl = (organizationId: string,
     workspaceId: string,
@@ -109,7 +43,7 @@ export const getWorkspaceAgentRunsGetUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs/${agentRunId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs/${agentRunId}`
 }
 
 /**
@@ -117,22 +51,15 @@ export const getWorkspaceAgentRunsGetUrl = (organizationId: string,
  */
 export const workspaceAgentRunsGet = async (organizationId: string,
     workspaceId: string,
-    agentRunId: string, options?: RequestInit): Promise<workspaceAgentRunsGetResponse> => {
+    agentRunId: string, options?: RequestInit): Promise<AgentRunDetailResponse> => {
 
-  const res = await fetch(getWorkspaceAgentRunsGetUrl(organizationId,workspaceId,agentRunId),
+  return apiRequest<AgentRunDetailResponse>(getWorkspaceAgentRunsGetUrl(organizationId,workspaceId,agentRunId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentRunsGetResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentRunsGetResponse
-}
+);}
 
 

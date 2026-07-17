@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   MCPRuntimeEventListResponse,
   MCPRuntimeSessionHealthResponse,
   MCPRuntimeSessionListResponse,
@@ -16,25 +14,7 @@ import type {
   WorkspaceMcpRuntimeListSessionsParams
 } from '../model';
 
-
-export type workspaceMcpRuntimeListSessionsResponse200 = {
-  data: MCPRuntimeSessionListResponse
-  status: 200
-}
-
-export type workspaceMcpRuntimeListSessionsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeListSessionsResponseSuccess = (workspaceMcpRuntimeListSessionsResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeListSessionsResponseError = (workspaceMcpRuntimeListSessionsResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeListSessionsResponse = (workspaceMcpRuntimeListSessionsResponseSuccess | workspaceMcpRuntimeListSessionsResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceMcpRuntimeListSessionsUrl = (organizationId: string,
     workspaceId: string,
@@ -50,7 +30,7 @@ export const getWorkspaceMcpRuntimeListSessionsUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions`
 }
 
 /**
@@ -58,48 +38,17 @@ export const getWorkspaceMcpRuntimeListSessionsUrl = (organizationId: string,
  */
 export const workspaceMcpRuntimeListSessions = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceMcpRuntimeListSessionsParams, options?: RequestInit): Promise<workspaceMcpRuntimeListSessionsResponse> => {
+    params?: WorkspaceMcpRuntimeListSessionsParams, options?: RequestInit): Promise<MCPRuntimeSessionListResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeListSessionsUrl(organizationId,workspaceId,params),
+  return apiRequest<MCPRuntimeSessionListResponse>(getWorkspaceMcpRuntimeListSessionsUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeListSessionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeListSessionsResponse
-}
-
-
-export type workspaceMcpRuntimeGetSessionResponse200 = {
-  data: MCPRuntimeSessionRead
-  status: 200
-}
-
-export type workspaceMcpRuntimeGetSessionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRuntimeGetSessionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeGetSessionResponseSuccess = (workspaceMcpRuntimeGetSessionResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeGetSessionResponseError = (workspaceMcpRuntimeGetSessionResponse404 | workspaceMcpRuntimeGetSessionResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeGetSessionResponse = (workspaceMcpRuntimeGetSessionResponseSuccess | workspaceMcpRuntimeGetSessionResponseError)
 
 export const getWorkspaceMcpRuntimeGetSessionUrl = (organizationId: string,
     workspaceId: string,
@@ -108,7 +57,7 @@ export const getWorkspaceMcpRuntimeGetSessionUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}`
 }
 
 /**
@@ -116,48 +65,17 @@ export const getWorkspaceMcpRuntimeGetSessionUrl = (organizationId: string,
  */
 export const workspaceMcpRuntimeGetSession = async (organizationId: string,
     workspaceId: string,
-    runtimeSessionId: string, options?: RequestInit): Promise<workspaceMcpRuntimeGetSessionResponse> => {
+    runtimeSessionId: string, options?: RequestInit): Promise<MCPRuntimeSessionRead> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeGetSessionUrl(organizationId,workspaceId,runtimeSessionId),
+  return apiRequest<MCPRuntimeSessionRead>(getWorkspaceMcpRuntimeGetSessionUrl(organizationId,workspaceId,runtimeSessionId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeGetSessionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeGetSessionResponse
-}
-
-
-export type workspaceMcpRuntimeListSessionEventsResponse200 = {
-  data: MCPRuntimeEventListResponse
-  status: 200
-}
-
-export type workspaceMcpRuntimeListSessionEventsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRuntimeListSessionEventsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeListSessionEventsResponseSuccess = (workspaceMcpRuntimeListSessionEventsResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeListSessionEventsResponseError = (workspaceMcpRuntimeListSessionEventsResponse404 | workspaceMcpRuntimeListSessionEventsResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeListSessionEventsResponse = (workspaceMcpRuntimeListSessionEventsResponseSuccess | workspaceMcpRuntimeListSessionEventsResponseError)
 
 export const getWorkspaceMcpRuntimeListSessionEventsUrl = (organizationId: string,
     workspaceId: string,
@@ -174,7 +92,7 @@ export const getWorkspaceMcpRuntimeListSessionEventsUrl = (organizationId: strin
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/events?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/events`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/events?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/events`
 }
 
 /**
@@ -183,48 +101,17 @@ export const getWorkspaceMcpRuntimeListSessionEventsUrl = (organizationId: strin
 export const workspaceMcpRuntimeListSessionEvents = async (organizationId: string,
     workspaceId: string,
     runtimeSessionId: string,
-    params?: WorkspaceMcpRuntimeListSessionEventsParams, options?: RequestInit): Promise<workspaceMcpRuntimeListSessionEventsResponse> => {
+    params?: WorkspaceMcpRuntimeListSessionEventsParams, options?: RequestInit): Promise<MCPRuntimeEventListResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeListSessionEventsUrl(organizationId,workspaceId,runtimeSessionId,params),
+  return apiRequest<MCPRuntimeEventListResponse>(getWorkspaceMcpRuntimeListSessionEventsUrl(organizationId,workspaceId,runtimeSessionId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeListSessionEventsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeListSessionEventsResponse
-}
-
-
-export type workspaceMcpRuntimeGetSessionHealthResponse200 = {
-  data: MCPRuntimeSessionHealthResponse
-  status: 200
-}
-
-export type workspaceMcpRuntimeGetSessionHealthResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRuntimeGetSessionHealthResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeGetSessionHealthResponseSuccess = (workspaceMcpRuntimeGetSessionHealthResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeGetSessionHealthResponseError = (workspaceMcpRuntimeGetSessionHealthResponse404 | workspaceMcpRuntimeGetSessionHealthResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeGetSessionHealthResponse = (workspaceMcpRuntimeGetSessionHealthResponseSuccess | workspaceMcpRuntimeGetSessionHealthResponseError)
 
 export const getWorkspaceMcpRuntimeGetSessionHealthUrl = (organizationId: string,
     workspaceId: string,
@@ -233,7 +120,7 @@ export const getWorkspaceMcpRuntimeGetSessionHealthUrl = (organizationId: string
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/health`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/health`
 }
 
 /**
@@ -241,48 +128,17 @@ export const getWorkspaceMcpRuntimeGetSessionHealthUrl = (organizationId: string
  */
 export const workspaceMcpRuntimeGetSessionHealth = async (organizationId: string,
     workspaceId: string,
-    runtimeSessionId: string, options?: RequestInit): Promise<workspaceMcpRuntimeGetSessionHealthResponse> => {
+    runtimeSessionId: string, options?: RequestInit): Promise<MCPRuntimeSessionHealthResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeGetSessionHealthUrl(organizationId,workspaceId,runtimeSessionId),
+  return apiRequest<MCPRuntimeSessionHealthResponse>(getWorkspaceMcpRuntimeGetSessionHealthUrl(organizationId,workspaceId,runtimeSessionId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeGetSessionHealthResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeGetSessionHealthResponse
-}
-
-
-export type workspaceMcpRuntimeStopSessionResponse200 = {
-  data: MCPRuntimeSessionRead
-  status: 200
-}
-
-export type workspaceMcpRuntimeStopSessionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRuntimeStopSessionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeStopSessionResponseSuccess = (workspaceMcpRuntimeStopSessionResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeStopSessionResponseError = (workspaceMcpRuntimeStopSessionResponse404 | workspaceMcpRuntimeStopSessionResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeStopSessionResponse = (workspaceMcpRuntimeStopSessionResponseSuccess | workspaceMcpRuntimeStopSessionResponseError)
 
 export const getWorkspaceMcpRuntimeStopSessionUrl = (organizationId: string,
     workspaceId: string,
@@ -291,7 +147,7 @@ export const getWorkspaceMcpRuntimeStopSessionUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/stop`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/sessions/${runtimeSessionId}/stop`
 }
 
 /**
@@ -299,43 +155,17 @@ export const getWorkspaceMcpRuntimeStopSessionUrl = (organizationId: string,
  */
 export const workspaceMcpRuntimeStopSession = async (organizationId: string,
     workspaceId: string,
-    runtimeSessionId: string, options?: RequestInit): Promise<workspaceMcpRuntimeStopSessionResponse> => {
+    runtimeSessionId: string, options?: RequestInit): Promise<MCPRuntimeSessionRead> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeStopSessionUrl(organizationId,workspaceId,runtimeSessionId),
+  return apiRequest<MCPRuntimeSessionRead>(getWorkspaceMcpRuntimeStopSessionUrl(organizationId,workspaceId,runtimeSessionId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeStopSessionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeStopSessionResponse
-}
-
-
-export type workspaceMcpRuntimeGetSummaryResponse200 = {
-  data: MCPRuntimeSummaryResponse
-  status: 200
-}
-
-export type workspaceMcpRuntimeGetSummaryResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRuntimeGetSummaryResponseSuccess = (workspaceMcpRuntimeGetSummaryResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRuntimeGetSummaryResponseError = (workspaceMcpRuntimeGetSummaryResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRuntimeGetSummaryResponse = (workspaceMcpRuntimeGetSummaryResponseSuccess | workspaceMcpRuntimeGetSummaryResponseError)
 
 export const getWorkspaceMcpRuntimeGetSummaryUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -343,29 +173,22 @@ export const getWorkspaceMcpRuntimeGetSummaryUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/summary`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/summary`
 }
 
 /**
  * @summary Get Workspace Mcp Runtime Summary
  */
 export const workspaceMcpRuntimeGetSummary = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceMcpRuntimeGetSummaryResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<MCPRuntimeSummaryResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRuntimeGetSummaryUrl(organizationId,workspaceId),
+  return apiRequest<MCPRuntimeSummaryResponse>(getWorkspaceMcpRuntimeGetSummaryUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRuntimeGetSummaryResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRuntimeGetSummaryResponse
-}
+);}
 
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { SecretStoreRead } from "@/lib/api/generated/model";
+import { secretStoresValidate } from "@/lib/api/generated/secrets/secrets";
 
 import {
   secretBackendValidationMessage,
@@ -73,12 +75,8 @@ export function SecretBackendsClient({
     setNotice(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/secrets/stores/${store.id}/validate`,
-        { method: "POST" }
-      );
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !secretBackendValidationOk(data)) {
+      const data = await secretStoresValidate(organizationId, store.id);
+      if (!secretBackendValidationOk(data)) {
         throw new Error(
           secretBackendValidationMessage(data, "Secret backend validation failed.")
         );
@@ -103,15 +101,13 @@ export function SecretBackendsClient({
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
         {notice ? (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <AsyncFeedback className="flex items-center gap-2" variant="success">
             <CheckCircle2 className="size-4" />
             {notice}
-          </div>
+          </AsyncFeedback>
         ) : null}
 
         {initialStores.length > 0 ? (

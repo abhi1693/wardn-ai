@@ -6,42 +6,30 @@ import {
   type UsageSummaryResponse,
   UsageSummaryView,
 } from "@/app/components/usage-summary-view";
-import { getOrganization } from "@/app/organizations/data";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type MyUsagePageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
 async function getMyUsage() {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath("/api/v1/me/usage"), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as UsageSummaryResponse;
-  } catch {
-    return null;
-  }
+  return backendJson<UsageSummaryResponse>("/api/v1/me/usage");
 }
 
 export default async function MyUsagePage({ params }: MyUsagePageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, usage] = await Promise.all([
+  const [workspaceContext, usage] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getMyUsage(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

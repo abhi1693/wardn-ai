@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     outbound_http_allow_http: bool = False
     outbound_http_allowed_ports: list[int] = [443]
     outbound_http_private_host_allowlist: list[str] = []
+    github_token: SecretStr = Field(default=SecretStr(""), max_length=4096)
+    github_metadata_import_rate_limit: int = Field(default=10, ge=1, le=10_000)
+    github_metadata_import_rate_window_seconds: int = Field(default=60, ge=1, le=86_400)
     mcp_install_root: str = Field(default="data/mcp-installations", min_length=1, max_length=4096)
     mcp_job_worker_isolation: Literal["process", "container"] = "process"
     mcp_job_worker_poll_interval_seconds: float = Field(default=2.0, gt=0, le=60)

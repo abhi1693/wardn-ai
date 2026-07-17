@@ -3,11 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
+import { getCurrentUser } from "@/lib/current-user";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
-import { getCurrentUser } from "../data";
 import { LimitForm } from "../limit-form";
 
 type NewLimitPageProps = {
@@ -16,17 +15,16 @@ type NewLimitPageProps = {
 
 export default async function NewLimitPage({ params }: NewLimitPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, currentUser] = await Promise.all([
+  const [workspaceContext, currentUser] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization || !currentUser?.isSuperuser) {
     notFound();
   }
-
-  const workspaces = await getWorkspaces(organization.id);
 
   return (
     <AppShell

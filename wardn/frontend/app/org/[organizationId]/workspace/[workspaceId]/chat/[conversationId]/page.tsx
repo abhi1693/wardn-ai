@@ -5,10 +5,10 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/app-shell";
 import { AgentChatClient } from "@/app/org/[organizationId]/agents/[agentId]/agent-chat-client";
 import { getLlmCredentials } from "@/app/org/[organizationId]/llm-credentials/data";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import type { AgentConversationResponse } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type WorkspaceConversationChatPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string; conversationId: string }>;
@@ -18,41 +18,26 @@ async function getWorkspaceConversation(
   organizationId: string,
   workspaceId: string,
   conversationId: string
-): Promise<AgentConversationResponse | null> {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(
-          organizationId
-        )}/workspaces/${encodeURIComponent(workspaceId)}/agents/conversations/${encodeURIComponent(
-          conversationId
-        )}`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as AgentConversationResponse;
-  } catch {
-    return null;
-  }
+): Promise<AgentConversationResponse> {
+  return backendJson<AgentConversationResponse>(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/workspaces/${encodeURIComponent(workspaceId)}/agents/conversations/${encodeURIComponent(
+      conversationId
+    )}`
+  );
 }
 
 export default async function WorkspaceConversationChatPage({
   params,
 }: WorkspaceConversationChatPageProps) {
   const { organizationId, workspaceId, conversationId } = await params;
-  const [workspaceContext, organization, credentials, conversation] = await Promise.all([
+  const [workspaceContext, credentials, conversation] = await Promise.all([
     getWorkspaceContext({ organizationId, workspaceId }),
-    getOrganization(organizationId),
     getLlmCredentials(organizationId),
     getWorkspaceConversation(organizationId, workspaceId, conversationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization || !conversation) {
     notFound();

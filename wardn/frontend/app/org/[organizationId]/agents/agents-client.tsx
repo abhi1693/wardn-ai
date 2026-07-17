@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,14 +23,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type {
-  AgentConversationResponse,
-  AgentRead,
-  OrganizationRead,
-} from "@/lib/api/generated/model";
+import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
+import {
+  workspaceAgentsDelete,
+  workspaceAgentsQuickStart,
+} from "@/lib/api/generated/workspace-agents/workspace-agents";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
-import { errorMessage } from "../tokens/token-form";
 
 type AgentsClientProps = {
   agents: AgentRead[];
@@ -67,7 +67,6 @@ export function AgentsClient({
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const basePath = `/org/${organization.id}/workspace/${workspaceId}/agents`;
-  const apiBasePath = `/api/organizations/${organization.id}/workspaces/${workspaceId}/agents`;
   const hasCredentials = credentials.length > 0;
 
   async function startChat() {
@@ -77,14 +76,7 @@ export function AgentsClient({
     setIsStartingChat(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBasePath}/quick-start`, {
-        method: "POST",
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Workspace chat could not be started."));
-      }
-      const bundle = data as AgentConversationResponse;
+      const bundle = await workspaceAgentsQuickStart(organization.id, workspaceId);
       const agent = bundle.agent;
       setAgents((current) => {
         const existingIndex = current.findIndex((entry) => entry.id === agent.id);
@@ -111,13 +103,7 @@ export function AgentsClient({
     setDeletingAgentId(agent.id);
     setError(null);
     try {
-      const response = await fetch(`${apiBasePath}/${agent.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(errorMessage(data, "Agent could not be deleted."));
-      }
+      await workspaceAgentsDelete(organization.id, workspaceId, agent.id);
       setAgents((current) => current.filter((entry) => entry.id !== agent.id));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Agent could not be deleted.");
@@ -160,9 +146,7 @@ export function AgentsClient({
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         {agents.length > 0 ? (

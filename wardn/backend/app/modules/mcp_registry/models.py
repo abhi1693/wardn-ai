@@ -31,6 +31,32 @@ from app.db.domain_types import (
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
+class MCPRepositoryMetadataRateLimit(Base):
+    __tablename__ = "mcp_repository_metadata_rate_limits"
+    __table_args__ = (
+        CheckConstraint(
+            "request_count > 0",
+            name="ck_mcp_repository_metadata_rate_limits_request_count_positive",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    window_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+    )
+
+
 class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "mcp_server_versions"
     __table_args__ = (

@@ -11,7 +11,16 @@ export default defineConfig({
       schemas: "./lib/api/generated/model",
       client: "fetch",
       clean: true,
-      baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000",
+      baseUrl: "",
+      override: {
+        fetch: {
+          includeHttpResponseReturnType: false,
+        },
+        mutator: {
+          path: "./lib/api/client.ts",
+          name: "apiRequest",
+        },
+      },
     },
   },
 });

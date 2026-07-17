@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
+import { getCurrentUser } from "@/lib/current-user";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { DeleteLimitClient } from "../../delete-limit-client";
-import { getCurrentUser, getLimits, limitBelongsToOrganization } from "../../data";
+import { getLimits, limitBelongsToOrganization } from "../../data";
 
 type DeleteLimitPageProps = {
   params: Promise<{ organizationId: string; limitId: string }>;
@@ -16,18 +16,18 @@ type DeleteLimitPageProps = {
 
 export default async function DeleteLimitPage({ params }: DeleteLimitPageProps) {
   const { organizationId, limitId } = await params;
-  const [workspaceContext, organization, currentUser, limits] = await Promise.all([
+  const [workspaceContext, currentUser, limits] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
     getLimits(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization || !currentUser?.isSuperuser) {
     notFound();
   }
 
-  const workspaces = await getWorkspaces(organization.id);
   const limit = limits.find(
     (entry) => entry.id === limitId && limitBelongsToOrganization(entry, organization.id, workspaces)
   );

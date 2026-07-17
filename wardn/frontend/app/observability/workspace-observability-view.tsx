@@ -22,11 +22,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceObservabilityApiPath,
 } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
 
 type MCPToolUsageSummary = {
   total: number;
@@ -152,19 +151,7 @@ async function getMcpToolUsage(context: WorkspaceContext) {
   if (!path) {
     return emptyUsage();
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return emptyUsage();
-    }
-    return (await response.json()) as MCPToolUsageListResponse;
-  } catch {
-    return emptyUsage();
-  }
+  return backendJson<MCPToolUsageListResponse>(path);
 }
 
 async function getLLMUsage(context: WorkspaceContext) {
@@ -172,19 +159,7 @@ async function getLLMUsage(context: WorkspaceContext) {
   if (!path) {
     return emptyLLMUsage();
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return emptyLLMUsage();
-    }
-    return (await response.json()) as LLMUsageListResponse;
-  } catch {
-    return emptyLLMUsage();
-  }
+  return backendJson<LLMUsageListResponse>(path);
 }
 
 function formatNumber(value: number) {

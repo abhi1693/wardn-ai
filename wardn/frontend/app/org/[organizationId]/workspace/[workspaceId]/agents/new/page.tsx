@@ -6,7 +6,6 @@ import { AppShell } from "@/app/components/app-shell";
 import { getWorkspaceAgentAvailableTools } from "@/app/org/[organizationId]/agents/data";
 import { AgentForm } from "@/app/org/[organizationId]/agents/agent-form";
 import { getLlmCredentials } from "@/app/org/[organizationId]/llm-credentials/data";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -16,13 +15,13 @@ type NewWorkspaceAgentPageProps = {
 
 export default async function NewWorkspaceAgentPage({ params }: NewWorkspaceAgentPageProps) {
   const { organizationId, workspaceId } = await params;
-  const [workspaceContext, organization, credentials, availableTools] =
+  const [workspaceContext, credentials, availableTools] =
     await Promise.all([
       getWorkspaceContext({ organizationId, workspaceId }),
-      getOrganization(organizationId),
       getLlmCredentials(organizationId),
       getWorkspaceAgentAvailableTools(organizationId, workspaceId),
     ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

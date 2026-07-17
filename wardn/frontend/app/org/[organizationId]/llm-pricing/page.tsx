@@ -3,11 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
+import { getCurrentUser } from "@/lib/current-user";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
-import { canManageModelPrices, getCurrentUser, getModelPrices } from "./data";
+import { canManageModelPrices, getModelPrices } from "./data";
 import { ModelPricingClient } from "./model-pricing-client";
 
 type ModelPricingPageProps = {
@@ -16,12 +16,12 @@ type ModelPricingPageProps = {
 
 export default async function ModelPricingPage({ params }: ModelPricingPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, currentUser, prices] = await Promise.all([
+  const [workspaceContext, currentUser, prices] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
     getModelPrices(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

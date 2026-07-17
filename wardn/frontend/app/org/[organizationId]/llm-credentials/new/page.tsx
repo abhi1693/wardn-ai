@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getSecretStores, getWorkspaces } from "@/app/organizations/data";
+import { getSecretStores } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser } from "@/lib/current-user";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { CredentialForm } from "../credential-form";
-import { getCurrentUser } from "../current-user";
 
 type NewLlmCredentialPageProps = {
   params: Promise<{ organizationId: string }>;
@@ -16,13 +16,13 @@ type NewLlmCredentialPageProps = {
 
 export default async function NewLlmCredentialPage({ params }: NewLlmCredentialPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces, secretStores, currentUser] = await Promise.all([
+  const [workspaceContext, secretStores, currentUser] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
     getSecretStores(organizationId),
     getCurrentUser(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization) {
     notFound();

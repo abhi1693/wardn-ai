@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -29,8 +30,11 @@ import type {
   OrganizationRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import {
+  workspaceGuardrailPoliciesCreate,
+  workspaceGuardrailPoliciesUpdate,
+} from "@/lib/api/generated/workspace-guardrail-policies/workspace-guardrail-policies";
 
-import { errorMessage } from "../../../tokens/token-form";
 import type {
   GuardrailServerOption,
   GuardrailToolOption,
@@ -71,14 +75,6 @@ const modeOptions: Array<{
     description: "Record an explicit allow policy for audit and future default-deny modes.",
   },
 ];
-
-function policyEndpoint(organizationId: string, workspaceId: string, policy?: GuardrailPolicyRead) {
-  return `/api/organizations/${encodeURIComponent(
-    organizationId
-  )}/workspaces/${encodeURIComponent(
-    workspaceId
-  )}/guardrails/policies${policy ? `/${encodeURIComponent(policy.id)}` : ""}`;
-}
 
 function selectedValue(value?: string | null) {
   return value && value.length > 0 ? value : noneValue;
@@ -207,17 +203,19 @@ export function GuardrailForm({
         conditions: conditionsPayload(),
       };
 
-      const response = await fetch(
-        policyEndpoint(organization.id, workspace.id, policy),
-        {
-          method: isEditing ? "PATCH" : "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Guardrail policy could not be saved."));
+      if (isEditing && policy) {
+        await workspaceGuardrailPoliciesUpdate(
+          organization.id,
+          workspace.id,
+          policy.id,
+          payload as GuardrailPolicyUpdate
+        );
+      } else {
+        await workspaceGuardrailPoliciesCreate(
+          organization.id,
+          workspace.id,
+          payload as GuardrailPolicyCreate
+        );
       }
       router.push(basePath);
       router.refresh();
@@ -250,9 +248,7 @@ export function GuardrailForm({
       <CardContent>
         <form className="space-y-6" onSubmit={submitPolicy}>
           {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
+            <AsyncFeedback variant="error">{error}</AsyncFeedback>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">

@@ -12,6 +12,7 @@ from app.api.authorization import (
     require_workspace_admin_or_404,
     require_workspace_member_or_404,
 )
+from app.core.config import get_settings
 from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -50,6 +51,8 @@ from app.modules.mcp_registry.schemas import (
     MCPOperationJobRead,
     MCPRegistryServerListResponse,
     MCPRegistryServerResponse,
+    MCPRepositoryMetadataImportRequest,
+    MCPRepositoryMetadataImportResponse,
     MCPServerBulkUpdateRequest,
     MCPServerCreate,
     MCPServerInstallationListResponse,
@@ -57,6 +60,14 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallationToolValidationRequest,
     MCPServerInstallationToolValidationResponse,
     MCPServerInstallRequest,
+)
+from app.modules.mcp_registry.source_metadata import (
+    GitHubRepositoryNotFoundError,
+    InvalidGitHubRepositoryURLError,
+    import_repository_metadata,
+)
+from app.modules.mcp_registry.source_metadata_rate_limit import (
+    consume_repository_metadata_rate_limit,
 )
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.users.dependencies import get_current_user
@@ -76,6 +87,46 @@ workspace_router = APIRouter(
     prefix="/organizations/{organization_id}/workspaces/{workspace_id}/mcp/registry",
     tags=["workspace-mcp-registry"],
 )
+
+
+@organization_router.post(
+    "/source-metadata",
+    response_model=MCPRepositoryMetadataImportResponse,
+    operation_id="organization_mcp_registry_import_repository_metadata",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
+    },
+)
+async def import_organization_mcp_repository_metadata(
+    organization_id: UUID,
+    payload: MCPRepositoryMetadataImportRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRepositoryMetadataImportResponse:
+    await require_organization_admin_or_404(session, current_user, organization_id)
+    settings = get_settings()
+    rate_limit = await consume_repository_metadata_rate_limit(
+        session,
+        organization_id,
+        limit=settings.github_metadata_import_rate_limit,
+        window_seconds=settings.github_metadata_import_rate_window_seconds,
+    )
+    # Persist the shared rate-limit bucket and release the connection before outbound I/O.
+    await session.commit()
+    if not rate_limit.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Repository metadata import rate limit exceeded.",
+            headers={"Retry-After": str(rate_limit.retry_after_seconds)},
+        )
+    try:
+        return await import_repository_metadata(payload.repository_url)
+    except InvalidGitHubRepositoryURLError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except GitHubRepositoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @organization_catalog_router.get(

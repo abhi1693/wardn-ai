@@ -3,16 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
+import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   getWorkspaceContext,
   type WorkspaceContext,
 } from "@/lib/workspace-context";
-import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
 
 type OrganizationDashboardPageProps = {
   params: Promise<{ organizationId: string }>;
@@ -24,36 +22,19 @@ async function getCatalogSourceCount(context: WorkspaceContext) {
     return 0;
   }
 
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (!response.ok) {
-      return 0;
-    }
-    const payload = (await response.json()) as MCPCatalogSourceListResponse;
-    return payload.sources.length;
-  } catch {
-    return 0;
-  }
+  const payload = await backendJson<MCPCatalogSourceListResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
+  );
+  return payload.sources.length;
 }
 
 export default async function OrganizationDashboardPage({
   params,
 }: OrganizationDashboardPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces] = await Promise.all([
-    getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId });
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization) {
     notFound();

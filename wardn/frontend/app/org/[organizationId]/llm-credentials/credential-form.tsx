@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -30,9 +31,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  llmProviderCredentialsChatgptDeviceComplete,
+  llmProviderCredentialsChatgptDeviceStart,
+  llmProviderCredentialsCreate,
+  llmProviderCredentialsUpdate,
+  llmProviderCredentialsValidate,
+} from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 import { cn } from "@/lib/utils";
 
-import { errorMessage } from "../tokens/token-form";
 import type {
   CredentialFormProps,
   CredentialPayload,
@@ -200,23 +207,14 @@ export function CredentialForm({
     setError(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organization.id}/llm/provider-credentials/chatgpt/device/complete`,
+      const result = await llmProviderCredentialsChatgptDeviceComplete(
+        organization.id,
         {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
             deviceAuthId: flow.deviceAuthId,
             userCode: flow.userCode,
             ...flow.target,
-          }),
         }
       );
-      const data = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "ChatGPT connection could not be completed."));
-      }
-      const result = data as { status?: unknown };
       if (result.status === "pending") {
         return;
       }
@@ -250,20 +248,7 @@ export function CredentialForm({
     setNotice(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organization.id}/llm/provider-credentials/chatgpt/device/start`,
-        { method: "POST" }
-      );
-      const data = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "ChatGPT connection could not be started."));
-      }
-      const result = data as {
-        deviceAuthId?: unknown;
-        userCode?: unknown;
-        verificationUrl?: unknown;
-        intervalSeconds?: unknown;
-      };
+      const result = await llmProviderCredentialsChatgptDeviceStart(organization.id);
       if (
         typeof result.deviceAuthId !== "string" ||
         typeof result.userCode !== "string" ||
@@ -337,19 +322,10 @@ export function CredentialForm({
         payload.oauthProvider = "chatgpt";
       }
 
-      const response = await fetch(
-        credential
-          ? `/api/organizations/${organization.id}/llm/provider-credentials/${credential.id}`
-          : `/api/organizations/${organization.id}/llm/provider-credentials`,
-        {
-          method: credential ? "PATCH" : "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Credential could not be saved."));
+      if (credential) {
+        await llmProviderCredentialsUpdate(organization.id, credential.id, payload);
+      } else {
+        await llmProviderCredentialsCreate(organization.id, payload);
       }
       router.push(`/org/${organization.id}/llm-credentials`);
     } catch (caught) {
@@ -369,15 +345,7 @@ export function CredentialForm({
     setNotice(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organization.id}/llm/provider-credentials/${credential.id}/validate`,
-        { method: "POST" }
-      );
-      const data = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Credential validation failed."));
-      }
-      const result = data as { ok?: unknown; message?: unknown };
+      const result = await llmProviderCredentialsValidate(organization.id, credential.id);
       const message =
         typeof result.message === "string" && result.message.trim().length > 0
           ? result.message
@@ -714,15 +682,13 @@ export function CredentialForm({
             ) : null}
 
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
+              <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
             {notice ? (
-              <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              <AsyncFeedback className="flex items-center gap-2" variant="success">
                 <CheckCircle2 className="size-4" />
                 {notice}
-              </div>
+              </AsyncFeedback>
             ) : null}
 
             <div className="flex justify-end gap-2">

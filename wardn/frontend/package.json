@@ -9,8 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "e2e:prepare": "mkdir -p .next/standalone/wardn/frontend/.next && rm -rf .next/standalone/wardn/frontend/.next/static .next/standalone/wardn/frontend/public && cp -R .next/static .next/standalone/wardn/frontend/.next/static && cp -R public .next/standalone/wardn/frontend/public",
-    "e2e": "npm run build && npm run e2e:prepare && playwright test",
-    "e2e:update": "npm run build && npm run e2e:prepare && playwright test --update-snapshots"
+    "e2e": "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:${WARDN_E2E_BACKEND_PORT:-4100} npm run build && npm run e2e:prepare && playwright test",
+    "e2e:update": "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:${WARDN_E2E_BACKEND_PORT:-4100} npm run build && npm run e2e:prepare && playwright test --update-snapshots"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.211",

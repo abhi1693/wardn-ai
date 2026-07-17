@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getSecretStores } from "@/app/organizations/data";
+import { getSecretStores } from "@/app/organizations/data";
 import { SecretBackendsClient } from "@/app/organizations/secret-backends-client";
 import { newSecretBackendPath } from "@/app/organizations/secret-backends-paths";
 import { Button } from "@/components/ui/button";
@@ -15,11 +15,11 @@ type SecretBackendsPageProps = {
 
 export default async function SecretBackendsPage({ params }: SecretBackendsPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, secretStores] = await Promise.all([
+  const [workspaceContext, secretStores] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getSecretStores(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

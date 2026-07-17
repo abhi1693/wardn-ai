@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  Check,
-  Copy,
   KeyRound,
   Loader2,
   Pencil,
@@ -12,6 +10,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,8 +19,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -32,10 +29,9 @@ import {
 } from "@/components/ui/table";
 import type {
   OrganizationRead,
-  UserAPITokenCreated,
   UserAPITokenRead,
 } from "@/lib/api/generated/model";
-import { createdTokenStorageKey, errorMessage } from "./token-form";
+import { authDeleteApiToken } from "@/lib/api/generated/auth/auth";
 
 type AgentTokensClientProps = {
   initialTokens: UserAPITokenRead[];
@@ -62,64 +58,13 @@ function scopeLabel(token: UserAPITokenRead, organization: OrganizationRead) {
   return "Organization scope";
 }
 
-function readCreatedToken(organizationId: string) {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const key = createdTokenStorageKey(organizationId);
-  const stored = sessionStorage.getItem(key);
-  if (!stored) {
-    return null;
-  }
-  sessionStorage.removeItem(key);
-  try {
-    const parsed = JSON.parse(stored) as UserAPITokenCreated;
-    return parsed.token && parsed.record?.id ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AgentTokensClient({
   initialTokens,
   organization,
 }: AgentTokensClientProps) {
-  const [createdToken, setCreatedToken] = useState<UserAPITokenCreated | null>(() =>
-    readCreatedToken(organization.id)
-  );
-  const [tokens, setTokens] = useState<UserAPITokenRead[]>(() => {
-    if (
-      createdToken &&
-      !initialTokens.some((token) => token.id === createdToken.record.id)
-    ) {
-      return [createdToken.record, ...initialTokens];
-    }
-    return initialTokens;
-  });
+  const [tokens, setTokens] = useState<UserAPITokenRead[]>(initialTokens);
   const [deletingTokenId, setDeletingTokenId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  async function copyCreatedToken() {
-    if (!createdToken?.token) {
-      return;
-    }
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(createdToken.token);
-    } else {
-      const field = document.createElement("textarea");
-      field.value = createdToken.token;
-      field.setAttribute("readonly", "");
-      field.style.position = "fixed";
-      field.style.top = "-1000px";
-      document.body.appendChild(field);
-      field.select();
-      document.execCommand("copy");
-      document.body.removeChild(field);
-    }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  }
 
   async function deleteToken(token: UserAPITokenRead) {
     if (!window.confirm(`Delete ${token.name}?`)) {
@@ -129,17 +74,8 @@ export function AgentTokensClient({
     setDeletingTokenId(token.id);
     setError(null);
     try {
-      const response = await fetch(`/api/auth/api-tokens/${token.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(errorMessage(data, "Token could not be deleted."));
-      }
+      await authDeleteApiToken(token.id);
       setTokens((current) => current.filter((entry) => entry.id !== token.id));
-      if (createdToken?.record.id === token.id) {
-        setCreatedToken(null);
-      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Token could not be deleted.");
     } finally {
@@ -162,41 +98,8 @@ export function AgentTokensClient({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {createdToken ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-800">
-                  <Check className="size-4" />
-                  Token created
-                </div>
-                <Label htmlFor="created-token">Token</Label>
-                <div className="mt-2 flex gap-2">
-                  <Input
-                    className="font-mono text-xs"
-                    id="created-token"
-                    readOnly
-                    type="text"
-                    value={createdToken.token}
-                  />
-                  <Button
-                    aria-label="Copy token"
-                    onClick={copyCreatedToken}
-                    size="icon"
-                    type="button"
-                    variant="outline"
-                  >
-                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                  </Button>
-                </div>
-                <p className="mt-3 text-xs leading-5 text-emerald-800">
-                  Store this value now. It is not shown again.
-                </p>
-              </div>
-            ) : null}
-
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
+              <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
             {tokens.length > 0 ? (

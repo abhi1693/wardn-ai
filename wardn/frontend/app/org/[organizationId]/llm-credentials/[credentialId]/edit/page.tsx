@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getSecretStores, getWorkspaces } from "@/app/organizations/data";
+import { getSecretStores } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser } from "@/lib/current-user";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { CredentialForm } from "../../credential-form";
-import { getCurrentUser } from "../../current-user";
 import { getLlmCredentials } from "../../data";
 
 type EditLlmCredentialPageProps = {
@@ -21,19 +21,17 @@ export default async function EditLlmCredentialPage({
   const { organizationId, credentialId } = await params;
   const [
     workspaceContext,
-    organization,
-    workspaces,
     secretStores,
     credentials,
     currentUser,
   ] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
     getSecretStores(organizationId),
     getLlmCredentials(organizationId),
     getCurrentUser(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
   const credential = credentials.find((entry) => entry.id === credentialId);
 
   if (!organization || !credential) {

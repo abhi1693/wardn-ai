@@ -6,7 +6,6 @@ import { AppShell } from "@/app/components/app-shell";
 import { AgentChatClient } from "@/app/org/[organizationId]/agents/[agentId]/agent-chat-client";
 import { getWorkspaceAgents } from "@/app/org/[organizationId]/agents/data";
 import { getLlmCredentials } from "@/app/org/[organizationId]/llm-credentials/data";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -16,12 +15,12 @@ type WorkspaceAgentChatPageProps = {
 
 export default async function WorkspaceAgentChatPage({ params }: WorkspaceAgentChatPageProps) {
   const { organizationId, workspaceId, agentId } = await params;
-  const [workspaceContext, organization, agents, credentials] = await Promise.all([
+  const [workspaceContext, agents, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId, workspaceId }),
-    getOrganization(organizationId),
     getWorkspaceAgents(organizationId, workspaceId),
     getLlmCredentials(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
   const agent = agents.find((entry) => entry.id === agentId);
 
   if (!organization || !agent) {

@@ -1,5 +1,7 @@
 "use client";
 
+import { ApiError, apiRawFetch } from "@/lib/api/client";
+
 import {
   CheckCircle2,
   CircleHelp,
@@ -10,17 +12,21 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { FeedbackMessages, responseErrorMessage } from "@/app/mcp/mcp-list-ui";
+import { FeedbackMessages } from "@/app/mcp/mcp-list-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type {
   MCPServerInstallationRead,
-  MCPServerInstallationToolsResponse,
   MCPServerInstallationToolValidationResponse,
   MCPServerToolRead,
 } from "@/lib/api/generated/model";
+import {
+  workspaceMcpRegistryListInstalledServerTools,
+  workspaceMcpRegistryValidateInstalledServerTool,
+} from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
+import { responseErrorMessage } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 
 type ToolInputProperty = {
@@ -59,17 +65,9 @@ type GatewayRpcResponse = {
 
 type ValidateInstallClientProps = {
   installation: MCPServerInstallationRead;
+  organizationId: string;
+  workspaceId: string;
 };
-
-function validationEndpoint(installationId: string) {
-  return `/api/mcp/registry/installed-server-configs/${encodeURIComponent(
-    installationId
-  )}/validate-tool`;
-}
-
-function toolsEndpoint(installationId: string) {
-  return `/api/mcp/registry/installed-server-configs/${encodeURIComponent(installationId)}/tools`;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -305,14 +303,20 @@ function validateRequiredArguments(
 }
 
 async function loadToolsFromGateway(
-  installation: MCPServerInstallationRead
+  installation: MCPServerInstallationRead,
+  organizationId: string,
+  workspaceId: string
 ): Promise<MCPServerToolRead[]> {
   const tools: MCPServerToolRead[] = [];
   let cursor = "";
   let requestId = 1;
 
   do {
-    const response = await fetch("/api/mcp/gateway", {
+    const response = await apiRawFetch(
+      `/api/v1/organizations/${encodeURIComponent(
+        organizationId
+      )}/workspaces/${encodeURIComponent(workspaceId)}/mcp/gateway`,
+      {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -331,7 +335,8 @@ async function loadToolsFromGateway(
         },
       }),
       cache: "no-store",
-    });
+      }
+    );
 
     if (!response.ok) {
       throw new Error(await responseErrorMessage(response, "Tools could not be loaded."));
@@ -364,7 +369,11 @@ async function loadToolsFromGateway(
   return tools;
 }
 
-export function ValidateInstallClient({ installation }: ValidateInstallClientProps) {
+export function ValidateInstallClient({
+  installation,
+  organizationId,
+  workspaceId,
+}: ValidateInstallClientProps) {
   const [tools, setTools] = useState<MCPServerToolRead[]>([]);
   const [toolSearch, setToolSearch] = useState("");
   const [selectedToolName, setSelectedToolName] = useState("");
@@ -409,26 +418,11 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
       setIsLoadingTools(true);
       setError("");
       try {
-        const response = await fetch(toolsEndpoint(installation.id), {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          if (response.status === 404) {
-            const fallbackTools = await loadToolsFromGateway(installation);
-            const sortedFallbackTools = fallbackTools.sort((left, right) =>
-              left.toolName.localeCompare(right.toolName)
-            );
-            if (!cancelled) {
-              setTools(sortedFallbackTools);
-              if (sortedFallbackTools.length > 0) {
-                selectTool(sortedFallbackTools[0]);
-              }
-            }
-            return;
-          }
-          throw new Error(await responseErrorMessage(response, "Tools could not be loaded."));
-        }
-        const data = (await response.json()) as MCPServerInstallationToolsResponse;
+        const data = await workspaceMcpRegistryListInstalledServerTools(
+          organizationId,
+          workspaceId,
+          installation.id
+        );
         const sortedTools = [...data.tools].sort((left, right) =>
           left.toolName.localeCompare(right.toolName)
         );
@@ -439,6 +433,27 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
           }
         }
       } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 404) {
+          try {
+            const fallbackTools = await loadToolsFromGateway(
+              installation,
+              organizationId,
+              workspaceId
+            );
+            const sortedFallbackTools = fallbackTools.sort((left, right) =>
+              left.toolName.localeCompare(right.toolName)
+            );
+            if (!cancelled) {
+              setTools(sortedFallbackTools);
+              if (sortedFallbackTools.length > 0) {
+                selectTool(sortedFallbackTools[0]);
+              }
+            }
+            return;
+          } catch (fallbackError) {
+            caught = fallbackError;
+          }
+        }
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Tools could not be loaded.");
         }
@@ -454,7 +469,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
     return () => {
       cancelled = true;
     };
-  }, [installation]);
+  }, [installation, organizationId, workspaceId]);
 
   async function validateTool() {
     const toolName = selectedToolName.trim();
@@ -480,20 +495,15 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
         return;
       }
 
-      const response = await fetch(validationEndpoint(installation.id), {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+      const data = await workspaceMcpRegistryValidateInstalledServerTool(
+        organizationId,
+        workspaceId,
+        installation.id,
+        {
           toolName,
           arguments: parsedArguments.argumentsValue,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Tool validation failed."));
-      }
-      const data = (await response.json()) as MCPServerInstallationToolValidationResponse;
+        }
+      );
       setResult(data);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Tool validation failed.");
@@ -634,6 +644,7 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                     <div className="space-y-4">
                       {selectedInputs.map((input) => {
                         const inputId = `validation-argument-${input.name}`;
+                        const errorId = `${inputId}-error`;
                         const value = argumentValues[input.name];
                         const fieldError =
                           argumentError?.field === input.name ? argumentError.message : "";
@@ -672,6 +683,8 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                 )}
                               >
                                 <input
+                                  aria-describedby={fieldError ? errorId : undefined}
+                                  aria-invalid={Boolean(fieldError)}
                                   checked={value === true}
                                   id={inputId}
                                   onChange={(event) => {
@@ -697,6 +710,8 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                                 value={typeof value === "string" ? value : ""}
                               >
                                 <SelectTrigger
+                                  aria-describedby={fieldError ? errorId : undefined}
+                                  aria-invalid={Boolean(fieldError)}
                                   className={cn(
                                     "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
                                     fieldError &&
@@ -716,6 +731,8 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                               </Select>
                             ) : input.type === "object" || input.type === "array" ? (
                               <textarea
+                                aria-describedby={fieldError ? errorId : undefined}
+                                aria-invalid={Boolean(fieldError)}
                                 className={cn(
                                   "min-h-32 w-full rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20",
                                   fieldError && "!border-red-500 focus:!border-red-600 focus:!ring-red-100"
@@ -732,6 +749,8 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                               />
                             ) : (
                               <Input
+                                aria-describedby={fieldError ? errorId : undefined}
+                                aria-invalid={Boolean(fieldError)}
                                 className={cn(
                                   "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
                                   fieldError &&
@@ -754,7 +773,12 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                               />
                             )}
                             {fieldError ? (
-                              <p className="text-xs font-medium leading-4 text-red-600">
+                              <p
+                                aria-live="assertive"
+                                className="text-xs font-medium leading-4 text-red-600"
+                                id={errorId}
+                                role="alert"
+                              >
                                 {fieldError}
                               </p>
                             ) : null}
@@ -805,11 +829,14 @@ export function ValidateInstallClient({ installation }: ValidateInstallClientPro
                 </div>
               ) : (
                 <div
+                  aria-atomic="true"
+                  aria-live={result.status === "passed" ? "polite" : "assertive"}
                   className={
                     result.status === "passed"
                       ? "rounded-lg border border-emerald-200 bg-emerald-50 p-4"
                       : "rounded-lg border border-red-200 bg-red-50 p-4"
                   }
+                  role={result.status === "passed" ? "status" : "alert"}
                 >
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                     {result.status === "passed" ? (

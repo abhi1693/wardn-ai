@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   MCPOperationJobRead,
   MCPServerBulkUpdateRequest,
   MCPServerInstallRequest,
@@ -17,30 +15,7 @@ import type {
   WorkspaceMcpRegistryListInstalledServersParams
 } from '../model';
 
-
-export type workspaceMcpRegistryUninstallServerConfigResponse204 = {
-  data: void
-  status: 204
-}
-
-export type workspaceMcpRegistryUninstallServerConfigResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryUninstallServerConfigResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryUninstallServerConfigResponseSuccess = (workspaceMcpRegistryUninstallServerConfigResponse204) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryUninstallServerConfigResponseError = (workspaceMcpRegistryUninstallServerConfigResponse404 | workspaceMcpRegistryUninstallServerConfigResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryUninstallServerConfigResponse = (workspaceMcpRegistryUninstallServerConfigResponseSuccess | workspaceMcpRegistryUninstallServerConfigResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceMcpRegistryUninstallServerConfigUrl = (organizationId: string,
     workspaceId: string,
@@ -49,7 +24,7 @@ export const getWorkspaceMcpRegistryUninstallServerConfigUrl = (organizationId: 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}`
 }
 
 /**
@@ -57,53 +32,17 @@ export const getWorkspaceMcpRegistryUninstallServerConfigUrl = (organizationId: 
  */
 export const workspaceMcpRegistryUninstallServerConfig = async (organizationId: string,
     workspaceId: string,
-    installationId: string, options?: RequestInit): Promise<workspaceMcpRegistryUninstallServerConfigResponse> => {
+    installationId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryUninstallServerConfigUrl(organizationId,workspaceId,installationId),
+  return apiRequest<void>(getWorkspaceMcpRegistryUninstallServerConfigUrl(organizationId,workspaceId,installationId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryUninstallServerConfigResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryUninstallServerConfigResponse
-}
-
-
-export type workspaceMcpRegistryListInstalledServerToolsResponse200 = {
-  data: MCPServerInstallationToolsResponse
-  status: 200
-}
-
-export type workspaceMcpRegistryListInstalledServerToolsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryListInstalledServerToolsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryListInstalledServerToolsResponse502 = {
-  data: ErrorResponse
-  status: 502
-}
-
-export type workspaceMcpRegistryListInstalledServerToolsResponseSuccess = (workspaceMcpRegistryListInstalledServerToolsResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryListInstalledServerToolsResponseError = (workspaceMcpRegistryListInstalledServerToolsResponse404 | workspaceMcpRegistryListInstalledServerToolsResponse422 | workspaceMcpRegistryListInstalledServerToolsResponse502) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryListInstalledServerToolsResponse = (workspaceMcpRegistryListInstalledServerToolsResponseSuccess | workspaceMcpRegistryListInstalledServerToolsResponseError)
 
 export const getWorkspaceMcpRegistryListInstalledServerToolsUrl = (organizationId: string,
     workspaceId: string,
@@ -112,7 +51,7 @@ export const getWorkspaceMcpRegistryListInstalledServerToolsUrl = (organizationI
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}/tools`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}/tools`
 }
 
 /**
@@ -120,48 +59,17 @@ export const getWorkspaceMcpRegistryListInstalledServerToolsUrl = (organizationI
  */
 export const workspaceMcpRegistryListInstalledServerTools = async (organizationId: string,
     workspaceId: string,
-    installationId: string, options?: RequestInit): Promise<workspaceMcpRegistryListInstalledServerToolsResponse> => {
+    installationId: string, options?: RequestInit): Promise<MCPServerInstallationToolsResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryListInstalledServerToolsUrl(organizationId,workspaceId,installationId),
+  return apiRequest<MCPServerInstallationToolsResponse>(getWorkspaceMcpRegistryListInstalledServerToolsUrl(organizationId,workspaceId,installationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryListInstalledServerToolsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryListInstalledServerToolsResponse
-}
-
-
-export type workspaceMcpRegistryValidateInstalledServerToolResponse200 = {
-  data: MCPServerInstallationToolValidationResponse
-  status: 200
-}
-
-export type workspaceMcpRegistryValidateInstalledServerToolResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryValidateInstalledServerToolResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryValidateInstalledServerToolResponseSuccess = (workspaceMcpRegistryValidateInstalledServerToolResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryValidateInstalledServerToolResponseError = (workspaceMcpRegistryValidateInstalledServerToolResponse404 | workspaceMcpRegistryValidateInstalledServerToolResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryValidateInstalledServerToolResponse = (workspaceMcpRegistryValidateInstalledServerToolResponseSuccess | workspaceMcpRegistryValidateInstalledServerToolResponseError)
 
 export const getWorkspaceMcpRegistryValidateInstalledServerToolUrl = (organizationId: string,
     workspaceId: string,
@@ -170,7 +78,7 @@ export const getWorkspaceMcpRegistryValidateInstalledServerToolUrl = (organizati
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}/validate-tool`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-server-configs/${installationId}/validate-tool`
 }
 
 /**
@@ -179,43 +87,17 @@ export const getWorkspaceMcpRegistryValidateInstalledServerToolUrl = (organizati
 export const workspaceMcpRegistryValidateInstalledServerTool = async (organizationId: string,
     workspaceId: string,
     installationId: string,
-    mCPServerInstallationToolValidationRequest: MCPServerInstallationToolValidationRequest, options?: RequestInit): Promise<workspaceMcpRegistryValidateInstalledServerToolResponse> => {
+    mCPServerInstallationToolValidationRequest: MCPServerInstallationToolValidationRequest, options?: RequestInit): Promise<MCPServerInstallationToolValidationResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryValidateInstalledServerToolUrl(organizationId,workspaceId,installationId),
+  return apiRequest<MCPServerInstallationToolValidationResponse>(getWorkspaceMcpRegistryValidateInstalledServerToolUrl(organizationId,workspaceId,installationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPServerInstallationToolValidationRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryValidateInstalledServerToolResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryValidateInstalledServerToolResponse
-}
-
-
-export type workspaceMcpRegistryListInstalledServersResponse200 = {
-  data: MCPServerInstallationListResponse
-  status: 200
-}
-
-export type workspaceMcpRegistryListInstalledServersResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryListInstalledServersResponseSuccess = (workspaceMcpRegistryListInstalledServersResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryListInstalledServersResponseError = (workspaceMcpRegistryListInstalledServersResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryListInstalledServersResponse = (workspaceMcpRegistryListInstalledServersResponseSuccess | workspaceMcpRegistryListInstalledServersResponseError)
 
 export const getWorkspaceMcpRegistryListInstalledServersUrl = (organizationId: string,
     workspaceId: string,
@@ -231,7 +113,7 @@ export const getWorkspaceMcpRegistryListInstalledServersUrl = (organizationId: s
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers`
 }
 
 /**
@@ -239,53 +121,17 @@ export const getWorkspaceMcpRegistryListInstalledServersUrl = (organizationId: s
  */
 export const workspaceMcpRegistryListInstalledServers = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceMcpRegistryListInstalledServersParams, options?: RequestInit): Promise<workspaceMcpRegistryListInstalledServersResponse> => {
+    params?: WorkspaceMcpRegistryListInstalledServersParams, options?: RequestInit): Promise<MCPServerInstallationListResponse> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryListInstalledServersUrl(organizationId,workspaceId,params),
+  return apiRequest<MCPServerInstallationListResponse>(getWorkspaceMcpRegistryListInstalledServersUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryListInstalledServersResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryListInstalledServersResponse
-}
-
-
-export type workspaceMcpRegistryUpdateInstalledServersResponse202 = {
-  data: MCPOperationJobRead
-  status: 202
-}
-
-export type workspaceMcpRegistryUpdateInstalledServersResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceMcpRegistryUpdateInstalledServersResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryUpdateInstalledServersResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryUpdateInstalledServersResponseSuccess = (workspaceMcpRegistryUpdateInstalledServersResponse202) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryUpdateInstalledServersResponseError = (workspaceMcpRegistryUpdateInstalledServersResponse400 | workspaceMcpRegistryUpdateInstalledServersResponse404 | workspaceMcpRegistryUpdateInstalledServersResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryUpdateInstalledServersResponse = (workspaceMcpRegistryUpdateInstalledServersResponseSuccess | workspaceMcpRegistryUpdateInstalledServersResponseError)
 
 export const getWorkspaceMcpRegistryUpdateInstalledServersUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -293,7 +139,7 @@ export const getWorkspaceMcpRegistryUpdateInstalledServersUrl = (organizationId:
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/updates`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/updates`
 }
 
 /**
@@ -301,48 +147,17 @@ export const getWorkspaceMcpRegistryUpdateInstalledServersUrl = (organizationId:
  */
 export const workspaceMcpRegistryUpdateInstalledServers = async (organizationId: string,
     workspaceId: string,
-    mCPServerBulkUpdateRequest: MCPServerBulkUpdateRequest, options?: RequestInit): Promise<workspaceMcpRegistryUpdateInstalledServersResponse> => {
+    mCPServerBulkUpdateRequest: MCPServerBulkUpdateRequest, options?: RequestInit): Promise<MCPOperationJobRead> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryUpdateInstalledServersUrl(organizationId,workspaceId),
+  return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryUpdateInstalledServersUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPServerBulkUpdateRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryUpdateInstalledServersResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryUpdateInstalledServersResponse
-}
-
-
-export type workspaceMcpRegistryUninstallServerResponse204 = {
-  data: void
-  status: 204
-}
-
-export type workspaceMcpRegistryUninstallServerResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryUninstallServerResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryUninstallServerResponseSuccess = (workspaceMcpRegistryUninstallServerResponse204) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryUninstallServerResponseError = (workspaceMcpRegistryUninstallServerResponse404 | workspaceMcpRegistryUninstallServerResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryUninstallServerResponse = (workspaceMcpRegistryUninstallServerResponseSuccess | workspaceMcpRegistryUninstallServerResponseError)
 
 export const getWorkspaceMcpRegistryUninstallServerUrl = (organizationId: string,
     workspaceId: string,
@@ -351,7 +166,7 @@ export const getWorkspaceMcpRegistryUninstallServerUrl = (organizationId: string
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
 }
 
 /**
@@ -359,53 +174,17 @@ export const getWorkspaceMcpRegistryUninstallServerUrl = (organizationId: string
  */
 export const workspaceMcpRegistryUninstallServer = async (organizationId: string,
     workspaceId: string,
-    serverName: string, options?: RequestInit): Promise<workspaceMcpRegistryUninstallServerResponse> => {
+    serverName: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryUninstallServerUrl(organizationId,workspaceId,serverName),
+  return apiRequest<void>(getWorkspaceMcpRegistryUninstallServerUrl(organizationId,workspaceId,serverName),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryUninstallServerResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryUninstallServerResponse
-}
-
-
-export type workspaceMcpRegistryInstallServerVersionResponse202 = {
-  data: MCPOperationJobRead
-  status: 202
-}
-
-export type workspaceMcpRegistryInstallServerVersionResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceMcpRegistryInstallServerVersionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryInstallServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryInstallServerVersionResponseSuccess = (workspaceMcpRegistryInstallServerVersionResponse202) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryInstallServerVersionResponseError = (workspaceMcpRegistryInstallServerVersionResponse400 | workspaceMcpRegistryInstallServerVersionResponse404 | workspaceMcpRegistryInstallServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryInstallServerVersionResponse = (workspaceMcpRegistryInstallServerVersionResponseSuccess | workspaceMcpRegistryInstallServerVersionResponseError)
 
 export const getWorkspaceMcpRegistryInstallServerVersionUrl = (organizationId: string,
     workspaceId: string,
@@ -414,7 +193,7 @@ export const getWorkspaceMcpRegistryInstallServerVersionUrl = (organizationId: s
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
 }
 
 /**
@@ -423,48 +202,17 @@ export const getWorkspaceMcpRegistryInstallServerVersionUrl = (organizationId: s
 export const workspaceMcpRegistryInstallServerVersion = async (organizationId: string,
     workspaceId: string,
     serverName: string,
-    mCPServerInstallRequest: MCPServerInstallRequest, options?: RequestInit): Promise<workspaceMcpRegistryInstallServerVersionResponse> => {
+    mCPServerInstallRequest: MCPServerInstallRequest, options?: RequestInit): Promise<MCPOperationJobRead> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryInstallServerVersionUrl(organizationId,workspaceId,serverName),
+  return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryInstallServerVersionUrl(organizationId,workspaceId,serverName),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPServerInstallRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryInstallServerVersionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryInstallServerVersionResponse
-}
-
-
-export type workspaceMcpRegistryGetOperationJobResponse200 = {
-  data: MCPOperationJobRead
-  status: 200
-}
-
-export type workspaceMcpRegistryGetOperationJobResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceMcpRegistryGetOperationJobResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpRegistryGetOperationJobResponseSuccess = (workspaceMcpRegistryGetOperationJobResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpRegistryGetOperationJobResponseError = (workspaceMcpRegistryGetOperationJobResponse404 | workspaceMcpRegistryGetOperationJobResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpRegistryGetOperationJobResponse = (workspaceMcpRegistryGetOperationJobResponseSuccess | workspaceMcpRegistryGetOperationJobResponseError)
 
 export const getWorkspaceMcpRegistryGetOperationJobUrl = (organizationId: string,
     workspaceId: string,
@@ -473,7 +221,7 @@ export const getWorkspaceMcpRegistryGetOperationJobUrl = (organizationId: string
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/jobs/${jobId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/jobs/${jobId}`
 }
 
 /**
@@ -481,22 +229,15 @@ export const getWorkspaceMcpRegistryGetOperationJobUrl = (organizationId: string
  */
 export const workspaceMcpRegistryGetOperationJob = async (organizationId: string,
     workspaceId: string,
-    jobId: string, options?: RequestInit): Promise<workspaceMcpRegistryGetOperationJobResponse> => {
+    jobId: string, options?: RequestInit): Promise<MCPOperationJobRead> => {
 
-  const res = await fetch(getWorkspaceMcpRegistryGetOperationJobUrl(organizationId,workspaceId,jobId),
+  return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryGetOperationJobUrl(organizationId,workspaceId,jobId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpRegistryGetOperationJobResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpRegistryGetOperationJobResponse
-}
+);}
 
 

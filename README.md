@@ -142,8 +142,29 @@ npm run web:build
 npm run web:lint
 ```
 
-The frontend expects the backend at `http://127.0.0.1:8000` by default. Override
-with `WARDN_BACKEND_URL` when needed.
+Browser requests go directly to FastAPI; the Next.js application does not proxy API,
+OAuth, or well-known routes. In production, route `/api/v1`, `/api/v1/oauth`, and
+`/.well-known` to the backend at the ingress so the UI and API share an origin. This
+keeps session cookies available to browser and server-rendered requests without an
+application-level proxy.
+
+For local development with the UI and API on separate ports, set
+`NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000` before building or starting Next.js,
+and include the frontend origin in `WARDN_CORS_ORIGINS`. Container deployments can
+set `window.__WARDN_API_BASE_URL__` in `public/wardn-config.js` at runtime. Leave it
+empty when ingress provides same-origin routing. `WARDN_BACKEND_URL` remains the
+server-rendering backend origin and defaults to `http://127.0.0.1:8000`.
+
+Set `WARDN_SESSION_COOKIE_NAME` to the same value in the backend and frontend
+environments when overriding the default `wardn_session` cookie name. The frontend
+route guard uses this setting only as an early navigation check; protected page data
+still goes through FastAPI, where expired or invalid sessions return `401` and trigger
+reauthentication.
+
+The frontend sends a restrictive Content Security Policy and related browser security
+headers. Same-origin API routing needs no additional configuration. If a deployment uses
+runtime browser API or WebSocket origins that differ from the frontend origin, list them
+space-separated in `WARDN_CSP_CONNECT_SRC` (for example, `https://api.example.com`).
 
 ## Management Commands
 
@@ -235,6 +256,9 @@ Runtime settings use the `WARDN_` prefix. Common local values include:
 
 - `WARDN_DATABASE_URL`
 - `WARDN_CORS_ORIGINS`
+- `WARDN_GITHUB_TOKEN` (optional; increases GitHub API limits for authenticated catalog metadata imports)
+- `WARDN_GITHUB_METADATA_IMPORT_RATE_LIMIT` and
+  `WARDN_GITHUB_METADATA_IMPORT_RATE_WINDOW_SECONDS` (cluster-wide per-organization import limit)
 - `WARDN_SESSION_SECRET`
 - `WARDN_MCP_INSTALL_ROOT`
 - `WARDN_MCP_JOB_WORKER_ISOLATION`

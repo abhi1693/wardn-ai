@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { WorkspacesOverviewClient } from "./workspaces-overview-client";
@@ -17,11 +16,9 @@ export default async function OrganizationWorkspacesPage({
   params,
 }: OrganizationWorkspacesPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces] = await Promise.all([
-    getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId });
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization) {
     notFound();

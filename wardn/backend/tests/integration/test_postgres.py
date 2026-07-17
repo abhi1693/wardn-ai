@@ -19,6 +19,9 @@ from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerVersion,
 )
+from app.modules.mcp_registry.source_metadata_rate_limit import (
+    consume_repository_metadata_rate_limit,
+)
 from app.modules.mcp_runtime import repository as mcp_runtime_repository
 from app.modules.mcp_runtime.models import (
     MCPRuntimeEvent,
@@ -104,6 +107,49 @@ async def test_alembic_upgrades_empty_database(postgres_engine: AsyncEngine) -> 
         "ix_mcp_tool_invocations_retention"
         in retention_indexes["mcp_tool_invocations"]
     )
+
+
+@pytest.mark.asyncio
+async def test_repository_metadata_rate_limit_is_durable_and_resets(
+    postgres_engine: AsyncEngine,
+) -> None:
+    session_factory = async_sessionmaker(postgres_engine, expire_on_commit=False)
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+
+    async with session_factory() as session:
+        user = await create_user(session)
+        organization = Organization(
+            name="Metadata Rate Limit",
+            slug=f"metadata-rate-limit-{uuid.uuid4().hex}",
+            status="active",
+            created_by_id=user.id,
+        )
+        session.add(organization)
+        await session.commit()
+
+        results = []
+        for _ in range(3):
+            results.append(
+                await consume_repository_metadata_rate_limit(
+                    session,
+                    organization.id,
+                    limit=2,
+                    window_seconds=60,
+                    now=now,
+                )
+            )
+            await session.commit()
+
+        reset_result = await consume_repository_metadata_rate_limit(
+            session,
+            organization.id,
+            limit=2,
+            window_seconds=60,
+            now=now + timedelta(seconds=61),
+        )
+
+    assert [result.allowed for result in results] == [True, True, False]
+    assert reset_result.allowed is True
 
 
 @pytest.mark.asyncio

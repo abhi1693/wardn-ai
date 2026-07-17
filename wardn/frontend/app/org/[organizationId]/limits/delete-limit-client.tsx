@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -18,6 +19,7 @@ import type {
   ResourceLimitRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { limitsDelete } from "@/lib/api/generated/limits/limits";
 
 import { displayLimitKey, scopeLabel } from "./limit-display";
 
@@ -27,18 +29,6 @@ type DeleteLimitClientProps = {
   organizations: OrganizationRead[];
   workspaces: WorkspaceRead[];
 };
-
-function errorMessage(payload: unknown, fallback: string) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "detail" in payload &&
-    typeof payload.detail === "string"
-  ) {
-    return payload.detail;
-  }
-  return fallback;
-}
 
 export function DeleteLimitClient({
   limit,
@@ -55,13 +45,7 @@ export function DeleteLimitClient({
     setDeleting(true);
     setError(null);
     try {
-      const response = await fetch(`/api/limits/${encodeURIComponent(limit.id)}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(errorMessage(payload, "Limit could not be deleted."));
-      }
+      await limitsDelete(limit.id);
       router.push(listPath);
       router.refresh();
     } catch (caught) {
@@ -85,9 +69,7 @@ export function DeleteLimitClient({
         </div>
 
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         <div className="flex justify-end gap-2">

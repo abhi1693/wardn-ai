@@ -8,8 +8,6 @@ import type {
   AuthConfigRead,
   AuthOidcCallbackParams,
   AuthOidcLoginParams,
-  ErrorResponse,
-  HTTPValidationError,
   LoginRequest,
   UserAPITokenCreate,
   UserAPITokenCreated,
@@ -19,439 +17,192 @@ import type {
   UserRead
 } from '../model';
 
-
-export type authListApiTokensResponse200 = {
-  data: UserAPITokenListResponse
-  status: 200
-}
-
-export type authListApiTokensResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authListApiTokensResponseSuccess = (authListApiTokensResponse200) & {
-  headers: Headers;
-};
-export type authListApiTokensResponseError = (authListApiTokensResponse422) & {
-  headers: Headers;
-};
-
-export type authListApiTokensResponse = (authListApiTokensResponseSuccess | authListApiTokensResponseError)
+import { apiRequest } from '../../client';
 
 export const getAuthListApiTokensUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/api-tokens`
+  return `/api/v1/auth/api-tokens`
 }
 
 /**
  * @summary List Api Tokens
  */
-export const authListApiTokens = async ( options?: RequestInit): Promise<authListApiTokensResponse> => {
+export const authListApiTokens = async ( options?: RequestInit): Promise<UserAPITokenListResponse> => {
 
-  const res = await fetch(getAuthListApiTokensUrl(),
+  return apiRequest<UserAPITokenListResponse>(getAuthListApiTokensUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authListApiTokensResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authListApiTokensResponse
-}
-
-
-export type authCreateApiTokenResponse201 = {
-  data: UserAPITokenCreated
-  status: 201
-}
-
-export type authCreateApiTokenResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type authCreateApiTokenResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authCreateApiTokenResponseSuccess = (authCreateApiTokenResponse201) & {
-  headers: Headers;
-};
-export type authCreateApiTokenResponseError = (authCreateApiTokenResponse400 | authCreateApiTokenResponse422) & {
-  headers: Headers;
-};
-
-export type authCreateApiTokenResponse = (authCreateApiTokenResponseSuccess | authCreateApiTokenResponseError)
 
 export const getAuthCreateApiTokenUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/api-tokens`
+  return `/api/v1/auth/api-tokens`
 }
 
 /**
  * @summary Create Api Token
  */
-export const authCreateApiToken = async (userAPITokenCreate: UserAPITokenCreate, options?: RequestInit): Promise<authCreateApiTokenResponse> => {
+export const authCreateApiToken = async (userAPITokenCreate: UserAPITokenCreate, options?: RequestInit): Promise<UserAPITokenCreated> => {
 
-  const res = await fetch(getAuthCreateApiTokenUrl(),
+  return apiRequest<UserAPITokenCreated>(getAuthCreateApiTokenUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(userAPITokenCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authCreateApiTokenResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authCreateApiTokenResponse
-}
-
-
-export type authDeleteApiTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type authDeleteApiTokenResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type authDeleteApiTokenResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authDeleteApiTokenResponseSuccess = (authDeleteApiTokenResponse204) & {
-  headers: Headers;
-};
-export type authDeleteApiTokenResponseError = (authDeleteApiTokenResponse404 | authDeleteApiTokenResponse422) & {
-  headers: Headers;
-};
-
-export type authDeleteApiTokenResponse = (authDeleteApiTokenResponseSuccess | authDeleteApiTokenResponseError)
 
 export const getAuthDeleteApiTokenUrl = (tokenId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/api-tokens/${tokenId}`
+  return `/api/v1/auth/api-tokens/${tokenId}`
 }
 
 /**
  * @summary Delete Api Token
  */
-export const authDeleteApiToken = async (tokenId: string, options?: RequestInit): Promise<authDeleteApiTokenResponse> => {
+export const authDeleteApiToken = async (tokenId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getAuthDeleteApiTokenUrl(tokenId),
+  return apiRequest<void>(getAuthDeleteApiTokenUrl(tokenId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authDeleteApiTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as authDeleteApiTokenResponse
-}
-
-
-export type authUpdateApiTokenResponse200 = {
-  data: UserAPITokenRead
-  status: 200
-}
-
-export type authUpdateApiTokenResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type authUpdateApiTokenResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type authUpdateApiTokenResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authUpdateApiTokenResponseSuccess = (authUpdateApiTokenResponse200) & {
-  headers: Headers;
-};
-export type authUpdateApiTokenResponseError = (authUpdateApiTokenResponse400 | authUpdateApiTokenResponse404 | authUpdateApiTokenResponse422) & {
-  headers: Headers;
-};
-
-export type authUpdateApiTokenResponse = (authUpdateApiTokenResponseSuccess | authUpdateApiTokenResponseError)
 
 export const getAuthUpdateApiTokenUrl = (tokenId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/api-tokens/${tokenId}`
+  return `/api/v1/auth/api-tokens/${tokenId}`
 }
 
 /**
  * @summary Update Api Token
  */
 export const authUpdateApiToken = async (tokenId: string,
-    userAPITokenUpdate: UserAPITokenUpdate, options?: RequestInit): Promise<authUpdateApiTokenResponse> => {
+    userAPITokenUpdate: UserAPITokenUpdate, options?: RequestInit): Promise<UserAPITokenRead> => {
 
-  const res = await fetch(getAuthUpdateApiTokenUrl(tokenId),
+  return apiRequest<UserAPITokenRead>(getAuthUpdateApiTokenUrl(tokenId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(userAPITokenUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authUpdateApiTokenResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authUpdateApiTokenResponse
-}
-
-
-export type authConfigResponse200 = {
-  data: AuthConfigRead
-  status: 200
-}
-
-export type authConfigResponseSuccess = (authConfigResponse200) & {
-  headers: Headers;
-};
-;
-
-export type authConfigResponse = (authConfigResponseSuccess)
 
 export const getAuthConfigUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/config`
+  return `/api/v1/auth/config`
 }
 
 /**
  * @summary Auth Config
  */
-export const authConfig = async ( options?: RequestInit): Promise<authConfigResponse> => {
+export const authConfig = async ( options?: RequestInit): Promise<AuthConfigRead> => {
 
-  const res = await fetch(getAuthConfigUrl(),
+  return apiRequest<AuthConfigRead>(getAuthConfigUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authConfigResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authConfigResponse
-}
-
-
-export type authLoginResponse200 = {
-  data: UserRead
-  status: 200
-}
-
-export type authLoginResponse401 = {
-  data: ErrorResponse
-  status: 401
-}
-
-export type authLoginResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authLoginResponseSuccess = (authLoginResponse200) & {
-  headers: Headers;
-};
-export type authLoginResponseError = (authLoginResponse401 | authLoginResponse422) & {
-  headers: Headers;
-};
-
-export type authLoginResponse = (authLoginResponseSuccess | authLoginResponseError)
 
 export const getAuthLoginUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/login`
+  return `/api/v1/auth/login`
 }
 
 /**
  * @summary Login
  */
-export const authLogin = async (loginRequest: LoginRequest, options?: RequestInit): Promise<authLoginResponse> => {
+export const authLogin = async (loginRequest: LoginRequest, options?: RequestInit): Promise<UserRead> => {
 
-  const res = await fetch(getAuthLoginUrl(),
+  return apiRequest<UserRead>(getAuthLoginUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(loginRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authLoginResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authLoginResponse
-}
-
-
-export type authLogoutResponse204 = {
-  data: void
-  status: 204
-}
-
-export type authLogoutResponseSuccess = (authLogoutResponse204) & {
-  headers: Headers;
-};
-;
-
-export type authLogoutResponse = (authLogoutResponseSuccess)
 
 export const getAuthLogoutUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/logout`
+  return `/api/v1/auth/logout`
 }
 
 /**
  * @summary Logout
  */
-export const authLogout = async ( options?: RequestInit): Promise<authLogoutResponse> => {
+export const authLogout = async ( options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getAuthLogoutUrl(),
+  return apiRequest<void>(getAuthLogoutUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authLogoutResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as authLogoutResponse
-}
-
-
-export type authMeResponse200 = {
-  data: UserRead
-  status: 200
-}
-
-export type authMeResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authMeResponseSuccess = (authMeResponse200) & {
-  headers: Headers;
-};
-export type authMeResponseError = (authMeResponse422) & {
-  headers: Headers;
-};
-
-export type authMeResponse = (authMeResponseSuccess | authMeResponseError)
 
 export const getAuthMeUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/auth/me`
+  return `/api/v1/auth/me`
 }
 
 /**
  * @summary Current User
  */
-export const authMe = async ( options?: RequestInit): Promise<authMeResponse> => {
+export const authMe = async ( options?: RequestInit): Promise<UserRead> => {
 
-  const res = await fetch(getAuthMeUrl(),
+  return apiRequest<UserRead>(getAuthMeUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authMeResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authMeResponse
-}
-
-
-export type authOidcCallbackResponse200 = {
-  data: unknown
-  status: 200
-}
-
-export type authOidcCallbackResponse302 = {
-  data: void
-  status: 302
-}
-
-export type authOidcCallbackResponse401 = {
-  data: ErrorResponse
-  status: 401
-}
-
-export type authOidcCallbackResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authOidcCallbackResponseSuccess = (authOidcCallbackResponse200) & {
-  headers: Headers;
-};
-export type authOidcCallbackResponseError = (authOidcCallbackResponse302 | authOidcCallbackResponse401 | authOidcCallbackResponse422) & {
-  headers: Headers;
-};
-
-export type authOidcCallbackResponse = (authOidcCallbackResponseSuccess | authOidcCallbackResponseError)
 
 export const getAuthOidcCallbackUrl = (params?: AuthOidcCallbackParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -465,59 +216,23 @@ export const getAuthOidcCallbackUrl = (params?: AuthOidcCallbackParams,) => {
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/auth/oidc/callback?${stringifiedParams}` : `http://localhost:8000/api/v1/auth/oidc/callback`
+  return stringifiedParams.length > 0 ? `/api/v1/auth/oidc/callback?${stringifiedParams}` : `/api/v1/auth/oidc/callback`
 }
 
 /**
  * @summary Oidc Callback
  */
-export const authOidcCallback = async (params?: AuthOidcCallbackParams, options?: RequestInit): Promise<authOidcCallbackResponse> => {
+export const authOidcCallback = async (params?: AuthOidcCallbackParams, options?: RequestInit): Promise<unknown> => {
 
-  const res = await fetch(getAuthOidcCallbackUrl(params),
+  return apiRequest<unknown>(getAuthOidcCallbackUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authOidcCallbackResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authOidcCallbackResponse
-}
-
-
-export type authOidcLoginResponse200 = {
-  data: unknown
-  status: 200
-}
-
-export type authOidcLoginResponse302 = {
-  data: void
-  status: 302
-}
-
-export type authOidcLoginResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type authOidcLoginResponse503 = {
-  data: ErrorResponse
-  status: 503
-}
-
-export type authOidcLoginResponseSuccess = (authOidcLoginResponse200) & {
-  headers: Headers;
-};
-export type authOidcLoginResponseError = (authOidcLoginResponse302 | authOidcLoginResponse422 | authOidcLoginResponse503) & {
-  headers: Headers;
-};
-
-export type authOidcLoginResponse = (authOidcLoginResponseSuccess | authOidcLoginResponseError)
 
 export const getAuthOidcLoginUrl = (params?: AuthOidcLoginParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -531,28 +246,21 @@ export const getAuthOidcLoginUrl = (params?: AuthOidcLoginParams,) => {
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/auth/oidc/login?${stringifiedParams}` : `http://localhost:8000/api/v1/auth/oidc/login`
+  return stringifiedParams.length > 0 ? `/api/v1/auth/oidc/login?${stringifiedParams}` : `/api/v1/auth/oidc/login`
 }
 
 /**
  * @summary Oidc Login
  */
-export const authOidcLogin = async (params?: AuthOidcLoginParams, options?: RequestInit): Promise<authOidcLoginResponse> => {
+export const authOidcLogin = async (params?: AuthOidcLoginParams, options?: RequestInit): Promise<unknown> => {
 
-  const res = await fetch(getAuthOidcLoginUrl(params),
+  return apiRequest<unknown>(getAuthOidcLoginUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: authOidcLoginResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as authOidcLoginResponse
-}
+);}
 
 

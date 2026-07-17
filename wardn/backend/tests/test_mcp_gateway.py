@@ -381,7 +381,7 @@ def test_mcp_oauth_authorize_accepts_direct_backend_resource_with_forwarded_orig
 
     assert response.status_code in {200, 302}
     if response.status_code == 302:
-        assert "/api/auth/oidc/login" in response.headers["location"]
+        assert "/api/v1/auth/oidc/login" in response.headers["location"]
     else:
         assert "Authorize Wardn MCP" in response.text
         assert "resource does not match this MCP server" not in response.text
@@ -410,6 +410,7 @@ def test_mcp_oauth_authorize_redirects_to_oidc_login(monkeypatch) -> None:
         _env_file=None,
         auth_mode="oidc",
         frontend_base_url="https://app.example.com",
+        public_base_url="https://api.example.com",
         oidc_issuer_url="https://issuer.example.com",
         oidc_client_id="wardn-client",
         oidc_client_secret="wardn-secret",
@@ -441,7 +442,7 @@ def test_mcp_oauth_authorize_redirects_to_oidc_login(monkeypatch) -> None:
     location = response.headers["location"]
     parsed = urlparse(location)
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
-        "https://app.example.com/api/auth/oidc/login"
+        "https://api.example.com/api/v1/auth/oidc/login"
     )
     redirect_to = parse_qs(parsed.query)["redirectTo"][0]
     redirect_target = urlparse(redirect_to)
@@ -457,6 +458,7 @@ def test_mcp_oauth_post_without_session_redirects_to_oidc_login(monkeypatch) -> 
         _env_file=None,
         auth_mode="oidc",
         frontend_base_url="https://app.example.com",
+        public_base_url="https://api.example.com",
         oidc_issuer_url="https://issuer.example.com",
         oidc_client_id="wardn-client",
         oidc_client_secret="wardn-secret",
@@ -487,7 +489,7 @@ def test_mcp_oauth_post_without_session_redirects_to_oidc_login(monkeypatch) -> 
     assert response.status_code == 302
     parsed = urlparse(response.headers["location"])
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
-        "https://app.example.com/api/auth/oidc/login"
+        "https://api.example.com/api/v1/auth/oidc/login"
     )
 
 

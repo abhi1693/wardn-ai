@@ -76,6 +76,29 @@ class MCPServerCreate(MCPServerDocument):
     pass
 
 
+class MCPRepositoryMetadataImportRequest(APIModel):
+    repository_url: str = Field(min_length=1, max_length=2048)
+
+
+class MCPRepositoryMetadataRepository(APIModel):
+    source: str = Field(min_length=1, max_length=64)
+    url: str = Field(min_length=1, max_length=2048)
+    subfolder: str = Field(default="", max_length=4096)
+
+
+class MCPRepositoryMetadataImportResponse(APIModel):
+    source: Literal["server.json", "mcp.json", "repository"]
+    name: str = Field(default="", max_length=200)
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=1_048_576)
+    version: str = Field(min_length=1, max_length=255)
+    website_url: str = Field(min_length=1, max_length=2048)
+    repository: MCPRepositoryMetadataRepository
+    icon_url: str = Field(default="", max_length=2048)
+    remotes: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    packages: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
 class MCPRegistryOfficialMetadata(APIModel):
     status: MCPServerStatus
     status_changed_at: datetime

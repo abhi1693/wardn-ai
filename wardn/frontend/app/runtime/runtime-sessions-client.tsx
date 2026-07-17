@@ -11,11 +11,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  FeedbackMessages,
-  McpTableCard,
-  responseErrorMessage,
-} from "@/app/mcp/mcp-list-ui";
+import { FeedbackMessages, McpTableCard } from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,13 +23,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type {
-  MCPRuntimeEventListResponse,
   MCPRuntimeEventRead,
   MCPRuntimeSessionHealthResponse,
-  MCPRuntimeSessionListResponse,
   MCPRuntimeSessionRead,
   MCPRuntimeSummaryResponse,
 } from "@/lib/api/generated/model";
+import {
+  workspaceMcpRuntimeGetSessionHealth,
+  workspaceMcpRuntimeGetSummary,
+  workspaceMcpRuntimeListSessionEvents,
+  workspaceMcpRuntimeListSessions,
+  workspaceMcpRuntimeStopSession,
+} from "@/lib/api/generated/workspace-mcp-runtime/workspace-mcp-runtime";
 
 type RuntimeSessionsClientProps = {
   initialSessions: MCPRuntimeSessionRead[];
@@ -56,12 +57,6 @@ const eventTypeLabels: Record<string, string> = {
   runtime_session_stopped: "Stopped",
   runtime_reaper_stopped: "Reaped",
 };
-
-function apiBasePath(organizationId: string, workspaceId: string) {
-  return `/api/organizations/${encodeURIComponent(organizationId)}/workspaces/${encodeURIComponent(
-    workspaceId
-  )}/mcp/runtime/sessions`;
-}
 
 function statusVariant(status: string) {
   if (status === "running" || status === "idle") {
@@ -167,8 +162,6 @@ export function RuntimeSessionsClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const basePath = apiBasePath(organizationId, workspaceId);
-
   const sortedSessions = useMemo(
     () =>
       [...sessions].sort((left, right) => {
@@ -194,14 +187,12 @@ export function RuntimeSessionsClient({
         setIsMutating(true);
       }
       try {
-        const response = await fetch(
-          `${basePath}/${encodeURIComponent(sessionId)}/events?limit=${runtimeEventLimit}`,
-          { cache: "no-store" }
+        const payload = await workspaceMcpRuntimeListSessionEvents(
+          organizationId,
+          workspaceId,
+          sessionId,
+          { limit: runtimeEventLimit }
         );
-        if (!response.ok) {
-          throw new Error(await responseErrorMessage(response, "Failed to load runtime events."));
-        }
-        const payload = (await response.json()) as MCPRuntimeEventListResponse;
         setEventsBySession((current) => ({ ...current, [sessionId]: payload.events }));
       } catch (caught) {
         if (options.showError) {
@@ -214,17 +205,11 @@ export function RuntimeSessionsClient({
         }
       }
     },
-    [basePath]
+    [organizationId, workspaceId]
   );
 
   async function fetchRuntimeSummary() {
-    const response = await fetch(`${basePath.replace(/\/sessions$/, "")}/summary`, {
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error(await responseErrorMessage(response, "Failed to refresh runtime summary."));
-    }
-    return (await response.json()) as MCPRuntimeSummaryResponse;
+    return workspaceMcpRuntimeGetSummary(organizationId, workspaceId);
   }
 
   useEffect(() => {
@@ -244,14 +229,10 @@ export function RuntimeSessionsClient({
     setError("");
     setNotice("");
     try {
-      const [sessionsResponse, nextSummary] = await Promise.all([
-        fetch(basePath, { cache: "no-store" }),
+      const [payload, nextSummary] = await Promise.all([
+        workspaceMcpRuntimeListSessions(organizationId, workspaceId),
         fetchRuntimeSummary(),
       ]);
-      if (!sessionsResponse.ok) {
-        throw new Error(await responseErrorMessage(sessionsResponse, "Failed to refresh sessions."));
-      }
-      const payload = (await sessionsResponse.json()) as MCPRuntimeSessionListResponse;
       setSessions(payload.sessions);
       setSummary(nextSummary);
       setEventsBySession({});
@@ -271,13 +252,11 @@ export function RuntimeSessionsClient({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${basePath}/${encodeURIComponent(session.id)}/stop`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to stop runtime session."));
-      }
-      const stopped = (await response.json()) as MCPRuntimeSessionRead;
+      const stopped = await workspaceMcpRuntimeStopSession(
+        organizationId,
+        workspaceId,
+        session.id
+      );
       setSessions((current) =>
         current.map((item) => (item.id === stopped.id ? stopped : item))
       );
@@ -305,13 +284,11 @@ export function RuntimeSessionsClient({
     setNotice("");
     setExpandedSessionId(session.id);
     try {
-      const response = await fetch(`${basePath}/${encodeURIComponent(session.id)}/health`, {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to check runtime health."));
-      }
-      const payload = (await response.json()) as MCPRuntimeSessionHealthResponse;
+      const payload = await workspaceMcpRuntimeGetSessionHealth(
+        organizationId,
+        workspaceId,
+        session.id
+      );
       setHealthBySession((current) => ({ ...current, [session.id]: payload }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Runtime health could not load.");
@@ -489,6 +466,7 @@ export function RuntimeSessionsClient({
                       <TableCell>
                         <div className="flex justify-end gap-2">
                           <Button
+                            aria-label={`Check health for ${session.serverName}`}
                             disabled={isMutating}
                             onClick={() => checkHealth(session)}
                             size="icon"
@@ -499,6 +477,7 @@ export function RuntimeSessionsClient({
                             <HeartPulse className="size-4" />
                           </Button>
                           <Button
+                            aria-label={`Show events for ${session.serverName}`}
                             disabled={isMutating}
                             onClick={() => toggleEvents(session)}
                             size="icon"
@@ -509,6 +488,7 @@ export function RuntimeSessionsClient({
                             <History className="size-4" />
                           </Button>
                           <Button
+                            aria-label={`Stop runtime session for ${session.serverName}`}
                             disabled={isMutating || !activeStatuses.has(session.status)}
                             onClick={() => stopSession(session)}
                             size="icon"

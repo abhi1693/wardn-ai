@@ -8,8 +8,6 @@ import type {
   ChatGPTDeviceAuthorizationCompleteRequest,
   ChatGPTDeviceAuthorizationCompleteResponse,
   ChatGPTDeviceAuthorizationStartResponse,
-  ErrorResponse,
-  HTTPValidationError,
   LLMProviderCredentialCreate,
   LLMProviderCredentialListResponse,
   LLMProviderCredentialRead,
@@ -18,298 +16,101 @@ import type {
   LLMProviderModelListResponse
 } from '../model';
 
-
-export type llmProviderCredentialsListResponse200 = {
-  data: LLMProviderCredentialListResponse
-  status: 200
-}
-
-export type llmProviderCredentialsListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsListResponseSuccess = (llmProviderCredentialsListResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsListResponseError = (llmProviderCredentialsListResponse403 | llmProviderCredentialsListResponse404 | llmProviderCredentialsListResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsListResponse = (llmProviderCredentialsListResponseSuccess | llmProviderCredentialsListResponseError)
+import { apiRequest } from '../../client';
 
 export const getLlmProviderCredentialsListUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials`
 }
 
 /**
  * @summary List Provider Credentials Route
  */
-export const llmProviderCredentialsList = async (organizationId: string, options?: RequestInit): Promise<llmProviderCredentialsListResponse> => {
+export const llmProviderCredentialsList = async (organizationId: string, options?: RequestInit): Promise<LLMProviderCredentialListResponse> => {
 
-  const res = await fetch(getLlmProviderCredentialsListUrl(organizationId),
+  return apiRequest<LLMProviderCredentialListResponse>(getLlmProviderCredentialsListUrl(organizationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsListResponse
-}
-
-
-export type llmProviderCredentialsCreateResponse201 = {
-  data: LLMProviderCredentialRead
-  status: 201
-}
-
-export type llmProviderCredentialsCreateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type llmProviderCredentialsCreateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsCreateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsCreateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type llmProviderCredentialsCreateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsCreateResponseSuccess = (llmProviderCredentialsCreateResponse201) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsCreateResponseError = (llmProviderCredentialsCreateResponse400 | llmProviderCredentialsCreateResponse403 | llmProviderCredentialsCreateResponse404 | llmProviderCredentialsCreateResponse409 | llmProviderCredentialsCreateResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsCreateResponse = (llmProviderCredentialsCreateResponseSuccess | llmProviderCredentialsCreateResponseError)
 
 export const getLlmProviderCredentialsCreateUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials`
 }
 
 /**
  * @summary Create Provider Credential Route
  */
 export const llmProviderCredentialsCreate = async (organizationId: string,
-    lLMProviderCredentialCreate: LLMProviderCredentialCreate, options?: RequestInit): Promise<llmProviderCredentialsCreateResponse> => {
+    lLMProviderCredentialCreate: LLMProviderCredentialCreate, options?: RequestInit): Promise<LLMProviderCredentialRead> => {
 
-  const res = await fetch(getLlmProviderCredentialsCreateUrl(organizationId),
+  return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsCreateUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(lLMProviderCredentialCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsCreateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsCreateResponse
-}
-
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse200 = {
-  data: ChatGPTDeviceAuthorizationCompleteResponse
-  status: 200
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponseSuccess = (llmProviderCredentialsChatgptDeviceCompleteResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsChatgptDeviceCompleteResponseError = (llmProviderCredentialsChatgptDeviceCompleteResponse400 | llmProviderCredentialsChatgptDeviceCompleteResponse403 | llmProviderCredentialsChatgptDeviceCompleteResponse404 | llmProviderCredentialsChatgptDeviceCompleteResponse409 | llmProviderCredentialsChatgptDeviceCompleteResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsChatgptDeviceCompleteResponse = (llmProviderCredentialsChatgptDeviceCompleteResponseSuccess | llmProviderCredentialsChatgptDeviceCompleteResponseError)
 
 export const getLlmProviderCredentialsChatgptDeviceCompleteUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/complete`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/complete`
 }
 
 /**
  * @summary Complete Chatgpt Device Authorization Route
  */
 export const llmProviderCredentialsChatgptDeviceComplete = async (organizationId: string,
-    chatGPTDeviceAuthorizationCompleteRequest: ChatGPTDeviceAuthorizationCompleteRequest, options?: RequestInit): Promise<llmProviderCredentialsChatgptDeviceCompleteResponse> => {
+    chatGPTDeviceAuthorizationCompleteRequest: ChatGPTDeviceAuthorizationCompleteRequest, options?: RequestInit): Promise<ChatGPTDeviceAuthorizationCompleteResponse> => {
 
-  const res = await fetch(getLlmProviderCredentialsChatgptDeviceCompleteUrl(organizationId),
+  return apiRequest<ChatGPTDeviceAuthorizationCompleteResponse>(getLlmProviderCredentialsChatgptDeviceCompleteUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(chatGPTDeviceAuthorizationCompleteRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsChatgptDeviceCompleteResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsChatgptDeviceCompleteResponse
-}
-
-
-export type llmProviderCredentialsChatgptDeviceStartResponse200 = {
-  data: ChatGPTDeviceAuthorizationStartResponse
-  status: 200
-}
-
-export type llmProviderCredentialsChatgptDeviceStartResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type llmProviderCredentialsChatgptDeviceStartResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsChatgptDeviceStartResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsChatgptDeviceStartResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsChatgptDeviceStartResponseSuccess = (llmProviderCredentialsChatgptDeviceStartResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsChatgptDeviceStartResponseError = (llmProviderCredentialsChatgptDeviceStartResponse400 | llmProviderCredentialsChatgptDeviceStartResponse403 | llmProviderCredentialsChatgptDeviceStartResponse404 | llmProviderCredentialsChatgptDeviceStartResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsChatgptDeviceStartResponse = (llmProviderCredentialsChatgptDeviceStartResponseSuccess | llmProviderCredentialsChatgptDeviceStartResponseError)
 
 export const getLlmProviderCredentialsChatgptDeviceStartUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/start`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/chatgpt/device/start`
 }
 
 /**
  * @summary Start Chatgpt Device Authorization Route
  */
-export const llmProviderCredentialsChatgptDeviceStart = async (organizationId: string, options?: RequestInit): Promise<llmProviderCredentialsChatgptDeviceStartResponse> => {
+export const llmProviderCredentialsChatgptDeviceStart = async (organizationId: string, options?: RequestInit): Promise<ChatGPTDeviceAuthorizationStartResponse> => {
 
-  const res = await fetch(getLlmProviderCredentialsChatgptDeviceStartUrl(organizationId),
+  return apiRequest<ChatGPTDeviceAuthorizationStartResponse>(getLlmProviderCredentialsChatgptDeviceStartUrl(organizationId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsChatgptDeviceStartResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsChatgptDeviceStartResponse
-}
-
-
-export type llmProviderCredentialsDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type llmProviderCredentialsDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsDeleteResponseSuccess = (llmProviderCredentialsDeleteResponse204) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsDeleteResponseError = (llmProviderCredentialsDeleteResponse403 | llmProviderCredentialsDeleteResponse404 | llmProviderCredentialsDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsDeleteResponse = (llmProviderCredentialsDeleteResponseSuccess | llmProviderCredentialsDeleteResponseError)
 
 export const getLlmProviderCredentialsDeleteUrl = (organizationId: string,
     credentialId: string,) => {
@@ -317,70 +118,24 @@ export const getLlmProviderCredentialsDeleteUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}`
 }
 
 /**
  * @summary Delete Provider Credential Route
  */
 export const llmProviderCredentialsDelete = async (organizationId: string,
-    credentialId: string, options?: RequestInit): Promise<llmProviderCredentialsDeleteResponse> => {
+    credentialId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getLlmProviderCredentialsDeleteUrl(organizationId,credentialId),
+  return apiRequest<void>(getLlmProviderCredentialsDeleteUrl(organizationId,credentialId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsDeleteResponse
-}
-
-
-export type llmProviderCredentialsUpdateResponse200 = {
-  data: LLMProviderCredentialRead
-  status: 200
-}
-
-export type llmProviderCredentialsUpdateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type llmProviderCredentialsUpdateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsUpdateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsUpdateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type llmProviderCredentialsUpdateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsUpdateResponseSuccess = (llmProviderCredentialsUpdateResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsUpdateResponseError = (llmProviderCredentialsUpdateResponse400 | llmProviderCredentialsUpdateResponse403 | llmProviderCredentialsUpdateResponse404 | llmProviderCredentialsUpdateResponse409 | llmProviderCredentialsUpdateResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsUpdateResponse = (llmProviderCredentialsUpdateResponseSuccess | llmProviderCredentialsUpdateResponseError)
 
 export const getLlmProviderCredentialsUpdateUrl = (organizationId: string,
     credentialId: string,) => {
@@ -388,7 +143,7 @@ export const getLlmProviderCredentialsUpdateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}`
 }
 
 /**
@@ -396,58 +151,17 @@ export const getLlmProviderCredentialsUpdateUrl = (organizationId: string,
  */
 export const llmProviderCredentialsUpdate = async (organizationId: string,
     credentialId: string,
-    lLMProviderCredentialUpdate: LLMProviderCredentialUpdate, options?: RequestInit): Promise<llmProviderCredentialsUpdateResponse> => {
+    lLMProviderCredentialUpdate: LLMProviderCredentialUpdate, options?: RequestInit): Promise<LLMProviderCredentialRead> => {
 
-  const res = await fetch(getLlmProviderCredentialsUpdateUrl(organizationId,credentialId),
+  return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsUpdateUrl(organizationId,credentialId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(lLMProviderCredentialUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsUpdateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsUpdateResponse
-}
-
-
-export type llmProviderCredentialsListModelsResponse200 = {
-  data: LLMProviderModelListResponse
-  status: 200
-}
-
-export type llmProviderCredentialsListModelsResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type llmProviderCredentialsListModelsResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsListModelsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsListModelsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsListModelsResponseSuccess = (llmProviderCredentialsListModelsResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsListModelsResponseError = (llmProviderCredentialsListModelsResponse400 | llmProviderCredentialsListModelsResponse403 | llmProviderCredentialsListModelsResponse404 | llmProviderCredentialsListModelsResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsListModelsResponse = (llmProviderCredentialsListModelsResponseSuccess | llmProviderCredentialsListModelsResponseError)
 
 export const getLlmProviderCredentialsListModelsUrl = (organizationId: string,
     credentialId: string,) => {
@@ -455,60 +169,24 @@ export const getLlmProviderCredentialsListModelsUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/models`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/models`
 }
 
 /**
  * @summary List Provider Credential Models Route
  */
 export const llmProviderCredentialsListModels = async (organizationId: string,
-    credentialId: string, options?: RequestInit): Promise<llmProviderCredentialsListModelsResponse> => {
+    credentialId: string, options?: RequestInit): Promise<LLMProviderModelListResponse> => {
 
-  const res = await fetch(getLlmProviderCredentialsListModelsUrl(organizationId,credentialId),
+  return apiRequest<LLMProviderModelListResponse>(getLlmProviderCredentialsListModelsUrl(organizationId,credentialId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsListModelsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsListModelsResponse
-}
-
-
-export type llmProviderCredentialsValidateResponse200 = {
-  data: LLMProviderCredentialValidationResponse
-  status: 200
-}
-
-export type llmProviderCredentialsValidateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type llmProviderCredentialsValidateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type llmProviderCredentialsValidateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type llmProviderCredentialsValidateResponseSuccess = (llmProviderCredentialsValidateResponse200) & {
-  headers: Headers;
-};
-export type llmProviderCredentialsValidateResponseError = (llmProviderCredentialsValidateResponse403 | llmProviderCredentialsValidateResponse404 | llmProviderCredentialsValidateResponse422) & {
-  headers: Headers;
-};
-
-export type llmProviderCredentialsValidateResponse = (llmProviderCredentialsValidateResponseSuccess | llmProviderCredentialsValidateResponseError)
 
 export const getLlmProviderCredentialsValidateUrl = (organizationId: string,
     credentialId: string,) => {
@@ -516,29 +194,22 @@ export const getLlmProviderCredentialsValidateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/validate`
+  return `/api/v1/organizations/${organizationId}/llm/provider-credentials/${credentialId}/validate`
 }
 
 /**
  * @summary Validate Provider Credential Route
  */
 export const llmProviderCredentialsValidate = async (organizationId: string,
-    credentialId: string, options?: RequestInit): Promise<llmProviderCredentialsValidateResponse> => {
+    credentialId: string, options?: RequestInit): Promise<LLMProviderCredentialValidationResponse> => {
 
-  const res = await fetch(getLlmProviderCredentialsValidateUrl(organizationId,credentialId),
+  return apiRequest<LLMProviderCredentialValidationResponse>(getLlmProviderCredentialsValidateUrl(organizationId,credentialId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: llmProviderCredentialsValidateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as llmProviderCredentialsValidateResponse
-}
+);}
 
 

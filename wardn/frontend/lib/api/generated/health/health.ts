@@ -8,95 +8,51 @@ import type {
   HealthStatus
 } from '../model';
 
-
-export type healthLiveResponse200 = {
-  data: HealthStatus
-  status: 200
-}
-
-export type healthLiveResponseSuccess = (healthLiveResponse200) & {
-  headers: Headers;
-};
-;
-
-export type healthLiveResponse = (healthLiveResponseSuccess)
+import { apiRequest } from '../../client';
 
 export const getHealthLiveUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/health/live`
+  return `/api/v1/health/live`
 }
 
 /**
  * @summary Live
  */
-export const healthLive = async ( options?: RequestInit): Promise<healthLiveResponse> => {
+export const healthLive = async ( options?: RequestInit): Promise<HealthStatus> => {
 
-  const res = await fetch(getHealthLiveUrl(),
+  return apiRequest<HealthStatus>(getHealthLiveUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: healthLiveResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as healthLiveResponse
-}
-
-
-export type healthReadyResponse200 = {
-  data: HealthStatus
-  status: 200
-}
-
-export type healthReadyResponse503 = {
-  data: HealthStatus
-  status: 503
-}
-
-export type healthReadyResponseSuccess = (healthReadyResponse200) & {
-  headers: Headers;
-};
-export type healthReadyResponseError = (healthReadyResponse503) & {
-  headers: Headers;
-};
-
-export type healthReadyResponse = (healthReadyResponseSuccess | healthReadyResponseError)
 
 export const getHealthReadyUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/health/ready`
+  return `/api/v1/health/ready`
 }
 
 /**
  * @summary Ready
  */
-export const healthReady = async ( options?: RequestInit): Promise<healthReadyResponse> => {
+export const healthReady = async ( options?: RequestInit): Promise<HealthStatus> => {
 
-  const res = await fetch(getHealthReadyUrl(),
+  return apiRequest<HealthStatus>(getHealthReadyUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: healthReadyResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as healthReadyResponse
-}
+);}
 
 

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -30,8 +31,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { GuardrailPolicyRead } from "@/lib/api/generated/model";
+import {
+  workspaceGuardrailPoliciesDelete,
+  workspaceGuardrailPoliciesUpdate,
+} from "@/lib/api/generated/workspace-guardrail-policies/workspace-guardrail-policies";
 
-import { errorMessage } from "../../../tokens/token-form";
 import type {
   GuardrailPolicyRecord,
   GuardrailToolOption,
@@ -79,14 +83,6 @@ function modeActionClassName(mode: GuardrailMode, isActive: boolean) {
   return isActive
     ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
     : "text-amber-700 hover:bg-amber-50";
-}
-
-function policyEndpoint(organizationId: string, workspaceId: string, policy: GuardrailPolicyRead) {
-  return `/api/organizations/${encodeURIComponent(
-    organizationId
-  )}/workspaces/${encodeURIComponent(
-    workspaceId
-  )}/guardrails/policies/${encodeURIComponent(policy.id)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,16 +180,12 @@ export function GuardrailsClient({
     setUpdatingMode({ policyId: record.policy.id, mode });
     setError(null);
     try {
-      const response = await fetch(policyEndpoint(organizationId, workspaceId, record.policy), {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Guardrail policy mode could not be changed."));
-      }
-      const updated = data as GuardrailPolicyRead;
+      const updated = await workspaceGuardrailPoliciesUpdate(
+        organizationId,
+        workspaceId,
+        record.policy.id,
+        { mode }
+      );
       setPolicies((current) =>
         current.map((entry) =>
           entry.policy.id === updated.id ? { ...entry, policy: updated } : entry
@@ -218,13 +210,7 @@ export function GuardrailsClient({
     setDeletingPolicyId(record.policy.id);
     setError(null);
     try {
-      const response = await fetch(policyEndpoint(organizationId, workspaceId, record.policy), {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(errorMessage(data, "Guardrail policy could not be deleted."));
-      }
+      await workspaceGuardrailPoliciesDelete(organizationId, workspaceId, record.policy.id);
       setPolicies((current) =>
         current.filter((entry) => entry.policy.id !== record.policy.id)
       );
@@ -249,9 +235,7 @@ export function GuardrailsClient({
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         {policies.length > 0 ? (

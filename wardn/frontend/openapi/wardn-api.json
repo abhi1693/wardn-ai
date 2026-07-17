@@ -3500,6 +3500,128 @@
         "title": "MCPRegistryServerResponse",
         "type": "object"
       },
+      "MCPRepositoryMetadataImportRequest": {
+        "properties": {
+          "repositoryUrl": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Repositoryurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repositoryUrl"
+        ],
+        "title": "MCPRepositoryMetadataImportRequest",
+        "type": "object"
+      },
+      "MCPRepositoryMetadataImportResponse": {
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 1048576,
+            "title": "Description",
+            "type": "string"
+          },
+          "iconUrl": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Iconurl",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "packages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 100,
+            "title": "Packages",
+            "type": "array"
+          },
+          "remotes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 100,
+            "title": "Remotes",
+            "type": "array"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/MCPRepositoryMetadataRepository"
+          },
+          "source": {
+            "enum": [
+              "server.json",
+              "mcp.json",
+              "repository"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "websiteUrl": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Websiteurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "title",
+          "version",
+          "websiteUrl",
+          "repository"
+        ],
+        "title": "MCPRepositoryMetadataImportResponse",
+        "type": "object"
+      },
+      "MCPRepositoryMetadataRepository": {
+        "properties": {
+          "source": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "subfolder": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Subfolder",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "url"
+        ],
+        "title": "MCPRepositoryMetadataRepository",
+        "type": "object"
+      },
       "MCPRuntimeEventListResponse": {
         "properties": {
           "events": {
@@ -10095,6 +10217,105 @@
           }
         },
         "summary": "Set Default Organization Mcp Server Version",
+        "tags": [
+          "organization-mcp-registry"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/mcp/registry/source-metadata": {
+      "post": {
+        "operationId": "organization_mcp_registry_import_repository_metadata",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPRepositoryMetadataImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPRepositoryMetadataImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Import Organization Mcp Repository Metadata",
         "tags": [
           "organization-mcp-registry"
         ]

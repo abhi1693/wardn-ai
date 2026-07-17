@@ -5,43 +5,13 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
   GuardrailPolicyCreate,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
-  GuardrailPolicyUpdate,
-  HTTPValidationError
+  GuardrailPolicyUpdate
 } from '../model';
 
-
-export type workspaceGuardrailPoliciesListResponse200 = {
-  data: GuardrailPolicyListResponse
-  status: 200
-}
-
-export type workspaceGuardrailPoliciesListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceGuardrailPoliciesListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceGuardrailPoliciesListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceGuardrailPoliciesListResponseSuccess = (workspaceGuardrailPoliciesListResponse200) & {
-  headers: Headers;
-};
-export type workspaceGuardrailPoliciesListResponseError = (workspaceGuardrailPoliciesListResponse403 | workspaceGuardrailPoliciesListResponse404 | workspaceGuardrailPoliciesListResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceGuardrailPoliciesListResponse = (workspaceGuardrailPoliciesListResponseSuccess | workspaceGuardrailPoliciesListResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceGuardrailPoliciesListUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -49,70 +19,24 @@ export const getWorkspaceGuardrailPoliciesListUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies`
 }
 
 /**
  * @summary List Workspace Guardrail Policies Route
  */
 export const workspaceGuardrailPoliciesList = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceGuardrailPoliciesListResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<GuardrailPolicyListResponse> => {
 
-  const res = await fetch(getWorkspaceGuardrailPoliciesListUrl(organizationId,workspaceId),
+  return apiRequest<GuardrailPolicyListResponse>(getWorkspaceGuardrailPoliciesListUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceGuardrailPoliciesListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceGuardrailPoliciesListResponse
-}
-
-
-export type workspaceGuardrailPoliciesCreateResponse201 = {
-  data: GuardrailPolicyRead
-  status: 201
-}
-
-export type workspaceGuardrailPoliciesCreateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceGuardrailPoliciesCreateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceGuardrailPoliciesCreateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceGuardrailPoliciesCreateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type workspaceGuardrailPoliciesCreateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceGuardrailPoliciesCreateResponseSuccess = (workspaceGuardrailPoliciesCreateResponse201) & {
-  headers: Headers;
-};
-export type workspaceGuardrailPoliciesCreateResponseError = (workspaceGuardrailPoliciesCreateResponse400 | workspaceGuardrailPoliciesCreateResponse403 | workspaceGuardrailPoliciesCreateResponse404 | workspaceGuardrailPoliciesCreateResponse409 | workspaceGuardrailPoliciesCreateResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceGuardrailPoliciesCreateResponse = (workspaceGuardrailPoliciesCreateResponseSuccess | workspaceGuardrailPoliciesCreateResponseError)
 
 export const getWorkspaceGuardrailPoliciesCreateUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -120,7 +44,7 @@ export const getWorkspaceGuardrailPoliciesCreateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies`
 }
 
 /**
@@ -128,53 +52,17 @@ export const getWorkspaceGuardrailPoliciesCreateUrl = (organizationId: string,
  */
 export const workspaceGuardrailPoliciesCreate = async (organizationId: string,
     workspaceId: string,
-    guardrailPolicyCreate: GuardrailPolicyCreate, options?: RequestInit): Promise<workspaceGuardrailPoliciesCreateResponse> => {
+    guardrailPolicyCreate: GuardrailPolicyCreate, options?: RequestInit): Promise<GuardrailPolicyRead> => {
 
-  const res = await fetch(getWorkspaceGuardrailPoliciesCreateUrl(organizationId,workspaceId),
+  return apiRequest<GuardrailPolicyRead>(getWorkspaceGuardrailPoliciesCreateUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(guardrailPolicyCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceGuardrailPoliciesCreateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceGuardrailPoliciesCreateResponse
-}
-
-
-export type workspaceGuardrailPoliciesDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type workspaceGuardrailPoliciesDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceGuardrailPoliciesDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceGuardrailPoliciesDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceGuardrailPoliciesDeleteResponseSuccess = (workspaceGuardrailPoliciesDeleteResponse204) & {
-  headers: Headers;
-};
-export type workspaceGuardrailPoliciesDeleteResponseError = (workspaceGuardrailPoliciesDeleteResponse403 | workspaceGuardrailPoliciesDeleteResponse404 | workspaceGuardrailPoliciesDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceGuardrailPoliciesDeleteResponse = (workspaceGuardrailPoliciesDeleteResponseSuccess | workspaceGuardrailPoliciesDeleteResponseError)
 
 export const getWorkspaceGuardrailPoliciesDeleteUrl = (organizationId: string,
     workspaceId: string,
@@ -183,7 +71,7 @@ export const getWorkspaceGuardrailPoliciesDeleteUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
 }
 
 /**
@@ -191,53 +79,17 @@ export const getWorkspaceGuardrailPoliciesDeleteUrl = (organizationId: string,
  */
 export const workspaceGuardrailPoliciesDelete = async (organizationId: string,
     workspaceId: string,
-    policyId: string, options?: RequestInit): Promise<workspaceGuardrailPoliciesDeleteResponse> => {
+    policyId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getWorkspaceGuardrailPoliciesDeleteUrl(organizationId,workspaceId,policyId),
+  return apiRequest<void>(getWorkspaceGuardrailPoliciesDeleteUrl(organizationId,workspaceId,policyId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceGuardrailPoliciesDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as workspaceGuardrailPoliciesDeleteResponse
-}
-
-
-export type workspaceGuardrailPoliciesGetResponse200 = {
-  data: GuardrailPolicyRead
-  status: 200
-}
-
-export type workspaceGuardrailPoliciesGetResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceGuardrailPoliciesGetResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceGuardrailPoliciesGetResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceGuardrailPoliciesGetResponseSuccess = (workspaceGuardrailPoliciesGetResponse200) & {
-  headers: Headers;
-};
-export type workspaceGuardrailPoliciesGetResponseError = (workspaceGuardrailPoliciesGetResponse403 | workspaceGuardrailPoliciesGetResponse404 | workspaceGuardrailPoliciesGetResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceGuardrailPoliciesGetResponse = (workspaceGuardrailPoliciesGetResponseSuccess | workspaceGuardrailPoliciesGetResponseError)
 
 export const getWorkspaceGuardrailPoliciesGetUrl = (organizationId: string,
     workspaceId: string,
@@ -246,7 +98,7 @@ export const getWorkspaceGuardrailPoliciesGetUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
 }
 
 /**
@@ -254,63 +106,17 @@ export const getWorkspaceGuardrailPoliciesGetUrl = (organizationId: string,
  */
 export const workspaceGuardrailPoliciesGet = async (organizationId: string,
     workspaceId: string,
-    policyId: string, options?: RequestInit): Promise<workspaceGuardrailPoliciesGetResponse> => {
+    policyId: string, options?: RequestInit): Promise<GuardrailPolicyRead> => {
 
-  const res = await fetch(getWorkspaceGuardrailPoliciesGetUrl(organizationId,workspaceId,policyId),
+  return apiRequest<GuardrailPolicyRead>(getWorkspaceGuardrailPoliciesGetUrl(organizationId,workspaceId,policyId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceGuardrailPoliciesGetResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceGuardrailPoliciesGetResponse
-}
-
-
-export type workspaceGuardrailPoliciesUpdateResponse200 = {
-  data: GuardrailPolicyRead
-  status: 200
-}
-
-export type workspaceGuardrailPoliciesUpdateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceGuardrailPoliciesUpdateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceGuardrailPoliciesUpdateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceGuardrailPoliciesUpdateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type workspaceGuardrailPoliciesUpdateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceGuardrailPoliciesUpdateResponseSuccess = (workspaceGuardrailPoliciesUpdateResponse200) & {
-  headers: Headers;
-};
-export type workspaceGuardrailPoliciesUpdateResponseError = (workspaceGuardrailPoliciesUpdateResponse400 | workspaceGuardrailPoliciesUpdateResponse403 | workspaceGuardrailPoliciesUpdateResponse404 | workspaceGuardrailPoliciesUpdateResponse409 | workspaceGuardrailPoliciesUpdateResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceGuardrailPoliciesUpdateResponse = (workspaceGuardrailPoliciesUpdateResponseSuccess | workspaceGuardrailPoliciesUpdateResponseError)
 
 export const getWorkspaceGuardrailPoliciesUpdateUrl = (organizationId: string,
     workspaceId: string,
@@ -319,7 +125,7 @@ export const getWorkspaceGuardrailPoliciesUpdateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/policies/${policyId}`
 }
 
 /**
@@ -328,22 +134,15 @@ export const getWorkspaceGuardrailPoliciesUpdateUrl = (organizationId: string,
 export const workspaceGuardrailPoliciesUpdate = async (organizationId: string,
     workspaceId: string,
     policyId: string,
-    guardrailPolicyUpdate: GuardrailPolicyUpdate, options?: RequestInit): Promise<workspaceGuardrailPoliciesUpdateResponse> => {
+    guardrailPolicyUpdate: GuardrailPolicyUpdate, options?: RequestInit): Promise<GuardrailPolicyRead> => {
 
-  const res = await fetch(getWorkspaceGuardrailPoliciesUpdateUrl(organizationId,workspaceId,policyId),
+  return apiRequest<GuardrailPolicyRead>(getWorkspaceGuardrailPoliciesUpdateUrl(organizationId,workspaceId,policyId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(guardrailPolicyUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceGuardrailPoliciesUpdateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceGuardrailPoliciesUpdateResponse
-}
+);}
 
 

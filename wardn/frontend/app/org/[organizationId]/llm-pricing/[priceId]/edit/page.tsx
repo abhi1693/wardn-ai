@@ -3,14 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser } from "@/lib/current-user";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { getLlmCredentials } from "../../../llm-credentials/data";
 import {
   canManageModelPrices,
-  getCurrentUser,
   getModelPriceById,
   getModelPrices,
 } from "../../data";
@@ -22,13 +21,13 @@ type EditModelPricePageProps = {
 
 export default async function EditModelPricePage({ params }: EditModelPricePageProps) {
   const { organizationId, priceId } = await params;
-  const [workspaceContext, organization, currentUser, prices, credentials] = await Promise.all([
+  const [workspaceContext, currentUser, prices, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
     getModelPrices(organizationId),
     getLlmCredentials(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization || !canManageModelPrices(currentUser, organization.currentUserRole)) {
     notFound();

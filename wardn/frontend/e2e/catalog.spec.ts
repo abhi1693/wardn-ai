@@ -8,20 +8,25 @@ import {
 
 const mockBackendUrl = `http://127.0.0.1:${process.env.WARDN_E2E_BACKEND_PORT ?? 4100}`;
 const organizationId = "org-1";
+const sessionCookieName = process.env.WARDN_E2E_SESSION_COOKIE_NAME ?? "wardn_e2e_session";
 
 async function authenticate(context: BrowserContext, baseURL: string) {
   await context.addCookies([
     {
-      name: "wardn_session",
+      name: sessionCookieName,
       value: "test-session",
       url: baseURL,
     },
   ]);
 }
 
-async function resetBackend(request: APIRequestContext, sources?: unknown[]) {
+async function resetBackend(
+  request: APIRequestContext,
+  sources?: unknown[],
+  overrides: Record<string, unknown> = {}
+) {
   await request.post(`${mockBackendUrl}/__test/reset`, {
-    data: sources === undefined ? {} : { sources },
+    data: { ...overrides, ...(sources === undefined ? {} : { sources }) },
   });
 }
 
@@ -98,7 +103,9 @@ test.describe("catalog source management", () => {
     await page.getByRole("button", { name: "Save" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/org/${organizationId}/catalog$`));
-    await expect(page.getByRole("cell", { name: "Wardn Hub Production" })).toBeVisible();
+    await expect(
+      page.getByRole("cell", { exact: true, name: "Wardn Hub Production" })
+    ).toBeVisible();
 
     const patchRequest = (await backendRequests(request)).find(
       (entry) =>
@@ -113,18 +120,83 @@ test.describe("catalog source management", () => {
     expect(patchRequest?.body).not.toHaveProperty("apiToken");
   });
 
-  test("syncs and deletes a catalog source from the list", async ({ baseURL, page }) => {
+  test("polls, syncs, and deletes a catalog source from the list", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
     await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
 
     const wardnHubRow = page.getByRole("row").filter({ hasText: "Wardn Hub" });
     await expect(wardnHubRow).toBeVisible();
-    await page.getByTitle("Sync").click();
-    await expect(page.getByText("Synced 2 server definitions.")).toBeVisible();
+    await page.getByRole("button", { name: "Sync Wardn Hub" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Synced 2 server definitions." })
+    ).toBeVisible();
     await expect(page.getByRole("cell", { name: /Jun 30/ })).toBeVisible();
+    const jobRequests = (await backendRequests(request)).filter((entry) =>
+      entry.path.includes("/mcp/catalog/jobs/")
+    );
+    expect(jobRequests).toHaveLength(2);
 
-    await page.getByTitle("Delete").click();
-    await expect(page.getByText("Catalog source deleted.")).toBeVisible();
+    await page.getByRole("button", { name: "Delete Wardn Hub" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Catalog source deleted." })
+    ).toBeVisible();
     await expect(page.getByText("No catalog sources")).toBeVisible();
+  });
+
+  test("stops polling a catalog job after navigation", async ({ baseURL, page, request }) => {
+    await resetBackend(request, undefined, { catalogJobPollsBeforeSuccess: 100 });
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+
+    await page.getByRole("button", { name: "Sync Wardn Hub" }).click();
+    await expect(page.getByRole("button", { name: "Edit Wardn Hub" })).toBeDisabled();
+    await expect(page.getByRole("link", { name: "Edit Wardn Hub" })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        (await backendRequests(request)).filter((entry) =>
+          entry.path.includes("/mcp/catalog/jobs/")
+        ).length
+      )
+      .toBeGreaterThan(0);
+
+    await page.goto("/org");
+    const requestsAfterNavigation = (await backendRequests(request)).filter((entry) =>
+      entry.path.includes("/mcp/catalog/jobs/")
+    ).length;
+    await page.waitForTimeout(2_000);
+    const requestsAfterWaiting = (await backendRequests(request)).filter((entry) =>
+      entry.path.includes("/mcp/catalog/jobs/")
+    ).length;
+    expect(requestsAfterWaiting).toBe(requestsAfterNavigation);
+  });
+
+  test("loads workspaces only for the organization selected by the route", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+    await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
+
+    const workspaceRequests = (await backendRequests(request)).filter((entry) =>
+      entry.path.endsWith("/workspaces")
+    );
+    expect(workspaceRequests).toEqual([
+      expect.objectContaining({
+        method: "GET",
+        path: `/api/v1/organizations/${organizationId}/workspaces`,
+      }),
+    ]);
+  });
+
+  test("displays the first workspace's actual name", async ({ baseURL, page }) => {
+    await openAuthenticated(page, `/org/${organizationId}/workspaces`, baseURL ?? "");
+
+    const workspaceButton = page.getByRole("button", { name: "Open Platform" });
+    await expect(workspaceButton.getByRole("heading", { name: "Platform" })).toBeVisible();
+    await expect(page.getByText("Default Workspace", { exact: true })).toHaveCount(0);
   });
 
   test("smoke: redirects protected catalog pages to login without a session", async ({ page }) => {
@@ -132,6 +204,108 @@ test.describe("catalog source management", () => {
 
     await expect(page).toHaveURL(/\/login\?next=/);
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  });
+
+  test("redirects an expired backend session to reauthentication", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await resetBackend(request, undefined, { organizationsStatus: 401 });
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+
+    await expect(page).toHaveURL(/\/login\?reauth=1&next=/);
+    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  });
+
+  test("reauthenticates browser API operations after session expiry", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+    await expect(page.getByRole("row").filter({ hasText: "Wardn Hub" })).toBeVisible();
+    await resetBackend(request, undefined, { catalogStatus: 401 });
+
+    await page.getByRole("button", { name: "Sync Wardn Hub" }).click();
+
+    await expect(page).toHaveURL(/\/login\?reauth=1&next=/);
+    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  });
+
+  test("announces catalog operation failures", async ({ baseURL, page, request }) => {
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+    await expect(page.getByRole("row").filter({ hasText: "Wardn Hub" })).toBeVisible();
+    await resetBackend(request, undefined, { catalogStatus: 500 });
+
+    await page.getByRole("button", { name: "Sync Wardn Hub" }).click();
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "catalog request failed" })
+    ).toBeVisible();
+  });
+
+  test("shows retryable API failures instead of an empty catalog", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await resetBackend(request, undefined, { catalogStatus: 503 });
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+
+    await expect(page.getByRole("heading", { name: "This page could not be loaded" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByText("No catalog sources")).not.toBeVisible();
+  });
+
+  test("preserves forbidden and not-found backend responses", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await resetBackend(request, undefined, { catalogStatus: 403 });
+    await openAuthenticated(page, `/org/${organizationId}/catalog`, baseURL ?? "");
+    await expect(page.getByRole("heading", { name: "Access denied" })).toBeVisible();
+
+    await resetBackend(request, undefined, { catalogStatus: 404 });
+    await page.goto(`/org/${organizationId}/catalog`);
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  });
+
+  test("reveals a new API token without writing it to browser storage", async ({
+    baseURL,
+    page,
+  }) => {
+    await openAuthenticated(page, `/org/${organizationId}/tokens/new`, baseURL ?? "");
+    await expect(page.getByText("Create Gateway Token", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Create token" }).click();
+
+    await expect(page.getByText("Token created", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Token" })).toHaveValue(
+      "wardn_test_secret_token"
+    );
+    expect(
+      await page.evaluate(() => ({
+        local: Object.keys(localStorage),
+        session: Object.keys(sessionStorage),
+      }))
+    ).toEqual({ local: [], session: [] });
+
+    await page.reload();
+    await expect(page.getByText("Create Gateway Token", { exact: true })).toBeVisible();
+    await expect(page.getByText("wardn_test_secret_token")).not.toBeVisible();
+  });
+
+  test("serves browser security headers", async ({ request }) => {
+    const response = await request.get("/login");
+    expect(response.ok()).toBeTruthy();
+    expect(response.headers()["content-security-policy"]).toContain("default-src 'self'");
+    expect(response.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(response.headers()["x-frame-options"]).toBe("DENY");
+    expect(response.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers()["permissions-policy"]).toContain("camera=()");
   });
 });
 

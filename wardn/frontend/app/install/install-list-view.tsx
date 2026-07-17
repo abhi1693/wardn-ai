@@ -4,9 +4,8 @@ import Link from "next/link";
 import { AppShell } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
 import type { MCPServerInstallationListResponse } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceInstallPath,
   workspaceMcpRegistryPath,
@@ -19,20 +18,8 @@ async function getInitialInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 type InstallListViewProps = {
@@ -61,6 +48,8 @@ export async function InstallListView({ workspaceContext }: InstallListViewProps
       <InstalledListClient
         basePath={basePath}
         initialInstallations={installations}
+        organizationId={workspaceContext.selectedOrganization?.id ?? ""}
+        workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
       />
     </AppShell>
   );

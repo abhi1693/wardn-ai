@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { OrganizationRead } from "@/lib/api/generated/model";
+import { clearSelectionCookie, setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
@@ -15,10 +16,6 @@ import {
 type OrganizationSelectClientProps = {
   organizations: OrganizationRead[];
 };
-
-function setSelectionCookie(name: string, value: string, maxAge = 31536000) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; samesite=lax`;
-}
 
 function roleLabel(role: string) {
   return role ? role[0].toUpperCase() + role.slice(1) : "";
@@ -29,7 +26,7 @@ export function OrganizationSelectClient({ organizations }: OrganizationSelectCl
 
   function selectOrganization(organizationId: string) {
     setSelectionCookie(selectedOrganizationCookie, organizationId);
-    setSelectionCookie(selectedWorkspaceCookie, "", 0);
+    clearSelectionCookie(selectedWorkspaceCookie);
     router.push(`/org/${encodeURIComponent(organizationId)}/dashboard`);
     router.refresh();
   }

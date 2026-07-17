@@ -16,40 +16,10 @@ import type {
   AgentToolAssignmentUpdate,
   AgentToolListResponse,
   AgentUpdate,
-  ErrorResponse,
-  HTTPValidationError,
   WorkspaceAgentsListParams
 } from '../model';
 
-
-export type workspaceAgentsListResponse200 = {
-  data: AgentListResponse
-  status: 200
-}
-
-export type workspaceAgentsListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsListResponseSuccess = (workspaceAgentsListResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsListResponseError = (workspaceAgentsListResponse403 | workspaceAgentsListResponse404 | workspaceAgentsListResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsListResponse = (workspaceAgentsListResponseSuccess | workspaceAgentsListResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceAgentsListUrl = (organizationId: string,
     workspaceId: string,
@@ -65,7 +35,7 @@ export const getWorkspaceAgentsListUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
 }
 
 /**
@@ -73,63 +43,17 @@ export const getWorkspaceAgentsListUrl = (organizationId: string,
  */
 export const workspaceAgentsList = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceAgentsListParams, options?: RequestInit): Promise<workspaceAgentsListResponse> => {
+    params?: WorkspaceAgentsListParams, options?: RequestInit): Promise<AgentListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsListUrl(organizationId,workspaceId,params),
+  return apiRequest<AgentListResponse>(getWorkspaceAgentsListUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsListResponse
-}
-
-
-export type workspaceAgentsCreateResponse201 = {
-  data: AgentRead
-  status: 201
-}
-
-export type workspaceAgentsCreateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsCreateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsCreateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsCreateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type workspaceAgentsCreateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsCreateResponseSuccess = (workspaceAgentsCreateResponse201) & {
-  headers: Headers;
-};
-export type workspaceAgentsCreateResponseError = (workspaceAgentsCreateResponse400 | workspaceAgentsCreateResponse403 | workspaceAgentsCreateResponse404 | workspaceAgentsCreateResponse409 | workspaceAgentsCreateResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsCreateResponse = (workspaceAgentsCreateResponseSuccess | workspaceAgentsCreateResponseError)
 
 export const getWorkspaceAgentsCreateUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -137,7 +61,7 @@ export const getWorkspaceAgentsCreateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
 }
 
 /**
@@ -145,53 +69,17 @@ export const getWorkspaceAgentsCreateUrl = (organizationId: string,
  */
 export const workspaceAgentsCreate = async (organizationId: string,
     workspaceId: string,
-    agentCreate: AgentCreate, options?: RequestInit): Promise<workspaceAgentsCreateResponse> => {
+    agentCreate: AgentCreate, options?: RequestInit): Promise<AgentRead> => {
 
-  const res = await fetch(getWorkspaceAgentsCreateUrl(organizationId,workspaceId),
+  return apiRequest<AgentRead>(getWorkspaceAgentsCreateUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsCreateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsCreateResponse
-}
-
-
-export type workspaceAgentsListAvailableToolsResponse200 = {
-  data: AgentAvailableToolListResponse
-  status: 200
-}
-
-export type workspaceAgentsListAvailableToolsResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsListAvailableToolsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsListAvailableToolsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsListAvailableToolsResponseSuccess = (workspaceAgentsListAvailableToolsResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsListAvailableToolsResponseError = (workspaceAgentsListAvailableToolsResponse403 | workspaceAgentsListAvailableToolsResponse404 | workspaceAgentsListAvailableToolsResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsListAvailableToolsResponse = (workspaceAgentsListAvailableToolsResponseSuccess | workspaceAgentsListAvailableToolsResponseError)
 
 export const getWorkspaceAgentsListAvailableToolsUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -199,60 +87,24 @@ export const getWorkspaceAgentsListAvailableToolsUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/available-tools`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/available-tools`
 }
 
 /**
  * @summary List Workspace Agent Available Tools Route
  */
 export const workspaceAgentsListAvailableTools = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceAgentsListAvailableToolsResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<AgentAvailableToolListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsListAvailableToolsUrl(organizationId,workspaceId),
+  return apiRequest<AgentAvailableToolListResponse>(getWorkspaceAgentsListAvailableToolsUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsListAvailableToolsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsListAvailableToolsResponse
-}
-
-
-export type workspaceAgentsGetConversationResponse200 = {
-  data: AgentConversationResponse
-  status: 200
-}
-
-export type workspaceAgentsGetConversationResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsGetConversationResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsGetConversationResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsGetConversationResponseSuccess = (workspaceAgentsGetConversationResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsGetConversationResponseError = (workspaceAgentsGetConversationResponse403 | workspaceAgentsGetConversationResponse404 | workspaceAgentsGetConversationResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsGetConversationResponse = (workspaceAgentsGetConversationResponseSuccess | workspaceAgentsGetConversationResponseError)
 
 export const getWorkspaceAgentsGetConversationUrl = (organizationId: string,
     workspaceId: string,
@@ -261,7 +113,7 @@ export const getWorkspaceAgentsGetConversationUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/conversations/${conversationId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/conversations/${conversationId}`
 }
 
 /**
@@ -269,58 +121,17 @@ export const getWorkspaceAgentsGetConversationUrl = (organizationId: string,
  */
 export const workspaceAgentsGetConversation = async (organizationId: string,
     workspaceId: string,
-    conversationId: string, options?: RequestInit): Promise<workspaceAgentsGetConversationResponse> => {
+    conversationId: string, options?: RequestInit): Promise<AgentConversationResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsGetConversationUrl(organizationId,workspaceId,conversationId),
+  return apiRequest<AgentConversationResponse>(getWorkspaceAgentsGetConversationUrl(organizationId,workspaceId,conversationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsGetConversationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsGetConversationResponse
-}
-
-
-export type workspaceAgentsQuickStartResponse200 = {
-  data: AgentConversationResponse
-  status: 200
-}
-
-export type workspaceAgentsQuickStartResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsQuickStartResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsQuickStartResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsQuickStartResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsQuickStartResponseSuccess = (workspaceAgentsQuickStartResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsQuickStartResponseError = (workspaceAgentsQuickStartResponse400 | workspaceAgentsQuickStartResponse403 | workspaceAgentsQuickStartResponse404 | workspaceAgentsQuickStartResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsQuickStartResponse = (workspaceAgentsQuickStartResponseSuccess | workspaceAgentsQuickStartResponseError)
 
 export const getWorkspaceAgentsQuickStartUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -328,60 +139,24 @@ export const getWorkspaceAgentsQuickStartUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/quick-start`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/quick-start`
 }
 
 /**
  * @summary Quick Start Workspace Agent Route
  */
 export const workspaceAgentsQuickStart = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceAgentsQuickStartResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<AgentConversationResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsQuickStartUrl(organizationId,workspaceId),
+  return apiRequest<AgentConversationResponse>(getWorkspaceAgentsQuickStartUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsQuickStartResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsQuickStartResponse
-}
-
-
-export type workspaceAgentsDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type workspaceAgentsDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsDeleteResponseSuccess = (workspaceAgentsDeleteResponse204) & {
-  headers: Headers;
-};
-export type workspaceAgentsDeleteResponseError = (workspaceAgentsDeleteResponse403 | workspaceAgentsDeleteResponse404 | workspaceAgentsDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsDeleteResponse = (workspaceAgentsDeleteResponseSuccess | workspaceAgentsDeleteResponseError)
 
 export const getWorkspaceAgentsDeleteUrl = (organizationId: string,
     workspaceId: string,
@@ -390,7 +165,7 @@ export const getWorkspaceAgentsDeleteUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
 }
 
 /**
@@ -398,53 +173,17 @@ export const getWorkspaceAgentsDeleteUrl = (organizationId: string,
  */
 export const workspaceAgentsDelete = async (organizationId: string,
     workspaceId: string,
-    agentId: string, options?: RequestInit): Promise<workspaceAgentsDeleteResponse> => {
+    agentId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getWorkspaceAgentsDeleteUrl(organizationId,workspaceId,agentId),
+  return apiRequest<void>(getWorkspaceAgentsDeleteUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsDeleteResponse
-}
-
-
-export type workspaceAgentsGetResponse200 = {
-  data: AgentRead
-  status: 200
-}
-
-export type workspaceAgentsGetResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsGetResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsGetResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsGetResponseSuccess = (workspaceAgentsGetResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsGetResponseError = (workspaceAgentsGetResponse403 | workspaceAgentsGetResponse404 | workspaceAgentsGetResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsGetResponse = (workspaceAgentsGetResponseSuccess | workspaceAgentsGetResponseError)
 
 export const getWorkspaceAgentsGetUrl = (organizationId: string,
     workspaceId: string,
@@ -453,7 +192,7 @@ export const getWorkspaceAgentsGetUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
 }
 
 /**
@@ -461,63 +200,17 @@ export const getWorkspaceAgentsGetUrl = (organizationId: string,
  */
 export const workspaceAgentsGet = async (organizationId: string,
     workspaceId: string,
-    agentId: string, options?: RequestInit): Promise<workspaceAgentsGetResponse> => {
+    agentId: string, options?: RequestInit): Promise<AgentRead> => {
 
-  const res = await fetch(getWorkspaceAgentsGetUrl(organizationId,workspaceId,agentId),
+  return apiRequest<AgentRead>(getWorkspaceAgentsGetUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsGetResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsGetResponse
-}
-
-
-export type workspaceAgentsUpdateResponse200 = {
-  data: AgentRead
-  status: 200
-}
-
-export type workspaceAgentsUpdateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsUpdateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsUpdateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsUpdateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type workspaceAgentsUpdateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsUpdateResponseSuccess = (workspaceAgentsUpdateResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsUpdateResponseError = (workspaceAgentsUpdateResponse400 | workspaceAgentsUpdateResponse403 | workspaceAgentsUpdateResponse404 | workspaceAgentsUpdateResponse409 | workspaceAgentsUpdateResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsUpdateResponse = (workspaceAgentsUpdateResponseSuccess | workspaceAgentsUpdateResponseError)
 
 export const getWorkspaceAgentsUpdateUrl = (organizationId: string,
     workspaceId: string,
@@ -526,7 +219,7 @@ export const getWorkspaceAgentsUpdateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
 }
 
 /**
@@ -535,63 +228,17 @@ export const getWorkspaceAgentsUpdateUrl = (organizationId: string,
 export const workspaceAgentsUpdate = async (organizationId: string,
     workspaceId: string,
     agentId: string,
-    agentUpdate: AgentUpdate, options?: RequestInit): Promise<workspaceAgentsUpdateResponse> => {
+    agentUpdate: AgentUpdate, options?: RequestInit): Promise<AgentRead> => {
 
-  const res = await fetch(getWorkspaceAgentsUpdateUrl(organizationId,workspaceId,agentId),
+  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsUpdateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsUpdateResponse
-}
-
-
-export type workspaceAgentsChatResponse200 = {
-  data: string
-  status: 200
-}
-
-export type workspaceAgentsChatResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsChatResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsChatResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsChatResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsChatResponse502 = {
-  data: ErrorResponse
-  status: 502
-}
-
-export type workspaceAgentsChatResponseSuccess = (workspaceAgentsChatResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsChatResponseError = (workspaceAgentsChatResponse400 | workspaceAgentsChatResponse403 | workspaceAgentsChatResponse404 | workspaceAgentsChatResponse422 | workspaceAgentsChatResponse502) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsChatResponse = (workspaceAgentsChatResponseSuccess | workspaceAgentsChatResponseError)
 
 export const getWorkspaceAgentsChatUrl = (organizationId: string,
     workspaceId: string,
@@ -600,7 +247,7 @@ export const getWorkspaceAgentsChatUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/chat`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/chat`
 }
 
 /**
@@ -609,58 +256,17 @@ export const getWorkspaceAgentsChatUrl = (organizationId: string,
 export const workspaceAgentsChat = async (organizationId: string,
     workspaceId: string,
     agentId: string,
-    agentChatRequest: AgentChatRequest, options?: RequestInit): Promise<workspaceAgentsChatResponse> => {
+    agentChatRequest: AgentChatRequest, options?: RequestInit): Promise<string> => {
 
-  const res = await fetch(getWorkspaceAgentsChatUrl(organizationId,workspaceId,agentId),
+  return apiRequest<string>(getWorkspaceAgentsChatUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentChatRequest)
   }
-)
+);}
 
-  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsChatResponse['data'] = body ? (contentType.includes('json') ? JSON.parse(body) : body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsChatResponse
-}
-
-
-export type workspaceAgentsDecideToolApprovalResponse200 = {
-  data: AgentToolApprovalDecisionResponse
-  status: 200
-}
-
-export type workspaceAgentsDecideToolApprovalResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsDecideToolApprovalResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsDecideToolApprovalResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsDecideToolApprovalResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsDecideToolApprovalResponseSuccess = (workspaceAgentsDecideToolApprovalResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsDecideToolApprovalResponseError = (workspaceAgentsDecideToolApprovalResponse400 | workspaceAgentsDecideToolApprovalResponse403 | workspaceAgentsDecideToolApprovalResponse404 | workspaceAgentsDecideToolApprovalResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsDecideToolApprovalResponse = (workspaceAgentsDecideToolApprovalResponseSuccess | workspaceAgentsDecideToolApprovalResponseError)
 
 export const getWorkspaceAgentsDecideToolApprovalUrl = (organizationId: string,
     workspaceId: string,
@@ -670,7 +276,7 @@ export const getWorkspaceAgentsDecideToolApprovalUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tool-approvals/${approvalId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tool-approvals/${approvalId}`
 }
 
 /**
@@ -680,58 +286,17 @@ export const workspaceAgentsDecideToolApproval = async (organizationId: string,
     workspaceId: string,
     agentId: string,
     approvalId: string,
-    agentToolApprovalDecisionRequest: AgentToolApprovalDecisionRequest, options?: RequestInit): Promise<workspaceAgentsDecideToolApprovalResponse> => {
+    agentToolApprovalDecisionRequest: AgentToolApprovalDecisionRequest, options?: RequestInit): Promise<AgentToolApprovalDecisionResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsDecideToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
+  return apiRequest<AgentToolApprovalDecisionResponse>(getWorkspaceAgentsDecideToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentToolApprovalDecisionRequest)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsDecideToolApprovalResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsDecideToolApprovalResponse
-}
-
-
-export type workspaceAgentsListToolsResponse200 = {
-  data: AgentToolListResponse
-  status: 200
-}
-
-export type workspaceAgentsListToolsResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsListToolsResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsListToolsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsListToolsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsListToolsResponseSuccess = (workspaceAgentsListToolsResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsListToolsResponseError = (workspaceAgentsListToolsResponse400 | workspaceAgentsListToolsResponse403 | workspaceAgentsListToolsResponse404 | workspaceAgentsListToolsResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsListToolsResponse = (workspaceAgentsListToolsResponseSuccess | workspaceAgentsListToolsResponseError)
 
 export const getWorkspaceAgentsListToolsUrl = (organizationId: string,
     workspaceId: string,
@@ -740,7 +305,7 @@ export const getWorkspaceAgentsListToolsUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
 }
 
 /**
@@ -748,58 +313,17 @@ export const getWorkspaceAgentsListToolsUrl = (organizationId: string,
  */
 export const workspaceAgentsListTools = async (organizationId: string,
     workspaceId: string,
-    agentId: string, options?: RequestInit): Promise<workspaceAgentsListToolsResponse> => {
+    agentId: string, options?: RequestInit): Promise<AgentToolListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsListToolsUrl(organizationId,workspaceId,agentId),
+  return apiRequest<AgentToolListResponse>(getWorkspaceAgentsListToolsUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsListToolsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsListToolsResponse
-}
-
-
-export type workspaceAgentsReplaceToolsResponse200 = {
-  data: AgentToolListResponse
-  status: 200
-}
-
-export type workspaceAgentsReplaceToolsResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type workspaceAgentsReplaceToolsResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceAgentsReplaceToolsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceAgentsReplaceToolsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceAgentsReplaceToolsResponseSuccess = (workspaceAgentsReplaceToolsResponse200) & {
-  headers: Headers;
-};
-export type workspaceAgentsReplaceToolsResponseError = (workspaceAgentsReplaceToolsResponse400 | workspaceAgentsReplaceToolsResponse403 | workspaceAgentsReplaceToolsResponse404 | workspaceAgentsReplaceToolsResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceAgentsReplaceToolsResponse = (workspaceAgentsReplaceToolsResponseSuccess | workspaceAgentsReplaceToolsResponseError)
 
 export const getWorkspaceAgentsReplaceToolsUrl = (organizationId: string,
     workspaceId: string,
@@ -808,7 +332,7 @@ export const getWorkspaceAgentsReplaceToolsUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
 }
 
 /**
@@ -817,22 +341,15 @@ export const getWorkspaceAgentsReplaceToolsUrl = (organizationId: string,
 export const workspaceAgentsReplaceTools = async (organizationId: string,
     workspaceId: string,
     agentId: string,
-    agentToolAssignmentUpdate: AgentToolAssignmentUpdate, options?: RequestInit): Promise<workspaceAgentsReplaceToolsResponse> => {
+    agentToolAssignmentUpdate: AgentToolAssignmentUpdate, options?: RequestInit): Promise<AgentToolListResponse> => {
 
-  const res = await fetch(getWorkspaceAgentsReplaceToolsUrl(organizationId,workspaceId,agentId),
+  return apiRequest<AgentToolListResponse>(getWorkspaceAgentsReplaceToolsUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentToolAssignmentUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceAgentsReplaceToolsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceAgentsReplaceToolsResponse
-}
+);}
 
 

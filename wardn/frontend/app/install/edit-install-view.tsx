@@ -6,9 +6,8 @@ import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceInstallPath,
   workspaceMcpRegistryPath,
@@ -21,20 +20,8 @@ async function getInitialInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 type EditInstallViewProps = {
@@ -67,7 +54,9 @@ export async function EditInstallView({ installationId, workspaceContext }: Edit
         basePath={workspaceInstallPath(workspaceContext)}
         initialInstallation={installation}
         initialInstallations={installations}
+        organizationId={organizationId}
         secretStores={secretStores}
+        workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
       />
     </AppShell>
   );

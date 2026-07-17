@@ -5,38 +5,13 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   MeUsageSummaryParams,
   OrganizationUsageSummaryParams,
   UsageSummaryResponse,
   WorkspaceUsageSummaryParams
 } from '../model';
 
-
-export type meUsageSummaryResponse200 = {
-  data: UsageSummaryResponse
-  status: 200
-}
-
-export type meUsageSummaryResponse401 = {
-  data: ErrorResponse
-  status: 401
-}
-
-export type meUsageSummaryResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type meUsageSummaryResponseSuccess = (meUsageSummaryResponse200) & {
-  headers: Headers;
-};
-export type meUsageSummaryResponseError = (meUsageSummaryResponse401 | meUsageSummaryResponse422) & {
-  headers: Headers;
-};
-
-export type meUsageSummaryResponse = (meUsageSummaryResponseSuccess | meUsageSummaryResponseError)
+import { apiRequest } from '../../client';
 
 export const getMeUsageSummaryUrl = (params?: MeUsageSummaryParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -50,60 +25,22 @@ export const getMeUsageSummaryUrl = (params?: MeUsageSummaryParams,) => {
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/me/usage?${stringifiedParams}` : `http://localhost:8000/api/v1/me/usage`
+  return stringifiedParams.length > 0 ? `/api/v1/me/usage?${stringifiedParams}` : `/api/v1/me/usage`
 }
 
 /**
  * @summary Me Usage Summary Route
  */
-export const meUsageSummary = async (params?: MeUsageSummaryParams, options?: RequestInit): Promise<meUsageSummaryResponse> => {
+export const meUsageSummary = async (params?: MeUsageSummaryParams, options?: RequestInit): Promise<UsageSummaryResponse> => {
 
-  const res = await fetch(getMeUsageSummaryUrl(params),
+  return apiRequest<UsageSummaryResponse>(getMeUsageSummaryUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: meUsageSummaryResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as meUsageSummaryResponse
-}
-
-
-export type organizationUsageSummaryResponse200 = {
-  data: UsageSummaryResponse
-  status: 200
-}
-
-export type organizationUsageSummaryResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationUsageSummaryResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationUsageSummaryResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationUsageSummaryResponseSuccess = (organizationUsageSummaryResponse200) & {
-  headers: Headers;
-};
-export type organizationUsageSummaryResponseError = (organizationUsageSummaryResponse403 | organizationUsageSummaryResponse404 | organizationUsageSummaryResponse422) & {
-  headers: Headers;
-};
-
-export type organizationUsageSummaryResponse = (organizationUsageSummaryResponseSuccess | organizationUsageSummaryResponseError)
-
+);}
 export const getOrganizationUsageSummaryUrl = (organizationId: string,
     params?: OrganizationUsageSummaryParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -117,60 +54,23 @@ export const getOrganizationUsageSummaryUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/usage/summary?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/usage/summary`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/usage/summary?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/usage/summary`
 }
 
 /**
  * @summary Organization Usage Summary Route
  */
 export const organizationUsageSummary = async (organizationId: string,
-    params?: OrganizationUsageSummaryParams, options?: RequestInit): Promise<organizationUsageSummaryResponse> => {
+    params?: OrganizationUsageSummaryParams, options?: RequestInit): Promise<UsageSummaryResponse> => {
 
-  const res = await fetch(getOrganizationUsageSummaryUrl(organizationId,params),
+  return apiRequest<UsageSummaryResponse>(getOrganizationUsageSummaryUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationUsageSummaryResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationUsageSummaryResponse
-}
-
-
-export type workspaceUsageSummaryResponse200 = {
-  data: UsageSummaryResponse
-  status: 200
-}
-
-export type workspaceUsageSummaryResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type workspaceUsageSummaryResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type workspaceUsageSummaryResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceUsageSummaryResponseSuccess = (workspaceUsageSummaryResponse200) & {
-  headers: Headers;
-};
-export type workspaceUsageSummaryResponseError = (workspaceUsageSummaryResponse403 | workspaceUsageSummaryResponse404 | workspaceUsageSummaryResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceUsageSummaryResponse = (workspaceUsageSummaryResponseSuccess | workspaceUsageSummaryResponseError)
+);}
 
 export const getWorkspaceUsageSummaryUrl = (organizationId: string,
     workspaceId: string,
@@ -186,7 +86,7 @@ export const getWorkspaceUsageSummaryUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/usage/summary`
 }
 
 /**
@@ -194,20 +94,13 @@ export const getWorkspaceUsageSummaryUrl = (organizationId: string,
  */
 export const workspaceUsageSummary = async (organizationId: string,
     workspaceId: string,
-    params?: WorkspaceUsageSummaryParams, options?: RequestInit): Promise<workspaceUsageSummaryResponse> => {
+    params?: WorkspaceUsageSummaryParams, options?: RequestInit): Promise<UsageSummaryResponse> => {
 
-  const res = await fetch(getWorkspaceUsageSummaryUrl(organizationId,workspaceId,params),
+  return apiRequest<UsageSummaryResponse>(getWorkspaceUsageSummaryUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceUsageSummaryResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceUsageSummaryResponse
-}
+);}

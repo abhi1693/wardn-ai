@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { getOrganization, getWorkspaceContext, getWorkspaces } from "../data";
+import { getWorkspaceContext } from "../data";
 
 type OrganizationPageProps = {
   params: Promise<{ organizationId: string }>;
@@ -27,11 +27,9 @@ function roleLabel(role: string) {
 
 export default async function OrganizationPage({ params }: OrganizationPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces] = await Promise.all([
-    getWorkspaceContext(),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId });
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
   if (!organization) {
     notFound();
   }

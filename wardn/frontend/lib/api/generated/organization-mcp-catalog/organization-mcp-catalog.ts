@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   MCPCatalogSourceCreate,
   MCPCatalogSourceListResponse,
   MCPCatalogSourceRead,
@@ -14,30 +12,7 @@ import type {
   MCPOperationJobRead
 } from '../model';
 
-
-export type organizationMcpCatalogGetOperationJobResponse200 = {
-  data: MCPOperationJobRead
-  status: 200
-}
-
-export type organizationMcpCatalogGetOperationJobResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpCatalogGetOperationJobResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogGetOperationJobResponseSuccess = (organizationMcpCatalogGetOperationJobResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogGetOperationJobResponseError = (organizationMcpCatalogGetOperationJobResponse404 | organizationMcpCatalogGetOperationJobResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogGetOperationJobResponse = (organizationMcpCatalogGetOperationJobResponseSuccess | organizationMcpCatalogGetOperationJobResponseError)
+import { apiRequest } from '../../client';
 
 export const getOrganizationMcpCatalogGetOperationJobUrl = (organizationId: string,
     jobId: string,) => {
@@ -45,159 +20,71 @@ export const getOrganizationMcpCatalogGetOperationJobUrl = (organizationId: stri
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/jobs/${jobId}`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/jobs/${jobId}`
 }
 
 /**
  * @summary Get Organization Mcp Catalog Operation Job
  */
 export const organizationMcpCatalogGetOperationJob = async (organizationId: string,
-    jobId: string, options?: RequestInit): Promise<organizationMcpCatalogGetOperationJobResponse> => {
+    jobId: string, options?: RequestInit): Promise<MCPOperationJobRead> => {
 
-  const res = await fetch(getOrganizationMcpCatalogGetOperationJobUrl(organizationId,jobId),
+  return apiRequest<MCPOperationJobRead>(getOrganizationMcpCatalogGetOperationJobUrl(organizationId,jobId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogGetOperationJobResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogGetOperationJobResponse
-}
-
-
-export type organizationMcpCatalogListSourcesResponse200 = {
-  data: MCPCatalogSourceListResponse
-  status: 200
-}
-
-export type organizationMcpCatalogListSourcesResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogListSourcesResponseSuccess = (organizationMcpCatalogListSourcesResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogListSourcesResponseError = (organizationMcpCatalogListSourcesResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogListSourcesResponse = (organizationMcpCatalogListSourcesResponseSuccess | organizationMcpCatalogListSourcesResponseError)
 
 export const getOrganizationMcpCatalogListSourcesUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources`
 }
 
 /**
  * @summary List Organization Mcp Catalog Sources
  */
-export const organizationMcpCatalogListSources = async (organizationId: string, options?: RequestInit): Promise<organizationMcpCatalogListSourcesResponse> => {
+export const organizationMcpCatalogListSources = async (organizationId: string, options?: RequestInit): Promise<MCPCatalogSourceListResponse> => {
 
-  const res = await fetch(getOrganizationMcpCatalogListSourcesUrl(organizationId),
+  return apiRequest<MCPCatalogSourceListResponse>(getOrganizationMcpCatalogListSourcesUrl(organizationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogListSourcesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogListSourcesResponse
-}
-
-
-export type organizationMcpCatalogCreateSourceResponse201 = {
-  data: MCPCatalogSourceRead
-  status: 201
-}
-
-export type organizationMcpCatalogCreateSourceResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationMcpCatalogCreateSourceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogCreateSourceResponseSuccess = (organizationMcpCatalogCreateSourceResponse201) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogCreateSourceResponseError = (organizationMcpCatalogCreateSourceResponse409 | organizationMcpCatalogCreateSourceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogCreateSourceResponse = (organizationMcpCatalogCreateSourceResponseSuccess | organizationMcpCatalogCreateSourceResponseError)
 
 export const getOrganizationMcpCatalogCreateSourceUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources`
 }
 
 /**
  * @summary Create Organization Mcp Catalog Source
  */
 export const organizationMcpCatalogCreateSource = async (organizationId: string,
-    mCPCatalogSourceCreate: MCPCatalogSourceCreate, options?: RequestInit): Promise<organizationMcpCatalogCreateSourceResponse> => {
+    mCPCatalogSourceCreate: MCPCatalogSourceCreate, options?: RequestInit): Promise<MCPCatalogSourceRead> => {
 
-  const res = await fetch(getOrganizationMcpCatalogCreateSourceUrl(organizationId),
+  return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogCreateSourceUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPCatalogSourceCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogCreateSourceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogCreateSourceResponse
-}
-
-
-export type organizationMcpCatalogDeleteSourceResponse204 = {
-  data: void
-  status: 204
-}
-
-export type organizationMcpCatalogDeleteSourceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpCatalogDeleteSourceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogDeleteSourceResponseSuccess = (organizationMcpCatalogDeleteSourceResponse204) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogDeleteSourceResponseError = (organizationMcpCatalogDeleteSourceResponse404 | organizationMcpCatalogDeleteSourceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogDeleteSourceResponse = (organizationMcpCatalogDeleteSourceResponseSuccess | organizationMcpCatalogDeleteSourceResponseError)
 
 export const getOrganizationMcpCatalogDeleteSourceUrl = (organizationId: string,
     sourceId: string,) => {
@@ -205,55 +92,24 @@ export const getOrganizationMcpCatalogDeleteSourceUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
 }
 
 /**
  * @summary Delete Organization Mcp Catalog Source
  */
 export const organizationMcpCatalogDeleteSource = async (organizationId: string,
-    sourceId: string, options?: RequestInit): Promise<organizationMcpCatalogDeleteSourceResponse> => {
+    sourceId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getOrganizationMcpCatalogDeleteSourceUrl(organizationId,sourceId),
+  return apiRequest<void>(getOrganizationMcpCatalogDeleteSourceUrl(organizationId,sourceId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogDeleteSourceResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogDeleteSourceResponse
-}
-
-
-export type organizationMcpCatalogGetSourceResponse200 = {
-  data: MCPCatalogSourceRead
-  status: 200
-}
-
-export type organizationMcpCatalogGetSourceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpCatalogGetSourceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogGetSourceResponseSuccess = (organizationMcpCatalogGetSourceResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogGetSourceResponseError = (organizationMcpCatalogGetSourceResponse404 | organizationMcpCatalogGetSourceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogGetSourceResponse = (organizationMcpCatalogGetSourceResponseSuccess | organizationMcpCatalogGetSourceResponseError)
 
 export const getOrganizationMcpCatalogGetSourceUrl = (organizationId: string,
     sourceId: string,) => {
@@ -261,60 +117,24 @@ export const getOrganizationMcpCatalogGetSourceUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
 }
 
 /**
  * @summary Get Organization Mcp Catalog Source
  */
 export const organizationMcpCatalogGetSource = async (organizationId: string,
-    sourceId: string, options?: RequestInit): Promise<organizationMcpCatalogGetSourceResponse> => {
+    sourceId: string, options?: RequestInit): Promise<MCPCatalogSourceRead> => {
 
-  const res = await fetch(getOrganizationMcpCatalogGetSourceUrl(organizationId,sourceId),
+  return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogGetSourceUrl(organizationId,sourceId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogGetSourceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogGetSourceResponse
-}
-
-
-export type organizationMcpCatalogUpdateSourceResponse200 = {
-  data: MCPCatalogSourceRead
-  status: 200
-}
-
-export type organizationMcpCatalogUpdateSourceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpCatalogUpdateSourceResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationMcpCatalogUpdateSourceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogUpdateSourceResponseSuccess = (organizationMcpCatalogUpdateSourceResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogUpdateSourceResponseError = (organizationMcpCatalogUpdateSourceResponse404 | organizationMcpCatalogUpdateSourceResponse409 | organizationMcpCatalogUpdateSourceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogUpdateSourceResponse = (organizationMcpCatalogUpdateSourceResponseSuccess | organizationMcpCatalogUpdateSourceResponseError)
 
 export const getOrganizationMcpCatalogUpdateSourceUrl = (organizationId: string,
     sourceId: string,) => {
@@ -322,7 +142,7 @@ export const getOrganizationMcpCatalogUpdateSourceUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}`
 }
 
 /**
@@ -330,53 +150,17 @@ export const getOrganizationMcpCatalogUpdateSourceUrl = (organizationId: string,
  */
 export const organizationMcpCatalogUpdateSource = async (organizationId: string,
     sourceId: string,
-    mCPCatalogSourceUpdate: MCPCatalogSourceUpdate, options?: RequestInit): Promise<organizationMcpCatalogUpdateSourceResponse> => {
+    mCPCatalogSourceUpdate: MCPCatalogSourceUpdate, options?: RequestInit): Promise<MCPCatalogSourceRead> => {
 
-  const res = await fetch(getOrganizationMcpCatalogUpdateSourceUrl(organizationId,sourceId),
+  return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogUpdateSourceUrl(organizationId,sourceId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPCatalogSourceUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogUpdateSourceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogUpdateSourceResponse
-}
-
-
-export type organizationMcpCatalogSyncSourceResponse202 = {
-  data: MCPOperationJobRead
-  status: 202
-}
-
-export type organizationMcpCatalogSyncSourceResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type organizationMcpCatalogSyncSourceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpCatalogSyncSourceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpCatalogSyncSourceResponseSuccess = (organizationMcpCatalogSyncSourceResponse202) & {
-  headers: Headers;
-};
-export type organizationMcpCatalogSyncSourceResponseError = (organizationMcpCatalogSyncSourceResponse400 | organizationMcpCatalogSyncSourceResponse404 | organizationMcpCatalogSyncSourceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpCatalogSyncSourceResponse = (organizationMcpCatalogSyncSourceResponseSuccess | organizationMcpCatalogSyncSourceResponseError)
 
 export const getOrganizationMcpCatalogSyncSourceUrl = (organizationId: string,
     sourceId: string,) => {
@@ -384,29 +168,22 @@ export const getOrganizationMcpCatalogSyncSourceUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}/sync`
+  return `/api/v1/organizations/${organizationId}/mcp/catalog/sources/${sourceId}/sync`
 }
 
 /**
  * @summary Sync Organization Mcp Catalog Source
  */
 export const organizationMcpCatalogSyncSource = async (organizationId: string,
-    sourceId: string, options?: RequestInit): Promise<organizationMcpCatalogSyncSourceResponse> => {
+    sourceId: string, options?: RequestInit): Promise<MCPOperationJobRead> => {
 
-  const res = await fetch(getOrganizationMcpCatalogSyncSourceUrl(organizationId,sourceId),
+  return apiRequest<MCPOperationJobRead>(getOrganizationMcpCatalogSyncSourceUrl(organizationId,sourceId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpCatalogSyncSourceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpCatalogSyncSourceResponse
-}
+);}
 
 

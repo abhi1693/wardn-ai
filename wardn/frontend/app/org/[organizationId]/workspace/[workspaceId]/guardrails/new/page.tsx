@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspace } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -16,11 +15,9 @@ type NewGuardrailPageProps = {
 
 export default async function NewGuardrailPage({ params }: NewGuardrailPageProps) {
   const { organizationId, workspaceId } = await params;
-  const [workspaceContext, organization, workspace] = await Promise.all([
-    getWorkspaceContext({ organizationId, workspaceId }),
-    getOrganization(organizationId),
-    getWorkspace(organizationId, workspaceId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId, workspaceId });
+  const organization = workspaceContext.selectedOrganization;
+  const workspace = workspaceContext.selectedWorkspace;
 
   if (!organization || !workspace) {
     notFound();

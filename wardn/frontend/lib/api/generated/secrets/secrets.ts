@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   SecretHandleCreate,
   SecretHandleListResponse,
   SecretHandleRead,
@@ -20,35 +18,7 @@ import type {
   SecretValidationResponse
 } from '../model';
 
-
-export type secretHandlesListResponse200 = {
-  data: SecretHandleListResponse
-  status: 200
-}
-
-export type secretHandlesListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesListResponseSuccess = (secretHandlesListResponse200) & {
-  headers: Headers;
-};
-export type secretHandlesListResponseError = (secretHandlesListResponse403 | secretHandlesListResponse404 | secretHandlesListResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesListResponse = (secretHandlesListResponseSuccess | secretHandlesListResponseError)
+import { apiRequest } from '../../client';
 
 export const getSecretHandlesListUrl = (organizationId: string,
     params?: SecretHandlesListParams,) => {
@@ -63,135 +33,48 @@ export const getSecretHandlesListUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/secrets/handles?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/secrets/handles`
 }
 
 /**
  * @summary List Secret Handles Route
  */
 export const secretHandlesList = async (organizationId: string,
-    params?: SecretHandlesListParams, options?: RequestInit): Promise<secretHandlesListResponse> => {
+    params?: SecretHandlesListParams, options?: RequestInit): Promise<SecretHandleListResponse> => {
 
-  const res = await fetch(getSecretHandlesListUrl(organizationId,params),
+  return apiRequest<SecretHandleListResponse>(getSecretHandlesListUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretHandlesListResponse
-}
-
-
-export type secretHandlesCreateResponse201 = {
-  data: SecretHandleRead
-  status: 201
-}
-
-export type secretHandlesCreateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type secretHandlesCreateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesCreateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesCreateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretHandlesCreateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesCreateResponseSuccess = (secretHandlesCreateResponse201) & {
-  headers: Headers;
-};
-export type secretHandlesCreateResponseError = (secretHandlesCreateResponse400 | secretHandlesCreateResponse403 | secretHandlesCreateResponse404 | secretHandlesCreateResponse409 | secretHandlesCreateResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesCreateResponse = (secretHandlesCreateResponseSuccess | secretHandlesCreateResponseError)
 
 export const getSecretHandlesCreateUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles`
+  return `/api/v1/organizations/${organizationId}/secrets/handles`
 }
 
 /**
  * @summary Create Secret Handle Route
  */
 export const secretHandlesCreate = async (organizationId: string,
-    secretHandleCreate: SecretHandleCreate, options?: RequestInit): Promise<secretHandlesCreateResponse> => {
+    secretHandleCreate: SecretHandleCreate, options?: RequestInit): Promise<SecretHandleRead> => {
 
-  const res = await fetch(getSecretHandlesCreateUrl(organizationId),
+  return apiRequest<SecretHandleRead>(getSecretHandlesCreateUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(secretHandleCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesCreateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretHandlesCreateResponse
-}
-
-
-export type secretHandlesDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type secretHandlesDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesDeleteResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretHandlesDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesDeleteResponseSuccess = (secretHandlesDeleteResponse204) & {
-  headers: Headers;
-};
-export type secretHandlesDeleteResponseError = (secretHandlesDeleteResponse403 | secretHandlesDeleteResponse404 | secretHandlesDeleteResponse409 | secretHandlesDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesDeleteResponse = (secretHandlesDeleteResponseSuccess | secretHandlesDeleteResponseError)
 
 export const getSecretHandlesDeleteUrl = (organizationId: string,
     handleId: string,) => {
@@ -199,60 +82,24 @@ export const getSecretHandlesDeleteUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
+  return `/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
 }
 
 /**
  * @summary Delete Secret Handle Route
  */
 export const secretHandlesDelete = async (organizationId: string,
-    handleId: string, options?: RequestInit): Promise<secretHandlesDeleteResponse> => {
+    handleId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getSecretHandlesDeleteUrl(organizationId,handleId),
+  return apiRequest<void>(getSecretHandlesDeleteUrl(organizationId,handleId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as secretHandlesDeleteResponse
-}
-
-
-export type secretHandlesGetResponse200 = {
-  data: SecretHandleRead
-  status: 200
-}
-
-export type secretHandlesGetResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesGetResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesGetResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesGetResponseSuccess = (secretHandlesGetResponse200) & {
-  headers: Headers;
-};
-export type secretHandlesGetResponseError = (secretHandlesGetResponse403 | secretHandlesGetResponse404 | secretHandlesGetResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesGetResponse = (secretHandlesGetResponseSuccess | secretHandlesGetResponseError)
 
 export const getSecretHandlesGetUrl = (organizationId: string,
     handleId: string,) => {
@@ -260,70 +107,24 @@ export const getSecretHandlesGetUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
+  return `/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
 }
 
 /**
  * @summary Get Secret Handle Route
  */
 export const secretHandlesGet = async (organizationId: string,
-    handleId: string, options?: RequestInit): Promise<secretHandlesGetResponse> => {
+    handleId: string, options?: RequestInit): Promise<SecretHandleRead> => {
 
-  const res = await fetch(getSecretHandlesGetUrl(organizationId,handleId),
+  return apiRequest<SecretHandleRead>(getSecretHandlesGetUrl(organizationId,handleId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesGetResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretHandlesGetResponse
-}
-
-
-export type secretHandlesUpdateResponse200 = {
-  data: SecretHandleRead
-  status: 200
-}
-
-export type secretHandlesUpdateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type secretHandlesUpdateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesUpdateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesUpdateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretHandlesUpdateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesUpdateResponseSuccess = (secretHandlesUpdateResponse200) & {
-  headers: Headers;
-};
-export type secretHandlesUpdateResponseError = (secretHandlesUpdateResponse400 | secretHandlesUpdateResponse403 | secretHandlesUpdateResponse404 | secretHandlesUpdateResponse409 | secretHandlesUpdateResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesUpdateResponse = (secretHandlesUpdateResponseSuccess | secretHandlesUpdateResponseError)
 
 export const getSecretHandlesUpdateUrl = (organizationId: string,
     handleId: string,) => {
@@ -331,7 +132,7 @@ export const getSecretHandlesUpdateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
+  return `/api/v1/organizations/${organizationId}/secrets/handles/${handleId}`
 }
 
 /**
@@ -339,58 +140,17 @@ export const getSecretHandlesUpdateUrl = (organizationId: string,
  */
 export const secretHandlesUpdate = async (organizationId: string,
     handleId: string,
-    secretHandleUpdate: SecretHandleUpdate, options?: RequestInit): Promise<secretHandlesUpdateResponse> => {
+    secretHandleUpdate: SecretHandleUpdate, options?: RequestInit): Promise<SecretHandleRead> => {
 
-  const res = await fetch(getSecretHandlesUpdateUrl(organizationId,handleId),
+  return apiRequest<SecretHandleRead>(getSecretHandlesUpdateUrl(organizationId,handleId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(secretHandleUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesUpdateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretHandlesUpdateResponse
-}
-
-
-export type secretHandlesValidateResponse200 = {
-  data: SecretValidationResponse
-  status: 200
-}
-
-export type secretHandlesValidateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type secretHandlesValidateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretHandlesValidateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretHandlesValidateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretHandlesValidateResponseSuccess = (secretHandlesValidateResponse200) & {
-  headers: Headers;
-};
-export type secretHandlesValidateResponseError = (secretHandlesValidateResponse400 | secretHandlesValidateResponse403 | secretHandlesValidateResponse404 | secretHandlesValidateResponse422) & {
-  headers: Headers;
-};
-
-export type secretHandlesValidateResponse = (secretHandlesValidateResponseSuccess | secretHandlesValidateResponseError)
 
 export const getSecretHandlesValidateUrl = (organizationId: string,
     handleId: string,) => {
@@ -398,60 +158,24 @@ export const getSecretHandlesValidateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/handles/${handleId}/validate`
+  return `/api/v1/organizations/${organizationId}/secrets/handles/${handleId}/validate`
 }
 
 /**
  * @summary Validate Secret Handle Route
  */
 export const secretHandlesValidate = async (organizationId: string,
-    handleId: string, options?: RequestInit): Promise<secretHandlesValidateResponse> => {
+    handleId: string, options?: RequestInit): Promise<SecretValidationResponse> => {
 
-  const res = await fetch(getSecretHandlesValidateUrl(organizationId,handleId),
+  return apiRequest<SecretValidationResponse>(getSecretHandlesValidateUrl(organizationId,handleId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretHandlesValidateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretHandlesValidateResponse
-}
-
-
-export type secretStoresListResponse200 = {
-  data: SecretStoreListResponse
-  status: 200
-}
-
-export type secretStoresListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresListResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresListResponseSuccess = (secretStoresListResponse200) & {
-  headers: Headers;
-};
-export type secretStoresListResponseError = (secretStoresListResponse403 | secretStoresListResponse404 | secretStoresListResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresListResponse = (secretStoresListResponseSuccess | secretStoresListResponseError)
 
 export const getSecretStoresListUrl = (organizationId: string,
     params?: SecretStoresListParams,) => {
@@ -466,135 +190,48 @@ export const getSecretStoresListUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/secrets/stores?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/secrets/stores`
 }
 
 /**
  * @summary List Secret Stores Route
  */
 export const secretStoresList = async (organizationId: string,
-    params?: SecretStoresListParams, options?: RequestInit): Promise<secretStoresListResponse> => {
+    params?: SecretStoresListParams, options?: RequestInit): Promise<SecretStoreListResponse> => {
 
-  const res = await fetch(getSecretStoresListUrl(organizationId,params),
+  return apiRequest<SecretStoreListResponse>(getSecretStoresListUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretStoresListResponse
-}
-
-
-export type secretStoresCreateResponse201 = {
-  data: SecretStoreRead
-  status: 201
-}
-
-export type secretStoresCreateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type secretStoresCreateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresCreateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresCreateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretStoresCreateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresCreateResponseSuccess = (secretStoresCreateResponse201) & {
-  headers: Headers;
-};
-export type secretStoresCreateResponseError = (secretStoresCreateResponse400 | secretStoresCreateResponse403 | secretStoresCreateResponse404 | secretStoresCreateResponse409 | secretStoresCreateResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresCreateResponse = (secretStoresCreateResponseSuccess | secretStoresCreateResponseError)
 
 export const getSecretStoresCreateUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores`
+  return `/api/v1/organizations/${organizationId}/secrets/stores`
 }
 
 /**
  * @summary Create Secret Store Route
  */
 export const secretStoresCreate = async (organizationId: string,
-    secretStoreCreate: SecretStoreCreate, options?: RequestInit): Promise<secretStoresCreateResponse> => {
+    secretStoreCreate: SecretStoreCreate, options?: RequestInit): Promise<SecretStoreRead> => {
 
-  const res = await fetch(getSecretStoresCreateUrl(organizationId),
+  return apiRequest<SecretStoreRead>(getSecretStoresCreateUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(secretStoreCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresCreateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretStoresCreateResponse
-}
-
-
-export type secretStoresDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type secretStoresDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresDeleteResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretStoresDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresDeleteResponseSuccess = (secretStoresDeleteResponse204) & {
-  headers: Headers;
-};
-export type secretStoresDeleteResponseError = (secretStoresDeleteResponse403 | secretStoresDeleteResponse404 | secretStoresDeleteResponse409 | secretStoresDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresDeleteResponse = (secretStoresDeleteResponseSuccess | secretStoresDeleteResponseError)
 
 export const getSecretStoresDeleteUrl = (organizationId: string,
     storeId: string,) => {
@@ -602,60 +239,24 @@ export const getSecretStoresDeleteUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
+  return `/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
 }
 
 /**
  * @summary Delete Secret Store Route
  */
 export const secretStoresDelete = async (organizationId: string,
-    storeId: string, options?: RequestInit): Promise<secretStoresDeleteResponse> => {
+    storeId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getSecretStoresDeleteUrl(organizationId,storeId),
+  return apiRequest<void>(getSecretStoresDeleteUrl(organizationId,storeId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as secretStoresDeleteResponse
-}
-
-
-export type secretStoresGetResponse200 = {
-  data: SecretStoreRead
-  status: 200
-}
-
-export type secretStoresGetResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresGetResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresGetResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresGetResponseSuccess = (secretStoresGetResponse200) & {
-  headers: Headers;
-};
-export type secretStoresGetResponseError = (secretStoresGetResponse403 | secretStoresGetResponse404 | secretStoresGetResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresGetResponse = (secretStoresGetResponseSuccess | secretStoresGetResponseError)
 
 export const getSecretStoresGetUrl = (organizationId: string,
     storeId: string,) => {
@@ -663,70 +264,24 @@ export const getSecretStoresGetUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
+  return `/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
 }
 
 /**
  * @summary Get Secret Store Route
  */
 export const secretStoresGet = async (organizationId: string,
-    storeId: string, options?: RequestInit): Promise<secretStoresGetResponse> => {
+    storeId: string, options?: RequestInit): Promise<SecretStoreRead> => {
 
-  const res = await fetch(getSecretStoresGetUrl(organizationId,storeId),
+  return apiRequest<SecretStoreRead>(getSecretStoresGetUrl(organizationId,storeId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresGetResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretStoresGetResponse
-}
-
-
-export type secretStoresUpdateResponse200 = {
-  data: SecretStoreRead
-  status: 200
-}
-
-export type secretStoresUpdateResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type secretStoresUpdateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresUpdateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresUpdateResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type secretStoresUpdateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresUpdateResponseSuccess = (secretStoresUpdateResponse200) & {
-  headers: Headers;
-};
-export type secretStoresUpdateResponseError = (secretStoresUpdateResponse400 | secretStoresUpdateResponse403 | secretStoresUpdateResponse404 | secretStoresUpdateResponse409 | secretStoresUpdateResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresUpdateResponse = (secretStoresUpdateResponseSuccess | secretStoresUpdateResponseError)
 
 export const getSecretStoresUpdateUrl = (organizationId: string,
     storeId: string,) => {
@@ -734,7 +289,7 @@ export const getSecretStoresUpdateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
+  return `/api/v1/organizations/${organizationId}/secrets/stores/${storeId}`
 }
 
 /**
@@ -742,53 +297,17 @@ export const getSecretStoresUpdateUrl = (organizationId: string,
  */
 export const secretStoresUpdate = async (organizationId: string,
     storeId: string,
-    secretStoreUpdate: SecretStoreUpdate, options?: RequestInit): Promise<secretStoresUpdateResponse> => {
+    secretStoreUpdate: SecretStoreUpdate, options?: RequestInit): Promise<SecretStoreRead> => {
 
-  const res = await fetch(getSecretStoresUpdateUrl(organizationId,storeId),
+  return apiRequest<SecretStoreRead>(getSecretStoresUpdateUrl(organizationId,storeId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(secretStoreUpdate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresUpdateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretStoresUpdateResponse
-}
-
-
-export type secretStoresValidateResponse200 = {
-  data: SecretValidationResponse
-  status: 200
-}
-
-export type secretStoresValidateResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type secretStoresValidateResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type secretStoresValidateResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type secretStoresValidateResponseSuccess = (secretStoresValidateResponse200) & {
-  headers: Headers;
-};
-export type secretStoresValidateResponseError = (secretStoresValidateResponse403 | secretStoresValidateResponse404 | secretStoresValidateResponse422) & {
-  headers: Headers;
-};
-
-export type secretStoresValidateResponse = (secretStoresValidateResponseSuccess | secretStoresValidateResponseError)
 
 export const getSecretStoresValidateUrl = (organizationId: string,
     storeId: string,) => {
@@ -796,29 +315,22 @@ export const getSecretStoresValidateUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/secrets/stores/${storeId}/validate`
+  return `/api/v1/organizations/${organizationId}/secrets/stores/${storeId}/validate`
 }
 
 /**
  * @summary Validate Secret Store Route
  */
 export const secretStoresValidate = async (organizationId: string,
-    storeId: string, options?: RequestInit): Promise<secretStoresValidateResponse> => {
+    storeId: string, options?: RequestInit): Promise<SecretValidationResponse> => {
 
-  const res = await fetch(getSecretStoresValidateUrl(organizationId,storeId),
+  return apiRequest<SecretValidationResponse>(getSecretStoresValidateUrl(organizationId,storeId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: secretStoresValidateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as secretStoresValidateResponse
-}
+);}
 
 

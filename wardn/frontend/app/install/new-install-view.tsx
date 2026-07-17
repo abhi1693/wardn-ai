@@ -4,9 +4,8 @@ import type {
   MCPRegistryServerListResponse,
   MCPServerInstallationListResponse,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   organizationMcpRegistryPath,
   type WorkspaceContext,
   workspaceInstallPath,
@@ -22,20 +21,8 @@ async function getInitialInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 async function getInitialServers(context: WorkspaceContext) {
@@ -50,19 +37,7 @@ async function getInitialServers(context: WorkspaceContext) {
   if (!path) {
     return emptyResponse;
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return emptyResponse;
-    }
-    return (await response.json()) as MCPRegistryServerListResponse;
-  } catch {
-    return emptyResponse;
-  }
+  return backendJson<MCPRegistryServerListResponse>(path);
 }
 
 async function getServer(context: WorkspaceContext, serverName: string, version: string) {
@@ -70,27 +45,15 @@ async function getServer(context: WorkspaceContext, serverName: string, version:
     return null;
   }
 
-  try {
-    const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
-    const path = organizationMcpRegistryPath(
-      context,
-      `/servers/${encodedName}/versions/${encodeURIComponent(version || "latest")}`
-    );
-    if (!path) {
-      return null;
-    }
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as MCPRegistryServerListResponse["servers"][number];
-  } catch {
+  const encodedName = serverName.split("/").map(encodeURIComponent).join("/");
+  const path = organizationMcpRegistryPath(
+    context,
+    `/servers/${encodedName}/versions/${encodeURIComponent(version || "latest")}`
+  );
+  if (!path) {
     return null;
   }
+  return backendJson<MCPRegistryServerListResponse["servers"][number]>(path);
 }
 
 type NewInstallViewProps = {
@@ -124,7 +87,9 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
         initialSelectedServer={selectedServer}
         initialServerNextCursor={serverList.metadata.nextCursor ?? ""}
         initialServers={selectedServer ? [selectedServer, ...serverList.servers] : serverList.servers}
+        organizationId={organizationId}
         secretStores={secretStores}
+        workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
       />
     </AppShell>
   );

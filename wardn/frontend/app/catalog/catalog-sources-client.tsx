@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -16,6 +17,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { MCPOperationJobRead } from "@/lib/api/generated/model";
+import {
+  organizationMcpCatalogDeleteSource,
+  organizationMcpCatalogGetOperationJob,
+  organizationMcpCatalogSyncSource,
+} from "@/lib/api/generated/organization-mcp-catalog/organization-mcp-catalog";
+import {
+  isOperationJobPollingCancelled,
+  useOperationJobPoller,
+} from "@/lib/use-operation-job";
 
 import type { MCPCatalogSource } from "./catalog-source-types";
 
@@ -28,13 +38,6 @@ type CatalogSyncResult = {
   source: MCPCatalogSource;
   syncedCount: number;
 };
-
-const JOB_POLL_INTERVAL_MS = 1_000;
-const JOB_POLL_ATTEMPTS = 600;
-
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
 
 function providerLabel(provider: string) {
   if (provider === "wardn_hub") {
@@ -62,48 +65,6 @@ function displayDate(value?: string | null) {
   }).format(date);
 }
 
-async function responseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-async function waitForCatalogSync(
-  organizationId: string,
-  initialJob: MCPOperationJobRead,
-  onProgress: (message: string) => void
-): Promise<CatalogSyncResult> {
-  let job = initialJob;
-  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
-    onProgress(job.progressMessage || "Catalog synchronization queued");
-    if (job.status === "succeeded") {
-      const result = job.result;
-      if (!result?.source || typeof result.syncedCount !== "number") {
-        throw new Error("Catalog synchronization completed without a result.");
-      }
-      return result as CatalogSyncResult;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.errorMessage || "Catalog synchronization failed.");
-    }
-    await wait(JOB_POLL_INTERVAL_MS);
-    const response = await fetch(
-      `/api/organizations/${encodeURIComponent(
-        organizationId
-      )}/mcp/catalog/jobs/${encodeURIComponent(job.jobId)}`,
-      { cache: "no-store" }
-    );
-    if (!response.ok) {
-      throw new Error(await responseErrorMessage(response, "Failed to read catalog sync status."));
-    }
-    job = (await response.json()) as MCPOperationJobRead;
-  }
-  throw new Error("Catalog synchronization is still running. Check again shortly.");
-}
-
 export function CatalogSourcesClient({
   organizationId,
   sources: initialSources,
@@ -112,26 +73,38 @@ export function CatalogSourcesClient({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const { waitForJob } = useOperationJobPoller();
 
   async function syncSource(source: MCPCatalogSource) {
     setBusyId(source.id);
     setError("");
     setNotice("");
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/mcp/catalog/sources/${source.id}/sync`,
-        { method: "POST" }
-      );
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Catalog sync failed."));
-      }
-      const job = (await response.json()) as MCPOperationJobRead;
-      const payload = await waitForCatalogSync(organizationId, job, setNotice);
+      const job = await organizationMcpCatalogSyncSource(organizationId, source.id);
+      const payload = await waitForJob<CatalogSyncResult>({
+        failureMessage: "Catalog synchronization failed.",
+        fetchJob: (jobId, signal) =>
+          organizationMcpCatalogGetOperationJob(organizationId, jobId, { signal }),
+        initialJob: job,
+        onProgress: setNotice,
+        pendingMessage: "Catalog synchronization queued",
+        readResult: (completedJob: MCPOperationJobRead) => {
+          const result = completedJob.result;
+          if (!result?.source || typeof result.syncedCount !== "number") {
+            throw new Error("Catalog synchronization completed without a result.");
+          }
+          return result as CatalogSyncResult;
+        },
+        timeoutMessage: "Catalog synchronization is still running. Check again shortly.",
+      });
       setSources((current) =>
         current.map((item) => (item.id === source.id ? payload.source : item))
       );
       setNotice(`Synced ${payload.syncedCount} server definitions.`);
     } catch (caught) {
+      if (isOperationJobPollingCancelled(caught)) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "Catalog sync failed.");
     } finally {
       setBusyId(null);
@@ -143,13 +116,7 @@ export function CatalogSourcesClient({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/mcp/catalog/sources/${source.id}`,
-        { method: "DELETE" }
-      );
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Catalog source could not be deleted."));
-      }
+      await organizationMcpCatalogDeleteSource(organizationId, source.id);
       setSources((current) => current.filter((item) => item.id !== source.id));
       setNotice("Catalog source deleted.");
     } catch (caught) {
@@ -162,15 +129,13 @@ export function CatalogSourcesClient({
   return (
     <div className="space-y-4">
       {error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
       {notice ? (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <AsyncFeedback className="flex items-center gap-2" variant="success">
           <CheckCircle2 className="size-4" />
           {notice}
-        </div>
+        </AsyncFeedback>
       ) : null}
 
       <Card>
@@ -221,6 +186,7 @@ export function CatalogSourcesClient({
                     <TableCell>
                       <div className="flex justify-end gap-2">
                         <Button
+                          aria-label={`Sync ${source.name}`}
                           disabled={busyId !== null || !source.isEnabled}
                           onClick={() => syncSource(source)}
                           size="icon"
@@ -234,12 +200,30 @@ export function CatalogSourcesClient({
                             <RefreshCw className="size-4" />
                           )}
                         </Button>
-                        <Button asChild disabled={busyId !== null} size="icon" variant="outline">
-                          <Link href={`/org/${organizationId}/catalog/edit/${source.id}`} title="Edit">
+                        {busyId !== null ? (
+                          <Button
+                            aria-label={`Edit ${source.name}`}
+                            disabled
+                            size="icon"
+                            title="Edit"
+                            type="button"
+                            variant="outline"
+                          >
                             <Pencil className="size-4" />
-                          </Link>
-                        </Button>
+                          </Button>
+                        ) : (
+                          <Button asChild size="icon" variant="outline">
+                            <Link
+                              aria-label={`Edit ${source.name}`}
+                              href={`/org/${organizationId}/catalog/edit/${source.id}`}
+                              title="Edit"
+                            >
+                              <Pencil className="size-4" />
+                            </Link>
+                          </Button>
+                        )}
                         <Button
+                          aria-label={`Delete ${source.name}`}
                           disabled={busyId !== null}
                           onClick={() => deleteSource(source)}
                           size="icon"

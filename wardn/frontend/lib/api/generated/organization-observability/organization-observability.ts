@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   LLMModelPriceCreate,
   LLMModelPriceListResponse,
   LLMModelPricePrefillResponse,
@@ -15,164 +13,54 @@ import type {
   OrganizationObservabilityPrefillLlmModelPriceParams
 } from '../model';
 
-
-export type organizationObservabilityListLlmModelPricesResponse200 = {
-  data: LLMModelPriceListResponse
-  status: 200
-}
-
-export type organizationObservabilityListLlmModelPricesResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationObservabilityListLlmModelPricesResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationObservabilityListLlmModelPricesResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationObservabilityListLlmModelPricesResponseSuccess = (organizationObservabilityListLlmModelPricesResponse200) & {
-  headers: Headers;
-};
-export type organizationObservabilityListLlmModelPricesResponseError = (organizationObservabilityListLlmModelPricesResponse403 | organizationObservabilityListLlmModelPricesResponse404 | organizationObservabilityListLlmModelPricesResponse422) & {
-  headers: Headers;
-};
-
-export type organizationObservabilityListLlmModelPricesResponse = (organizationObservabilityListLlmModelPricesResponseSuccess | organizationObservabilityListLlmModelPricesResponseError)
+import { apiRequest } from '../../client';
 
 export const getOrganizationObservabilityListLlmModelPricesUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices`
+  return `/api/v1/organizations/${organizationId}/observability/llm/model-prices`
 }
 
 /**
  * @summary List Llm Model Prices Route
  */
-export const organizationObservabilityListLlmModelPrices = async (organizationId: string, options?: RequestInit): Promise<organizationObservabilityListLlmModelPricesResponse> => {
+export const organizationObservabilityListLlmModelPrices = async (organizationId: string, options?: RequestInit): Promise<LLMModelPriceListResponse> => {
 
-  const res = await fetch(getOrganizationObservabilityListLlmModelPricesUrl(organizationId),
+  return apiRequest<LLMModelPriceListResponse>(getOrganizationObservabilityListLlmModelPricesUrl(organizationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationObservabilityListLlmModelPricesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationObservabilityListLlmModelPricesResponse
-}
-
-
-export type organizationObservabilityCreateLlmModelPriceResponse201 = {
-  data: LLMModelPriceRead
-  status: 201
-}
-
-export type organizationObservabilityCreateLlmModelPriceResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationObservabilityCreateLlmModelPriceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationObservabilityCreateLlmModelPriceResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationObservabilityCreateLlmModelPriceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationObservabilityCreateLlmModelPriceResponseSuccess = (organizationObservabilityCreateLlmModelPriceResponse201) & {
-  headers: Headers;
-};
-export type organizationObservabilityCreateLlmModelPriceResponseError = (organizationObservabilityCreateLlmModelPriceResponse403 | organizationObservabilityCreateLlmModelPriceResponse404 | organizationObservabilityCreateLlmModelPriceResponse409 | organizationObservabilityCreateLlmModelPriceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationObservabilityCreateLlmModelPriceResponse = (organizationObservabilityCreateLlmModelPriceResponseSuccess | organizationObservabilityCreateLlmModelPriceResponseError)
 
 export const getOrganizationObservabilityCreateLlmModelPriceUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices`
+  return `/api/v1/organizations/${organizationId}/observability/llm/model-prices`
 }
 
 /**
  * @summary Create Llm Model Price Route
  */
 export const organizationObservabilityCreateLlmModelPrice = async (organizationId: string,
-    lLMModelPriceCreate: LLMModelPriceCreate, options?: RequestInit): Promise<organizationObservabilityCreateLlmModelPriceResponse> => {
+    lLMModelPriceCreate: LLMModelPriceCreate, options?: RequestInit): Promise<LLMModelPriceRead> => {
 
-  const res = await fetch(getOrganizationObservabilityCreateLlmModelPriceUrl(organizationId),
+  return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityCreateLlmModelPriceUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(lLMModelPriceCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationObservabilityCreateLlmModelPriceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationObservabilityCreateLlmModelPriceResponse
-}
-
-
-export type organizationObservabilityPrefillLlmModelPriceResponse200 = {
-  data: LLMModelPricePrefillResponse
-  status: 200
-}
-
-export type organizationObservabilityPrefillLlmModelPriceResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type organizationObservabilityPrefillLlmModelPriceResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationObservabilityPrefillLlmModelPriceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationObservabilityPrefillLlmModelPriceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationObservabilityPrefillLlmModelPriceResponseSuccess = (organizationObservabilityPrefillLlmModelPriceResponse200) & {
-  headers: Headers;
-};
-export type organizationObservabilityPrefillLlmModelPriceResponseError = (organizationObservabilityPrefillLlmModelPriceResponse400 | organizationObservabilityPrefillLlmModelPriceResponse403 | organizationObservabilityPrefillLlmModelPriceResponse404 | organizationObservabilityPrefillLlmModelPriceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationObservabilityPrefillLlmModelPriceResponse = (organizationObservabilityPrefillLlmModelPriceResponseSuccess | organizationObservabilityPrefillLlmModelPriceResponseError)
 
 export const getOrganizationObservabilityPrefillLlmModelPriceUrl = (organizationId: string,
     params: OrganizationObservabilityPrefillLlmModelPriceParams,) => {
@@ -187,60 +75,24 @@ export const getOrganizationObservabilityPrefillLlmModelPriceUrl = (organization
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/observability/llm/model-prices/prefill`
 }
 
 /**
  * @summary Prefill Llm Model Price Route
  */
 export const organizationObservabilityPrefillLlmModelPrice = async (organizationId: string,
-    params: OrganizationObservabilityPrefillLlmModelPriceParams, options?: RequestInit): Promise<organizationObservabilityPrefillLlmModelPriceResponse> => {
+    params: OrganizationObservabilityPrefillLlmModelPriceParams, options?: RequestInit): Promise<LLMModelPricePrefillResponse> => {
 
-  const res = await fetch(getOrganizationObservabilityPrefillLlmModelPriceUrl(organizationId,params),
+  return apiRequest<LLMModelPricePrefillResponse>(getOrganizationObservabilityPrefillLlmModelPriceUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationObservabilityPrefillLlmModelPriceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationObservabilityPrefillLlmModelPriceResponse
-}
-
-
-export type organizationObservabilityDeleteLlmModelPriceResponse204 = {
-  data: void
-  status: 204
-}
-
-export type organizationObservabilityDeleteLlmModelPriceResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationObservabilityDeleteLlmModelPriceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationObservabilityDeleteLlmModelPriceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationObservabilityDeleteLlmModelPriceResponseSuccess = (organizationObservabilityDeleteLlmModelPriceResponse204) & {
-  headers: Headers;
-};
-export type organizationObservabilityDeleteLlmModelPriceResponseError = (organizationObservabilityDeleteLlmModelPriceResponse403 | organizationObservabilityDeleteLlmModelPriceResponse404 | organizationObservabilityDeleteLlmModelPriceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationObservabilityDeleteLlmModelPriceResponse = (organizationObservabilityDeleteLlmModelPriceResponseSuccess | organizationObservabilityDeleteLlmModelPriceResponseError)
 
 export const getOrganizationObservabilityDeleteLlmModelPriceUrl = (organizationId: string,
     priceId: string,) => {
@@ -248,65 +100,24 @@ export const getOrganizationObservabilityDeleteLlmModelPriceUrl = (organizationI
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/${priceId}`
+  return `/api/v1/organizations/${organizationId}/observability/llm/model-prices/${priceId}`
 }
 
 /**
  * @summary Delete Llm Model Price Route
  */
 export const organizationObservabilityDeleteLlmModelPrice = async (organizationId: string,
-    priceId: string, options?: RequestInit): Promise<organizationObservabilityDeleteLlmModelPriceResponse> => {
+    priceId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getOrganizationObservabilityDeleteLlmModelPriceUrl(organizationId,priceId),
+  return apiRequest<void>(getOrganizationObservabilityDeleteLlmModelPriceUrl(organizationId,priceId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationObservabilityDeleteLlmModelPriceResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as organizationObservabilityDeleteLlmModelPriceResponse
-}
-
-
-export type organizationObservabilityUpdateLlmModelPriceResponse200 = {
-  data: LLMModelPriceRead
-  status: 200
-}
-
-export type organizationObservabilityUpdateLlmModelPriceResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type organizationObservabilityUpdateLlmModelPriceResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationObservabilityUpdateLlmModelPriceResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationObservabilityUpdateLlmModelPriceResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationObservabilityUpdateLlmModelPriceResponseSuccess = (organizationObservabilityUpdateLlmModelPriceResponse200) & {
-  headers: Headers;
-};
-export type organizationObservabilityUpdateLlmModelPriceResponseError = (organizationObservabilityUpdateLlmModelPriceResponse403 | organizationObservabilityUpdateLlmModelPriceResponse404 | organizationObservabilityUpdateLlmModelPriceResponse409 | organizationObservabilityUpdateLlmModelPriceResponse422) & {
-  headers: Headers;
-};
-
-export type organizationObservabilityUpdateLlmModelPriceResponse = (organizationObservabilityUpdateLlmModelPriceResponseSuccess | organizationObservabilityUpdateLlmModelPriceResponseError)
 
 export const getOrganizationObservabilityUpdateLlmModelPriceUrl = (organizationId: string,
     priceId: string,) => {
@@ -314,7 +125,7 @@ export const getOrganizationObservabilityUpdateLlmModelPriceUrl = (organizationI
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/observability/llm/model-prices/${priceId}`
+  return `/api/v1/organizations/${organizationId}/observability/llm/model-prices/${priceId}`
 }
 
 /**
@@ -322,22 +133,15 @@ export const getOrganizationObservabilityUpdateLlmModelPriceUrl = (organizationI
  */
 export const organizationObservabilityUpdateLlmModelPrice = async (organizationId: string,
     priceId: string,
-    lLMModelPriceUpdate: LLMModelPriceUpdate, options?: RequestInit): Promise<organizationObservabilityUpdateLlmModelPriceResponse> => {
+    lLMModelPriceUpdate: LLMModelPriceUpdate, options?: RequestInit): Promise<LLMModelPriceRead> => {
 
-  const res = await fetch(getOrganizationObservabilityUpdateLlmModelPriceUrl(organizationId,priceId),
+  return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityUpdateLlmModelPriceUrl(organizationId,priceId),
   {
     ...options,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(lLMModelPriceUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationObservabilityUpdateLlmModelPriceResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationObservabilityUpdateLlmModelPriceResponse
-}
+);}
 
 

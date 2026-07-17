@@ -18,7 +18,6 @@ import {
   McpTableCard,
   RuntimeBadge,
   ServerIdentityCell,
-  responseErrorMessage,
   runtimeDisplayName,
   serverIconUrlFromIcons,
 } from "@/app/mcp/mcp-list-ui";
@@ -35,12 +34,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type {
-  MCPRegistryServerListResponse,
   MCPRegistryListMetadata,
   MCPRegistryServerResponse,
-  MCPServerInstallationListResponse,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
+import {
+  organizationMcpRegistryDeleteServerVersion,
+  organizationMcpRegistryListServers,
+} from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
+import { workspaceMcpRegistryListInstalledServers } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 
 const PAGE_SIZE = 50;
 
@@ -107,17 +109,12 @@ function newServerVersionUrl(organizationId: string, serverName: string, version
   return `${basePath}?version=${encodeURIComponent(version)}`;
 }
 
-function serverVersionUrl(serverName: string, version: string) {
-  return `/api/mcp/registry/servers/${[...serverName.split("/"), version]
-    .map(encodeURIComponent)
-    .join("/")}`;
-}
-
 type CatalogListClientProps = {
   initialInstallations: MCPServerInstallationRead[];
   initialMetadata: MCPRegistryListMetadata;
   initialServers: MCPRegistryServerResponse[];
   organizationId: string;
+  workspaceId: string;
 };
 
 export function CatalogListClient({
@@ -125,6 +122,7 @@ export function CatalogListClient({
   initialMetadata,
   initialServers,
   organizationId,
+  workspaceId,
 }: CatalogListClientProps) {
   const [installations, setInstallations] =
     useState<MCPServerInstallationRead[]>(initialInstallations);
@@ -169,29 +167,16 @@ export function CatalogListClient({
     setIsLoading(true);
     setError("");
     setNotice("");
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), version: "latest" });
-    if (query.trim()) {
-      params.set("search", query.trim());
-    }
-    if (cursor) {
-      params.set("cursor", cursor);
-    }
-
     try {
-      const [serversResponse, installationsResponse] = await Promise.all([
-        fetch(`/api/mcp/registry/servers?${params.toString()}`, {
-          cache: "no-store",
+      const [serversData, installationsData] = await Promise.all([
+        organizationMcpRegistryListServers(organizationId, {
+          limit: PAGE_SIZE,
+          version: "latest",
+          ...(query.trim() ? { search: query.trim() } : {}),
+          ...(cursor ? { cursor } : {}),
         }),
-        fetch("/api/mcp/registry/installed-servers", {
-          cache: "no-store",
-        }),
+        workspaceMcpRegistryListInstalledServers(organizationId, workspaceId),
       ]);
-      if (!serversResponse.ok || !installationsResponse.ok) {
-        throw new Error("Failed to load catalog");
-      }
-      const serversData = (await serversResponse.json()) as MCPRegistryServerListResponse;
-      const installationsData =
-        (await installationsResponse.json()) as MCPServerInstallationListResponse;
       if (searchRequestId.current !== requestId) {
         return;
       }
@@ -211,7 +196,7 @@ export function CatalogListClient({
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [organizationId, workspaceId]);
 
   async function loadNextPage() {
     if (!nextCursor) {
@@ -254,12 +239,7 @@ export function CatalogListClient({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(serverVersionUrl(serverName, version), {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Failed to delete server."));
-      }
+      await organizationMcpRegistryDeleteServerVersion(organizationId, serverName, version);
       setNotice("Server deleted.");
       await loadServers({
         query: appliedSearch,

@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization, getWorkspaces } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
@@ -16,12 +15,12 @@ type LlmCredentialsPageProps = {
 
 export default async function LlmCredentialsPage({ params }: LlmCredentialsPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, workspaces, credentials] = await Promise.all([
+  const [workspaceContext, credentials] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
-    getWorkspaces(organizationId),
     getLlmCredentials(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
+  const workspaces = workspaceContext.workspaces;
 
   if (!organization) {
     notFound();

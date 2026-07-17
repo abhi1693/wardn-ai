@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -13,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { organizationObservabilityDeleteLlmModelPrice } from "@/lib/api/generated/organization-observability/organization-observability";
 
 import { displayUsdPerMillion, modelPriceLabel } from "./price-display";
 import type { LLMModelPriceRead } from "./types";
@@ -21,18 +23,6 @@ type DeleteModelPriceClientProps = {
   organizationId: string;
   price: LLMModelPriceRead;
 };
-
-function errorMessage(payload: unknown, fallback: string) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "detail" in payload &&
-    typeof payload.detail === "string"
-  ) {
-    return payload.detail;
-  }
-  return fallback;
-}
 
 export function DeleteModelPriceClient({
   organizationId,
@@ -47,14 +37,7 @@ export function DeleteModelPriceClient({
     setDeleting(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/observability/llm/model-prices/${price.id}`,
-        { method: "DELETE" }
-      );
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(errorMessage(payload, "Model price could not be deleted."));
-      }
+      await organizationObservabilityDeleteLlmModelPrice(organizationId, price.id);
       router.push(listPath);
       router.refresh();
     } catch (caught) {
@@ -90,9 +73,7 @@ export function DeleteModelPriceClient({
         </div>
 
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         <div className="flex justify-end gap-2">

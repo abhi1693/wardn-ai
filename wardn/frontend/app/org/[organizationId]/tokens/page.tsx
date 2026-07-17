@@ -3,10 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
 import type { UserAPITokenListResponse } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath, getWorkspaceContext } from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { AgentTokensClient } from "./tokens-client";
 
@@ -15,29 +15,17 @@ type OrganizationTokensPageProps = {
 };
 
 async function getApiTokens() {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath("/api/v1/auth/api-tokens"), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const payload = (await response.json()) as UserAPITokenListResponse;
-    return payload.tokens;
-  } catch {
-    return [];
-  }
+  const payload = await backendJson<UserAPITokenListResponse>("/api/v1/auth/api-tokens");
+  return payload.tokens;
 }
 
 export default async function OrganizationTokensPage({ params }: OrganizationTokensPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization, tokens] = await Promise.all([
+  const [workspaceContext, tokens] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getApiTokens(),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization) {
     notFound();

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,8 +23,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
+import { llmProviderCredentialsDelete } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 
-import { errorMessage } from "../tokens/token-form";
 import type { LlmCredentialRead } from "./types";
 
 type CredentialsClientProps = {
@@ -76,14 +77,7 @@ export function CredentialsClient({
     setDeletingCredentialId(credential.id);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/organizations/${organization.id}/llm/provider-credentials/${credential.id}`,
-        { method: "DELETE" }
-      );
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(errorMessage(data, "Credential could not be deleted."));
-      }
+      await llmProviderCredentialsDelete(organization.id, credential.id);
       setCredentials((current) => current.filter((entry) => entry.id !== credential.id));
     } catch (caught) {
       setError(
@@ -104,9 +98,7 @@ export function CredentialsClient({
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         {credentials.length > 0 ? (

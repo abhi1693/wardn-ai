@@ -1,22 +1,11 @@
+import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
+
 export const selectedOrganizationCookie = "wardn_selected_organization";
 export const selectedWorkspaceCookie = "wardn_selected_workspace";
 
-export type OrganizationOption = {
-  id: string;
-  name: string;
-  slug: string;
-  status: string;
-  currentUserRole: string;
-};
+export type OrganizationOption = OrganizationRead;
 
-export type WorkspaceOption = {
-  id: string;
-  organizationId: string;
-  name: string;
-  slug: string;
-  status: string;
-  currentUserRole: string;
-};
+export type WorkspaceOption = WorkspaceRead;
 
 export type WorkspaceContext = {
   organizations: OrganizationOption[];

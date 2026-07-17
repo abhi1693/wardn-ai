@@ -3,7 +3,7 @@ import nextTypescript from "eslint-config-next/typescript";
 
 const config = [
   {
-    ignores: ["lib/api/generated/**"],
+    ignores: ["lib/api/generated/**", "playwright-report/**", "test-results/**"],
   },
   ...nextVitals,
   ...nextTypescript,

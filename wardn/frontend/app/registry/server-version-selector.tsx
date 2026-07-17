@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -13,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { organizationMcpRegistrySetDefaultServerVersion } from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
 
 type ServerVersionOption = {
   isDefault: boolean;
@@ -36,12 +38,6 @@ function catalogServerPath(organizationId: string, serverName: string, version: 
   )}?version=${encodeURIComponent(version)}`;
 }
 
-function defaultVersionUrl(serverName: string, version: string) {
-  return `/api/mcp/registry/servers/${encodedServerName(serverName)}/${encodeURIComponent(
-    version
-  )}/default`;
-}
-
 export function ServerVersionSelector({
   currentVersion,
   organizationId,
@@ -57,12 +53,11 @@ export function ServerVersionSelector({
     setIsSaving(true);
     setError("");
     try {
-      const response = await fetch(defaultVersionUrl(serverName, currentVersion), {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error("Default version could not be updated.");
-      }
+      await organizationMcpRegistrySetDefaultServerVersion(
+        organizationId,
+        serverName,
+        currentVersion
+      );
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Default version could not be updated.");
@@ -114,7 +109,11 @@ export function ServerVersionSelector({
           </Button>
         </div>
 
-        {error ? <div className="text-xs text-destructive">{error}</div> : null}
+        {error ? (
+          <AsyncFeedback className="text-xs" variant="error">
+            {error}
+          </AsyncFeedback>
+        ) : null}
       </CardContent>
     </Card>
   );

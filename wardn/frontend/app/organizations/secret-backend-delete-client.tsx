@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -14,8 +15,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { SecretStoreRead } from "@/lib/api/generated/model";
+import { secretStoresDelete } from "@/lib/api/generated/secrets/secrets";
 
-import { secretBackendErrorMessage } from "./secret-backend-errors";
 import { secretBackendsPath, type SecretBackendScope } from "./secret-backends-paths";
 
 type SecretBackendDeleteClientProps = SecretBackendScope & {
@@ -37,16 +38,7 @@ export function SecretBackendDeleteClient({
     setError(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/secrets/stores/${store.id}`,
-        { method: "DELETE" }
-      );
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(
-          secretBackendErrorMessage(data, "Secret backend could not be deleted.")
-        );
-      }
+      await secretStoresDelete(organizationId, store.id);
       router.push(listPath);
       router.refresh();
     } catch (caught) {
@@ -72,9 +64,7 @@ export function SecretBackendDeleteClient({
         </div>
 
         {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
 
         <div className="flex justify-end gap-2">

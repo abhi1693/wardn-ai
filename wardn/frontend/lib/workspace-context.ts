@@ -1,4 +1,7 @@
 import { cookies } from "next/headers";
+import { cache } from "react";
+
+import { backendJson } from "@/lib/api/server";
 
 import {
   selectedOrganizationCookie,
@@ -16,49 +19,18 @@ export {
   type WorkspaceOption,
 };
 
-const backendUrl = process.env.WARDN_BACKEND_URL ?? "http://127.0.0.1:8000";
-
 type WorkspaceSelection = {
   organizationId?: string;
   workspaceId?: string;
 };
 
-export function backendPath(path: string) {
-  return `${backendUrl}${path}`;
-}
-
-export async function backendCookieHeader() {
-  const cookieStore = await cookies();
-  return cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${cookie.value}`)
-    .join("; ");
-}
-
-async function fetchBackendJson<T>(path: string): Promise<T | null> {
-  const cookieHeader = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookieHeader ? { cookie: cookieHeader } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  }
-}
+export { backendCookieHeader, backendPath } from "@/lib/api/server";
 
 export async function getWorkspaceContext(
   selection: WorkspaceSelection = {},
 ): Promise<WorkspaceContext> {
   const cookieStore = await cookies();
-  const organizationsPayload = await fetchBackendJson<{ organizations: OrganizationOption[] }>(
-    "/api/v1/organizations"
-  );
-  const organizations = organizationsPayload?.organizations ?? [];
+  const organizations = await getOrganizationOptions();
   const selectedOrganizationId =
     selection.organizationId ?? cookieStore.get(selectedOrganizationCookie)?.value;
 
@@ -71,30 +43,18 @@ export async function getWorkspaceContext(
     };
   }
 
-  const workspacePayloads = await Promise.all(
-    organizations.map((organization) =>
-      fetchBackendJson<{ workspaces: WorkspaceOption[] }>(
-        `/api/v1/organizations/${encodeURIComponent(organization.id)}/workspaces`
-      )
-    )
-  );
-  const workspaces = workspacePayloads.flatMap((payload) => payload?.workspaces ?? []);
-  const selectedWorkspaceId =
-    selection.workspaceId ?? cookieStore.get(selectedWorkspaceCookie)?.value;
   const requestedOrganization =
     organizations.find((organization) => organization.id === selectedOrganizationId) ?? null;
-  const workspaceCandidates = requestedOrganization
-    ? workspaces.filter((workspace) => workspace.organizationId === requestedOrganization.id)
-    : workspaces;
-  const selectedWorkspace =
-    workspaceCandidates.find((workspace) => workspace.id === selectedWorkspaceId) ??
-    workspaceCandidates[0] ??
-    null;
   const selectedOrganization =
-    requestedOrganization ??
-    organizations.find((organization) => organization.id === selectedWorkspace?.organizationId) ??
-    organizations[0] ??
-    null;
+    requestedOrganization ?? (selection.organizationId ? null : organizations[0] ?? null);
+  const workspaces = selectedOrganization
+    ? await getWorkspaceOptions(selectedOrganization.id)
+    : [];
+  const selectedWorkspaceId =
+    selection.workspaceId ?? cookieStore.get(selectedWorkspaceCookie)?.value;
+  const selectedWorkspace =
+    workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
+    (selection.workspaceId ? null : workspaces[0] ?? null);
 
   return {
     organizations,
@@ -103,6 +63,22 @@ export async function getWorkspaceContext(
     selectedWorkspace,
   };
 }
+
+export const getOrganizationOptions = cache(async (): Promise<OrganizationOption[]> => {
+  const payload = await backendJson<{ organizations: OrganizationOption[] }>(
+    "/api/v1/organizations"
+  );
+  return payload.organizations;
+});
+
+export const getWorkspaceOptions = cache(
+  async (organizationId: string): Promise<WorkspaceOption[]> => {
+    const payload = await backendJson<{ workspaces: WorkspaceOption[] }>(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/workspaces`
+    );
+    return payload.workspaces;
+  }
+);
 
 export function workspaceBasePath(context: WorkspaceContext) {
   if (!context.selectedOrganization || !context.selectedWorkspace) {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -25,8 +26,10 @@ import {
 import type {
   OrganizationRead,
   ResourceLimitRead,
+  ResourceLimitUpsert,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { limitsUpsert } from "@/lib/api/generated/limits/limits";
 
 import {
   displayLimitKey,
@@ -42,18 +45,6 @@ type LimitFormProps = {
   organizations: OrganizationRead[];
   workspaces: WorkspaceRead[];
 };
-
-function errorMessage(payload: unknown, fallback: string) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "detail" in payload &&
-    typeof payload.detail === "string"
-  ) {
-    return payload.detail;
-  }
-  return fallback;
-}
 
 export function LimitForm({
   initialLimit,
@@ -114,20 +105,12 @@ export function LimitForm({
     setIsSubmitting(true);
     setError(null);
     try {
-      const response = await fetch("/api/limits", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          scopeType: isEdit ? initialLimit.scopeType : scopeType,
-          scopeId: isEdit ? initialLimit.scopeId : scopeId.trim(),
-          limitKey: selectedKey.trim(),
-          value: parsedValue,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(errorMessage(payload, "Limit could not be saved."));
-      }
+      await limitsUpsert({
+        scopeType: isEdit ? initialLimit.scopeType : scopeType,
+        scopeId: isEdit ? initialLimit.scopeId : scopeId.trim(),
+        limitKey: selectedKey.trim(),
+        value: parsedValue,
+      } as ResourceLimitUpsert);
       router.push(listPath);
       router.refresh();
     } catch (caught) {
@@ -229,9 +212,7 @@ export function LimitForm({
               </div>
 
               {error ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </div>
+                <AsyncFeedback variant="error">{error}</AsyncFeedback>
               ) : null}
             </div>
 

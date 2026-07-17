@@ -3,14 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import { getOrganization } from "@/app/organizations/data";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser } from "@/lib/current-user";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { DeleteModelPriceClient } from "../../delete-model-price-client";
 import {
   canManageModelPrices,
-  getCurrentUser,
   getModelPriceById,
   getModelPrices,
 } from "../../data";
@@ -23,12 +22,12 @@ export default async function DeleteModelPricePage({
   params,
 }: DeleteModelPricePageProps) {
   const { organizationId, priceId } = await params;
-  const [workspaceContext, organization, currentUser, prices] = await Promise.all([
+  const [workspaceContext, currentUser, prices] = await Promise.all([
     getWorkspaceContext({ organizationId }),
-    getOrganization(organizationId),
     getCurrentUser(),
     getModelPrices(organizationId),
   ]);
+  const organization = workspaceContext.selectedOrganization;
 
   if (!organization || !canManageModelPrices(currentUser, organization.currentUserRole)) {
     notFound();
@@ -60,4 +59,3 @@ export default async function DeleteModelPricePage({
     </AppShell>
   );
 }
-

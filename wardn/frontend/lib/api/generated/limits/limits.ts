@@ -5,8 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   LimitsListParams,
   ResourceLimitListResponse,
   ResourceLimitRead,
@@ -17,35 +15,7 @@ import type {
   UsageBudgetsListParams
 } from '../model';
 
-
-export type limitsListResponse200 = {
-  data: ResourceLimitListResponse
-  status: 200
-}
-
-export type limitsListResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type limitsListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type limitsListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type limitsListResponseSuccess = (limitsListResponse200) & {
-  headers: Headers;
-};
-export type limitsListResponseError = (limitsListResponse400 | limitsListResponse403 | limitsListResponse422) & {
-  headers: Headers;
-};
-
-export type limitsListResponse = (limitsListResponseSuccess | limitsListResponseError)
+import { apiRequest } from '../../client';
 
 export const getLimitsListUrl = (params?: LimitsListParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -59,118 +29,46 @@ export const getLimitsListUrl = (params?: LimitsListParams,) => {
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/limits?${stringifiedParams}` : `http://localhost:8000/api/v1/limits`
+  return stringifiedParams.length > 0 ? `/api/v1/limits?${stringifiedParams}` : `/api/v1/limits`
 }
 
 /**
  * @summary List Limits Route
  */
-export const limitsList = async (params?: LimitsListParams, options?: RequestInit): Promise<limitsListResponse> => {
+export const limitsList = async (params?: LimitsListParams, options?: RequestInit): Promise<ResourceLimitListResponse> => {
 
-  const res = await fetch(getLimitsListUrl(params),
+  return apiRequest<ResourceLimitListResponse>(getLimitsListUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: limitsListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as limitsListResponse
-}
-
-
-export type limitsUpsertResponse200 = {
-  data: ResourceLimitRead
-  status: 200
-}
-
-export type limitsUpsertResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type limitsUpsertResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type limitsUpsertResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type limitsUpsertResponseSuccess = (limitsUpsertResponse200) & {
-  headers: Headers;
-};
-export type limitsUpsertResponseError = (limitsUpsertResponse400 | limitsUpsertResponse403 | limitsUpsertResponse422) & {
-  headers: Headers;
-};
-
-export type limitsUpsertResponse = (limitsUpsertResponseSuccess | limitsUpsertResponseError)
 
 export const getLimitsUpsertUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/limits`
+  return `/api/v1/limits`
 }
 
 /**
  * @summary Upsert Limit Route
  */
-export const limitsUpsert = async (resourceLimitUpsert: ResourceLimitUpsert, options?: RequestInit): Promise<limitsUpsertResponse> => {
+export const limitsUpsert = async (resourceLimitUpsert: ResourceLimitUpsert, options?: RequestInit): Promise<ResourceLimitRead> => {
 
-  const res = await fetch(getLimitsUpsertUrl(),
+  return apiRequest<ResourceLimitRead>(getLimitsUpsertUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(resourceLimitUpsert)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: limitsUpsertResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as limitsUpsertResponse
-}
-
-
-export type usageBudgetsListResponse200 = {
-  data: UsageBudgetListResponse
-  status: 200
-}
-
-export type usageBudgetsListResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type usageBudgetsListResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type usageBudgetsListResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type usageBudgetsListResponseSuccess = (usageBudgetsListResponse200) & {
-  headers: Headers;
-};
-export type usageBudgetsListResponseError = (usageBudgetsListResponse400 | usageBudgetsListResponse403 | usageBudgetsListResponse422) & {
-  headers: Headers;
-};
-
-export type usageBudgetsListResponse = (usageBudgetsListResponseSuccess | usageBudgetsListResponseError)
 
 export const getUsageBudgetsListUrl = (params?: UsageBudgetsListParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -184,205 +82,90 @@ export const getUsageBudgetsListUrl = (params?: UsageBudgetsListParams,) => {
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/limits/budgets?${stringifiedParams}` : `http://localhost:8000/api/v1/limits/budgets`
+  return stringifiedParams.length > 0 ? `/api/v1/limits/budgets?${stringifiedParams}` : `/api/v1/limits/budgets`
 }
 
 /**
  * @summary List Usage Budgets Route
  */
-export const usageBudgetsList = async (params?: UsageBudgetsListParams, options?: RequestInit): Promise<usageBudgetsListResponse> => {
+export const usageBudgetsList = async (params?: UsageBudgetsListParams, options?: RequestInit): Promise<UsageBudgetListResponse> => {
 
-  const res = await fetch(getUsageBudgetsListUrl(params),
+  return apiRequest<UsageBudgetListResponse>(getUsageBudgetsListUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: usageBudgetsListResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as usageBudgetsListResponse
-}
-
-
-export type usageBudgetsUpsertResponse200 = {
-  data: UsageBudgetRead
-  status: 200
-}
-
-export type usageBudgetsUpsertResponse400 = {
-  data: ErrorResponse
-  status: 400
-}
-
-export type usageBudgetsUpsertResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type usageBudgetsUpsertResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type usageBudgetsUpsertResponseSuccess = (usageBudgetsUpsertResponse200) & {
-  headers: Headers;
-};
-export type usageBudgetsUpsertResponseError = (usageBudgetsUpsertResponse400 | usageBudgetsUpsertResponse403 | usageBudgetsUpsertResponse422) & {
-  headers: Headers;
-};
-
-export type usageBudgetsUpsertResponse = (usageBudgetsUpsertResponseSuccess | usageBudgetsUpsertResponseError)
 
 export const getUsageBudgetsUpsertUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/limits/budgets`
+  return `/api/v1/limits/budgets`
 }
 
 /**
  * @summary Upsert Usage Budget Route
  */
-export const usageBudgetsUpsert = async (usageBudgetUpsert: UsageBudgetUpsert, options?: RequestInit): Promise<usageBudgetsUpsertResponse> => {
+export const usageBudgetsUpsert = async (usageBudgetUpsert: UsageBudgetUpsert, options?: RequestInit): Promise<UsageBudgetRead> => {
 
-  const res = await fetch(getUsageBudgetsUpsertUrl(),
+  return apiRequest<UsageBudgetRead>(getUsageBudgetsUpsertUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(usageBudgetUpsert)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: usageBudgetsUpsertResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as usageBudgetsUpsertResponse
-}
-
-
-export type usageBudgetsDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type usageBudgetsDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type usageBudgetsDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type usageBudgetsDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type usageBudgetsDeleteResponseSuccess = (usageBudgetsDeleteResponse204) & {
-  headers: Headers;
-};
-export type usageBudgetsDeleteResponseError = (usageBudgetsDeleteResponse403 | usageBudgetsDeleteResponse404 | usageBudgetsDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type usageBudgetsDeleteResponse = (usageBudgetsDeleteResponseSuccess | usageBudgetsDeleteResponseError)
 
 export const getUsageBudgetsDeleteUrl = (budgetId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/limits/budgets/${budgetId}`
+  return `/api/v1/limits/budgets/${budgetId}`
 }
 
 /**
  * @summary Delete Usage Budget Route
  */
-export const usageBudgetsDelete = async (budgetId: string, options?: RequestInit): Promise<usageBudgetsDeleteResponse> => {
+export const usageBudgetsDelete = async (budgetId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getUsageBudgetsDeleteUrl(budgetId),
+  return apiRequest<void>(getUsageBudgetsDeleteUrl(budgetId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: usageBudgetsDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as usageBudgetsDeleteResponse
-}
-
-
-export type limitsDeleteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type limitsDeleteResponse403 = {
-  data: ErrorResponse
-  status: 403
-}
-
-export type limitsDeleteResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type limitsDeleteResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type limitsDeleteResponseSuccess = (limitsDeleteResponse204) & {
-  headers: Headers;
-};
-export type limitsDeleteResponseError = (limitsDeleteResponse403 | limitsDeleteResponse404 | limitsDeleteResponse422) & {
-  headers: Headers;
-};
-
-export type limitsDeleteResponse = (limitsDeleteResponseSuccess | limitsDeleteResponseError)
 
 export const getLimitsDeleteUrl = (limitId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/limits/${limitId}`
+  return `/api/v1/limits/${limitId}`
 }
 
 /**
  * @summary Delete Limit Route
  */
-export const limitsDelete = async (limitId: string, options?: RequestInit): Promise<limitsDeleteResponse> => {
+export const limitsDelete = async (limitId: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getLimitsDeleteUrl(limitId),
+  return apiRequest<void>(getLimitsDeleteUrl(limitId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: limitsDeleteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as limitsDeleteResponse
-}
+);}
 
 

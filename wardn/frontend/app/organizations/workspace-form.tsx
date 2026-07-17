@@ -6,11 +6,17 @@ import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { WorkspaceRead } from "@/lib/api/generated/model";
+import type { WorkspaceRead, WorkspaceUpdateStatus } from "@/lib/api/generated/model";
+import {
+  workspacesCreate,
+  workspacesUpdate,
+} from "@/lib/api/generated/organizations/organizations";
+import { setSelectionCookie } from "@/lib/selection-cookies";
 import { selectedOrganizationCookie } from "@/lib/workspace-types";
 
 type WorkspaceFormProps = {
@@ -27,16 +33,14 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function setSelectionCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-}
-
 export function WorkspaceForm({ initialWorkspace, mode, organizationId }: WorkspaceFormProps) {
   const router = useRouter();
   const [name, setName] = useState(initialWorkspace?.name ?? "");
   const [slug, setSlug] = useState(initialWorkspace?.slug ?? "");
   const [description, setDescription] = useState(initialWorkspace?.description ?? "");
-  const [status, setStatus] = useState(initialWorkspace?.status ?? "active");
+  const [status, setStatus] = useState<WorkspaceUpdateStatus>(
+    (initialWorkspace?.status as WorkspaceUpdateStatus) ?? "active"
+  );
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,25 +54,22 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
     setSubmitting(true);
     setError("");
 
-    const response = await fetch(
-      mode === "create"
-        ? `/api/organizations/${encodeURIComponent(organizationId)}/workspaces`
-        : `/api/organizations/${encodeURIComponent(organizationId)}/workspaces/${encodeURIComponent(
-            initialWorkspace?.id ?? ""
-          )}`,
-      {
-        method: mode === "create" ? "POST" : "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          mode === "create"
-            ? { name: name.trim(), slug: slug.trim(), description: description.trim() }
-            : { name: name.trim(), description: description.trim(), status }
-        ),
+    try {
+      if (mode === "create") {
+        await workspacesCreate(organizationId, {
+          name: name.trim(),
+          slug: slug.trim(),
+          description: description.trim(),
+        });
+      } else {
+        await workspacesUpdate(organizationId, initialWorkspace?.id ?? "", {
+          name: name.trim(),
+          description: description.trim(),
+          status,
+        });
       }
-    );
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      setError(typeof payload?.detail === "string" ? payload.detail : "Workspace could not be saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Workspace could not be saved.");
       setSubmitting(false);
       return;
     }
@@ -80,9 +81,7 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
   return (
     <form className="space-y-5" onSubmit={submit}>
       {error ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
+        <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
 
       <Card>
@@ -127,7 +126,10 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
           {mode === "edit" ? (
             <div className="grid max-w-sm gap-2">
               <Label>Status</Label>
-              <Select onValueChange={setStatus} value={status}>
+              <Select
+                onValueChange={(value) => setStatus(value as WorkspaceUpdateStatus)}
+                value={status}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

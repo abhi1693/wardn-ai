@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import type { ReactNode } from "react";
 
 const appTitle = "Wardn AI";
@@ -59,6 +60,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <Script src="/wardn-config.js" strategy="beforeInteractive" />
+      </head>
       <body>{children}</body>
     </html>
   );

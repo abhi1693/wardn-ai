@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { getOrganizations, getWorkspaceContext, getWorkspaces } from "./data";
+import { getWorkspaceContext } from "./data";
 
 function roleLabel(role: string) {
   return role ? role[0].toUpperCase() + role.slice(1) : "";
@@ -22,15 +22,7 @@ function roleLabel(role: string) {
 
 export default async function OrganizationsPage() {
   const workspaceContext = await getWorkspaceContext();
-  const organizations = await getOrganizations();
-  const workspaceCounts = new Map(
-    await Promise.all(
-      organizations.map(async (organization) => [
-        organization.id,
-        (await getWorkspaces(organization.id)).length,
-      ] as const)
-    )
-  );
+  const organizations = workspaceContext.organizations;
 
   return (
     <AppShell
@@ -58,7 +50,6 @@ export default async function OrganizationsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Role</TableHead>
-                <TableHead>Workspaces</TableHead>
                 <TableHead className="w-28" />
               </TableRow>
             </TableHeader>
@@ -80,7 +71,6 @@ export default async function OrganizationsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>{roleLabel(organization.currentUserRole)}</TableCell>
-                  <TableCell>{workspaceCounts.get(organization.id) ?? 0}</TableCell>
                   <TableCell className="text-right">
                     <Button asChild size="icon" variant="outline">
                       <Link aria-label={`Settings for ${organization.name}`} href={`/organizations/${organization.id}/settings`}>
@@ -92,7 +82,7 @@ export default async function OrganizationsPage() {
               ))}
               {organizations.length === 0 ? (
                 <TableRow>
-                  <TableCell className="h-28 text-center text-muted-foreground" colSpan={5}>
+                  <TableCell className="h-28 text-center text-muted-foreground" colSpan={4}>
                     No organizations are available.
                   </TableCell>
                 </TableRow>

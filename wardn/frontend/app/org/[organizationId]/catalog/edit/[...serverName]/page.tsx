@@ -4,11 +4,8 @@ import { AppShell } from "@/app/components/app-shell";
 import { CatalogSourceForm } from "@/app/catalog/catalog-source-form";
 import type { MCPCatalogSource } from "@/app/catalog/catalog-source-types";
 import { getSecretStores } from "@/app/organizations/data";
-import {
-  backendCookieHeader,
-  backendPath,
-  getWorkspaceContext,
-} from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type EditCatalogSourcePageProps = {
   params: Promise<{
@@ -18,29 +15,11 @@ type EditCatalogSourcePageProps = {
 };
 
 async function getCatalogSource(organizationId: string, sourceId: string) {
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(
-          organizationId
-        )}/mcp/catalog/sources/${encodeURIComponent(sourceId)}`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (response.status === 404) {
-      notFound();
-    }
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as MCPCatalogSource;
-  } catch {
-    return null;
-  }
+  return backendJson<MCPCatalogSource>(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/mcp/catalog/sources/${encodeURIComponent(sourceId)}`
+  );
 }
 
 export default async function EditCatalogSourcePage({

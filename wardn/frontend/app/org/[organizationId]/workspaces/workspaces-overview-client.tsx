@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
+import { setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
@@ -14,10 +15,6 @@ type WorkspacesOverviewClientProps = {
   organization: OrganizationRead;
   workspaces: WorkspaceRead[];
 };
-
-function setSelectionCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-}
 
 export function WorkspacesOverviewClient({
   organization,
@@ -39,7 +36,7 @@ export function WorkspacesOverviewClient({
   return (
     <div className="space-y-4">
       <section className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
-        {workspaces.map((workspace, index) => (
+        {workspaces.map((workspace) => (
           <button
             aria-label={`Open ${workspace.name}`}
             className="group relative min-h-32 overflow-hidden rounded-md border border-border bg-card text-left shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/30 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/15"
@@ -53,7 +50,7 @@ export function WorkspacesOverviewClient({
                   <Boxes className="size-4" />
                 </div>
                 <h3 className="text-base font-semibold leading-6 text-foreground">
-                  {index === 0 ? "Default Workspace" : workspace.name}
+                  {workspace.name}
                 </h3>
                 <p className="break-all text-sm leading-5 text-muted-foreground">
                   {workspace.slug}

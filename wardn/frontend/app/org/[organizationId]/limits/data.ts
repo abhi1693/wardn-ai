@@ -1,42 +1,13 @@
 import type {
   ResourceLimitListResponse,
   ResourceLimitRead,
-  UserRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
-import { backendCookieHeader, backendPath } from "@/lib/workspace-context";
-
-export async function getCurrentUser() {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath("/api/v1/auth/me"), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as UserRead;
-  } catch {
-    return null;
-  }
-}
+import { backendJson } from "@/lib/api/server";
 
 export async function getLimits() {
-  const cookie = await backendCookieHeader();
-  try {
-    const response = await fetch(backendPath("/api/v1/limits"), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [] as ResourceLimitRead[];
-    }
-    const payload = (await response.json()) as ResourceLimitListResponse;
-    return payload.limits;
-  } catch {
-    return [] as ResourceLimitRead[];
-  }
+  const payload = await backendJson<ResourceLimitListResponse>("/api/v1/limits");
+  return payload.limits;
 }
 
 export function limitBelongsToOrganization(

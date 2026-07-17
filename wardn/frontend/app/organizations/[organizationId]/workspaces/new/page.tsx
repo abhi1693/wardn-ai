@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 
-import { getOrganization, getWorkspaceContext } from "../../../data";
+import { getWorkspaceContext } from "../../../data";
 import { WorkspaceForm } from "../../../workspace-form";
 
 type NewWorkspacePageProps = {
@@ -11,10 +11,8 @@ type NewWorkspacePageProps = {
 
 export default async function NewWorkspacePage({ params }: NewWorkspacePageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, organization] = await Promise.all([
-    getWorkspaceContext(),
-    getOrganization(organizationId),
-  ]);
+  const workspaceContext = await getWorkspaceContext({ organizationId });
+  const organization = workspaceContext.selectedOrganization;
   if (!organization) {
     notFound();
   }

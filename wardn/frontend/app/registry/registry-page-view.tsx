@@ -7,9 +7,8 @@ import type {
   MCPRegistryServerListResponse,
   MCPServerInstallationListResponse,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   organizationMcpRegistryPath,
   type WorkspaceContext,
   workspaceMcpRegistryPath,
@@ -22,19 +21,7 @@ async function getInitialServers(context: WorkspaceContext) {
   if (!path) {
     return { servers: [], metadata: { count: 0, nextCursor: "" } };
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return { servers: [], metadata: { count: 0, nextCursor: "" } };
-    }
-    return (await response.json()) as MCPRegistryServerListResponse;
-  } catch {
-    return { servers: [], metadata: { count: 0, nextCursor: "" } };
-  }
+  return backendJson<MCPRegistryServerListResponse>(path);
 }
 
 async function getInitialInstallations(context: WorkspaceContext) {
@@ -42,20 +29,8 @@ async function getInitialInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 type CatalogPageViewProps = {
@@ -64,6 +39,7 @@ type CatalogPageViewProps = {
 
 export async function CatalogPageView({ workspaceContext }: CatalogPageViewProps) {
   const organizationId = workspaceContext.selectedOrganization?.id;
+  const workspaceId = workspaceContext.selectedWorkspace?.id;
   const [serverList, installations] = await Promise.all([
     getInitialServers(workspaceContext),
     getInitialInstallations(workspaceContext),
@@ -89,6 +65,7 @@ export async function CatalogPageView({ workspaceContext }: CatalogPageViewProps
         initialMetadata={serverList.metadata}
         initialServers={serverList.servers}
         organizationId={organizationId ?? ""}
+        workspaceId={workspaceId ?? ""}
       />
     </AppShell>
   );

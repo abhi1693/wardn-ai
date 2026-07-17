@@ -1,11 +1,11 @@
 "use client";
 
-import { KeyRound, Loader2 } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -13,19 +13,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type {
   OrganizationRead,
   UserAPITokenCreate,
   UserAPITokenCreated,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { authCreateApiToken } from "@/lib/api/generated/auth/auth";
 
-import {
-  createdTokenStorageKey,
-  errorMessage,
-  type ScopeMode,
-  TokenFields,
-} from "../token-form";
+import { type ScopeMode, TokenFields } from "../token-form";
 
 type CreateTokenClientProps = {
   organization: OrganizationRead;
@@ -33,7 +31,6 @@ type CreateTokenClientProps = {
 };
 
 export function CreateTokenClient({ organization, workspaces }: CreateTokenClientProps) {
-  const router = useRouter();
   const [name, setName] = useState("Wardn MCP Gateway");
   const [description, setDescription] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
@@ -41,6 +38,8 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdToken, setCreatedToken] = useState<UserAPITokenCreated | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const activeWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.status === "active"),
@@ -64,6 +63,27 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
     });
   }
 
+  async function copyCreatedToken() {
+    if (!createdToken?.token) {
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(createdToken.token);
+    } else {
+      const field = document.createElement("textarea");
+      field.value = createdToken.token;
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.top = "-1000px";
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand("copy");
+      document.body.removeChild(field);
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_600);
+  }
+
   async function createToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canCreate) {
@@ -82,25 +102,69 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
     };
 
     try {
-      const response = await fetch("/api/auth/api-tokens", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = (await response.json()) as UserAPITokenCreated | { detail?: string };
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Token could not be created."));
-      }
-      sessionStorage.setItem(
-        createdTokenStorageKey(organization.id),
-        JSON.stringify(data as UserAPITokenCreated)
-      );
-      router.push(`/org/${organization.id}/tokens`);
+      const data = await authCreateApiToken(payload);
+      setCreatedToken(data);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Token could not be created.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (createdToken) {
+    return (
+      <div className="max-w-4xl space-y-6">
+        <div aria-live="polite" className="sr-only" role="status">
+          Token created. Copy it now because it will not be shown again.
+        </div>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2 text-emerald-700">
+              <Check className="size-5" />
+              <CardTitle>Token created</CardTitle>
+            </div>
+            <CardDescription>
+              Copy this token now. It is held only in this page&apos;s memory and is not shown again.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="created-token">Token</Label>
+              <div className="mt-2 flex gap-2">
+                <Input
+                  autoComplete="off"
+                  className="font-mono text-xs"
+                  id="created-token"
+                  readOnly
+                  spellCheck={false}
+                  type="text"
+                  value={createdToken.token}
+                />
+                <Button
+                  aria-label="Copy token"
+                  onClick={copyCreatedToken}
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                >
+                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                </Button>
+                {copied ? (
+                  <span aria-live="polite" className="sr-only" role="status">
+                    Token copied to clipboard.
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button asChild>
+                <Link href={`/org/${organization.id}/tokens`}>Done</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -136,9 +200,7 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
             />
 
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
+              <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
             <div className="flex justify-end gap-2">

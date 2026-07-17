@@ -8,10 +8,6 @@ import { cn } from "@/lib/utils";
 
 export type ScopeMode = "organization" | "workspaces";
 
-export function createdTokenStorageKey(organizationId: string) {
-  return `wardn.created-agent-token.${organizationId}`;
-}
-
 const scopeOptions: Array<{
   value: ScopeMode;
   label: string;
@@ -28,16 +24,6 @@ const scopeOptions: Array<{
     description: "Only enabled MCP servers in checked workspaces.",
   },
 ];
-
-export function errorMessage(payload: unknown, fallback: string) {
-  if (payload && typeof payload === "object" && "detail" in payload) {
-    const detail = (payload as { detail?: unknown }).detail;
-    if (typeof detail === "string") {
-      return detail;
-    }
-  }
-  return fallback;
-}
 
 function workspaceName(workspaces: WorkspaceRead[], workspaceId: string) {
   return workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? workspaceId;

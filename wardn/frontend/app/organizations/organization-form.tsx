@@ -6,11 +6,17 @@ import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { OrganizationRead } from "@/lib/api/generated/model";
+import type { OrganizationRead, OrganizationUpdateStatus } from "@/lib/api/generated/model";
+import {
+  organizationsCreate,
+  organizationsUpdate,
+} from "@/lib/api/generated/organizations/organizations";
+import { clearSelectionCookie, setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
@@ -30,15 +36,13 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function setSelectionCookie(name: string, value: string, maxAge = 31536000) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; samesite=lax`;
-}
-
 export function OrganizationForm({ formId, initialOrganization, mode }: OrganizationFormProps) {
   const router = useRouter();
   const [name, setName] = useState(initialOrganization?.name ?? "");
   const [slug, setSlug] = useState(initialOrganization?.slug ?? "");
-  const [status, setStatus] = useState(initialOrganization?.status ?? "active");
+  const [status, setStatus] = useState<OrganizationUpdateStatus>(
+    (initialOrganization?.status as OrganizationUpdateStatus) ?? "active"
+  );
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,29 +56,22 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
     setSubmitting(true);
     setError("");
 
-    const response = await fetch(
-      mode === "create"
-        ? "/api/organizations"
-        : `/api/organizations/${encodeURIComponent(initialOrganization?.id ?? "")}`,
-      {
-        method: mode === "create" ? "POST" : "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          mode === "create"
-            ? { name: name.trim(), slug: slug.trim() }
-            : { name: name.trim(), status }
-        ),
-      }
-    );
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      setError(typeof payload?.detail === "string" ? payload.detail : "Organization could not be saved.");
+    let organization: OrganizationRead;
+    try {
+      organization =
+        mode === "create"
+          ? await organizationsCreate({ name: name.trim(), slug: slug.trim() })
+          : await organizationsUpdate(initialOrganization?.id ?? "", {
+              name: name.trim(),
+              status,
+            });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Organization could not be saved.");
       setSubmitting(false);
       return;
     }
-    const organization = (await response.json()) as OrganizationRead;
     setSelectionCookie(selectedOrganizationCookie, organization.id);
-    setSelectionCookie(selectedWorkspaceCookie, "", 0);
+    clearSelectionCookie(selectedWorkspaceCookie);
     router.push(`/org/${encodeURIComponent(organization.id)}/dashboard`);
     router.refresh();
   }
@@ -96,9 +93,9 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
       </div>
 
       {error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <AsyncFeedback className="rounded-lg px-4 py-3" variant="error">
           {error}
-        </div>
+        </AsyncFeedback>
       ) : null}
 
       <Card className="overflow-hidden rounded-xl border-[var(--outline-variant)] bg-[var(--surface)] shadow-none">
@@ -133,7 +130,10 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
             {mode === "edit" ? (
               <div>
                 <Label>Status</Label>
-                <Select onValueChange={setStatus} value={status}>
+                <Select
+                  onValueChange={(value) => setStatus(value as OrganizationUpdateStatus)}
+                  value={status}
+                >
                   <SelectTrigger className="mt-2 h-12 rounded-lg border-[var(--outline-variant)] bg-[var(--surface)] px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20">
                     <SelectValue />
                   </SelectTrigger>

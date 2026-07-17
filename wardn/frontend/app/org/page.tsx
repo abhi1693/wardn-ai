@@ -3,13 +3,12 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-import { getOrganizations } from "../organizations/data";
+import { getOrganizationOptions } from "@/lib/workspace-context";
 
 import { OrganizationSelectClient } from "./organization-select-client";
 
 export default async function OrganizationSelectionPage() {
-  const organizations = await getOrganizations();
+  const organizations = await getOrganizationOptions();
 
   return (
     <main className="min-h-screen bg-background">

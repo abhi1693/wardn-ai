@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,8 +18,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SecretStoreRead } from "@/lib/api/generated/model";
+import {
+  secretStoresCreate,
+  secretStoresUpdate,
+  secretStoresValidate,
+} from "@/lib/api/generated/secrets/secrets";
 
-import { secretBackendErrorMessage } from "./secret-backend-errors";
 import {
   secretBackendValidationMessage,
   secretBackendValidationOk,
@@ -90,36 +95,27 @@ export function SecretBackendForm({
     setError(null);
     setNotice(null);
 
-    const config: Record<string, unknown> = {
+    const config = {
       baseUrl: baseUrl.trim(),
       kvMount: standardKvMount,
     };
     const authConfig = { profile: authProfile.trim() };
-    const payload = {
-      name: name.trim(),
-      provider: "openbao",
-      config,
-      authConfig,
-      ...(isEditing ? { isActive } : {}),
-    };
 
     try {
-      const response = await fetch(
-        isEditing && store
-          ? `/api/organizations/${organizationId}/secrets/stores/${store.id}`
-          : `/api/organizations/${organizationId}/secrets/stores`,
-        {
-          method: isEditing ? "PATCH" : "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(
-          secretBackendErrorMessage(data, "Secret backend could not be saved.")
-        );
+      if (isEditing && store) {
+        await secretStoresUpdate(organizationId, store.id, {
+          name: name.trim(),
+          config,
+          authConfig,
+          isActive,
+        });
+      } else {
+        await secretStoresCreate(organizationId, {
+          name: name.trim(),
+          provider: "openbao",
+          config,
+          authConfig,
+        });
       }
 
       router.push(listPath);
@@ -141,12 +137,8 @@ export function SecretBackendForm({
     setNotice(null);
 
     try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/secrets/stores/${store.id}/validate`,
-        { method: "POST" }
-      );
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !secretBackendValidationOk(data)) {
+      const data = await secretStoresValidate(organizationId, store.id);
+      if (!secretBackendValidationOk(data)) {
         throw new Error(
           secretBackendValidationMessage(data, "Secret backend validation failed.")
         );
@@ -242,15 +234,13 @@ export function SecretBackendForm({
           ) : null}
 
           {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
+            <AsyncFeedback variant="error">{error}</AsyncFeedback>
           ) : null}
           {notice ? (
-            <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            <AsyncFeedback className="flex items-center gap-2" variant="success">
               <CheckCircle2 className="size-4" />
               {notice}
-            </div>
+            </AsyncFeedback>
           ) : null}
 
           <div className="flex justify-end gap-2">

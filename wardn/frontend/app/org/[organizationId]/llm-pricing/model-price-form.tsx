@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -15,6 +16,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
+import {
+  organizationObservabilityCreateLlmModelPrice,
+  organizationObservabilityPrefillLlmModelPrice,
+  organizationObservabilityUpdateLlmModelPrice,
+} from "@/lib/api/generated/organization-observability/organization-observability";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import type { LLMModelPriceRead, ProviderModel } from "./types";
@@ -31,18 +38,6 @@ function decimalText(value: string | number | null | undefined) {
     return "";
   }
   return String(value);
-}
-
-function errorMessage(payload: unknown, fallback: string) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "detail" in payload &&
-    typeof payload.detail === "string"
-  ) {
-    return payload.detail;
-  }
-  return fallback;
 }
 
 function providerLabel(credential: LlmCredentialRead) {
@@ -117,16 +112,11 @@ export function ModelPriceForm({
 
     async function loadModels() {
       try {
-        const response = await fetch(
-          `/api/organizations/${organizationId}/llm/provider-credentials/${providerCredentialId}/models`,
+        const data = await llmProviderCredentialsListModels(
+          organizationId,
+          providerCredentialId,
           { signal: abortController.signal }
         );
-        const data = (await response.json().catch(() => null)) as
-          | { models?: ProviderModel[] }
-          | unknown;
-        if (!response.ok) {
-          throw new Error(errorMessage(data, "Models could not be loaded."));
-        }
         setModelOptions(
           Array.isArray((data as { models?: unknown }).models)
             ? ((data as { models: ProviderModel[] }).models ?? [])
@@ -158,26 +148,22 @@ export function ModelPriceForm({
     setIsSubmitting(true);
     setError(null);
     try {
-      const response = await fetch(
-        isEdit
-          ? `/api/organizations/${organizationId}/observability/llm/model-prices/${initialPrice.id}`
-          : `/api/organizations/${organizationId}/observability/llm/model-prices`,
-        {
-          method: isEdit ? "PATCH" : "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            provider: effectiveCredential.provider,
-            model: model.trim(),
-            inputUsdPer1mTokens: inputPrice.trim(),
-            outputUsdPer1mTokens: outputPrice.trim(),
-            cacheReadUsdPer1mTokens: cacheReadPrice.trim() || null,
-            cacheWriteUsdPer1mTokens: cacheWritePrice.trim() || null,
-          }),
-        }
-      );
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(errorMessage(payload, "Model price could not be saved."));
+      const payload = {
+        provider: effectiveCredential.provider,
+        model: model.trim(),
+        inputUsdPer1mTokens: inputPrice.trim(),
+        outputUsdPer1mTokens: outputPrice.trim(),
+        cacheReadUsdPer1mTokens: cacheReadPrice.trim() || null,
+        cacheWriteUsdPer1mTokens: cacheWritePrice.trim() || null,
+      };
+      if (isEdit) {
+        await organizationObservabilityUpdateLlmModelPrice(
+          organizationId,
+          initialPrice.id,
+          payload
+        );
+      } else {
+        await organizationObservabilityCreateLlmModelPrice(organizationId, payload);
       }
       router.push(listPath);
       router.refresh();
@@ -196,26 +182,10 @@ export function ModelPriceForm({
     setError(null);
     setPrefillNotice(null);
     try {
-      const params = new URLSearchParams({
+      const payload = await organizationObservabilityPrefillLlmModelPrice(organizationId, {
         provider: effectiveCredential.provider,
         model: model.trim(),
       });
-      const response = await fetch(
-        `/api/organizations/${organizationId}/observability/llm/model-prices/prefill?${params}`
-      );
-      const payload = (await response.json().catch(() => null)) as
-        | {
-            found?: boolean;
-            inputUsdPer1mTokens?: string | number | null;
-            outputUsdPer1mTokens?: string | number | null;
-            cacheReadUsdPer1mTokens?: string | number | null;
-            cacheWriteUsdPer1mTokens?: string | number | null;
-            sourceModelName?: string;
-          }
-        | null;
-      if (!response.ok) {
-        throw new Error(errorMessage(payload, "OpenRouter pricing could not be loaded."));
-      }
       if (!payload?.found) {
         setPrefillNotice("No OpenRouter pricing match was found for this model.");
         return;
@@ -307,11 +277,11 @@ export function ModelPriceForm({
                     </option>
                   ))}
                 </select>
-                {modelError ? <div className="text-sm text-red-700">{modelError}</div> : null}
+                {modelError ? <AsyncFeedback variant="error">{modelError}</AsyncFeedback> : null}
                 {selectedModelUnavailable ? (
-                  <div className="text-sm text-red-700">
+                  <AsyncFeedback variant="error">
                     This model is not available from the selected credential.
-                  </div>
+                  </AsyncFeedback>
                 ) : null}
               </div>
               <div className="sm:col-span-2">
@@ -332,7 +302,9 @@ export function ModelPriceForm({
                   {isPrefilling ? "Loading pricing" : "Prefill from OpenRouter"}
                 </Button>
                 {prefillNotice ? (
-                  <div className="mt-2 text-sm text-muted-foreground">{prefillNotice}</div>
+                  <AsyncFeedback className="mt-2" variant="info">
+                    {prefillNotice}
+                  </AsyncFeedback>
                 ) : null}
               </div>
               <div className="space-y-2">
@@ -376,9 +348,7 @@ export function ModelPriceForm({
                 />
               </div>
               {error ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">
-                  {error}
-                </div>
+                <AsyncFeedback className="sm:col-span-2" variant="error">{error}</AsyncFeedback>
               ) : null}
             </div>
 

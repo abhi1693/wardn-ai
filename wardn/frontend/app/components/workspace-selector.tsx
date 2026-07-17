@@ -8,6 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
+import { setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
@@ -17,10 +18,6 @@ import {
 type WorkspaceSelectorProps = {
   context: WorkspaceContext;
 };
-
-function setSelectionCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-}
 
 export function WorkspaceSelector({ context }: WorkspaceSelectorProps) {
   const router = useRouter();

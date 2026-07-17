@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { buttonVariants } from "@/components/ui/button";
+import { authLogout } from "@/lib/api/generated/auth/auth";
 import type { VariantProps } from "class-variance-authority";
 
 type LogoutButtonProps = {
@@ -19,9 +20,7 @@ export function LogoutButton({ className, iconOnly = false, variant }: LogoutBut
 
   async function handleLogout() {
     setIsSubmitting(true);
-    await fetch("/api/auth/logout", {
-      method: "POST",
-    });
+    await authLogout();
     router.replace("/login");
     router.refresh();
   }

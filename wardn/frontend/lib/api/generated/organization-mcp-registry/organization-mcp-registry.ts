@@ -5,35 +5,17 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  ErrorResponse,
-  HTTPValidationError,
   MCPRegistryServerListResponse,
   MCPRegistryServerResponse,
+  MCPRepositoryMetadataImportRequest,
+  MCPRepositoryMetadataImportResponse,
   MCPServerCreate,
   OrganizationMcpRegistryGetServerVersionParams,
   OrganizationMcpRegistryListServerVersionsParams,
   OrganizationMcpRegistryListServersParams
 } from '../model';
 
-
-export type organizationMcpRegistryListServersResponse200 = {
-  data: MCPRegistryServerListResponse
-  status: 200
-}
-
-export type organizationMcpRegistryListServersResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryListServersResponseSuccess = (organizationMcpRegistryListServersResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryListServersResponseError = (organizationMcpRegistryListServersResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryListServersResponse = (organizationMcpRegistryListServersResponseSuccess | organizationMcpRegistryListServersResponseError)
+import { apiRequest } from '../../client';
 
 export const getOrganizationMcpRegistryListServersUrl = (organizationId: string,
     params?: OrganizationMcpRegistryListServersParams,) => {
@@ -48,110 +30,48 @@ export const getOrganizationMcpRegistryListServersUrl = (organizationId: string,
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/mcp/registry/servers?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/mcp/registry/servers`
 }
 
 /**
  * @summary List Organization Mcp Servers
  */
 export const organizationMcpRegistryListServers = async (organizationId: string,
-    params?: OrganizationMcpRegistryListServersParams, options?: RequestInit): Promise<organizationMcpRegistryListServersResponse> => {
+    params?: OrganizationMcpRegistryListServersParams, options?: RequestInit): Promise<MCPRegistryServerListResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistryListServersUrl(organizationId,params),
+  return apiRequest<MCPRegistryServerListResponse>(getOrganizationMcpRegistryListServersUrl(organizationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryListServersResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryListServersResponse
-}
-
-
-export type organizationMcpRegistryCreateServerVersionResponse201 = {
-  data: MCPRegistryServerResponse
-  status: 201
-}
-
-export type organizationMcpRegistryCreateServerVersionResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationMcpRegistryCreateServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryCreateServerVersionResponseSuccess = (organizationMcpRegistryCreateServerVersionResponse201) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryCreateServerVersionResponseError = (organizationMcpRegistryCreateServerVersionResponse409 | organizationMcpRegistryCreateServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryCreateServerVersionResponse = (organizationMcpRegistryCreateServerVersionResponseSuccess | organizationMcpRegistryCreateServerVersionResponseError)
 
 export const getOrganizationMcpRegistryCreateServerVersionUrl = (organizationId: string,) => {
 
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers`
+  return `/api/v1/organizations/${organizationId}/mcp/registry/servers`
 }
 
 /**
  * @summary Create Organization Mcp Server Version
  */
 export const organizationMcpRegistryCreateServerVersion = async (organizationId: string,
-    mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<organizationMcpRegistryCreateServerVersionResponse> => {
+    mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<MCPRegistryServerResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistryCreateServerVersionUrl(organizationId),
+  return apiRequest<MCPRegistryServerResponse>(getOrganizationMcpRegistryCreateServerVersionUrl(organizationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPServerCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryCreateServerVersionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryCreateServerVersionResponse
-}
-
-
-export type organizationMcpRegistryListServerVersionsResponse200 = {
-  data: MCPRegistryServerListResponse
-  status: 200
-}
-
-export type organizationMcpRegistryListServerVersionsResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpRegistryListServerVersionsResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryListServerVersionsResponseSuccess = (organizationMcpRegistryListServerVersionsResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryListServerVersionsResponseError = (organizationMcpRegistryListServerVersionsResponse404 | organizationMcpRegistryListServerVersionsResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryListServerVersionsResponse = (organizationMcpRegistryListServerVersionsResponseSuccess | organizationMcpRegistryListServerVersionsResponseError)
 
 export const getOrganizationMcpRegistryListServerVersionsUrl = (organizationId: string,
     serverName: string,
@@ -167,7 +87,7 @@ export const getOrganizationMcpRegistryListServerVersionsUrl = (organizationId: 
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions`
 }
 
 /**
@@ -175,53 +95,17 @@ export const getOrganizationMcpRegistryListServerVersionsUrl = (organizationId: 
  */
 export const organizationMcpRegistryListServerVersions = async (organizationId: string,
     serverName: string,
-    params?: OrganizationMcpRegistryListServerVersionsParams, options?: RequestInit): Promise<organizationMcpRegistryListServerVersionsResponse> => {
+    params?: OrganizationMcpRegistryListServerVersionsParams, options?: RequestInit): Promise<MCPRegistryServerListResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistryListServerVersionsUrl(organizationId,serverName,params),
+  return apiRequest<MCPRegistryServerListResponse>(getOrganizationMcpRegistryListServerVersionsUrl(organizationId,serverName,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryListServerVersionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryListServerVersionsResponse
-}
-
-
-export type organizationMcpRegistryDeleteServerVersionResponse204 = {
-  data: void
-  status: 204
-}
-
-export type organizationMcpRegistryDeleteServerVersionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpRegistryDeleteServerVersionResponse409 = {
-  data: ErrorResponse
-  status: 409
-}
-
-export type organizationMcpRegistryDeleteServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryDeleteServerVersionResponseSuccess = (organizationMcpRegistryDeleteServerVersionResponse204) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryDeleteServerVersionResponseError = (organizationMcpRegistryDeleteServerVersionResponse404 | organizationMcpRegistryDeleteServerVersionResponse409 | organizationMcpRegistryDeleteServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryDeleteServerVersionResponse = (organizationMcpRegistryDeleteServerVersionResponseSuccess | organizationMcpRegistryDeleteServerVersionResponseError)
 
 export const getOrganizationMcpRegistryDeleteServerVersionUrl = (organizationId: string,
     serverName: string,
@@ -230,7 +114,7 @@ export const getOrganizationMcpRegistryDeleteServerVersionUrl = (organizationId:
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
+  return `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
 }
 
 /**
@@ -238,48 +122,17 @@ export const getOrganizationMcpRegistryDeleteServerVersionUrl = (organizationId:
  */
 export const organizationMcpRegistryDeleteServerVersion = async (organizationId: string,
     serverName: string,
-    version: string, options?: RequestInit): Promise<organizationMcpRegistryDeleteServerVersionResponse> => {
+    version: string, options?: RequestInit): Promise<void> => {
 
-  const res = await fetch(getOrganizationMcpRegistryDeleteServerVersionUrl(organizationId,serverName,version),
+  return apiRequest<void>(getOrganizationMcpRegistryDeleteServerVersionUrl(organizationId,serverName,version),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryDeleteServerVersionResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryDeleteServerVersionResponse
-}
-
-
-export type organizationMcpRegistryGetServerVersionResponse200 = {
-  data: MCPRegistryServerResponse
-  status: 200
-}
-
-export type organizationMcpRegistryGetServerVersionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpRegistryGetServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryGetServerVersionResponseSuccess = (organizationMcpRegistryGetServerVersionResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryGetServerVersionResponseError = (organizationMcpRegistryGetServerVersionResponse404 | organizationMcpRegistryGetServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryGetServerVersionResponse = (organizationMcpRegistryGetServerVersionResponseSuccess | organizationMcpRegistryGetServerVersionResponseError)
 
 export const getOrganizationMcpRegistryGetServerVersionUrl = (organizationId: string,
     serverName: string,
@@ -296,7 +149,7 @@ export const getOrganizationMcpRegistryGetServerVersionUrl = (organizationId: st
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}?${stringifiedParams}` : `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
 }
 
 /**
@@ -305,48 +158,17 @@ export const getOrganizationMcpRegistryGetServerVersionUrl = (organizationId: st
 export const organizationMcpRegistryGetServerVersion = async (organizationId: string,
     serverName: string,
     version: string,
-    params?: OrganizationMcpRegistryGetServerVersionParams, options?: RequestInit): Promise<organizationMcpRegistryGetServerVersionResponse> => {
+    params?: OrganizationMcpRegistryGetServerVersionParams, options?: RequestInit): Promise<MCPRegistryServerResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistryGetServerVersionUrl(organizationId,serverName,version,params),
+  return apiRequest<MCPRegistryServerResponse>(getOrganizationMcpRegistryGetServerVersionUrl(organizationId,serverName,version,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryGetServerVersionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryGetServerVersionResponse
-}
-
-
-export type organizationMcpRegistryUpdateServerVersionResponse200 = {
-  data: MCPRegistryServerResponse
-  status: 200
-}
-
-export type organizationMcpRegistryUpdateServerVersionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpRegistryUpdateServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistryUpdateServerVersionResponseSuccess = (organizationMcpRegistryUpdateServerVersionResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpRegistryUpdateServerVersionResponseError = (organizationMcpRegistryUpdateServerVersionResponse404 | organizationMcpRegistryUpdateServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistryUpdateServerVersionResponse = (organizationMcpRegistryUpdateServerVersionResponseSuccess | organizationMcpRegistryUpdateServerVersionResponseError)
 
 export const getOrganizationMcpRegistryUpdateServerVersionUrl = (organizationId: string,
     serverName: string,
@@ -355,7 +177,7 @@ export const getOrganizationMcpRegistryUpdateServerVersionUrl = (organizationId:
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
+  return `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}`
 }
 
 /**
@@ -364,48 +186,17 @@ export const getOrganizationMcpRegistryUpdateServerVersionUrl = (organizationId:
 export const organizationMcpRegistryUpdateServerVersion = async (organizationId: string,
     serverName: string,
     version: string,
-    mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<organizationMcpRegistryUpdateServerVersionResponse> => {
+    mCPServerCreate: MCPServerCreate, options?: RequestInit): Promise<MCPRegistryServerResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistryUpdateServerVersionUrl(organizationId,serverName,version),
+  return apiRequest<MCPRegistryServerResponse>(getOrganizationMcpRegistryUpdateServerVersionUrl(organizationId,serverName,version),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(mCPServerCreate)
   }
-)
+);}
 
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: organizationMcpRegistryUpdateServerVersionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistryUpdateServerVersionResponse
-}
-
-
-export type organizationMcpRegistrySetDefaultServerVersionResponse200 = {
-  data: MCPRegistryServerResponse
-  status: 200
-}
-
-export type organizationMcpRegistrySetDefaultServerVersionResponse404 = {
-  data: ErrorResponse
-  status: 404
-}
-
-export type organizationMcpRegistrySetDefaultServerVersionResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type organizationMcpRegistrySetDefaultServerVersionResponseSuccess = (organizationMcpRegistrySetDefaultServerVersionResponse200) & {
-  headers: Headers;
-};
-export type organizationMcpRegistrySetDefaultServerVersionResponseError = (organizationMcpRegistrySetDefaultServerVersionResponse404 | organizationMcpRegistrySetDefaultServerVersionResponse422) & {
-  headers: Headers;
-};
-
-export type organizationMcpRegistrySetDefaultServerVersionResponse = (organizationMcpRegistrySetDefaultServerVersionResponseSuccess | organizationMcpRegistrySetDefaultServerVersionResponseError)
 
 export const getOrganizationMcpRegistrySetDefaultServerVersionUrl = (organizationId: string,
     serverName: string,
@@ -414,7 +205,7 @@ export const getOrganizationMcpRegistrySetDefaultServerVersionUrl = (organizatio
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}/default`
+  return `/api/v1/organizations/${organizationId}/mcp/registry/servers/${serverName}/versions/${version}/default`
 }
 
 /**
@@ -422,22 +213,39 @@ export const getOrganizationMcpRegistrySetDefaultServerVersionUrl = (organizatio
  */
 export const organizationMcpRegistrySetDefaultServerVersion = async (organizationId: string,
     serverName: string,
-    version: string, options?: RequestInit): Promise<organizationMcpRegistrySetDefaultServerVersionResponse> => {
+    version: string, options?: RequestInit): Promise<MCPRegistryServerResponse> => {
 
-  const res = await fetch(getOrganizationMcpRegistrySetDefaultServerVersionUrl(organizationId,serverName,version),
+  return apiRequest<MCPRegistryServerResponse>(getOrganizationMcpRegistrySetDefaultServerVersionUrl(organizationId,serverName,version),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
+);}
 
 
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+export const getOrganizationMcpRegistryImportRepositoryMetadataUrl = (organizationId: string,) => {
 
-  const data: organizationMcpRegistrySetDefaultServerVersionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as organizationMcpRegistrySetDefaultServerVersionResponse
+
+
+
+  return `/api/v1/organizations/${organizationId}/mcp/registry/source-metadata`
 }
+
+/**
+ * @summary Import Organization Mcp Repository Metadata
+ */
+export const organizationMcpRegistryImportRepositoryMetadata = async (organizationId: string,
+    mCPRepositoryMetadataImportRequest: MCPRepositoryMetadataImportRequest, options?: RequestInit): Promise<MCPRepositoryMetadataImportResponse> => {
+
+  return apiRequest<MCPRepositoryMetadataImportResponse>(getOrganizationMcpRegistryImportRepositoryMetadataUrl(organizationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mCPRepositoryMetadataImportRequest)
+  }
+);}
 
 

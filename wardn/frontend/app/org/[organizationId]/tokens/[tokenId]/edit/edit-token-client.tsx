@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -19,8 +20,9 @@ import type {
   UserAPITokenUpdate,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { authUpdateApiToken } from "@/lib/api/generated/auth/auth";
 
-import { errorMessage, type ScopeMode, TokenFields } from "../../token-form";
+import { type ScopeMode, TokenFields } from "../../token-form";
 
 type EditTokenClientProps = {
   organization: OrganizationRead;
@@ -93,15 +95,7 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
     };
 
     try {
-      const response = await fetch(`/api/auth/api-tokens/${token.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = (await response.json()) as UserAPITokenRead | { detail?: string };
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Token could not be updated."));
-      }
+      await authUpdateApiToken(token.id, payload);
       router.push(`/org/${organization.id}/tokens`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Token could not be updated.");
@@ -153,9 +147,7 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
             </label>
 
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
+              <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
             <div className="flex justify-end gap-2">

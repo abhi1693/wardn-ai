@@ -2,9 +2,8 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import type { MCPRegistryServerResponse } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   organizationMcpRegistryPath,
   type WorkspaceContext,
   workspaceInstallPath,
@@ -21,18 +20,7 @@ async function getServer(context: WorkspaceContext, serverName: string, version:
   if (!path) {
     return null;
   }
-  const cookie = await backendCookieHeader();
-  const response = await fetch(backendPath(path), {
-    cache: "no-store",
-    headers: cookie ? { cookie } : {},
-  });
-  if (response.status === 404) {
-    notFound();
-  }
-  if (!response.ok) {
-    return null;
-  }
-  return (await response.json()) as MCPRegistryServerResponse;
+  return backendJson<MCPRegistryServerResponse>(path);
 }
 
 type NewVersionPageViewProps = {
@@ -66,6 +54,7 @@ export async function NewVersionPageView({
         installBasePath={workspaceInstallPath(workspaceContext)}
         initialServer={response.server}
         mode="create"
+        organizationId={workspaceContext.selectedOrganization?.id ?? ""}
       />
     </AppShell>
   );

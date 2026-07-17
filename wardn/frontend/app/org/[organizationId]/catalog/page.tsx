@@ -5,36 +5,18 @@ import { AppShell } from "@/app/components/app-shell";
 import { CatalogSourcesClient } from "@/app/catalog/catalog-sources-client";
 import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
 import { Button } from "@/components/ui/button";
-import {
-  backendCookieHeader,
-  backendPath,
-  getWorkspaceContext,
-} from "@/lib/workspace-context";
+import { backendJson } from "@/lib/api/server";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type OrganizationCatalogPageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
 async function getCatalogSources(organizationId: string) {
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(
-      backendPath(
-        `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
-      ),
-      {
-        cache: "no-store",
-        headers: cookie ? { cookie } : {},
-      }
-    );
-    if (!response.ok) {
-      return [];
-    }
-    const payload = (await response.json()) as MCPCatalogSourceListResponse;
-    return payload.sources;
-  } catch {
-    return [];
-  }
+  const payload = await backendJson<MCPCatalogSourceListResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
+  );
+  return payload.sources;
 }
 
 export default async function OrganizationCatalogPage({

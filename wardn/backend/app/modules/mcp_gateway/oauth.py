@@ -193,13 +193,9 @@ def authorize_request_path(params: dict[str, str]) -> str:
     return f"{path}?{query}" if query else path
 
 
-def oidc_login_redirect(params: dict[str, str]) -> RedirectResponse:
+def oidc_login_redirect(request: Request, params: dict[str, str]) -> RedirectResponse:
     settings = get_settings()
-    login_url = (
-        f"{settings.frontend_base_url.rstrip('/')}/api/auth/oidc/login"
-        if settings.frontend_base_url.strip()
-        else f"{settings.api_prefix}/auth/oidc/login"
-    )
+    login_url = f"{public_base_url(request)}{settings.api_prefix}/auth/oidc/login"
     return RedirectResponse(
         append_query(login_url, {"redirectTo": authorize_request_path(params)}),
         status_code=status.HTTP_302_FOUND,
@@ -590,7 +586,7 @@ async def authorize(
     if user is not None:
         return await consent_form(session, user, params)
     if oidc_enabled(get_settings()):
-        return oidc_login_redirect(params)
+        return oidc_login_redirect(request, params)
     return login_form(params)
 
 
@@ -609,7 +605,7 @@ async def authorize_with_password(
         just_logged_in = False
         if user is None:
             if oidc_enabled(get_settings()):
-                return oidc_login_redirect(form)
+                return oidc_login_redirect(request, form)
             login = LoginRequest(
                 email=form.get("email", ""),
                 password=SecretStr(form.get("password", "")),

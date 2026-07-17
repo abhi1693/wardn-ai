@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import {
   Card,
   CardContent,
@@ -16,9 +17,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AgentRead, OrganizationRead } from "@/lib/api/generated/model";
+import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
+import {
+  workspaceAgentsCreate,
+  workspaceAgentsReplaceTools,
+  workspaceAgentsUpdate,
+} from "@/lib/api/generated/workspace-agents/workspace-agents";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
-import { errorMessage } from "../tokens/token-form";
 import {
   ALL_SERVER_TOOLS,
   type AgentAvailableServer,
@@ -137,16 +143,11 @@ export function AgentForm({
 
     async function loadModels() {
       try {
-        const response = await fetch(
-          `/api/organizations/${organization.id}/llm/provider-credentials/${effectiveProviderCredentialId}/models`,
+        const data = await llmProviderCredentialsListModels(
+          organization.id,
+          effectiveProviderCredentialId,
           { signal: abortController.signal }
         );
-        const data = (await response.json().catch(() => null)) as
-          | { models?: ProviderModel[] }
-          | unknown;
-        if (!response.ok) {
-          throw new Error(errorMessage(data, "Models could not be loaded."));
-        }
         setModelOptions(
           Array.isArray((data as { models?: unknown }).models)
             ? ((data as { models: ProviderModel[] }).models ?? [])
@@ -184,7 +185,6 @@ export function AgentForm({
     Boolean(effectiveProviderCredentialId) &&
     modelName.trim().length > 0;
 
-  const formBasePath = `/api/organizations/${organization.id}/workspaces/${fixedWorkspaceId}/agents`;
   const pageBasePath = `/org/${organization.id}/workspace/${fixedWorkspaceId}/agents`;
 
   const availableToolGroups = useMemo(() => {
@@ -308,19 +308,15 @@ export function AgentForm({
     };
 
     try {
-      const response = await fetch(
-        agent ? `${formBasePath}/${agent.id}` : formBasePath,
-        {
-          method: agent ? "PATCH" : "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(errorMessage(data, "Agent could not be saved."));
-      }
-      const savedAgentId = (data as { id?: string } | null)?.id ?? agent?.id;
+      const savedAgent = agent
+        ? await workspaceAgentsUpdate(
+            organization.id,
+            fixedWorkspaceId,
+            agent.id,
+            payload
+          )
+        : await workspaceAgentsCreate(organization.id, fixedWorkspaceId, payload);
+      const savedAgentId = savedAgent.id;
       if (savedAgentId) {
         const servers = Object.entries(selectedServerTools).map(
           ([installationId, toolSchemaIds]) => ({
@@ -328,15 +324,12 @@ export function AgentForm({
             toolSchemaIds,
           })
         );
-        const toolsResponse = await fetch(`${formBasePath}/${savedAgentId}/tools`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ servers }),
-        });
-        const toolsData = (await toolsResponse.json().catch(() => null)) as unknown;
-        if (!toolsResponse.ok) {
-          throw new Error(errorMessage(toolsData, "Agent tools could not be saved."));
-        }
+        await workspaceAgentsReplaceTools(
+          organization.id,
+          fixedWorkspaceId,
+          savedAgentId,
+          { servers }
+        );
       }
       router.push(pageBasePath);
     } catch (caught) {
@@ -453,7 +446,7 @@ export function AgentForm({
                 ))}
               </select>
               {modelError ? (
-                <div className="text-sm text-red-700">{modelError}</div>
+                <AsyncFeedback variant="error">{modelError}</AsyncFeedback>
               ) : null}
             </div>
 
@@ -578,9 +571,7 @@ export function AgentForm({
             </div>
 
             {error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
+              <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
             <div className="flex justify-end gap-2">

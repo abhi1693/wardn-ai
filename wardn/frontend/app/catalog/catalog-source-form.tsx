@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SecretStoreRead } from "@/lib/api/generated/model";
+import type { MCPCatalogSourceCreate, MCPCatalogSourceUpdate } from "@/lib/api/generated/model";
+import {
+  organizationMcpCatalogCreateSource,
+  organizationMcpCatalogUpdateSource,
+} from "@/lib/api/generated/organization-mcp-catalog/organization-mcp-catalog";
 
 import type { MCPCatalogSource } from "./catalog-source-types";
 
@@ -33,15 +39,6 @@ type CatalogSourceFormProps = {
   organizationId: string;
   secretStores: SecretStoreRead[];
 };
-
-async function responseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 export function CatalogSourceForm({
   initialSource,
@@ -91,19 +88,18 @@ export function CatalogSourceForm({
           ? { apiTokenSecretStoreId }
           : {}),
     };
-    const path =
-      mode === "edit" && initialSource
-        ? `/api/organizations/${organizationId}/mcp/catalog/sources/${initialSource.id}`
-        : `/api/organizations/${organizationId}/mcp/catalog/sources`;
-
     try {
-      const response = await fetch(path, {
-        method: mode === "edit" ? "PATCH" : "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, "Catalog source could not be saved."));
+      if (mode === "edit" && initialSource) {
+        await organizationMcpCatalogUpdateSource(
+          organizationId,
+          initialSource.id,
+          payload as MCPCatalogSourceUpdate
+        );
+      } else {
+        await organizationMcpCatalogCreateSource(
+          organizationId,
+          payload as MCPCatalogSourceCreate
+        );
       }
       router.push(catalogPath);
       router.refresh();
@@ -121,9 +117,7 @@ export function CatalogSourceForm({
       </CardHeader>
       <CardContent>
         {error ? (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
+          <AsyncFeedback className="mb-4" variant="error">{error}</AsyncFeedback>
         ) : null}
         <form className="space-y-5" onSubmit={submit}>
           <div className="grid gap-4 md:grid-cols-2">

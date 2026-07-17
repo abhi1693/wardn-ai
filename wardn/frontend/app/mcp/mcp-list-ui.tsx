@@ -3,17 +3,9 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-
-export async function responseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 export function runtimeDisplayName(value: string) {
   const normalized = value.trim().toLowerCase();
@@ -73,14 +65,14 @@ export function FeedbackMessages({ error, notice }: FeedbackMessagesProps) {
   return (
     <>
       {error ? (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="error">
           {error}
-        </div>
+        </AsyncFeedback>
       ) : null}
       {notice ? (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="success">
           {notice}
-        </div>
+        </AsyncFeedback>
       ) : null}
     </>
   );
@@ -139,6 +131,7 @@ export function ServerIdentityCell({ href, iconUrl, name, title }: ServerIdentit
           <img
             alt=""
             className="size-full object-contain"
+            loading="lazy"
             referrerPolicy="no-referrer"
             src={iconUrl}
           />

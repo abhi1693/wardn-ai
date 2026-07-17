@@ -4,29 +4,7 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
-import type {
-  HTTPValidationError
-} from '../model';
-
-
-export type workspaceMcpGatewayRpcResponse200 = {
-  data: unknown
-  status: 200
-}
-
-export type workspaceMcpGatewayRpcResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type workspaceMcpGatewayRpcResponseSuccess = (workspaceMcpGatewayRpcResponse200) & {
-  headers: Headers;
-};
-export type workspaceMcpGatewayRpcResponseError = (workspaceMcpGatewayRpcResponse422) & {
-  headers: Headers;
-};
-
-export type workspaceMcpGatewayRpcResponse = (workspaceMcpGatewayRpcResponseSuccess | workspaceMcpGatewayRpcResponseError)
+import { apiRequest } from '../../client';
 
 export const getWorkspaceMcpGatewayRpcUrl = (organizationId: string,
     workspaceId: string,) => {
@@ -34,29 +12,22 @@ export const getWorkspaceMcpGatewayRpcUrl = (organizationId: string,
 
 
 
-  return `http://localhost:8000/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/gateway`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/gateway`
 }
 
 /**
  * @summary Workspace Mcp Gateway Rpc
  */
 export const workspaceMcpGatewayRpc = async (organizationId: string,
-    workspaceId: string, options?: RequestInit): Promise<workspaceMcpGatewayRpcResponse> => {
+    workspaceId: string, options?: RequestInit): Promise<unknown> => {
 
-  const res = await fetch(getWorkspaceMcpGatewayRpcUrl(organizationId,workspaceId),
+  return apiRequest<unknown>(getWorkspaceMcpGatewayRpcUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: workspaceMcpGatewayRpcResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as workspaceMcpGatewayRpcResponse
-}
+);}
 
 

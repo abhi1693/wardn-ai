@@ -4,57 +4,28 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
-import type {
-  HTTPValidationError
-} from '../model';
-
-
-export type mcpGatewayRpcResponse200 = {
-  data: unknown
-  status: 200
-}
-
-export type mcpGatewayRpcResponse422 = {
-  data: HTTPValidationError
-  status: 422
-}
-
-export type mcpGatewayRpcResponseSuccess = (mcpGatewayRpcResponse200) & {
-  headers: Headers;
-};
-export type mcpGatewayRpcResponseError = (mcpGatewayRpcResponse422) & {
-  headers: Headers;
-};
-
-export type mcpGatewayRpcResponse = (mcpGatewayRpcResponseSuccess | mcpGatewayRpcResponseError)
+import { apiRequest } from '../../client';
 
 export const getMcpGatewayRpcUrl = () => {
 
 
 
 
-  return `http://localhost:8000/api/v1/mcp/gateway`
+  return `/api/v1/mcp/gateway`
 }
 
 /**
  * @summary Mcp Gateway Rpc
  */
-export const mcpGatewayRpc = async ( options?: RequestInit): Promise<mcpGatewayRpcResponse> => {
+export const mcpGatewayRpc = async ( options?: RequestInit): Promise<unknown> => {
 
-  const res = await fetch(getMcpGatewayRpcUrl(),
+  return apiRequest<unknown>(getMcpGatewayRpcUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: mcpGatewayRpcResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as mcpGatewayRpcResponse
-}
+);}
 
 

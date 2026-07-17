@@ -60,6 +60,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",
         "/api/v1/organizations/{organization_id}/mcp/catalog/jobs/{job_id}",
         "/api/v1/organizations/{organization_id}/mcp/registry/servers",
+        "/api/v1/organizations/{organization_id}/mcp/registry/source-metadata",
         (
             "/api/v1/organizations/{organization_id}/mcp/registry/servers"
             "/{server_name}/versions"
@@ -195,6 +196,15 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         "/api/v1/users/bootstrap",
     }
+
+
+def test_repository_metadata_import_documents_rate_limiting() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    operation = schema["paths"][
+        "/api/v1/organizations/{organization_id}/mcp/registry/source-metadata"
+    ]["post"]
+
+    assert "429" in operation["responses"]
 
 
 def test_only_top_level_mcp_gateway_route_is_mounted() -> None:

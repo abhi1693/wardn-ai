@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
@@ -13,10 +14,6 @@ type OpenWorkspaceButtonProps = {
   organizationId: string;
   workspaceId: string;
 };
-
-function setSelectionCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-}
 
 export function OpenWorkspaceButton({ organizationId, workspaceId }: OpenWorkspaceButtonProps) {
   const router = useRouter();

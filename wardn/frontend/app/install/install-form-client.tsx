@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  FileUp,
   Network,
   Package,
   Search,
@@ -12,712 +11,56 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type {
-  MCPRegistryServerListResponse,
   MCPRegistryServerResponse,
   MCPOperationJobRead,
+  MCPServerInstallRequest,
   MCPServerInstallRequestConfigValues,
   MCPServerInstallationRead,
-  SecretStoreRead,
 } from "@/lib/api/generated/model";
+import {
+  organizationMcpRegistryGetServerVersion,
+} from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
+import {
+  workspaceMcpRegistryGetOperationJob,
+  workspaceMcpRegistryInstallServerVersion,
+} from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
+import {
+  isOperationJobPollingCancelled,
+  useOperationJobPoller,
+} from "@/lib/use-operation-job";
 
-type InstallTarget = string;
-type InstallTargetKind = "remote" | "package";
+import {
+  configuredFieldNames,
+  configuredFieldValues,
+  defaultInstallTarget,
+  defaultInstallValues,
+  installFields,
+  installTargetFromInstallation,
+  installTargetOptions,
+  installTargetPayloadValue,
+  installValueConfigured,
+  mergeInstallValues,
+  selectedInstallTargetOption,
+  serverResponseFromInstallation,
+  SERVER_PICKER_PAGE_SIZE,
+  type CustomHeader,
+  type InstallFormClientProps,
+  type InstallTarget,
+  type InstallValue,
+} from "./install-form-domain";
+import { InstallFieldControl, ServerPickerCard } from "./install-form-fields";
+import { useInstallServerPicker } from "./use-install-server-picker";
 
-type InstallTargetOption = {
-  value: InstallTarget;
-  kind: InstallTargetKind;
-  index: number;
-  label: string;
-  description: string;
-};
 
-type InstallField = {
-  name: string;
-  description: string;
-  required: boolean;
-  secret: boolean;
-  format: string;
-  defaultValue: string;
-  options: string[];
-  section: "connection" | "runtime";
-};
-
-type FileInstallValue = {
-  type: "file";
-  filename: string;
-  content: string;
-};
-
-type InstallValue = string | FileInstallValue;
-
-type CustomHeader = {
-  id: string;
-  name: string;
-  value: string;
-};
-
-type InstallFormClientProps = {
-  basePath: string;
-  initialInstallation?: MCPServerInstallationRead | null;
-  initialInstallations: MCPServerInstallationRead[];
-  initialSelectedServer?: MCPRegistryServerResponse | null;
-  initialServerNextCursor?: string;
-  initialServers?: MCPRegistryServerResponse[];
-  secretStores: SecretStoreRead[];
-};
-
-const SERVER_PICKER_PAGE_SIZE = 12;
-const JOB_POLL_INTERVAL_MS = 1_000;
-const JOB_POLL_ATTEMPTS = 600;
-
-function installUrl(serverName: string) {
-  return `/api/mcp/registry/installed-servers/${serverName
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}`;
-}
-
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-async function waitForInstallationJob(
-  initialJob: MCPOperationJobRead,
-  onProgress: (message: string) => void
-): Promise<MCPServerInstallationRead> {
-  let job = initialJob;
-  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
-    onProgress(job.progressMessage || "Installation queued");
-    if (job.status === "succeeded") {
-      const installation = job.result?.installation;
-      if (!installation || typeof installation !== "object" || !("id" in installation)) {
-        throw new Error("Installation completed without an installation result.");
-      }
-      return installation as MCPServerInstallationRead;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.errorMessage || "Server installation failed.");
-    }
-    await wait(JOB_POLL_INTERVAL_MS);
-    const response = await fetch(
-      `/api/mcp/registry/jobs/${encodeURIComponent(job.jobId)}`,
-      { cache: "no-store" }
-    );
-    if (!response.ok) {
-      throw new Error(await responseErrorMessage(response, "Failed to read installation status."));
-    }
-    job = (await response.json()) as MCPOperationJobRead;
-  }
-  throw new Error("Installation is still running. Check the installation list shortly.");
-}
-
-function encodedServerName(serverName: string) {
-  return serverName.split("/").map(encodeURIComponent).join("/");
-}
-
-function serverVersionUrl(serverName: string, version: string) {
-  return `/api/mcp/registry/servers/${encodedServerName(serverName)}/${encodeURIComponent(version)}`;
-}
-
-function serverVersionsUrl(serverName: string) {
-  return `/api/mcp/registry/servers/${encodedServerName(serverName)}/versions`;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function displayHost(url: string) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-function runtimeDisplayName(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "remote" || normalized === "streamable-http" || normalized === "sse") {
-    return "Remote API";
-  }
-  if (normalized === "uvx") {
-    return "UVX";
-  }
-  if (normalized === "npm") {
-    return "NPM";
-  }
-  if (normalized === "pypi") {
-    return "PyPI";
-  }
-  if (normalized === "oci") {
-    return "OCI";
-  }
-  return value || "Package";
-}
-
-function runtimeDetailName(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "streamable-http") {
-    return "Streamable HTTP";
-  }
-  if (normalized === "sse") {
-    return "SSE";
-  }
-  return runtimeDisplayName(value);
-}
-
-function deliveryDetails(entry: MCPRegistryServerResponse) {
-  const firstPackage = entry.server.packages?.[0] as Record<string, unknown> | undefined;
-  const firstRemote = entry.server.remotes?.[0] as Record<string, unknown> | undefined;
-
-  if (firstRemote) {
-    const type = stringValue(firstRemote.type) || "remote";
-    const url = stringValue(firstRemote.url);
-    return { icon: Network, primary: runtimeDisplayName(type), secondary: url ? displayHost(url) : "" };
-  }
-  if (firstPackage) {
-    const registryType = stringValue(firstPackage.registryType) || "package";
-    return {
-      icon: Package,
-      primary: runtimeDisplayName(registryType),
-      secondary: stringValue(firstPackage.identifier),
-    };
-  }
-  return { icon: Package, primary: "Unspecified", secondary: "" };
-}
-
-function packageDescription(packageDefinition: Record<string, unknown>) {
-  const registryType = stringValue(packageDefinition.registryType) || "package";
-  const identifier = stringValue(packageDefinition.identifier);
-  return [runtimeDetailName(registryType), identifier].filter(Boolean).join(" · ");
-}
-
-function remoteDescription(remote: Record<string, unknown>) {
-  const type = stringValue(remote.type) || "remote";
-  const url = stringValue(remote.url);
-  return url ? `${runtimeDetailName(type)} · ${displayHost(url)}` : runtimeDetailName(type);
-}
-
-function installTargetOptions(entry: MCPRegistryServerResponse): InstallTargetOption[] {
-  const packageOptions = (entry.server.packages ?? []).map((packageDefinition, index) => {
-    const packageRecord = packageDefinition as Record<string, unknown>;
-    return {
-      value: `package:${index}`,
-      kind: "package" as const,
-      index,
-      label: "Run in Kubernetes",
-      description: packageDescription(packageRecord),
-    };
-  });
-  const remoteOptions = (entry.server.remotes ?? []).map((remote, index) => {
-    const remoteRecord = remote as Record<string, unknown>;
-    return {
-      value: `remote:${index}`,
-      kind: "remote" as const,
-      index,
-      label: "Remote API",
-      description: remoteDescription(remoteRecord),
-    };
-  });
-  return [...packageOptions, ...remoteOptions];
-}
-
-function defaultInstallTarget(entry: MCPRegistryServerResponse): InstallTarget {
-  return installTargetOptions(entry)[0]?.value ?? "package:0";
-}
-
-function installTargetFromInstallation(installation: MCPServerInstallationRead): InstallTarget {
-  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
-  if (installation.installType === "remote") {
-    const transport = runtimeConfig.transport as Record<string, unknown> | undefined;
-    const transportUrl = stringValue(transport?.url);
-    const remoteIndex = (installation.server.remotes ?? []).findIndex((remote) => {
-      const remoteRecord = remote as Record<string, unknown>;
-      return stringValue(remoteRecord.url) === transportUrl;
-    });
-    return `remote:${remoteIndex >= 0 ? remoteIndex : 0}`;
-  }
-
-  const packageConfig = runtimeConfig.package as Record<string, unknown> | undefined;
-  const packageIdentifier = stringValue(packageConfig?.identifier);
-  const packageRegistryType = stringValue(packageConfig?.registryType);
-  const packageIndex = (installation.server.packages ?? []).findIndex((packageDefinition) => {
-    const packageRecord = packageDefinition as Record<string, unknown>;
-    return (
-      stringValue(packageRecord.identifier) === packageIdentifier &&
-      stringValue(packageRecord.registryType).toLowerCase() === packageRegistryType.toLowerCase()
-    );
-  });
-  return `package:${packageIndex >= 0 ? packageIndex : 0}`;
-}
-
-function serverResponseFromInstallation(installation: MCPServerInstallationRead): MCPRegistryServerResponse {
-  return {
-    server: installation.server,
-    _meta: {
-      "io.modelcontextprotocol.registry/official": {
-        status: "active",
-        statusChangedAt: installation.updatedAt,
-        publishedAt: installation.installedAt,
-        updatedAt: installation.updatedAt,
-        isLatest: !installation.updateAvailable,
-      },
-    },
-  } as MCPRegistryServerResponse;
-}
-
-function uniqueServerResponses(servers: MCPRegistryServerResponse[]) {
-  const byVersion = new Map<string, MCPRegistryServerResponse>();
-  for (const server of servers) {
-    byVersion.set(`${server.server.name}:${server.server.version}`, server);
-  }
-  return Array.from(byVersion.values());
-}
-
-function numberValue(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function metadataRecord(entry: MCPRegistryServerResponse, key: string) {
-  const serverMeta = entry.server._meta;
-  if (isRecord(serverMeta?.[key])) {
-    return serverMeta[key];
-  }
-  const responseMeta = entry._meta as unknown;
-  if (isRecord(responseMeta) && isRecord(responseMeta[key])) {
-    return responseMeta[key];
-  }
-  return null;
-}
-
-function wardnHubMetadata(entry: MCPRegistryServerResponse) {
-  return (
-    metadataRecord(entry, "dev.wardnai.hub/catalog") ??
-    metadataRecord(entry, "ai.wardn.hub")
-  );
-}
-
-function qualityScore(entry: MCPRegistryServerResponse) {
-  const metadata = wardnHubMetadata(entry);
-  const directScore = numberValue(entry.server.qualityScore);
-  if (directScore !== null) {
-    return directScore;
-  }
-  return metadata ? numberValue(metadata.qualityScore) : null;
-}
-
-function qualityScorePercent(score: number | null) {
-  return score === null ? 0 : Math.max(0, Math.min(100, score));
-}
-
-function qualityScoreTone(score: number | null) {
-  if (score === null) {
-    return "bg-muted-foreground/25";
-  }
-  if (score >= 85) {
-    return "bg-emerald-500";
-  }
-  if (score >= 70) {
-    return "bg-lime-500";
-  }
-  if (score >= 50) {
-    return "bg-amber-500";
-  }
-  return "bg-red-500";
-}
-
-function serverCategory(entry: MCPRegistryServerResponse) {
-  const metadata = wardnHubMetadata(entry);
-  const category = metadata ? stringValue(metadata.category) : "";
-  if (category) {
-    return category;
-  }
-  return deliveryDetails(entry).primary;
-}
-
-function serverIconUrl(entry: MCPRegistryServerResponse) {
-  const icon = entry.server.icons?.find((item) => isRecord(item) && stringValue(item.url));
-  return isRecord(icon) ? stringValue(icon.url) : "";
-}
-
-function installTargetKind(target: InstallTarget): InstallTargetKind {
-  return target.startsWith("remote") ? "remote" : "package";
-}
-
-function installTargetIndex(target: InstallTarget) {
-  const rawIndex = target.split(":")[1];
-  const index = Number.parseInt(rawIndex ?? "0", 10);
-  return Number.isFinite(index) && index >= 0 ? index : 0;
-}
-
-function installTargetPayloadValue(target: InstallTarget) {
-  const kind = installTargetKind(target);
-  const index = installTargetIndex(target);
-  return index === 0 ? kind : `${kind}:${index}`;
-}
-
-function installValueConfigured(value: InstallValue | undefined) {
-  if (typeof value === "string") {
-    return value.trim().length > 0;
-  }
-  return Boolean(value?.content);
-}
-
-function installValueInputText(value: InstallValue | undefined) {
-  return typeof value === "string" ? value : "";
-}
-
-function installValueFilename(value: InstallValue | undefined) {
-  return typeof value === "string" ? "" : value?.filename || "";
-}
-
-function selectedInstallTargetOption(
-  entry: MCPRegistryServerResponse,
-  target: InstallTarget,
-): InstallTargetOption {
-  return installTargetOptions(entry).find((option) => option.value === target) ?? {
-    value: target,
-    kind: installTargetKind(target),
-    index: installTargetIndex(target),
-    label: installTargetKind(target) === "remote" ? "Remote API" : "Run in Kubernetes",
-    description: "",
-  };
-}
-
-function installFields(entry: MCPRegistryServerResponse, target: InstallTarget): InstallField[] {
-  const targetKind = installTargetKind(target);
-  const targetIndex = installTargetIndex(target);
-  const remote = entry.server.remotes?.[targetIndex] as Record<string, unknown> | undefined;
-  const remoteHeaders = Array.isArray(remote?.headers) ? (remote.headers as Record<string, unknown>[]) : [];
-  const packageDefinition = entry.server.packages?.[targetIndex] as Record<string, unknown> | undefined;
-  const environmentVariables = Array.isArray(packageDefinition?.environmentVariables)
-    ? (packageDefinition.environmentVariables as Record<string, unknown>[])
-    : [];
-  const packageArguments = Array.isArray(packageDefinition?.packageArguments)
-    ? (packageDefinition.packageArguments as Record<string, unknown>[])
-    : [];
-
-  const connectionFields = (targetKind === "remote" ? remoteHeaders : environmentVariables).map((field) => ({
-    name: String(field.name ?? ""),
-    description: String(field.description ?? ""),
-    required: Boolean(field.isRequired),
-    secret: Boolean(field.isSecret),
-    format: String(field.format ?? "string"),
-    defaultValue: String(field.default ?? ""),
-    options: Array.isArray(field.options) ? field.options.map(String) : [],
-    section: "connection" as const,
-  }));
-  const runtimeFields = targetKind === "package"
-    ? packageArguments.map((field) => ({
-        name: String(field.name ?? ""),
-        description: String(field.description ?? ""),
-        required: Boolean(field.isRequired),
-        secret: Boolean(field.isSecret),
-        format: String(field.format ?? "string"),
-        defaultValue: String(field.default ?? ""),
-        options: Array.isArray(field.options) ? field.options.map(String) : [],
-        section: "runtime" as const,
-      }))
-    : [];
-
-  return [...connectionFields, ...runtimeFields].filter((field) => field.name);
-}
-
-function defaultInstallValues(fields: InstallField[]): Record<string, InstallValue> {
-  return Object.fromEntries(fields.map((field) => [field.name, field.defaultValue]));
-}
-
-function mergeInstallValues(
-  fields: InstallField[],
-  currentValues: Record<string, InstallValue>,
-): Record<string, InstallValue> {
-  return Object.fromEntries(
-    fields.map((field) => [field.name, currentValues[field.name] ?? field.defaultValue])
-  );
-}
-
-function configuredFieldValues(
-  fields: InstallField[],
-  installation: MCPServerInstallationRead,
-): Record<string, InstallValue> {
-  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
-  const configuredValues = installation.configuredValues ?? {};
-  const packageConfig = runtimeConfig.package as Record<string, unknown> | undefined;
-  const transportConfig = runtimeConfig.transport as Record<string, unknown> | undefined;
-  const configuredInputs = [
-    ...((packageConfig?.environmentVariables as Record<string, unknown>[] | undefined) ?? []),
-    ...((packageConfig?.packageArguments as Record<string, unknown>[] | undefined) ?? []),
-    ...((transportConfig?.headers as Record<string, unknown>[] | undefined) ?? []),
-  ];
-
-  return Object.fromEntries(fields.map((field) => {
-    const configured = configuredInputs.find((item) => item.name === field.name);
-    if (configuredValues[field.name] !== undefined) {
-      if (field.format === "file") {
-        return [field.name, ""];
-      }
-      return [field.name, configuredValues[field.name]];
-    }
-    if (field.format === "boolean" && configured?.configured) {
-      return [field.name, "true"];
-    }
-    return [field.name, field.defaultValue];
-  }));
-}
-
-function configuredFieldNames(installation: MCPServerInstallationRead | null) {
-  if (!installation) {
-    return new Set<string>();
-  }
-  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
-  const packageConfig = runtimeConfig.package as Record<string, unknown> | undefined;
-  const transportConfig = runtimeConfig.transport as Record<string, unknown> | undefined;
-  const configuredInputs = [
-    ...((packageConfig?.environmentVariables as Record<string, unknown>[] | undefined) ?? []),
-    ...((packageConfig?.packageArguments as Record<string, unknown>[] | undefined) ?? []),
-    ...((transportConfig?.headers as Record<string, unknown>[] | undefined) ?? []),
-  ];
-  return new Set(configuredInputs
-    .filter((item) => item.configured && typeof item.name === "string")
-    .map((item) => String(item.name)));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function formatApiErrorDetail(detail: unknown): string {
-  if (typeof detail === "string") {
-    return detail;
-  }
-  if (Array.isArray(detail)) {
-    return detail
-      .map((item) => {
-        if (!isRecord(item)) {
-          return formatApiErrorDetail(item);
-        }
-        const location = Array.isArray(item.loc)
-          ? item.loc.filter((part) => part !== "body").join(".")
-          : "";
-        const message = typeof item.msg === "string" ? item.msg : formatApiErrorDetail(item);
-        return location ? `${location}: ${message}` : message;
-      })
-      .filter(Boolean)
-      .join("; ");
-  }
-  if (isRecord(detail)) {
-    for (const key of ["detail", "message", "error"]) {
-      const nested = formatApiErrorDetail(detail[key]);
-      if (nested) {
-        return nested;
-      }
-    }
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      return "";
-    }
-  }
-  return "";
-}
-
-async function responseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { detail?: unknown; message?: unknown; error?: unknown };
-    return (
-      formatApiErrorDetail(payload.detail) ||
-      formatApiErrorDetail(payload.message) ||
-      formatApiErrorDetail(payload.error) ||
-      fallback
-    );
-  } catch {
-    return fallback;
-  }
-}
-
-function ServerPickerCard({
-  entry,
-  onSelect,
-}: {
-  entry: MCPRegistryServerResponse;
-  onSelect: () => void;
-}) {
-  const score = qualityScore(entry);
-  const iconUrl = serverIconUrl(entry);
-  const description = entry.server.description?.trim();
-  const category = serverCategory(entry);
-
-  return (
-    <button
-      className="flex min-h-48 w-full flex-col rounded-md border bg-white p-4 text-left transition-colors hover:border-primary/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onSelect}
-      type="button"
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
-          {iconUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              alt=""
-              className="size-full object-cover"
-              loading="lazy"
-              src={iconUrl}
-            />
-          ) : (
-            (entry.server.title || entry.server.name).slice(0, 1).toUpperCase()
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="break-words text-sm font-semibold leading-5 text-foreground">
-            {entry.server.title || entry.server.name}
-          </div>
-          <div className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
-            {category || entry.server.name}
-          </div>
-        </div>
-      </div>
-
-      {description ? (
-        <p className="mt-4 line-clamp-4 text-sm leading-6 text-foreground">
-          {description}
-        </p>
-      ) : (
-        <div className="mt-4 text-sm leading-6 text-muted-foreground">
-          No description provided.
-        </div>
-      )}
-
-      <div className="mt-auto pt-4">
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-muted-foreground">Quality score</span>
-          <span className="font-semibold text-foreground">
-            {score === null ? "Pending" : `${score}/100`}
-          </span>
-        </div>
-        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full ${qualityScoreTone(score)}`}
-            style={{ width: `${qualityScorePercent(score)}%` }}
-          />
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function InstallFieldControl({
-  field,
-  hasExistingValue = false,
-  onChange,
-  value,
-}: {
-  field: InstallField;
-  hasExistingValue?: boolean;
-  onChange: (value: InstallValue) => void;
-  value: InstallValue;
-}) {
-  const inputId = `install-${field.name}`;
-
-  if (field.format === "boolean") {
-    return (
-      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-        <input
-          checked={installValueInputText(value) === "true"}
-          className="mt-1"
-          onChange={(event) => onChange(event.target.checked ? "true" : "false")}
-          type="checkbox"
-        />
-        <span className="grid gap-1">
-          <span className="font-medium">
-            {field.name}
-            {field.required ? <span className="text-red-600"> *</span> : null}
-          </span>
-          {field.description ? <span className="text-xs leading-5 text-muted-foreground">{field.description}</span> : null}
-        </span>
-      </label>
-    );
-  }
-
-  if (field.format === "file") {
-    const selectedFilename = installValueFilename(value);
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor={inputId}>
-          {field.name}
-          {field.required ? <span className="text-red-600"> *</span> : null}
-        </Label>
-        <div className="grid gap-2">
-          <Input
-            id={inputId}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (!file) {
-                onChange("");
-                return;
-              }
-              void file.text().then((content) => {
-                onChange({
-                  type: "file",
-                  filename: file.name,
-                  content,
-                });
-              });
-            }}
-            type="file"
-          />
-          {selectedFilename ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <FileUp className="size-3.5" />
-              {selectedFilename}
-            </div>
-          ) : hasExistingValue ? (
-            <div className="text-xs text-muted-foreground">Configured file is saved.</div>
-          ) : null}
-        </div>
-        {field.description ? <div className="text-xs leading-5 text-muted-foreground">{field.description}</div> : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={inputId}>
-        {field.name}
-        {field.required ? <span className="text-red-600"> *</span> : null}
-      </Label>
-      {field.options.length > 0 || field.format === "select" ? (
-        <Select onValueChange={onChange} value={installValueInputText(value)}>
-          <SelectTrigger id={inputId}>
-            <SelectValue placeholder="Default" />
-          </SelectTrigger>
-          <SelectContent>
-            {field.options.map((option) => (
-              <SelectItem key={option} value={option}>{option}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input
-          autoComplete="off"
-          id={inputId}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={field.secret && hasExistingValue ? "Configured value" : field.secret ? "Secret value" : "Value"}
-          type={field.secret ? "password" : field.format === "integer" ? "number" : "text"}
-          value={installValueInputText(value)}
-        />
-      )}
-      {field.description ? <div className="text-xs leading-5 text-muted-foreground">{field.description}</div> : null}
-    </div>
-  );
-}
 
 export function InstallFormClient({
   basePath,
@@ -726,37 +69,49 @@ export function InstallFormClient({
   initialSelectedServer = null,
   initialServerNextCursor = "",
   initialServers = [],
+  organizationId,
   secretStores,
+  workspaceId,
 }: InstallFormClientProps) {
   const router = useRouter();
   const isEdit = Boolean(initialInstallation);
   const [installations, setInstallations] = useState<MCPServerInstallationRead[]>(initialInstallations);
-  const [serverQuery, setServerQuery] = useState("");
-  const [appliedServerQuery, setAppliedServerQuery] = useState("");
-  const [serverResults, setServerResults] = useState<MCPRegistryServerResponse[]>(() =>
-    uniqueServerResponses(initialServers)
-  );
-  const [serverCurrentCursor, setServerCurrentCursor] = useState("");
-  const [serverNextCursor, setServerNextCursor] = useState(initialServerNextCursor);
-  const [serverPreviousCursors, setServerPreviousCursors] = useState<string[]>([]);
-  const [hasSearched, setHasSearched] = useState(initialServers.length > 0);
-  const [isSearching, setIsSearching] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [jobProgress, setJobProgress] = useState("");
+  const { waitForJob } = useOperationJobPoller();
   const [selectedServer, setSelectedServer] = useState<MCPRegistryServerResponse | null>(() =>
     initialInstallation
       ? serverResponseFromInstallation(initialInstallation)
       : initialSelectedServer
   );
-  const [serverVersions, setServerVersions] = useState<MCPRegistryServerResponse[]>(() =>
-    initialSelectedServer
+  const {
+    appliedServerQuery,
+    hasSearched,
+    isLoadingVersions,
+    isSearching,
+    loadNextServerPage,
+    loadPreviousServerPage,
+    serverNextCursor,
+    serverPreviousCursors,
+    serverQuery,
+    serverResults,
+    serverVersions,
+    setServerQuery,
+    setIsLoadingVersions,
+    setServerVersions,
+  } = useInstallServerPicker({
+    initialNextCursor: initialServerNextCursor,
+    initialServers,
+    initialVersions: initialSelectedServer
       ? [initialSelectedServer]
       : initialInstallation
         ? [serverResponseFromInstallation(initialInstallation)]
-        : []
-  );
-  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+        : [],
+    organizationId,
+    selectedServer,
+    setError,
+  });
   const [selectedInstallTarget, setSelectedInstallTarget] = useState<InstallTarget>(() =>
     initialInstallation
       ? installTargetFromInstallation(initialInstallation)
@@ -798,8 +153,6 @@ export function InstallFormClient({
   );
   const [configSecretStoreId, setConfigSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const customHeaderId = useRef(0);
-  const hasInitializedServerSearch = useRef(false);
-  const serverSearchRequestId = useRef(0);
 
   const availableInstallTargets = selectedServer ? installTargetOptions(selectedServer) : [];
   const selectedInstallTargetDetails = selectedServer
@@ -812,7 +165,6 @@ export function InstallFormClient({
     selectedFields.some((field) => field.secret || field.format === "file") ||
     customHeaders.some((header) => header.name.trim() || header.value.trim());
   const existingConfiguredFields = useMemo(() => configuredFieldNames(initialInstallation), [initialInstallation]);
-  const selectedServerName = selectedServer?.server.name ?? "";
   const versionOptions = useMemo(() => {
     if (!selectedServer) {
       return [];
@@ -824,127 +176,6 @@ export function InstallFormClient({
     }
     return Array.from(versions.values());
   }, [selectedServer, serverVersions]);
-
-  useEffect(() => {
-    if (!selectedServerName) {
-      return;
-    }
-
-    let cancelled = false;
-    async function loadVersions() {
-      setIsLoadingVersions(true);
-      try {
-        const response = await fetch(serverVersionsUrl(selectedServerName), {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as MCPRegistryServerListResponse;
-        if (!cancelled) {
-          setServerVersions(data.servers);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingVersions(false);
-        }
-      }
-    }
-
-    void loadVersions();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedServerName]);
-
-  const loadServerOptions = useCallback(async ({
-    query,
-    cursor,
-    previous,
-  }: {
-    query: string;
-    cursor: string;
-    previous: string[];
-  }) => {
-    const requestId = serverSearchRequestId.current + 1;
-    serverSearchRequestId.current = requestId;
-    setError("");
-    setHasSearched(true);
-    setIsSearching(true);
-    try {
-      const params = new URLSearchParams({
-        limit: String(SERVER_PICKER_PAGE_SIZE),
-        version: "latest",
-      });
-      if (query.trim()) {
-        params.set("search", query.trim());
-      }
-      if (cursor) {
-        params.set("cursor", cursor);
-      }
-      const response = await fetch(`/api/mcp/registry/servers?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error("Server search failed.");
-      }
-      const data = (await response.json()) as MCPRegistryServerListResponse;
-      if (serverSearchRequestId.current !== requestId) {
-        return;
-      }
-      setServerResults(uniqueServerResponses(data.servers));
-      setAppliedServerQuery(query);
-      setServerCurrentCursor(cursor);
-      setServerNextCursor(data.metadata.nextCursor ?? "");
-      setServerPreviousCursors(previous);
-    } catch (caught) {
-      if (serverSearchRequestId.current !== requestId) {
-        return;
-      }
-      setError(caught instanceof Error ? caught.message : "Server search failed.");
-    } finally {
-      if (serverSearchRequestId.current === requestId) {
-        setIsSearching(false);
-      }
-    }
-  }, []);
-
-  async function loadNextServerPage() {
-    if (!serverNextCursor) {
-      return;
-    }
-    await loadServerOptions({
-      query: appliedServerQuery,
-      cursor: serverNextCursor,
-      previous: [...serverPreviousCursors, serverCurrentCursor],
-    });
-  }
-
-  async function loadPreviousServerPage() {
-    if (serverPreviousCursors.length === 0) {
-      return;
-    }
-    const previousCursor = serverPreviousCursors.at(-1) ?? "";
-    await loadServerOptions({
-      query: appliedServerQuery,
-      cursor: previousCursor,
-      previous: serverPreviousCursors.slice(0, -1),
-    });
-  }
-
-  useEffect(() => {
-    if (selectedServer) {
-      return;
-    }
-    if (!hasInitializedServerSearch.current) {
-      hasInitializedServerSearch.current = true;
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      void loadServerOptions({ query: serverQuery, cursor: "", previous: [] });
-    }, 250);
-
-    return () => window.clearTimeout(timeout);
-  }, [loadServerOptions, serverQuery, selectedServer]);
 
   function selectServerForInstall(server: MCPRegistryServerResponse) {
     const target = defaultInstallTarget(server);
@@ -970,13 +201,11 @@ export function InstallFormClient({
     setIsLoadingVersions(true);
     setError("");
     try {
-      const response = await fetch(serverVersionUrl(selectedServer.server.name, version), {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        throw new Error("Server version could not be loaded.");
-      }
-      const server = (await response.json()) as MCPRegistryServerResponse;
+      const server = await organizationMcpRegistryGetServerVersion(
+        organizationId,
+        selectedServer.server.name,
+        version
+      );
       const availableTargets = installTargetOptions(server);
       const target = availableTargets.some((option) => option.value === selectedInstallTarget)
         ? selectedInstallTarget
@@ -1091,20 +320,35 @@ export function InstallFormClient({
       if (needsSecretBackend) {
         body.configSecretStoreId = configSecretStoreId;
       }
-      const response = await fetch(installUrl(selectedServer.server.name), {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+      const job = await workspaceMcpRegistryInstallServerVersion(
+        organizationId,
+        workspaceId,
+        selectedServer.server.name,
+        body as MCPServerInstallRequest
+      );
+      const installation = await waitForJob<MCPServerInstallationRead>({
+        failureMessage: "Server installation failed.",
+        fetchJob: (jobId, signal) =>
+          workspaceMcpRegistryGetOperationJob(organizationId, workspaceId, jobId, { signal }),
+        initialJob: job,
+        onProgress: setJobProgress,
+        pendingMessage: "Installation queued",
+        readResult: (completedJob: MCPOperationJobRead) => {
+          const result = completedJob.result?.installation;
+          if (!result || typeof result !== "object" || !("id" in result)) {
+            throw new Error("Installation completed without an installation result.");
+          }
+          return result as MCPServerInstallationRead;
+        },
+        timeoutMessage: "Installation is still running. Check the installation list shortly.",
       });
-      if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, isEdit ? "Failed to save instance." : "Failed to add instance."));
-      }
-      const job = (await response.json()) as MCPOperationJobRead;
-      const installation = await waitForInstallationJob(job, setJobProgress);
       setInstallations((current) => [...current.filter((item) => item.id !== installation.id), installation]);
       router.push(basePath);
       router.refresh();
     } catch (caught) {
+      if (isOperationJobPollingCancelled(caught)) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "Server instance could not be saved.");
     } finally {
       setIsMutating(false);
@@ -1119,8 +363,10 @@ export function InstallFormClient({
 
   return (
     <form className="space-y-5" onSubmit={submitConfiguration}>
-      {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
-      {jobProgress ? <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">{jobProgress}</div> : null}
+      {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
+      {jobProgress ? (
+        <AsyncFeedback variant="progress">{jobProgress}</AsyncFeedback>
+      ) : null}
 
       {!selectedServer ? (
         <section className="space-y-4">
@@ -1145,7 +391,13 @@ export function InstallFormClient({
           </div>
 
           {serverResults.length === 0 ? (
-            <div className="rounded-md border bg-white px-3 py-10 text-center text-sm text-muted-foreground">
+            <div
+              aria-atomic="true"
+              aria-busy={isSearching}
+              aria-live="polite"
+              className="rounded-md border bg-white px-3 py-10 text-center text-sm text-muted-foreground"
+              role="status"
+            >
               {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
             </div>
           ) : (

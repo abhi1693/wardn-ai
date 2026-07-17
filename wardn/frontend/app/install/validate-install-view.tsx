@@ -8,9 +8,8 @@ import type {
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
 } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
-  backendCookieHeader,
-  backendPath,
   type WorkspaceContext,
   workspaceInstallPath,
   workspaceMcpRegistryPath,
@@ -23,20 +22,8 @@ async function getInitialInstallations(context: WorkspaceContext) {
   if (!path) {
     return [];
   }
-  try {
-    const cookie = await backendCookieHeader();
-    const response = await fetch(backendPath(path), {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!response.ok) {
-      return [];
-    }
-    const data = (await response.json()) as MCPServerInstallationListResponse;
-    return data.installations;
-  } catch {
-    return [];
-  }
+  const data = await backendJson<MCPServerInstallationListResponse>(path);
+  return data.installations;
 }
 
 type ValidateInstallViewProps = {
@@ -73,7 +60,11 @@ export async function ValidateInstallView({
       title="Validate MCP server"
       workspaceContext={workspaceContext}
     >
-      <ValidateInstallClient installation={installation} />
+      <ValidateInstallClient
+        installation={installation}
+        organizationId={workspaceContext.selectedOrganization?.id ?? ""}
+        workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
+      />
     </AppShell>
   );
 }
