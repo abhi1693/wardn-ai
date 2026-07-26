@@ -84,6 +84,7 @@ export * from './lLMProviderCredentialRead';
 export * from './lLMProviderCredentialReadAuthMethod';
 export * from './lLMProviderCredentialReadExtraHeaders';
 export * from './lLMProviderCredentialReadOauthMetadata';
+export * from './lLMProviderCredentialReadStatus';
 export * from './lLMProviderCredentialReadVisibility';
 export * from './lLMProviderCredentialUpdate';
 export * from './lLMProviderCredentialUpdateAuthMethod';

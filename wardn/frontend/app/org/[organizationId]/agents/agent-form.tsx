@@ -91,7 +91,7 @@ export function AgentForm({
   const availableCredentials = useMemo(
     () =>
       credentials.filter((credential) => {
-        if (!credential.isActive) {
+        if (credential.status !== "active") {
           return false;
         }
         if (credential.visibility !== "workspace") {

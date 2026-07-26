@@ -60,6 +60,24 @@ def patch_resolved_secrets(monkeypatch, values: dict) -> None:
     monkeypatch.setattr(service, "resolve_secret", resolve_secret)
 
 
+def test_credential_status_distinguishes_expiration_from_enablement() -> None:
+    now = datetime(2026, 7, 27, tzinfo=UTC)
+    credential = LLMProviderCredential(
+        auth_method="oauth",
+        oauth_expires_at=now - timedelta(seconds=1),
+        is_active=True,
+    )
+
+    assert service.credential_status(credential, now=now) == "expired"
+
+    credential.is_active = False
+    assert service.credential_status(credential, now=now) == "inactive"
+
+    credential.is_active = True
+    credential.oauth_expires_at = now + timedelta(seconds=1)
+    assert service.credential_status(credential, now=now) == "active"
+
+
 class FakeResponse:
     def __init__(self, status_code: int, payload: dict) -> None:
         self.status_code = status_code
@@ -649,6 +667,7 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
     assert response.api_key_secret_handle_id is None
     assert response.oauth_access_token_secret_handle_id == access_handle_id
     assert response.oauth_refresh_token_secret_handle_id == refresh_handle_id
+    assert response.status == "active"
 
 
 @pytest.mark.asyncio

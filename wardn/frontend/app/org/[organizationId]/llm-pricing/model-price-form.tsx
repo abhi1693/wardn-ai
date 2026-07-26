@@ -60,7 +60,7 @@ export function ModelPriceForm({
   const isEdit = mode === "edit" && initialPrice;
   const listPath = `/org/${organizationId}/llm-pricing`;
   const availableCredentials = useMemo(
-    () => credentials.filter((credential) => credential.isActive),
+    () => credentials.filter((credential) => credential.status === "active"),
     [credentials]
   );
   const initialCredentialId =

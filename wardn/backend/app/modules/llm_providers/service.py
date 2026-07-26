@@ -143,6 +143,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialCreate,
     LLMProviderCredentialListResponse,
     LLMProviderCredentialRead,
+    LLMProviderCredentialStatus,
     LLMProviderCredentialUpdate,
     LLMProviderCredentialValidationResponse,
     LLMProviderModelListResponse,
@@ -179,6 +180,22 @@ def normalize_provider(value: str) -> str:
 
 def normalize_name(value: str) -> str:
     return " ".join(value.strip().split())
+
+
+def credential_status(
+    credential: LLMProviderCredential,
+    *,
+    now: datetime | None = None,
+) -> LLMProviderCredentialStatus:
+    if not credential.is_active:
+        return "inactive"
+    if (
+        credential.auth_method == "oauth"
+        and credential.oauth_expires_at is not None
+        and credential.oauth_expires_at <= (now or utc_now())
+    ):
+        return "expired"
+    return "active"
 
 
 def safe_secret_path_component(value: str) -> str:
@@ -818,6 +835,7 @@ def credential_response(credential: LLMProviderCredential) -> LLMProviderCredent
         oauthScopes=credential.oauth_scopes or [],
         oauthMetadata=credential.oauth_metadata or {},
         isActive=credential.is_active,
+        status=credential_status(credential),
         createdAt=credential.created_at,
         updatedAt=credential.updated_at,
     )

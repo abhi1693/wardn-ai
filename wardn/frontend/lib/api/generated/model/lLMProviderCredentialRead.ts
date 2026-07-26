@@ -7,6 +7,7 @@
 import type { LLMProviderCredentialReadAuthMethod } from './lLMProviderCredentialReadAuthMethod';
 import type { LLMProviderCredentialReadExtraHeaders } from './lLMProviderCredentialReadExtraHeaders';
 import type { LLMProviderCredentialReadOauthMetadata } from './lLMProviderCredentialReadOauthMetadata';
+import type { LLMProviderCredentialReadStatus } from './lLMProviderCredentialReadStatus';
 import type { LLMProviderCredentialReadVisibility } from './lLMProviderCredentialReadVisibility';
 
 export interface LLMProviderCredentialRead {
@@ -26,6 +27,7 @@ export interface LLMProviderCredentialRead {
   oauthScopes: string[];
   organizationId: string;
   provider: string;
+  status: LLMProviderCredentialReadStatus;
   updatedAt: string;
   userId?: string | null;
   visibility: LLMProviderCredentialReadVisibility;

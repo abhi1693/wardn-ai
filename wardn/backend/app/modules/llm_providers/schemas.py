@@ -9,6 +9,7 @@ from app.core.schemas import APIModel
 LLMProviderVisibility = Literal["organization", "workspace", "user"]
 LLMProviderAuthMethod = Literal["api_key", "oauth"]
 LLMProviderOAuthProvider = Literal["chatgpt"]
+LLMProviderCredentialStatus = Literal["active", "inactive", "expired"]
 
 
 class LLMProviderCredentialCreate(APIModel):
@@ -103,6 +104,7 @@ class LLMProviderCredentialRead(APIModel):
     oauth_scopes: list[str]
     oauth_metadata: dict[str, Any]
     is_active: bool
+    status: LLMProviderCredentialStatus
     created_at: datetime
     updated_at: datetime
 

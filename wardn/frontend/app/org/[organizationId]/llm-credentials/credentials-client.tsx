@@ -60,6 +60,16 @@ function scopeLabel(credential: LlmCredentialRead, workspaces: WorkspaceRead[]) 
   return "Organization";
 }
 
+function statusPresentation(credential: LlmCredentialRead) {
+  if (credential.status === "expired") {
+    return { label: "Expired", variant: "destructive" as const };
+  }
+  if (credential.status === "active") {
+    return { label: "Active", variant: "success" as const };
+  }
+  return { label: "Inactive", variant: "secondary" as const };
+}
+
 export function CredentialsClient({
   credentials: initialCredentials,
   organization,
@@ -113,56 +123,59 @@ export function CredentialsClient({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {credentials.map((credential) => (
-                <TableRow key={credential.id}>
-                  <TableCell>
-                    <div className="min-w-48">
-                      <div className="font-medium">{credential.name}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={credential.authMethod === "oauth" ? "secondary" : "outline"}>
-                      {providerLabel(credential)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{scopeLabel(credential, workspaces)}</TableCell>
-                  <TableCell>
-                    <Badge variant={credential.isActive ? "success" : "secondary"}>
-                      {credential.isActive ? "Active" : "Inactive"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        asChild
-                        aria-label={`Edit ${credential.name}`}
-                        size="icon"
-                        variant="outline"
+              {credentials.map((credential) => {
+                const status = statusPresentation(credential);
+                return (
+                  <TableRow key={credential.id}>
+                    <TableCell>
+                      <div className="min-w-48">
+                        <div className="font-medium">{credential.name}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={credential.authMethod === "oauth" ? "secondary" : "outline"}
                       >
-                        <Link
-                          href={`/org/${organization.id}/llm-credentials/${credential.id}/edit`}
+                        {providerLabel(credential)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{scopeLabel(credential, workspaces)}</TableCell>
+                    <TableCell>
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          asChild
+                          aria-label={`Edit ${credential.name}`}
+                          size="icon"
+                          variant="outline"
                         >
-                          <Pencil className="size-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        aria-label={`Delete ${credential.name}`}
-                        disabled={deletingCredentialId === credential.id}
-                        onClick={() => deleteCredential(credential)}
-                        size="icon"
-                        type="button"
-                        variant="outline"
-                      >
-                        {deletingCredentialId === credential.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                          <Link
+                            href={`/org/${organization.id}/llm-credentials/${credential.id}/edit`}
+                          >
+                            <Pencil className="size-4" />
+                          </Link>
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${credential.name}`}
+                          disabled={deletingCredentialId === credential.id}
+                          onClick={() => deleteCredential(credential)}
+                          size="icon"
+                          type="button"
+                          variant="outline"
+                        >
+                          {deletingCredentialId === credential.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         ) : (

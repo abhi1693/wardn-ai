@@ -2255,6 +2255,15 @@
             "title": "Provider",
             "type": "string"
           },
+          "status": {
+            "enum": [
+              "active",
+              "inactive",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
           "updatedAt": {
             "format": "date-time",
             "title": "Updatedat",
@@ -2307,6 +2316,7 @@
           "oauthScopes",
           "oauthMetadata",
           "isActive",
+          "status",
           "createdAt",
           "updatedAt"
         ],
