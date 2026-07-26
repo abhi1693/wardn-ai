@@ -18,6 +18,10 @@ class MCPServerInstallationFailedError(MCPRegistryError):
     pass
 
 
+class MCPServerPackageUnavailableError(MCPServerInstallationFailedError):
+    pass
+
+
 class MCPServerInstallationUnsupportedError(MCPRegistryError):
     pass
 

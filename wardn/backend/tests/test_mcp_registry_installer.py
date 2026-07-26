@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -6,6 +7,7 @@ from app.core.outbound_http import UnsafeOutboundURLError
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationUnsupportedError,
+    MCPServerPackageUnavailableError,
 )
 from app.modules.mcp_registry.installer import (
     MCPRuntimeInstall,
@@ -73,6 +75,33 @@ def test_install_commands_receive_minimal_environment(tmp_path, monkeypatch) -> 
     assert "WARDN_DATABASE_URL" not in environment
     assert "WARDN_SESSION_SECRET" not in environment
     assert not any(name.startswith("WARDN_") for name in environment)
+
+
+def test_install_command_reports_an_unavailable_package_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    def run(command, **kwargs):
+        raise subprocess.CalledProcessError(
+            1,
+            command,
+            stderr=(
+                "ERROR: Could not find a version that satisfies the requirement "
+                "example-package==9.9.9\n"
+                "ERROR: No matching distribution found for example-package==9.9.9"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.support.subprocess.run",
+        run,
+    )
+
+    with pytest.raises(
+        MCPServerPackageUnavailableError,
+        match="No matching distribution found",
+    ):
+        run_install_command(["pip", "install", "example-package==9.9.9"], cwd=tmp_path)
 
 
 def test_install_swap_restores_previous_artifact_when_finalization_fails(

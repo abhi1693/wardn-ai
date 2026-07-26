@@ -13,11 +13,17 @@ from app.core.config import get_settings
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationUnsupportedError,
+    MCPServerPackageUnavailableError,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
 
 RUNTIME_FILE_DIR_NAME = "runtime-files"
 KUBERNETES_RUNTIME_FILE_MOUNT_PATH = "/opt/wardn/runtime-files"
+PACKAGE_UNAVAILABLE_MARKERS = (
+    "could not find a version that satisfies the requirement",
+    "no matching distribution found for",
+    "no matching version found for",
+)
 ConfigValues = dict[str, Any]
 
 @dataclass(frozen=True)
@@ -461,6 +467,8 @@ def run_install_command(command: list[str], *, cwd: Path) -> None:
     except subprocess.CalledProcessError as exc:
         output = (exc.stderr or exc.stdout or "").strip()
         detail = output.splitlines()[-1] if output else str(exc)
+        if any(marker in output.casefold() for marker in PACKAGE_UNAVAILABLE_MARKERS):
+            raise MCPServerPackageUnavailableError(detail) from exc
         raise MCPServerInstallationFailedError(detail) from exc
     except subprocess.TimeoutExpired as exc:
         raise MCPServerInstallationFailedError("installer timed out") from exc

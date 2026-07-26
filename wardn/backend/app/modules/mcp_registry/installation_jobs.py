@@ -19,6 +19,7 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationNotFoundError,
     MCPServerInstallationUnsupportedError,
     MCPServerNotFoundError,
+    MCPServerPackageUnavailableError,
 )
 from app.modules.mcp_registry.installer import default_install_root, server_install_path
 from app.modules.mcp_registry.job_service import (
@@ -226,6 +227,12 @@ def cleanup_payload_for_server(
 
 
 def classify_installation_error(exc: Exception) -> MCPJobExecutionError:
+    if isinstance(exc, MCPServerPackageUnavailableError):
+        return MCPJobExecutionError(
+            str(exc),
+            code="package_unavailable",
+            retryable=False,
+        )
     if isinstance(
         exc,
         (

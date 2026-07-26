@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.modules.mcp_registry import installation_jobs
+from app.modules.mcp_registry.exceptions import MCPServerPackageUnavailableError
 from app.modules.mcp_registry.job_worker import MCPJobCleanupError, MCPJobExecutionError
 from app.modules.mcp_registry.models import (
     MCPOperationJob,
@@ -354,10 +355,15 @@ async def test_bulk_worker_executes_each_persisted_target(monkeypatch) -> None:
 
 def test_installation_error_classification_distinguishes_permanent_errors() -> None:
     permanent = installation_jobs.classify_installation_error(ValueError("invalid target"))
+    unavailable = installation_jobs.classify_installation_error(
+        MCPServerPackageUnavailableError("package version does not exist")
+    )
     transient = installation_jobs.classify_installation_error(RuntimeError("registry offline"))
 
     assert isinstance(permanent, MCPJobExecutionError)
     assert permanent.retryable is False
+    assert unavailable.code == "package_unavailable"
+    assert unavailable.retryable is False
     assert transient.retryable is True
 
 
