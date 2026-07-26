@@ -284,6 +284,10 @@ is bound to its OpenBao destination. For example:
 Secret-store API callers select the profile with `authConfig.profile`; they cannot configure
 credential paths, authentication methods, namespaces, or TLS behavior.
 
+When upgrading a database containing the older per-store OpenBao authentication fields, the
+migration assigns those stores to the operator profile named `legacy`. Define that profile before
+starting the upgraded API or worker so existing secret handles continue to resolve.
+
 Outbound OpenBao, catalog-sync, and remote MCP requests use a shared SSRF policy. It allows public
 HTTPS destinations on port `443` by default, rejects URL credentials and non-public DNS
 results, and does not follow redirects. Operators can add nonstandard ports with
