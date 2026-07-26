@@ -71,6 +71,7 @@ let state = initialState();
 
 function initialState(overrides = {}) {
   return {
+    authMode: overrides.authMode ?? "local",
     catalogJobPollsBeforeSuccess: overrides.catalogJobPollsBeforeSuccess ?? 2,
     catalogStatus: overrides.catalogStatus ?? 200,
     jobs: new Map(),
@@ -182,12 +183,42 @@ async function handle(request) {
     };
   }
   if (request.method === "GET" && url.pathname === "/api/v1/auth/config") {
+    const oidcEnabled = state.authMode === "oidc";
     return json({
-      authMode: "local",
-      localLoginEnabled: true,
-      oidcLoginEnabled: false,
-      oidcProviderName: "",
+      authMode: state.authMode,
+      localLoginEnabled: !oidcEnabled,
+      oidcLoginEnabled: oidcEnabled,
+      oidcProviderName: oidcEnabled ? "Zitadel" : "",
     });
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/auth/oidc/login") {
+    return {
+      status: 302,
+      body: "",
+      headers: {
+        location: `${frontendOrigin}/favicon.ico?oidc-provider=1&state=test-state`,
+        "set-cookie": [
+          "wardn_oidc_state=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax",
+          "wardn_oidc_state_test=state-cookie; Path=/; HttpOnly; Max-Age=600; SameSite=Lax",
+        ],
+      },
+    };
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/auth/oidc/callback") {
+    if (!request.headers.cookie?.includes("wardn_oidc_state_test=state-cookie")) {
+      return json({ detail: "missing OIDC state" }, 401);
+    }
+    return {
+      status: 302,
+      body: "",
+      headers: {
+        location: `${frontendOrigin}/org`,
+        "set-cookie": [
+          `${sessionCookieName}=test-session; Path=/; HttpOnly; SameSite=Lax`,
+          "wardn_oidc_state_test=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax",
+        ],
+      },
+    };
   }
   if (request.method === "GET" && url.pathname === "/api/v1/auth/me") {
     return json({ id: "user-1", email: "owner@example.com", isSuperuser: true });

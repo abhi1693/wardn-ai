@@ -9,6 +9,7 @@ const sessionCookieName = process.env.WARDN_E2E_SESSION_COOKIE_NAME ?? "wardn_e2
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
@@ -30,7 +31,7 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: `HOSTNAME=127.0.0.1 PORT=${frontendPort} WARDN_BACKEND_URL=${mockBackendUrl} WARDN_SESSION_COOKIE_NAME=${sessionCookieName} node .next/standalone/wardn/frontend/server.js`,
+      command: `HOSTNAME=127.0.0.1 PORT=${frontendPort} NEXT_PUBLIC_SITE_URL=${frontendUrl} WARDN_BACKEND_URL=${mockBackendUrl} WARDN_SESSION_COOKIE_NAME=${sessionCookieName} node .next/standalone/wardn/frontend/server.js`,
       url: `${frontendUrl}/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

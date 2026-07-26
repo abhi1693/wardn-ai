@@ -1,7 +1,5 @@
 "use client";
 
-import { apiUrl } from "@/lib/api/client";
-
 import type { FormEvent } from "react";
 import { LoaderCircle, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -62,9 +60,7 @@ export default function LoginPage() {
           if (payload.authMode === "oidc" && payload.oidcLoginEnabled && !oidcReturnedError) {
             setIsSubmitting(true);
             window.location.assign(
-              apiUrl(
-                `/api/v1/auth/oidc/login?redirectTo=${encodeURIComponent(requestedDestination())}`
-              )
+              `/api/auth/oidc/login?redirectTo=${encodeURIComponent(requestedDestination())}`
             );
           }
         }
@@ -110,9 +106,7 @@ export default function LoginPage() {
     setError("");
     setIsSubmitting(true);
     window.location.assign(
-      apiUrl(
-        `/api/v1/auth/oidc/login?redirectTo=${encodeURIComponent(requestedDestination())}`
-      )
+      `/api/auth/oidc/login?redirectTo=${encodeURIComponent(requestedDestination())}`
     );
   }
 
