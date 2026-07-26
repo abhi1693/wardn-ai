@@ -143,6 +143,7 @@ class Settings(BaseSettings):
         max_length=4096,
         description="Async SQLAlchemy database URL.",
     )
+    database_pool_strategy: Literal["queue", "null"] = "queue"
     database_pool_size: int = Field(default=5, ge=1, le=100)
     database_max_overflow: int = Field(default=10, ge=0, le=100)
     database_pool_timeout_seconds: float = Field(default=30.0, gt=0, le=300)

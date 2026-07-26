@@ -65,6 +65,7 @@ def test_database_engine_uses_configured_pool_settings(monkeypatch) -> None:
 
     settings = SimpleNamespace(
         database_url=SecretStr("postgresql+asyncpg://wardn:secret@db/wardn"),
+        database_pool_strategy="queue",
         database_pool_size=7,
         database_max_overflow=11,
         database_pool_timeout_seconds=12.5,
@@ -83,6 +84,28 @@ def test_database_engine_uses_configured_pool_settings(monkeypatch) -> None:
         "pool_recycle": 900,
         "pool_pre_ping": True,
         "pool_use_lifo": True,
+    }
+
+
+def test_database_engine_can_disable_application_pooling(monkeypatch) -> None:
+    captured = {}
+    expected_engine = object()
+
+    def create_async_engine(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return expected_engine
+
+    settings = SimpleNamespace(
+        database_url=SecretStr("postgresql+asyncpg://wardn:secret@pooler/wardn"),
+        database_pool_strategy="null",
+    )
+    monkeypatch.setattr(db_session, "create_async_engine", create_async_engine)
+
+    assert db_session.create_database_engine(settings) is expected_engine
+    assert captured == {
+        "url": "postgresql+asyncpg://wardn:secret@pooler/wardn",
+        "poolclass": db_session.NullPool,
     }
 
 
