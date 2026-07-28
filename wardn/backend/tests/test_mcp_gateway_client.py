@@ -1,4 +1,5 @@
 import sys
+from http.client import RemoteDisconnected
 from threading import Event
 
 import pytest
@@ -243,6 +244,42 @@ def test_send_remote_request_uses_custom_outbound_policy(monkeypatch) -> None:
     assert seen["policy"] is policy
 
 
+def test_send_remote_request_uses_configured_remote_response_timeout(monkeypatch) -> None:
+    seen = {}
+
+    class FakeResponse:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b'{"jsonrpc":"2.0","id":2,"result":{}}'
+
+    class FakeSettings:
+        mcp_gateway_remote_response_timeout_seconds = 123
+
+    def open_outbound_request(request, *args, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        open_outbound_request,
+    )
+    monkeypatch.setattr("app.modules.mcp_gateway.client.get_settings", lambda: FakeSettings())
+
+    send_remote_request(
+        "https://example.com/mcp",
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+
+    assert seen["timeout"] == 123
+
+
 def test_send_remote_request_maps_rejected_url_to_gateway_error(monkeypatch) -> None:
     def reject_url(*args, **kwargs):
         raise UnsafeOutboundURLError("outbound URL resolves to a non-public address")
@@ -255,6 +292,22 @@ def test_send_remote_request_maps_rejected_url_to_gateway_error(monkeypatch) -> 
     with pytest.raises(MCPGatewayUpstreamError, match="MCP URL was rejected"):
         send_remote_request(
             "http://169.254.169.254/latest/meta-data",
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        )
+
+
+def test_send_remote_request_maps_remote_disconnect_to_gateway_error(monkeypatch) -> None:
+    def disconnect(*args, **kwargs):
+        raise RemoteDisconnected("Remote end closed connection without response")
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        disconnect,
+    )
+
+    with pytest.raises(MCPGatewayUpstreamError, match="not reachable"):
+        send_remote_request(
+            "https://example.com/mcp",
             {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
         )
 

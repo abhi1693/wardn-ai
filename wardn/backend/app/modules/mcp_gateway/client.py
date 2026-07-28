@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from http.client import RemoteDisconnected
 from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -65,6 +66,7 @@ def send_remote_request(
     protocol_version: str | None = None,
     verify_tls: bool = True,
     outbound_policy: OutboundURLPolicy | None = None,
+    timeout: float | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     request_headers = {
         "Accept": "application/json, text/event-stream",
@@ -86,9 +88,14 @@ def send_remote_request(
     )
     try:
         context = None if verify_tls else ssl._create_unverified_context()
+        response_timeout = (
+            timeout
+            if timeout is not None
+            else get_settings().mcp_gateway_remote_response_timeout_seconds
+        )
         with open_outbound_request(
             request,
-            timeout=30,
+            timeout=response_timeout,
             context=context,
             policy=outbound_policy,
         ) as response:
@@ -110,7 +117,7 @@ def send_remote_request(
         raise MCPGatewayUpstreamError(
             f"upstream MCP server returned HTTP {exc.code}: {detail or exc.reason}"
         ) from exc
-    except (TimeoutError, URLError) as exc:
+    except (TimeoutError, URLError, RemoteDisconnected) as exc:
         raise MCPGatewayUpstreamError(f"upstream MCP server is not reachable: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise MCPGatewayUpstreamError("upstream MCP server returned invalid JSON-RPC") from exc

@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     mcp_runtime_event_retention_days: int = Field(default=14, ge=1, le=3650)
     mcp_runtime_invocation_retention_days: int = Field(default=30, ge=1, le=3650)
     mcp_runtime_invocation_stale_seconds: int = Field(default=600, ge=60, le=86_400)
+    mcp_gateway_remote_response_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     mcp_gateway_stdio_response_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     database_url: SecretStr = Field(
         default=SecretStr("postgresql+asyncpg://wardn:wardn@localhost:5432/wardn"),
