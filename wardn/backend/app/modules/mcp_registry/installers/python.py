@@ -20,6 +20,21 @@ from app.modules.mcp_registry.installers.support import (
 )
 from app.modules.mcp_registry.models import MCPServerVersion
 
+PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
+
+
+def python_runtime_dependencies(package: dict[str, Any]) -> list[str]:
+    dependencies: list[str] = []
+    for field_name in PYTHON_RUNTIME_DEPENDENCY_FIELDS:
+        raw_dependencies = package.get(field_name)
+        if not isinstance(raw_dependencies, list):
+            continue
+        for dependency in raw_dependencies:
+            value = str(dependency or "").strip()
+            if value and value not in dependencies:
+                dependencies.append(value)
+    return dependencies
+
 
 def package_stdio_transport(package: dict[str, Any]) -> tuple[str, list[str]]:
     transport = package.get("transport")
@@ -69,7 +84,11 @@ def build_pypi_install(
     pip_path = venv_path / "bin" / "pip"
     python_path = venv_path / "bin" / "python"
     package_spec = identifier if version == "latest" else f"{identifier}=={version}"
-    run_install_command([str(pip_path), "install", package_spec], cwd=install_path)
+    python_dependencies = python_runtime_dependencies(package)
+    run_install_command(
+        [str(pip_path), "install", package_spec, *python_dependencies],
+        cwd=install_path,
+    )
 
     env_vars = (
         package.get("environmentVariables", [])
@@ -122,6 +141,8 @@ def build_pypi_install(
         "cwd": str(install_path),
         "requiresConfiguration": False,
     }
+    if python_dependencies:
+        runtime_config["pythonDependencies"] = python_dependencies
     write_runtime_manifest(install_path, runtime_config)
     write_secret_manifest(install_path, secret_config)
     return MCPRuntimeInstall(

@@ -1167,3 +1167,39 @@ def test_install_server_runtime_uses_pypi_declared_console_script(
         "/venv/bin/mcp-google-search-console"
     )
     assert install.runtime_config["args"] == ["--site-url", "https://example.com/"]
+
+
+def test_install_server_runtime_installs_pypi_runtime_dependencies(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "pypi",
+                "identifier": "mcp-google-search-console",
+                "version": "2.0.2",
+                "pythonDependencies": ["mcp<2"],
+                "transport": {
+                    "type": "stdio",
+                    "command": "uvx",
+                    "args": ["mcp-google-search-console"],
+                },
+            }
+        ]
+    )
+    commands = []
+
+    def run_install_command(command, *, cwd):
+        commands.append(command)
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(server, install_root=tmp_path)
+
+    assert commands[1][-2:] == ["mcp-google-search-console==2.0.2", "mcp<2"]
+    assert install.runtime_config["pythonDependencies"] == ["mcp<2"]
+    assert install.runtime_config["package"]["pythonDependencies"] == ["mcp<2"]

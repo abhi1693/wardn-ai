@@ -306,6 +306,31 @@ def stdio_transport_command(transport: Any) -> tuple[str, list[str]]:
     args = [str(arg) for arg in raw_args] if isinstance(raw_args, list) else []
     return str(transport.get("command") or "").strip(), args
 
+PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
+
+def pypi_runtime_dependencies(runtime_config: dict[str, Any]) -> list[str]:
+    dependencies: list[str] = []
+    sources: list[dict[str, Any]] = [runtime_config]
+    package = runtime_config.get("package")
+    if isinstance(package, dict):
+        sources.append(package)
+    for source in sources:
+        for field_name in PYTHON_RUNTIME_DEPENDENCY_FIELDS:
+            raw_dependencies = source.get(field_name)
+            if not isinstance(raw_dependencies, list):
+                continue
+            for dependency in raw_dependencies:
+                value = str(dependency or "").strip()
+                if value and value not in dependencies:
+                    dependencies.append(value)
+    return dependencies
+
+def pypi_runtime_dependency_args(runtime_config: dict[str, Any]) -> list[str]:
+    args: list[str] = []
+    for dependency in pypi_runtime_dependencies(runtime_config):
+        args.extend(["--with", dependency])
+    return args
+
 def pypi_transport_process_args(
     runtime_config: dict[str, Any],
     *,
@@ -317,11 +342,19 @@ def pypi_transport_process_args(
     transport_command, transport_args = stdio_transport_command(
         package_transport or runtime_config.get("transport")
     )
+    dependency_args = pypi_runtime_dependency_args(runtime_config)
     transport_command_name = Path(transport_command).name
     if transport_command_name == "uvx" and transport_args:
-        return ["--from", package_spec, *transport_args, *configured_args]
+        return ["--from", package_spec, *dependency_args, *transport_args, *configured_args]
     if transport_command_name not in {"", "python", "python3"}:
-        return ["--from", package_spec, transport_command_name, *transport_args, *configured_args]
+        return [
+            "--from",
+            package_spec,
+            *dependency_args,
+            transport_command_name,
+            *transport_args,
+            *configured_args,
+        ]
     return []
 
 def kubernetes_runtime_process(
@@ -373,7 +406,15 @@ def kubernetes_runtime_process(
         return (
             "uvx",
             rewrite_runtime_file_paths(
-                ["--from", package_spec, "python", "-m", module_name, *configured_args],
+                [
+                    "--from",
+                    package_spec,
+                    *pypi_runtime_dependency_args(runtime_config),
+                    "python",
+                    "-m",
+                    module_name,
+                    *configured_args,
+                ],
                 runtime_config,
             ),
             "",
