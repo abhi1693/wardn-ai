@@ -382,6 +382,23 @@ async def get_model_price(
     return result.scalar_one_or_none()
 
 
+async def list_model_prices_for_provider_models(
+    session: AsyncSession,
+    *,
+    provider: str,
+    models: list[str],
+) -> list[LLMModelPrice]:
+    if not models:
+        return []
+    result = await session.execute(
+        select(LLMModelPrice).where(
+            LLMModelPrice.provider == provider,
+            LLMModelPrice.model.in_(models),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def save_model_price(
     session: AsyncSession,
     *,

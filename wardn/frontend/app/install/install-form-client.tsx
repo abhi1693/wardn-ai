@@ -161,6 +161,12 @@ export function InstallFormClient({
   const selectedFields = selectedServer ? installFields(selectedServer, selectedInstallTarget) : [];
   const connectionFields = selectedFields.filter((field) => field.section === "connection");
   const runtimeFields = selectedFields.filter((field) => field.section === "runtime");
+  const hasMultipleInstallTargets = availableInstallTargets.length > 1;
+  const selectedInstallTargetLabel = selectedInstallTargetDetails
+    ? [selectedInstallTargetDetails.label, selectedInstallTargetDetails.description]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   const needsSecretBackend =
     selectedFields.some((field) => field.secret || field.format === "file") ||
     customHeaders.some((header) => header.name.trim() || header.value.trim());
@@ -224,11 +230,14 @@ export function InstallFormClient({
   }
 
   function changeInstallTarget(target: InstallTarget) {
-    if (!selectedServer || isEdit) {
+    if (!selectedServer) {
       return;
     }
     setSelectedInstallTarget(target);
-    setInstallValues(defaultInstallValues(installFields(selectedServer, target)));
+    const fields = installFields(selectedServer, target);
+    setInstallValues((current) =>
+      isEdit ? mergeInstallValues(fields, current) : defaultInstallValues(fields)
+    );
     setCustomHeaders([]);
     setError("");
   }
@@ -287,9 +296,12 @@ export function InstallFormClient({
       return;
     }
 
-    const missing = selectedFields.filter(
-      (field) => field.required && !isEdit && !installValueConfigured(installValues[field.name])
-    );
+    const missing = selectedFields.filter((field) => {
+      if (!field.required || installValueConfigured(installValues[field.name])) {
+        return false;
+      }
+      return !(isEdit && existingConfiguredFields.has(field.name));
+    });
     if (missing.length > 0) {
       setError(`Missing required settings: ${missing.map((field) => field.name).join(", ")}`);
       return;
@@ -516,6 +528,59 @@ export function InstallFormClient({
                     </SelectContent>
                   </Select>
                 </div>
+                {selectedInstallTargetDetails ? (
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="install-runtime">Runtime</Label>
+                      {hasMultipleInstallTargets ? (
+                        <Select
+                          disabled={isMutating}
+                          onValueChange={changeInstallTarget}
+                          value={selectedInstallTarget}
+                        >
+                          <SelectTrigger id="install-runtime">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableInstallTargets.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {[option.label, option.description].filter(Boolean).join(" · ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div
+                          className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm"
+                          id="install-runtime"
+                        >
+                          {selectedInstallTargetDetails.kind === "remote" ? (
+                            <Network className="size-4 text-muted-foreground" />
+                          ) : (
+                            <Package className="size-4 text-muted-foreground" />
+                          )}
+                          <span className="truncate font-medium">
+                            {selectedInstallTargetLabel || selectedInstallTargetDetails.label}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid gap-2" data-testid="install-target-details">
+                      <Label>{selectedInstallTargetDetails.referenceLabel}</Label>
+                      <div className="min-h-9 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                        <div className="break-all font-medium">
+                          {selectedInstallTargetDetails.referenceValue}
+                        </div>
+                        {selectedInstallTargetDetails.versionValue ? (
+                          <div className="text-xs text-muted-foreground">
+                            {selectedInstallTargetDetails.versionLabel}:{" "}
+                            {selectedInstallTargetDetails.versionValue}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
                 {needsSecretBackend ? (
                   <div className="grid gap-2 md:col-span-2">
                     <Label htmlFor="install-secret-backend">Secret backend</Label>
@@ -537,52 +602,6 @@ export function InstallFormClient({
                         No active secret backend
                       </div>
                     )}
-                  </div>
-                ) : null}
-                {isEdit ? (
-                  <div className="grid gap-2 md:col-span-2">
-                    <Label>Install target</Label>
-                    <div className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/30 px-3 text-sm">
-                      {selectedInstallTargetDetails?.kind === "remote" ? (
-                        <Network className="size-4 text-muted-foreground" />
-                      ) : (
-                        <Package className="size-4 text-muted-foreground" />
-                      )}
-                      <span className="min-w-0">
-                        <span className="block font-medium">
-                          {selectedInstallTargetDetails?.label ?? "Run in Kubernetes"}
-                        </span>
-                        {selectedInstallTargetDetails?.description ? (
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {selectedInstallTargetDetails.description}
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  </div>
-                ) : availableInstallTargets.length > 1 ? (
-                  <div className="grid gap-2 md:col-span-2">
-                    <Label>Install target</Label>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {availableInstallTargets.map((option) => {
-                        const Icon = option.kind === "remote" ? Network : Package;
-                        const selected = selectedInstallTarget === option.value;
-                        return (
-                          <button
-                            className={`flex items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-muted ${selected ? "border-primary bg-accent" : ""}`}
-                            key={option.value}
-                            onClick={() => changeInstallTarget(option.value)}
-                            type="button"
-                          >
-                            <Icon className="mt-0.5 size-4 text-muted-foreground" />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium">{option.label}</div>
-                              <div className="break-all text-xs text-muted-foreground">{option.description}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
                   </div>
                 ) : null}
               </div>

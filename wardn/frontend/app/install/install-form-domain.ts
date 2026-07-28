@@ -15,6 +15,10 @@ export type InstallTargetOption = {
   index: number;
   label: string;
   description: string;
+  referenceLabel: string;
+  referenceValue: string;
+  versionLabel: string;
+  versionValue: string;
 };
 
 export type InstallField = {
@@ -125,6 +129,16 @@ export function packageDescription(packageDefinition: Record<string, unknown>) {
   return [runtimeDetailName(registryType), identifier].filter(Boolean).join(" · ");
 }
 
+export function packageVersion(packageDefinition: Record<string, unknown>, serverVersion: string) {
+  return stringValue(packageDefinition.version) || serverVersion;
+}
+
+export function packageReference(packageDefinition: Record<string, unknown>, serverVersion: string) {
+  const identifier = stringValue(packageDefinition.identifier);
+  const version = packageVersion(packageDefinition, serverVersion);
+  return [identifier, version ? `Version ${version}` : ""].filter(Boolean).join(" · ");
+}
+
 export function remoteDescription(remote: Record<string, unknown>) {
   const type = stringValue(remote.type) || "remote";
   const url = stringValue(remote.url);
@@ -134,22 +148,33 @@ export function remoteDescription(remote: Record<string, unknown>) {
 export function installTargetOptions(entry: MCPRegistryServerResponse): InstallTargetOption[] {
   const packageOptions = (entry.server.packages ?? []).map((packageDefinition, index) => {
     const packageRecord = packageDefinition as Record<string, unknown>;
+    const registryType = stringValue(packageRecord.registryType) || "package";
     return {
       value: `package:${index}`,
       kind: "package" as const,
       index,
-      label: "Run in Kubernetes",
-      description: packageDescription(packageRecord),
+      label: runtimeDetailName(registryType),
+      description: packageReference(packageRecord, entry.server.version),
+      referenceLabel: "Package",
+      referenceValue: stringValue(packageRecord.identifier) || "Unspecified package",
+      versionLabel: "Package version",
+      versionValue: packageVersion(packageRecord, entry.server.version),
     };
   });
   const remoteOptions = (entry.server.remotes ?? []).map((remote, index) => {
     const remoteRecord = remote as Record<string, unknown>;
+    const type = stringValue(remoteRecord.type) || "remote";
+    const url = stringValue(remoteRecord.url);
     return {
       value: `remote:${index}`,
       kind: "remote" as const,
       index,
-      label: "Remote API",
+      label: runtimeDetailName(type),
       description: remoteDescription(remoteRecord),
+      referenceLabel: "Endpoint",
+      referenceValue: url || "Unspecified endpoint",
+      versionLabel: "Server version",
+      versionValue: entry.server.version,
     };
   });
   return [...packageOptions, ...remoteOptions];
@@ -312,8 +337,12 @@ export function selectedInstallTargetOption(
     value: target,
     kind: installTargetKind(target),
     index: installTargetIndex(target),
-    label: installTargetKind(target) === "remote" ? "Remote API" : "Run in Kubernetes",
+    label: installTargetKind(target) === "remote" ? "Remote API" : "Package",
     description: "",
+    referenceLabel: installTargetKind(target) === "remote" ? "Endpoint" : "Package",
+    referenceValue: "",
+    versionLabel: "Version",
+    versionValue: entry.server.version,
   };
 }
 
@@ -418,4 +447,3 @@ export function configuredFieldNames(installation: MCPServerInstallationRead | n
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-

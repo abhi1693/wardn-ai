@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
@@ -40,6 +41,7 @@ USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT = 25
 USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT = 100
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_TIMEOUT_SECONDS = 10
+OPENROUTER_MAX_MODEL_PAGES = 20
 OPENROUTER_PROVIDER_SLUGS = {
     "openai": "openai",
     "openai_chatgpt": "openai",
@@ -248,28 +250,132 @@ def openrouter_prefill_response(
     )
 
 
+async def fetch_openrouter_model_entries() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    next_url = OPENROUTER_MODELS_URL
+    seen_urls: set[str] = set()
+
+    try:
+        async with httpx.AsyncClient(timeout=OPENROUTER_TIMEOUT_SECONDS) as client:
+            for _ in range(OPENROUTER_MAX_MODEL_PAGES):
+                if not next_url or next_url in seen_urls:
+                    break
+                seen_urls.add(next_url)
+                response = await client.get(next_url)
+                response.raise_for_status()
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise LLMModelPricePrefillError(
+                        "OpenRouter returned invalid model data"
+                    ) from exc
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(data, list):
+                    raise LLMModelPricePrefillError("OpenRouter returned invalid model data")
+                entries.extend(entry for entry in data if isinstance(entry, dict))
+
+                links = payload.get("links") if isinstance(payload, dict) else None
+                next_link = links.get("next") if isinstance(links, dict) else None
+                next_url = (
+                    urljoin(OPENROUTER_MODELS_URL, next_link.strip())
+                    if isinstance(next_link, str) and next_link.strip()
+                    else ""
+                )
+    except httpx.HTTPError as exc:
+        raise LLMModelPricePrefillError("OpenRouter pricing could not be loaded") from exc
+    return entries
+
+
+def openrouter_model_price_create(
+    *,
+    provider: str,
+    model: str,
+    entry: dict[str, Any],
+) -> LLMModelPriceCreate | None:
+    response = openrouter_prefill_response(provider=provider, model=model, entry=entry)
+    if response.input_usd_per_1m_tokens is None or response.output_usd_per_1m_tokens is None:
+        return None
+    return LLMModelPriceCreate(
+        provider=response.provider,
+        model=response.model,
+        inputUsdPer1mTokens=response.input_usd_per_1m_tokens,
+        outputUsdPer1mTokens=response.output_usd_per_1m_tokens,
+        cacheReadUsdPer1mTokens=response.cache_read_usd_per_1m_tokens,
+        cacheWriteUsdPer1mTokens=response.cache_write_usd_per_1m_tokens,
+    )
+
+
+async def create_missing_openrouter_model_prices(
+    session: AsyncSession,
+    *,
+    provider: str,
+    models: list[str],
+) -> int:
+    normalized_provider = normalize_provider(provider)
+    normalized_models = sorted(
+        {normalized_model for model in models if (normalized_model := normalize_model(model))}
+    )
+    if not normalized_models:
+        return 0
+
+    existing = await repository.list_model_prices_for_provider_models(
+        session,
+        provider=normalized_provider,
+        models=normalized_models,
+    )
+    existing_models = {model_price.model for model_price in existing}
+    model_entries = await fetch_openrouter_model_entries()
+
+    created_count = 0
+    for model in normalized_models:
+        if model in existing_models:
+            continue
+        matched_entry = next(
+            (
+                entry
+                for entry in model_entries
+                if openrouter_entry_matches_model(entry, normalized_provider, model)
+            ),
+            None,
+        )
+        if matched_entry is None:
+            continue
+        payload = openrouter_model_price_create(
+            provider=normalized_provider,
+            model=model,
+            entry=matched_entry,
+        )
+        if payload is None:
+            continue
+        session.add(
+            LLMModelPrice(
+                provider=payload.provider,
+                model=payload.model,
+                input_usd_per_1m_tokens=payload.input_usd_per_1m_tokens,
+                output_usd_per_1m_tokens=payload.output_usd_per_1m_tokens,
+                cache_read_usd_per_1m_tokens=payload.cache_read_usd_per_1m_tokens,
+                cache_write_usd_per_1m_tokens=payload.cache_write_usd_per_1m_tokens,
+            )
+        )
+        created_count += 1
+
+    if created_count:
+        await session.flush()
+    return created_count
+
+
 async def fetch_openrouter_model_prices(
     *,
     provider: str,
     model: str,
 ) -> LLMModelPricePrefillResponse:
-    try:
-        async with httpx.AsyncClient(timeout=OPENROUTER_TIMEOUT_SECONDS) as client:
-            response = await client.get(OPENROUTER_MODELS_URL)
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise LLMModelPricePrefillError("OpenRouter pricing could not be loaded") from exc
-
-    payload = response.json()
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, list):
-        raise LLMModelPricePrefillError("OpenRouter returned invalid model data")
+    data = await fetch_openrouter_model_entries()
 
     matched_entry = next(
         (
             entry
             for entry in data
-            if isinstance(entry, dict) and openrouter_entry_matches_model(entry, provider, model)
+            if openrouter_entry_matches_model(entry, provider, model)
         ),
         None,
     )

@@ -148,6 +148,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialValidationResponse,
     LLMProviderModelListResponse,
 )
+from app.modules.observability import service as observability_service
 from app.modules.organizations.service import (
     require_organization_admin,
     require_organization_member,
@@ -877,6 +878,24 @@ def user_can_see_credential(user: User, credential: LLMProviderCredential) -> bo
     return credential.visibility != "user" or credential.user_id == user.id or user.is_superuser
 
 
+async def auto_add_openrouter_pricing_for_credential(
+    session: AsyncSession,
+    credential: LLMProviderCredential,
+) -> int:
+    try:
+        models = await list_models_for_credential(session, credential)
+        return await observability_service.create_missing_openrouter_model_prices(
+            session,
+            provider=credential.provider,
+            models=[model.id for model in models.models],
+        )
+    except (
+        InvalidLLMProviderCredentialAuthError,
+        observability_service.LLMModelPricePrefillError,
+    ):
+        return 0
+
+
 async def list_provider_credentials(
     session: AsyncSession,
     user: User,
@@ -1100,6 +1119,7 @@ async def create_provider_credential(
     await session.refresh(credential)
     if auth_method == "api_key" and api_key_value:
         await activate_managed_secret(session, managed_secret_id)
+    await auto_add_openrouter_pricing_for_credential(session, credential)
     return credential_response(credential)
 
 

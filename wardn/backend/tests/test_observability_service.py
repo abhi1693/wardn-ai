@@ -101,6 +101,115 @@ def test_openrouter_matching_maps_openai_chatgpt_to_openai_slug() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_openrouter_model_entries_follows_next_link(monkeypatch) -> None:
+    calls: list[str] = []
+    next_url = "https://openrouter.ai/api/v1/models?offset=500&limit=500"
+    pages = {
+        service.OPENROUTER_MODELS_URL: {
+            "data": [{"id": "openai/gpt-4.1"}],
+            "links": {"next": "/api/v1/models?offset=500&limit=500"},
+        },
+        next_url: {
+            "data": [{"id": "openai/gpt-4.1-mini"}],
+            "links": {"next": None},
+        },
+    }
+
+    class FakeOpenRouterResponse:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url: str):
+            calls.append(url)
+            return FakeOpenRouterResponse(pages[url])
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+
+    entries = await service.fetch_openrouter_model_entries()
+
+    assert calls == [service.OPENROUTER_MODELS_URL, next_url]
+    assert [entry["id"] for entry in entries] == ["openai/gpt-4.1", "openai/gpt-4.1-mini"]
+
+
+@pytest.mark.asyncio
+async def test_create_missing_openrouter_model_prices_adds_matching_missing_prices(
+    monkeypatch,
+) -> None:
+    existing_price = LLMModelPrice(
+        provider="openai",
+        model="gpt-4o-mini",
+        input_usd_per_1m_tokens=Decimal("0.1500000000"),
+        output_usd_per_1m_tokens=Decimal("0.6000000000"),
+    )
+
+    async def list_model_prices_for_provider_models(session, *, provider, models):
+        assert provider == "openai"
+        assert models == ["gpt-4.1-mini", "gpt-4o-mini", "missing-model"]
+        return [existing_price]
+
+    async def fetch_openrouter_model_entries():
+        return [
+            {
+                "id": "openai/gpt-4.1-mini",
+                "name": "OpenAI: GPT-4.1 Mini",
+                "pricing": {
+                    "prompt": "0.0000004",
+                    "completion": "0.0000016",
+                    "input_cache_read": "0.0000001",
+                },
+            },
+            {
+                "id": "openai/gpt-4o-mini",
+                "name": "OpenAI: GPT-4o Mini",
+                "pricing": {
+                    "prompt": "0.00000015",
+                    "completion": "0.0000006",
+                },
+            },
+        ]
+
+    monkeypatch.setattr(
+        service.repository,
+        "list_model_prices_for_provider_models",
+        list_model_prices_for_provider_models,
+    )
+    monkeypatch.setattr(service, "fetch_openrouter_model_entries", fetch_openrouter_model_entries)
+
+    session = FakeSession()
+    created_count = await service.create_missing_openrouter_model_prices(
+        session,
+        provider=" OpenAI ",
+        models=["gpt-4.1-mini", "gpt-4o-mini", "missing-model", "gpt-4.1-mini"],
+    )
+
+    assert created_count == 1
+    assert session.flushed is True
+    [created_price] = session.added
+    assert isinstance(created_price, LLMModelPrice)
+    assert created_price.provider == "openai"
+    assert created_price.model == "gpt-4.1-mini"
+    assert created_price.input_usd_per_1m_tokens == Decimal("0.4000000000")
+    assert created_price.output_usd_per_1m_tokens == Decimal("1.6000000000")
+    assert created_price.cache_read_usd_per_1m_tokens == Decimal("0.1000000000")
+
+
+@pytest.mark.asyncio
 async def test_record_llm_usage_creates_trace_and_usage_record(monkeypatch) -> None:
     async def get_model_price(*args, **kwargs):
         return LLMModelPrice(

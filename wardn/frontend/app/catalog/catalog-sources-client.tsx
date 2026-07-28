@@ -74,6 +74,7 @@ export function CatalogSourcesClient({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const { waitForJob } = useOperationJobPoller();
+  const sourceCount = sources.length;
 
   async function syncSource(source: MCPCatalogSource) {
     setBusyId(source.id);
@@ -140,6 +141,11 @@ export function CatalogSourcesClient({
 
       <Card>
         <CardContent className="p-0">
+          <div className="flex h-11 items-center justify-end border-b px-3 text-sm text-muted-foreground">
+            <span aria-live="polite">
+              Total: <span className="font-medium text-foreground">{sourceCount.toLocaleString("en")}</span>
+            </span>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -152,7 +158,7 @@ export function CatalogSourcesClient({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sources.length === 0 ? (
+              {sourceCount === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     No catalog sources

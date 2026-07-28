@@ -41,6 +41,7 @@ export const meUsageSummary = async (params?: MeUsageSummaryParams, options?: Re
 
   }
 );}
+
 export const getOrganizationUsageSummaryUrl = (organizationId: string,
     params?: OrganizationUsageSummaryParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -71,6 +72,7 @@ export const organizationUsageSummary = async (organizationId: string,
 
   }
 );}
+
 
 export const getWorkspaceUsageSummaryUrl = (organizationId: string,
     workspaceId: string,

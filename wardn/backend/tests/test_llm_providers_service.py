@@ -21,6 +21,8 @@ from app.modules.organizations.models import Organization, OrganizationMembershi
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
+ORIGINAL_AUTO_ADD_OPENROUTER_PRICING = service.auto_add_openrouter_pricing_for_credential
+
 
 class FakeSession:
     def __init__(self) -> None:
@@ -50,6 +52,18 @@ class FakeSession:
 
     async def execute(self, *args, **kwargs) -> EmptyResult:
         return EmptyResult()
+
+
+@pytest.fixture(autouse=True)
+def disable_auto_openrouter_pricing(monkeypatch) -> None:
+    async def auto_add_openrouter_pricing_for_credential(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        service,
+        "auto_add_openrouter_pricing_for_credential",
+        auto_add_openrouter_pricing_for_credential,
+    )
 
 
 def patch_resolved_secrets(monkeypatch, values: dict) -> None:
@@ -632,6 +646,18 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
             refresh_handle_id: "refresh-token",
         },
     )
+    auto_priced_credentials: list[LLMProviderCredential] = []
+
+    async def auto_add_openrouter_pricing_for_credential(session_arg, credential_arg):
+        assert session_arg is session
+        auto_priced_credentials.append(credential_arg)
+        return 2
+
+    monkeypatch.setattr(
+        service,
+        "auto_add_openrouter_pricing_for_credential",
+        auto_add_openrouter_pricing_for_credential,
+    )
 
     session = FakeSession()
     response = await service.create_provider_credential(
@@ -668,6 +694,7 @@ async def test_org_admin_can_create_oauth_provider_credential(monkeypatch) -> No
     assert response.oauth_access_token_secret_handle_id == access_handle_id
     assert response.oauth_refresh_token_secret_handle_id == refresh_handle_id
     assert response.status == "active"
+    assert auto_priced_credentials == [credential]
 
 
 @pytest.mark.asyncio
@@ -1150,6 +1177,57 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
     )
 
     assert [model.id for model in response.models] == list(service.OPENAI_CHATGPT_MODEL_IDS)
+
+
+@pytest.mark.asyncio
+async def test_auto_add_openrouter_pricing_imports_discovered_models(monkeypatch) -> None:
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=uuid4(),
+        name="OpenAI",
+        provider="openai",
+        visibility="organization",
+        auth_method="api_key",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    seen: dict[str, object] = {}
+
+    async def list_models_for_credential(session_arg, credential_arg):
+        assert credential_arg is credential
+        seen["session"] = session_arg
+        return service.LLMProviderModelListResponse(
+            models=[
+                LLMProviderModelRead(id="gpt-4.1-mini", name="GPT-4.1 Mini"),
+                LLMProviderModelRead(id="gpt-4o-mini", name="GPT-4o Mini"),
+            ]
+        )
+
+    async def create_missing_openrouter_model_prices(session_arg, *, provider, models):
+        seen["pricing_session"] = session_arg
+        seen["provider"] = provider
+        seen["models"] = models
+        return 2
+
+    monkeypatch.setattr(service, "list_models_for_credential", list_models_for_credential)
+    monkeypatch.setattr(
+        service.observability_service,
+        "create_missing_openrouter_model_prices",
+        create_missing_openrouter_model_prices,
+    )
+
+    session = FakeSession()
+    imported_count = await ORIGINAL_AUTO_ADD_OPENROUTER_PRICING(session, credential)
+
+    assert imported_count == 2
+    assert seen == {
+        "session": session,
+        "pricing_session": session,
+        "provider": "openai",
+        "models": ["gpt-4.1-mini", "gpt-4o-mini"],
+    }
 
 
 def test_oauth_auth_rejects_unsupported_provider() -> None:

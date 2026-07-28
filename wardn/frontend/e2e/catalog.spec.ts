@@ -129,6 +129,7 @@ test.describe("catalog source management", () => {
 
     const wardnHubRow = page.getByRole("row").filter({ hasText: "Wardn Hub" });
     await expect(wardnHubRow).toBeVisible();
+    await expect(page.getByText("Total: 1")).toBeVisible();
     await page.getByRole("button", { name: "Sync Wardn Hub" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Synced 2 server definitions." })
@@ -143,6 +144,7 @@ test.describe("catalog source management", () => {
     await expect(
       page.getByRole("status").filter({ hasText: "Catalog source deleted." })
     ).toBeVisible();
+    await expect(page.getByText("Total: 0")).toBeVisible();
     await expect(page.getByText("No catalog sources")).toBeVisible();
   });
 

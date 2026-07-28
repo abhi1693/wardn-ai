@@ -50,6 +50,47 @@ const secretStore = {
   updatedAt: now,
 };
 
+const registrySchema = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json";
+
+const googleSearchConsoleServer = {
+  $schema: registrySchema,
+  name: "io.github.acamolese/google-search-console-mcp",
+  title: "Google Search Console",
+  description: "Inspect Google Search Console properties and performance data.",
+  version: "1.0.0",
+  packages: [
+    {
+      registryType: "npm",
+      identifier: "@acamolese/google-search-console-mcp",
+      version: "1.0.0",
+      environmentVariables: [
+        {
+          name: "GSC_CLIENT_ID",
+          description:
+            "Google OAuth client ID used with GSC_CLIENT_SECRET for stateless authentication.",
+          isRequired: false,
+          isSecret: false,
+        },
+      ],
+    },
+    {
+      registryType: "uvx",
+      identifier: "google-search-console-mcp",
+      version: "1.0.0",
+      environmentVariables: [
+        {
+          name: "GSC_CLIENT_ID",
+          description:
+            "Google OAuth client ID used with GSC_CLIENT_SECRET for stateless authentication.",
+          isRequired: false,
+          isSecret: false,
+        },
+      ],
+    },
+  ],
+  remotes: [],
+};
+
 const defaultSource = {
   id: "source-1",
   organizationId: organization.id,
@@ -67,6 +108,74 @@ const defaultSource = {
   updatedAt: now,
 };
 
+const usageWindow = {
+  startDate: "2026-06-01",
+  endDate: "2026-06-30",
+  timezone: "UTC",
+  breakdownLimit: 25,
+};
+
+function usageBreakdownRow(id, label, requests, toolCalls) {
+  return {
+    id,
+    label,
+    requests,
+    inputTokens: requests * 100,
+    outputTokens: requests * 40,
+    totalTokens: requests * 140,
+    costUsd: String((requests * 0.01).toFixed(4)),
+    toolCalls,
+  };
+}
+
+function usageSummaryResponse(scope) {
+  const isPersonal = scope === "me";
+  const requests = isPersonal ? 3 : 8;
+  const toolCalls = isPersonal ? 2 : 5;
+  const primaryUser = usageBreakdownRow(
+    isPersonal ? "user-1" : "user-all",
+    isPersonal ? "owner@example.com" : "All users",
+    requests,
+    toolCalls
+  );
+  return {
+    window: usageWindow,
+    summary: {
+      requests,
+      succeeded: requests,
+      failed: 0,
+      running: 0,
+      inputTokens: requests * 100,
+      outputTokens: requests * 40,
+      totalTokens: requests * 140,
+      costUsd: String((requests * 0.01).toFixed(4)),
+      toolCalls,
+    },
+    byUser: isPersonal ? [] : [primaryUser],
+    byWorkspace: [usageBreakdownRow(workspace.id, workspace.name, requests, toolCalls)],
+    byAgent: [
+      usageBreakdownRow(
+        "agent-1",
+        isPersonal ? "My assistant" : "Support agent",
+        requests,
+        toolCalls
+      ),
+    ],
+    byModel: [usageBreakdownRow("openai:gpt-4.1-mini", "gpt-4.1-mini", requests, toolCalls)],
+    daily: [
+      {
+        date: "2026-06-30",
+        requests,
+        inputTokens: requests * 100,
+        outputTokens: requests * 40,
+        totalTokens: requests * 140,
+        costUsd: String((requests * 0.01).toFixed(4)),
+        toolCalls,
+      },
+    ],
+  };
+}
+
 let state = initialState();
 
 function initialState(overrides = {}) {
@@ -77,8 +186,24 @@ function initialState(overrides = {}) {
     jobs: new Map(),
     organizationsStatus: overrides.organizationsStatus ?? 200,
     requests: [],
+    installations: overrides.installations ?? [],
     sources: overrides.sources ?? [{ ...defaultSource }],
     tokens: [],
+  };
+}
+
+function registryServerResponse(server, isLatest = true) {
+  return {
+    server,
+    _meta: {
+      "io.modelcontextprotocol.registry/official": {
+        status: "active",
+        statusChangedAt: now,
+        publishedAt: now,
+        updatedAt: now,
+        isLatest,
+      },
+    },
   };
 }
 
@@ -104,6 +229,31 @@ function operationJob(jobId, status, progressMessage, result = undefined) {
     status,
     updatedAt: now,
     workspaceId: null,
+  };
+}
+
+function installOperationJob(jobId, status, progressMessage, result = undefined) {
+  return {
+    attemptCount: 1,
+    cleanupAttemptCount: 0,
+    cleanupError: "",
+    cleanupMaxAttempts: 3,
+    cleanupStatus: "not_required",
+    createdAt: now,
+    errorCode: "",
+    errorMessage: "",
+    jobId,
+    maxAttempts: 3,
+    operation: "install_server",
+    organizationId: organization.id,
+    progressCurrent: status === "succeeded" ? 1 : 0,
+    progressMessage,
+    progressTotal: 1,
+    resourceKey: `mcp-install:${googleSearchConsoleServer.name}`,
+    result,
+    status,
+    updatedAt: now,
+    workspaceId: workspace.id,
   };
 }
 
@@ -152,6 +302,39 @@ function sourcePathMatch(pathname) {
   return pathname.match(
     /^\/api\/v1\/organizations\/([^/]+)\/mcp\/catalog\/sources(?:\/([^/]+)(?:\/sync)?)?$/
   );
+}
+
+function installedServerFromPayload(body) {
+  const installTarget = String(body.installTarget ?? "package");
+  const [, rawIndex = "0"] = installTarget.split(":");
+  const packageIndex = Number.parseInt(rawIndex, 10);
+  const packageDefinition =
+    googleSearchConsoleServer.packages[
+      Number.isFinite(packageIndex) && packageIndex >= 0 ? packageIndex : 0
+    ] ?? googleSearchConsoleServer.packages[0];
+
+  return {
+    id: "installation-1",
+    workspaceId: workspace.id,
+    serverName: googleSearchConsoleServer.name,
+    configName: body.configName ?? "default",
+    installedVersion: body.version ?? googleSearchConsoleServer.version,
+    latestVersion: googleSearchConsoleServer.version,
+    updateAvailable: false,
+    status: "enabled",
+    installType: "package",
+    installPath: "/tmp/wardn/mcp/google-search-console",
+    runtimeConfig: {
+      kind: "package",
+      package: packageDefinition,
+    },
+    configuredValues: body.configValues ?? {},
+    installError: null,
+    installedAt: now,
+    updatedAt: now,
+    server: googleSearchConsoleServer,
+    latestServer: googleSearchConsoleServer,
+  };
 }
 
 async function handle(request) {
@@ -269,9 +452,78 @@ async function handle(request) {
   }
   if (
     request.method === "GET" &&
+    url.pathname === `/api/v1/organizations/${organization.id}/usage/summary`
+  ) {
+    return json(usageSummaryResponse("organization"));
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/me/usage") {
+    return json(usageSummaryResponse("me"));
+  }
+  if (
+    request.method === "GET" &&
     url.pathname === `/api/v1/organizations/${organization.id}/secrets/stores`
   ) {
     return json({ stores: [secretStore] });
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === `/api/v1/organizations/${organization.id}/mcp/registry/servers`
+  ) {
+    const search = url.searchParams.get("search")?.trim().toLowerCase() ?? "";
+    const servers =
+      search && !googleSearchConsoleServer.title.toLowerCase().includes(search)
+        ? []
+        : [registryServerResponse(googleSearchConsoleServer)];
+    return json({ servers, metadata: { count: servers.length, nextCursor: "" } });
+  }
+
+  const serverVersionsMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/([^/]+)\/mcp\/registry\/servers\/([^/]+\/[^/]+)\/versions(?:\/([^/]+))?$/
+  );
+  if (
+    request.method === "GET" &&
+    serverVersionsMatch?.[1] === organization.id &&
+    decodeURIComponent(serverVersionsMatch[2]) === googleSearchConsoleServer.name
+  ) {
+    const version = decodeURIComponent(serverVersionsMatch[3] ?? "");
+    if (version && version !== "latest" && version !== googleSearchConsoleServer.version) {
+      return json({ detail: "server version not found" }, 404);
+    }
+    const response = registryServerResponse(googleSearchConsoleServer);
+    return version ? json(response) : json({ servers: [response], metadata: { count: 1, nextCursor: "" } });
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname ===
+      `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/mcp/registry/installed-servers`
+  ) {
+    return json({
+      installations: state.installations,
+      metadata: { count: state.installations.length, nextCursor: "" },
+    });
+  }
+
+  const installServerMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/([^/]+)\/workspaces\/([^/]+)\/mcp\/registry\/installed-servers\/([^/]+\/[^/]+)$/
+  );
+  if (
+    request.method === "PUT" &&
+    installServerMatch?.[1] === organization.id &&
+    installServerMatch[2] === workspace.id &&
+    decodeURIComponent(installServerMatch[3]) === googleSearchConsoleServer.name
+  ) {
+    const installation = installedServerFromPayload(body ?? {});
+    state.installations = [
+      ...state.installations.filter((item) => item.id !== installation.id),
+      installation,
+    ];
+    return json(
+      installOperationJob(randomUUID(), "succeeded", "Server installation completed", {
+        installation,
+      })
+    );
   }
 
   const catalogJobMatch = url.pathname.match(
