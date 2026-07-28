@@ -48,6 +48,7 @@ import {
   installTargetOptions,
   installTargetPayloadValue,
   installValueConfigured,
+  hubServerHref,
   mergeInstallValues,
   selectedInstallTargetOption,
   serverResponseFromInstallation,
@@ -167,6 +168,7 @@ export function InstallFormClient({
         .filter(Boolean)
         .join(" · ")
     : "";
+  const selectedServerHubHref = selectedServer ? hubServerHref(selectedServer) : "";
   const needsSecretBackend =
     selectedFields.some((field) => field.secret || field.format === "file") ||
     customHeaders.some((header) => header.name.trim() || header.value.trim());
@@ -472,7 +474,20 @@ export function InstallFormClient({
               <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
                 <div className="min-w-0">
                   <div className="font-medium">{selectedServer.server.title || selectedServer.server.name}</div>
-                  <div className="mt-0.5 break-all text-xs text-muted-foreground">{selectedServer.server.name}</div>
+                  {selectedServerHubHref ? (
+                    <a
+                      className="mt-0.5 block break-all text-xs text-primary underline-offset-4 hover:underline"
+                      href={selectedServerHubHref}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {selectedServer.server.name}
+                    </a>
+                  ) : (
+                    <div className="mt-0.5 break-all text-xs text-muted-foreground">
+                      {selectedServer.server.name}
+                    </div>
+                  )}
                 </div>
                 {!isEdit ? (
                   <Button

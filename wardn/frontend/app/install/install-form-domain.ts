@@ -248,6 +248,27 @@ export function metadataRecord(entry: MCPRegistryServerResponse, key: string) {
   return null;
 }
 
+export function catalogSourceMetadata(entry: MCPRegistryServerResponse) {
+  return metadataRecord(entry, "wardnCatalogSource");
+}
+
+export function hubServerHref(entry: MCPRegistryServerResponse) {
+  const metadata = catalogSourceMetadata(entry);
+  if (!metadata || stringValue(metadata.provider) !== "wardn_hub") {
+    return "";
+  }
+  const baseUrl = stringValue(metadata.baseUrl).trim();
+  if (!baseUrl) {
+    return "";
+  }
+  try {
+    const serverPath = entry.server.name.split("/").map(encodeURIComponent).join("/");
+    return new URL(`/servers/${serverPath}`, baseUrl.replace(/\/+$/, "/")).toString();
+  } catch {
+    return "";
+  }
+}
+
 export function wardnHubMetadata(entry: MCPRegistryServerResponse) {
   return (
     metadataRecord(entry, "dev.wardnai.hub/catalog") ??

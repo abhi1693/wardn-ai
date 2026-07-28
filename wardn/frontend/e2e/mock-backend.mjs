@@ -54,6 +54,15 @@ const registrySchema = "https://static.modelcontextprotocol.io/schemas/2025-12-1
 
 const googleSearchConsoleServer = {
   $schema: registrySchema,
+  _meta: {
+    wardnCatalogSource: {
+      id: "source-1",
+      name: "Wardn Hub",
+      provider: "wardn_hub",
+      baseUrl: "https://hub.wardnai.dev",
+      sourceUrl: "https://hub.wardnai.dev/api/v1/mcp/catalog",
+    },
+  },
   name: "io.github.acamolese/google-search-console-mcp",
   title: "Google Search Console",
   description: "Inspect Google Search Console properties and performance data.",

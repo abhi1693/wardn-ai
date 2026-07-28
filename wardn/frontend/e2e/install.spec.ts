@@ -48,6 +48,10 @@ test.describe("MCP install runtime selection", () => {
     );
 
     await expect(page.getByRole("heading", { name: "Add MCP server" })).toBeVisible();
+    await expect(page.getByRole("link", { name: serverName })).toHaveAttribute(
+      "href",
+      "https://hub.wardnai.dev/servers/io.github.acamolese/google-search-console-mcp"
+    );
     await expect(page.getByRole("combobox", { name: "Runtime" })).toContainText("NPM");
 
     const selectedPackage = page.getByTestId("install-target-details");
