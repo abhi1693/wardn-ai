@@ -75,12 +75,31 @@ test.describe("usage summary scope", () => {
     ]);
   });
 
-  test("redirects the old personal usage route to the usage filter", async ({ baseURL, page }) => {
+  test("applies top usage filters and preserves them across scope changes", async ({
+    baseURL,
+    page,
+  }) => {
     await authenticate(page.context(), baseURL ?? "");
-    await page.goto(`/org/${organizationId}/usage/me`);
+    await page.goto(`/org/${organizationId}/usage`);
 
-    await expect(page).toHaveURL(new RegExp(`/org/${organizationId}/usage\\?scope=me$`));
-    await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
+    await page.getByLabel("Start date").fill("2026-06-01");
+    await page.getByLabel("End date").fill("2026-06-30");
+    await page.getByLabel("Rows").selectOption("50");
+    await page.getByRole("button", { name: "Apply" }).click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get("scope")).toBe("organization");
+    await expect.poll(() => new URL(page.url()).searchParams.get("startDate")).toBe("2026-06-01");
+    await expect.poll(() => new URL(page.url()).searchParams.get("endDate")).toBe("2026-06-30");
+    await expect.poll(() => new URL(page.url()).searchParams.get("breakdownLimit")).toBe("50");
+    await expect(page.getByLabel("Start date")).toHaveValue("2026-06-01");
+    await expect(page.getByLabel("End date")).toHaveValue("2026-06-30");
+
+    await page.getByRole("tab", { name: "My usage" }).click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get("scope")).toBe("me");
+    await expect.poll(() => new URL(page.url()).searchParams.get("startDate")).toBe("2026-06-01");
+    await expect.poll(() => new URL(page.url()).searchParams.get("endDate")).toBe("2026-06-30");
+    await expect.poll(() => new URL(page.url()).searchParams.get("breakdownLimit")).toBe("50");
     await expect(page.getByRole("tab", { name: "My usage" })).toHaveAttribute(
       "aria-selected",
       "true"
