@@ -1119,3 +1119,51 @@ def test_install_server_runtime_omits_latest_pin_for_pypi_placeholder_version(
     install_server_runtime(server, install_root=tmp_path)
 
     assert commands[1][-1] == "openstackmcp-server"
+
+
+def test_install_server_runtime_uses_pypi_declared_console_script(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "pypi",
+                "identifier": "mcp-google-search-console",
+                "version": "2.0.2",
+                "transport": {
+                    "type": "stdio",
+                    "command": "uvx",
+                    "args": ["mcp-google-search-console"],
+                },
+                "packageArguments": [
+                    {
+                        "name": "site-url",
+                        "flag": "--site-url",
+                    }
+                ],
+            }
+        ]
+    )
+    commands = []
+
+    def run_install_command(command, *, cwd):
+        commands.append(command)
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"site-url": "https://example.com/"},
+        install_root=tmp_path,
+    )
+
+    assert commands[1][-1] == "mcp-google-search-console==2.0.2"
+    assert install.install_type == "pypi"
+    assert install.runtime_config["command"].endswith(
+        "/venv/bin/mcp-google-search-console"
+    )
+    assert install.runtime_config["args"] == ["--site-url", "https://example.com/"]

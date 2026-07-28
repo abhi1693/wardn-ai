@@ -297,6 +297,33 @@ def strip_npm_launcher_args(args: list[str], identifier: str) -> list[str]:
         remaining = remaining[1:]
     return remaining
 
+def stdio_transport_command(transport: Any) -> tuple[str, list[str]]:
+    if not isinstance(transport, dict):
+        return "", []
+    if str(transport.get("type") or "stdio").strip().lower() not in {"", "stdio"}:
+        return "", []
+    raw_args = transport.get("args")
+    args = [str(arg) for arg in raw_args] if isinstance(raw_args, list) else []
+    return str(transport.get("command") or "").strip(), args
+
+def pypi_transport_process_args(
+    runtime_config: dict[str, Any],
+    *,
+    package_spec: str,
+    configured_args: list[str],
+) -> list[str]:
+    package = runtime_config.get("package")
+    package_transport = package.get("transport") if isinstance(package, dict) else None
+    transport_command, transport_args = stdio_transport_command(
+        package_transport or runtime_config.get("transport")
+    )
+    transport_command_name = Path(transport_command).name
+    if transport_command_name == "uvx" and transport_args:
+        return ["--from", package_spec, *transport_args, *configured_args]
+    if transport_command_name not in {"", "python", "python3"}:
+        return ["--from", package_spec, transport_command_name, *transport_args, *configured_args]
+    return []
+
 def kubernetes_runtime_process(
     runtime,
     runtime_config: dict[str, Any],
@@ -332,6 +359,17 @@ def kubernetes_runtime_process(
         configured_args = runtime.args
         if len(configured_args) >= 2 and configured_args[:2] == ["-m", module_name]:
             configured_args = configured_args[2:]
+        transport_args = pypi_transport_process_args(
+            runtime_config,
+            package_spec=package_spec,
+            configured_args=configured_args,
+        )
+        if transport_args:
+            return (
+                "uvx",
+                rewrite_runtime_file_paths(transport_args, runtime_config),
+                "",
+            )
         return (
             "uvx",
             rewrite_runtime_file_paths(
