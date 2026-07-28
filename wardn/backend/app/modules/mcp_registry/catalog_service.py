@@ -61,6 +61,7 @@ PULSE_SERVER_VERSION_META_KEY = "com.pulsemcp/server-version"
 VERSION_PREFIX_PATTERN = re.compile(r"^\s*v?(\d+(?:[._-]\d+)*)", re.IGNORECASE)
 CATALOG_SYNC_PAGE_SIZE = 100
 WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
+WARDN_HUB_SERVERS_PATH = "/api/v1/mcp/servers"
 CATALOG_SOURCE_TOKEN_KEY = "api_token"
 CATALOG_SOURCE_META_KEY = "wardnCatalogSource"
 
@@ -497,6 +498,22 @@ def wardn_hub_catalog_url(base_url: str) -> str:
     return f"{split_url.scheme}://{split_url.netloc}{WARDN_HUB_CATALOG_PATH}"
 
 
+def wardn_hub_servers_url(base_url: str) -> str:
+    split_url = urlsplit(base_url.strip().rstrip("/"))
+    return f"{split_url.scheme}://{split_url.netloc}{WARDN_HUB_SERVERS_PATH}"
+
+
+def catalog_source_updated_since(source: MCPCatalogSource) -> str | None:
+    if source.provider != "wardn_hub" or source.sync_mode != "latest_only":
+        return None
+    if source.last_synced_updated_since is None:
+        return None
+    value = source.last_synced_updated_since
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 def catalog_source_token_path(
     *,
     organization_id: uuid.UUID,
@@ -623,6 +640,19 @@ async def sync_catalog_source(
 
     source_type = registry_source_type(source.provider)
     version = "latest" if source.sync_mode == "latest_only" else None
+    updated_since = catalog_source_updated_since(source)
+    source_urls = (
+        [wardn_hub_servers_url(source.base_url)]
+        if updated_since
+        else catalog_source_urls(source)
+    )
+    if updated_since:
+        pagination = "cursor"
+    elif source.provider == "wardn_hub":
+        pagination = "page"
+    else:
+        pagination = "cursor"
+    sync_started_at = datetime.now(UTC)
 
     try:
         headers = registry_headers(source_type, api_key=None, tenant_id=source.tenant_id or None)
@@ -630,7 +660,7 @@ async def sync_catalog_source(
         last_error: Exception | None = None
         servers = None
         synced_source_url = ""
-        for source_url in catalog_source_urls(source):
+        for source_url in source_urls:
             try:
                 servers = await asyncio.to_thread(
                     load_supported_servers_from_registry_url,
@@ -638,8 +668,10 @@ async def sync_catalog_source(
                     limit=CATALOG_SYNC_PAGE_SIZE,
                     max_pages=None,
                     headers=headers,
+                    updated_since=updated_since,
                     version=version,
-                    pagination="page" if source.provider == "wardn_hub" else "cursor",
+                    pagination=pagination,
+                    wardn_hub_version_details=bool(updated_since),
                 )
                 synced_source_url = source_url
                 break
@@ -666,7 +698,7 @@ async def sync_catalog_source(
 
     now = datetime.now(UTC)
     source.last_success_at = now
-    source.last_synced_updated_since = now
+    source.last_synced_updated_since = sync_started_at
     source.last_error = ""
     await session.flush()
     await session.refresh(source)

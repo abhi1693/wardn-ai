@@ -449,6 +449,66 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermark(
+    monkeypatch,
+) -> None:
+    source = catalog_source()
+    source.last_synced_updated_since = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    payload = registry_payload("1.0.1")
+    calls = {}
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def resolve_secret(*args, **kwargs):
+        return SimpleNamespace(value="hub-token")
+
+    def registry_headers(*args, **kwargs):
+        return {"x-test": "1"}
+
+    def load_supported_servers_from_registry_url(source_url, **kwargs):
+        calls["source_url"] = source_url
+        calls["kwargs"] = kwargs
+        return [payload]
+
+    async def sync_supported_servers(*args, **kwargs):
+        calls["servers"] = args[1]
+        calls["organization_id"] = kwargs["organization_id"]
+        calls["catalog_source_id"] = kwargs["catalog_source_id"]
+        return 1
+
+    from app.modules.mcp_registry import commands
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(catalog_service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(commands, "registry_headers", registry_headers)
+    monkeypatch.setattr(
+        commands,
+        "load_supported_servers_from_registry_url",
+        load_supported_servers_from_registry_url,
+    )
+    monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
+    session = FakeSession()
+
+    response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
+
+    assert response.synced_count == 1
+    assert calls["source_url"] == "https://hub.wardnai.dev/api/v1/mcp/servers"
+    assert calls["kwargs"]["updated_since"] == "2026-07-28T12:00:00Z"
+    assert calls["kwargs"]["version"] == "latest"
+    assert calls["kwargs"]["pagination"] == "cursor"
+    assert calls["kwargs"]["wardn_hub_version_details"] is True
+    assert calls["servers"][0].meta[service.CATALOG_SOURCE_META_KEY]["sourceUrl"] == (
+        "https://hub.wardnai.dev/api/v1/mcp/servers"
+    )
+    assert calls["organization_id"] == ORGANIZATION_ID
+    assert calls["catalog_source_id"] == source.id
+    assert source.last_success_at is not None
+    assert source.last_synced_updated_since > datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    assert source.last_error == ""
+
+
+@pytest.mark.asyncio
 async def test_delete_catalog_source_deletes_associated_server_versions(monkeypatch) -> None:
     source = catalog_source()
     server = server_version("1.0.0", is_latest=True)

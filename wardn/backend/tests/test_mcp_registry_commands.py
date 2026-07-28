@@ -647,6 +647,93 @@ def test_registry_url_loader_supports_wardn_hub_page_pagination(monkeypatch) -> 
     ]
 
 
+def test_registry_url_loader_fetches_wardn_hub_changed_version_details(monkeypatch) -> None:
+    fetched_urls = []
+
+    def fetch_registry_payload(url, headers=None):
+        fetched_urls.append(url)
+        if url.endswith("/versions/1.0.1"):
+            return {
+                "server": {
+                    "name": "io.github.example/weather",
+                    "title": "Weather",
+                    "description": "Weather tools",
+                    "documentation": "# Weather",
+                    "websiteUrl": "https://example.com",
+                    "repository": {"url": "https://github.com/example/weather"},
+                    "icons": [],
+                },
+                "version": {
+                    "version": "1.0.1",
+                    "status": "active",
+                    "isLatest": True,
+                    "publishedAt": "2026-07-28T00:00:00Z",
+                    "statusChangedAt": "2026-07-28T00:00:00Z",
+                    "createdAt": "2026-07-28T00:00:00Z",
+                    "updatedAt": "2026-07-28T00:00:00Z",
+                    "packages": [
+                        {
+                            "registryType": "npm",
+                            "identifier": "@example/weather-mcp",
+                            "version": "1.0.1",
+                            "transport": {
+                                "type": "stdio",
+                                "command": "npx",
+                                "args": ["-y", "@example/weather-mcp"],
+                            },
+                        }
+                    ],
+                    "remotes": [],
+                    "serverJson": {
+                        "$schema": (
+                            "https://static.modelcontextprotocol.io/schemas/"
+                            "2025-12-11/server.schema.json"
+                        ),
+                        "name": "io.github.example/weather",
+                        "title": "Weather",
+                        "description": "Weather tools",
+                        "documentation": "# Weather",
+                        "websiteUrl": "https://example.com",
+                        "repository": {"url": "https://github.com/example/weather"},
+                        "version": "1.0.1",
+                    },
+                },
+            }
+        return {
+            "servers": [
+                {
+                    "name": "io.github.example/weather",
+                    "latestVersion": {"version": "1.0.1"},
+                }
+            ],
+            "metadata": {"count": 1},
+        }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", fetch_registry_payload)
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://hub.wardnai.dev/api/v1/mcp/servers",
+        limit=100,
+        max_pages=None,
+        headers={"Authorization": "Bearer token"},
+        updated_since="2026-07-28T00:00:00Z",
+        version="latest",
+        wardn_hub_version_details=True,
+    )
+
+    assert len(servers) == 1
+    assert servers[0].name == "io.github.example/weather"
+    assert servers[0].version == "1.0.1"
+    assert servers[0].packages[0]["identifier"] == "@example/weather-mcp"
+    assert fetched_urls == [
+        (
+            "https://hub.wardnai.dev/api/v1/mcp/servers?"
+            "limit=100&updated_since=2026-07-28T00%3A00%3A00Z&version=latest"
+        ),
+        "https://hub.wardnai.dev/api/v1/mcp/servers/io.github.example/weather/versions/1.0.1",
+    ]
+
+
 def test_pulsemcp_registry_source_uses_default_url_and_auth_headers() -> None:
     assert (
         commands.registry_source_url("pulsemcp", commands.DEFAULT_REGISTRY_URL)

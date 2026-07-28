@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request
 from uuid import UUID
 
@@ -24,6 +24,7 @@ from app.modules.mcp_registry.tool_service import refresh_tool_schemas
 DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 PULSE_REGISTRY_URL = "https://api.pulsemcp.com/v0.1/servers"
 WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
+WARDN_HUB_SERVERS_PATH = "/api/v1/mcp/servers"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
 REGISTRY_SYNC_USER_AGENT = "Wardn/0.1 (+https://wardnai.dev)"
@@ -274,6 +275,66 @@ def _wardn_hub_catalog_documents(server: dict) -> list[dict]:
         }
         document["_meta"] = metadata
         documents.append(document)
+    return documents
+
+
+def wardn_hub_version_detail_url(source_url: str, server_name: str, version: str) -> str:
+    split_url = urlsplit(source_url)
+    path = split_url.path.rstrip("/")
+    return urlunsplit(
+        (
+            split_url.scheme,
+            split_url.netloc,
+            (
+                f"{path}/{quote(server_name, safe='/')}/versions/"
+                f"{quote(version, safe='')}"
+            ),
+            "",
+            split_url.fragment,
+        )
+    )
+
+
+def _wardn_hub_version_detail_documents(payload: dict) -> list[dict]:
+    server = payload.get("server")
+    version = payload.get("version")
+    if not isinstance(server, dict) or not isinstance(version, dict):
+        return []
+    return _wardn_hub_catalog_documents({**server, "versions": [version]})
+
+
+def _wardn_hub_latest_version_summary(item: dict) -> tuple[str, str] | None:
+    server_name = str(item.get("name") or "").strip()
+    latest_version = item.get("latestVersion")
+    if not server_name or not isinstance(latest_version, dict):
+        return None
+    version = str(latest_version.get("version") or "").strip()
+    if not version:
+        return None
+    return server_name, version
+
+
+def load_wardn_hub_version_detail_documents(
+    payload: dict,
+    *,
+    source_url: str,
+    headers: dict[str, str] | None = None,
+) -> list[dict]:
+    documents: list[dict] = []
+    servers = payload.get("servers", []) if isinstance(payload, dict) else []
+    for item in servers:
+        if not isinstance(item, dict):
+            continue
+        summary = _wardn_hub_latest_version_summary(item)
+        if summary is None:
+            continue
+        server_name, version = summary
+        detail_payload = fetch_registry_payload(
+            wardn_hub_version_detail_url(source_url, server_name, version),
+            headers=headers,
+        )
+        if isinstance(detail_payload, dict):
+            documents.extend(_wardn_hub_version_detail_documents(detail_payload))
     return documents
 
 
@@ -594,6 +655,7 @@ def load_supported_servers_from_registry_url(
     pagination: str = "cursor",
     readme_descriptions: bool = False,
     github_token: str | None = None,
+    wardn_hub_version_details: bool = False,
 ) -> list[MCPServerCreate]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
@@ -624,11 +686,21 @@ def load_supported_servers_from_registry_url(
             payload = fetch_registry_payload(page_url, headers=headers)
         else:
             payload = fetch_registry_payload(page_url)
-        page_servers = load_supported_servers_from_payload(
-            payload,
-            strip_unsupported_packages=True,
-            sanitize_urls=True,
-        )
+        if wardn_hub_version_details:
+            documents = load_wardn_hub_version_detail_documents(
+                payload,
+                source_url=source_url,
+                headers=headers,
+            )
+            documents = [strip_unsupported_package_targets(server) for server in documents]
+            documents = [sanitize_source_urls(server) for server in documents]
+            page_servers = [MCPServerCreate.model_validate(server) for server in documents]
+        else:
+            page_servers = load_supported_servers_from_payload(
+                payload,
+                strip_unsupported_packages=True,
+                sanitize_urls=True,
+            )
         if readme_descriptions:
             page_servers = enrich_descriptions_from_readmes(
                 page_servers,
