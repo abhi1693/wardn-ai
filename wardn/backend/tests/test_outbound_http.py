@@ -112,7 +112,11 @@ def test_outbound_request_uses_no_redirect_opener(monkeypatch) -> None:
         seen_handlers.extend(handlers)
         return FakeOpener()
 
-    monkeypatch.setattr(outbound_http, "validate_outbound_url", lambda _url: None)
+    monkeypatch.setattr(
+        outbound_http,
+        "validate_outbound_url",
+        lambda _url, **_kwargs: None,
+    )
     monkeypatch.setattr(outbound_http, "build_opener", build_opener)
 
     result = outbound_http.open_outbound_request(

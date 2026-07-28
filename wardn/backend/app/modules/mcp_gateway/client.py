@@ -12,7 +12,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from app.core.config import get_settings
-from app.core.outbound_http import UnsafeOutboundURLError, open_outbound_request
+from app.core.outbound_http import (
+    OutboundURLPolicy,
+    UnsafeOutboundURLError,
+    open_outbound_request,
+)
 from app.modules.mcp_registry.installer import parse_mcp_response_body
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -41,6 +45,7 @@ class MCPRemoteSession:
     headers: dict[str, str]
     session_id: str | None
     protocol_version: str
+    outbound_policy: OutboundURLPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ def send_remote_request(
     headers: dict[str, str] | None = None,
     protocol_version: str | None = None,
     verify_tls: bool = True,
+    outbound_policy: OutboundURLPolicy | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     request_headers = {
         "Accept": "application/json, text/event-stream",
@@ -80,7 +86,12 @@ def send_remote_request(
     )
     try:
         context = None if verify_tls else ssl._create_unverified_context()
-        with open_outbound_request(request, timeout=30, context=context) as response:
+        with open_outbound_request(
+            request,
+            timeout=30,
+            context=context,
+            policy=outbound_policy,
+        ) as response:
             body = response.read().decode("utf-8", "replace")
             return parse_mcp_response_body(body), response.headers.get("Mcp-Session-Id")
     except UnsafeOutboundURLError as exc:
@@ -120,6 +131,7 @@ def open_remote_session(
     headers: dict[str, str],
     *,
     verify_tls: bool = True,
+    outbound_policy: OutboundURLPolicy | None = None,
 ) -> MCPRemoteSession:
     response, session_id = send_remote_request(
         url,
@@ -135,6 +147,7 @@ def open_remote_session(
         },
         headers=headers,
         verify_tls=verify_tls,
+        outbound_policy=outbound_policy,
     )
     if "error" in response:
         raise MCPGatewayUpstreamError(f"upstream initialize failed: {response['error']}")
@@ -150,6 +163,7 @@ def open_remote_session(
             headers=headers,
             protocol_version=protocol_version,
             verify_tls=verify_tls,
+            outbound_policy=outbound_policy,
         )
     except MCPGatewayUpstreamError:
         pass
@@ -159,6 +173,7 @@ def open_remote_session(
         headers=headers,
         session_id=session_id,
         protocol_version=protocol_version,
+        outbound_policy=outbound_policy,
     )
 
 
@@ -375,8 +390,14 @@ def list_tools(
     *,
     max_pages: int = 100,
     verify_tls: bool = True,
+    outbound_policy: OutboundURLPolicy | None = None,
 ) -> list[dict[str, Any]]:
-    session = open_remote_session(url, headers, verify_tls=verify_tls)
+    session = open_remote_session(
+        url,
+        headers,
+        verify_tls=verify_tls,
+        outbound_policy=outbound_policy,
+    )
     tools: list[dict[str, Any]] = []
     cursor = None
     for request_id in range(2, max_pages + 2):
@@ -388,6 +409,7 @@ def list_tools(
             headers=session.headers,
             protocol_version=session.protocol_version,
             verify_tls=verify_tls,
+            outbound_policy=session.outbound_policy,
         )
         if "error" in response:
             raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
@@ -481,8 +503,14 @@ def call_tool(
     arguments: dict[str, Any],
     request_meta: dict[str, Any] | None = None,
     verify_tls: bool = True,
+    outbound_policy: OutboundURLPolicy | None = None,
 ) -> dict[str, Any]:
-    session = open_remote_session(url, headers, verify_tls=verify_tls)
+    session = open_remote_session(
+        url,
+        headers,
+        verify_tls=verify_tls,
+        outbound_policy=outbound_policy,
+    )
     params: dict[str, Any] = {"name": tool_name, "arguments": arguments}
     if request_meta:
         params["_meta"] = request_meta
@@ -498,6 +526,7 @@ def call_tool(
         headers=session.headers,
         protocol_version=session.protocol_version,
         verify_tls=verify_tls,
+        outbound_policy=session.outbound_policy,
     )
     if "error" in response:
         raise MCPGatewayUpstreamError(f"upstream tools/call failed: {response['error']}")

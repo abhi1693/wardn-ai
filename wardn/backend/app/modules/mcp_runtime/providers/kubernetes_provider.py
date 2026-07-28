@@ -3,6 +3,7 @@ from threading import Event
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.outbound_http import OutboundURLPolicy, normalize_hostname
 from app.modules.mcp_gateway import client as mcp_client
 from app.modules.mcp_registry.models import MCPServerInstallation
 from app.modules.mcp_runtime.models import MCPRuntimeSession
@@ -32,6 +33,24 @@ from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
 )
 from app.modules.mcp_runtime.providers.kubernetes_naming import runtime_object_names_for_session
 from app.modules.mcp_runtime.providers.kubernetes_reconciler import KubernetesRuntimeReconciler
+from app.modules.mcp_runtime.providers.kubernetes_types import KubernetesRuntimeManifest
+
+
+def runtime_mcp_outbound_policy(
+    manifest: KubernetesRuntimeManifest,
+    *,
+    service_port: int,
+) -> OutboundURLPolicy | None:
+    if manifest.ingress is not None:
+        return None
+    service_host = normalize_hostname(
+        f"{manifest.names.service_name}.{manifest.names.namespace}.svc.cluster.local"
+    )
+    return OutboundURLPolicy(
+        allow_http=True,
+        allowed_ports=frozenset({service_port}),
+        private_host_allowlist=frozenset({service_host}),
+    )
 
 
 class KubernetesRuntimeProvider:
@@ -127,6 +146,7 @@ class KubernetesRuntimeProvider:
                 "use a tracked runtime call path before invocation"
             )
         manifest = build_runtime_manifests(installation, runtime_session)
+        settings = get_settings()
         reconciler = self._new_reconciler()
         reconcile_result = reconciler.reconcile(manifest)
         runtime_session.namespace = manifest.names.namespace
@@ -139,7 +159,11 @@ class KubernetesRuntimeProvider:
         return mcp_client.list_tools(
             runtime_session.endpoint_url,
             runtime_request_headers(installation),
-            verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
+            verify_tls=settings.mcp_runtime_kubernetes_ingress_tls_verify,
+            outbound_policy=runtime_mcp_outbound_policy(
+                manifest,
+                service_port=settings.mcp_runtime_kubernetes_service_port,
+            ),
         )
 
     def call_tool(
@@ -159,6 +183,7 @@ class KubernetesRuntimeProvider:
                 "kubernetes MCP runtime reconciliation requires a runtime session"
             )
         manifest = build_runtime_manifests(installation, runtime_session)
+        settings = get_settings()
         reconciler = self._new_reconciler()
         reconcile_result = reconciler.reconcile(manifest)
         runtime_session.namespace = manifest.names.namespace
@@ -174,7 +199,11 @@ class KubernetesRuntimeProvider:
             tool_name=tool_name,
             arguments=arguments,
             request_meta=request_meta,
-            verify_tls=get_settings().mcp_runtime_kubernetes_ingress_tls_verify,
+            verify_tls=settings.mcp_runtime_kubernetes_ingress_tls_verify,
+            outbound_policy=runtime_mcp_outbound_policy(
+                manifest,
+                service_port=settings.mcp_runtime_kubernetes_service_port,
+            ),
         )
 
     def ensure_runtime(

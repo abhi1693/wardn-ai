@@ -146,8 +146,9 @@ def open_outbound_request(
     *,
     timeout: float,
     context: ssl.SSLContext | None = None,
+    policy: OutboundURLPolicy | None = None,
 ) -> Any:
-    validate_outbound_url(request.full_url)
+    validate_outbound_url(request.full_url, policy=policy)
     handlers: list[Any] = [NoRedirectHandler()]
     if context is not None:
         handlers.append(HTTPSHandler(context=context))

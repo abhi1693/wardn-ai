@@ -3,7 +3,7 @@ from threading import Event
 
 import pytest
 
-from app.core.outbound_http import UnsafeOutboundURLError
+from app.core.outbound_http import OutboundURLPolicy, UnsafeOutboundURLError
 from app.modules.mcp_gateway.client import (
     MCPGatewayUpstreamError,
     call_stdio_tool,
@@ -201,6 +201,46 @@ def test_send_remote_request_adds_protocol_version_header(monkeypatch) -> None:
     )
 
     assert seen["headers"]["mcp-protocol-version"] == "2025-06-18"
+
+
+def test_send_remote_request_uses_custom_outbound_policy(monkeypatch) -> None:
+    seen = {}
+    policy = OutboundURLPolicy(
+        allow_http=True,
+        allowed_ports=frozenset({8000}),
+        private_host_allowlist=frozenset(
+            {"runtime-service.runtime-namespace.svc.cluster.local"}
+        ),
+    )
+
+    class FakeResponse:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b'{"jsonrpc":"2.0","id":2,"result":{}}'
+
+    def open_outbound_request(request, *args, **kwargs):
+        seen["policy"] = kwargs["policy"]
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        open_outbound_request,
+    )
+
+    send_remote_request(
+        "http://runtime-service.runtime-namespace.svc.cluster.local:8000/mcp",
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        outbound_policy=policy,
+    )
+
+    assert seen["policy"] is policy
 
 
 def test_send_remote_request_maps_rejected_url_to_gateway_error(monkeypatch) -> None:

@@ -38,6 +38,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     runtime_object_names,
     runtime_object_names_for_session,
     runtime_request_headers,
+    runtime_service_endpoint_url,
     safe_kubernetes_name,
 )
 
@@ -274,7 +275,12 @@ class FakeReconciler:
 
     def reconcile(self, manifest):
         self.reconciled_manifest = manifest
-        return KubernetesReconcileResult(endpoint_url="http://runtime.test:8000/mcp")
+        return KubernetesReconcileResult(
+            endpoint_url=runtime_service_endpoint_url(
+                names=manifest.names,
+                gateway_port=FakeSettings.mcp_runtime_kubernetes_service_port,
+            )
+        )
 
     def wait_until_ready(self, manifest, *, endpoint_url):
         self.ready_endpoint_url = endpoint_url
@@ -2339,6 +2345,113 @@ def test_kubernetes_reconciler_can_skip_ingress_tls_verification(monkeypatch) ->
     assert seen == [("https://runtime.example.test/mcp", False)]
 
 
+def test_kubernetes_provider_reconciles_and_lists_supergateway_runtime_tools(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    core_v1 = FakeCoreV1Api()
+    fake_reconciler = FakeReconciler(
+        core_v1=core_v1,
+        api_exception_class=FakeApiException,
+    )
+    provider = KubernetesRuntimeProvider(
+        client_factory=FakeClientFactory(core_v1),
+        reconciler_factory=lambda **kwargs: fake_reconciler,
+    )
+    seen = {}
+
+    def list_tools(
+        endpoint_url,
+        headers,
+        *,
+        max_pages=100,
+        verify_tls=True,
+        outbound_policy=None,
+    ):
+        seen["endpoint_url"] = endpoint_url
+        seen["headers"] = headers
+        seen["max_pages"] = max_pages
+        seen["verify_tls"] = verify_tls
+        seen["outbound_policy"] = outbound_policy
+        return [{"name": "health", "inputSchema": {"type": "object"}}]
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_provider.mcp_client.list_tools",
+        list_tools,
+    )
+
+    result = provider.list_tools(installation, runtime_session=runtime_session)
+
+    assert result == [{"name": "health", "inputSchema": {"type": "object"}}]
+    assert fake_reconciler.reconciled_manifest is not None
+    expected_endpoint_url = runtime_service_endpoint_url(
+        names=fake_reconciler.reconciled_manifest.names,
+        gateway_port=FakeSettings.mcp_runtime_kubernetes_service_port,
+    )
+    assert seen["endpoint_url"] == expected_endpoint_url
+    assert seen["headers"] == {}
+    assert seen["max_pages"] == 100
+    assert seen["verify_tls"] is True
+    outbound_policy = seen["outbound_policy"]
+    assert outbound_policy is not None
+    assert outbound_policy.allow_http is True
+    assert outbound_policy.allowed_ports == frozenset({8000})
+    assert outbound_policy.private_host_allowlist == frozenset(
+        {
+            (
+                f"{fake_reconciler.reconciled_manifest.names.service_name}."
+                f"{fake_reconciler.reconciled_manifest.names.namespace}.svc.cluster.local"
+            )
+        }
+    )
+    assert runtime_session.endpoint_url == expected_endpoint_url
+
+
 def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
     tmp_path,
     monkeypatch,
@@ -2411,6 +2524,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         request_meta=None,
         progress_callback=None,
         verify_tls=True,
+        outbound_policy=None,
     ):
         seen["endpoint_url"] = endpoint_url
         seen["headers"] = headers
@@ -2418,6 +2532,7 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
         seen["arguments"] = arguments
         seen["request_meta"] = request_meta
         seen["verify_tls"] = verify_tls
+        seen["outbound_policy"] = outbound_policy
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     monkeypatch.setattr(
@@ -2433,20 +2548,34 @@ def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(
     )
 
     assert result == {"content": [{"type": "text", "text": "ok"}], "isError": False}
-    assert seen == {
-        "endpoint_url": "http://runtime.test:8000/mcp",
-        "headers": {},
-        "tool_name": "echo",
-        "arguments": {"value": "ok"},
-        "request_meta": None,
-        "verify_tls": True,
-    }
     assert fake_reconciler.reconciled_manifest is not None
+    expected_endpoint_url = runtime_service_endpoint_url(
+        names=fake_reconciler.reconciled_manifest.names,
+        gateway_port=FakeSettings.mcp_runtime_kubernetes_service_port,
+    )
+    assert seen["endpoint_url"] == expected_endpoint_url
+    assert seen["headers"] == {}
+    assert seen["tool_name"] == "echo"
+    assert seen["arguments"] == {"value": "ok"}
+    assert seen["request_meta"] is None
+    assert seen["verify_tls"] is True
+    outbound_policy = seen["outbound_policy"]
+    assert outbound_policy is not None
+    assert outbound_policy.allow_http is True
+    assert outbound_policy.allowed_ports == frozenset({8000})
+    assert outbound_policy.private_host_allowlist == frozenset(
+        {
+            (
+                f"{fake_reconciler.reconciled_manifest.names.service_name}."
+                f"{fake_reconciler.reconciled_manifest.names.namespace}.svc.cluster.local"
+            )
+        }
+    )
     assert client_factory.load_count == 1
-    assert fake_reconciler.ready_endpoint_url == "http://runtime.test:8000/mcp"
+    assert fake_reconciler.ready_endpoint_url == expected_endpoint_url
     assert runtime_session.namespace == fake_reconciler.reconciled_manifest.names.namespace
     assert runtime_session.pod_name == fake_reconciler.reconciled_manifest.names.pod_name
-    assert runtime_session.endpoint_url == "http://runtime.test:8000/mcp"
+    assert runtime_session.endpoint_url == expected_endpoint_url
 
     second_result = provider.call_tool(
         installation,
@@ -2530,9 +2659,11 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
         request_meta=None,
         progress_callback=None,
         verify_tls=True,
+        outbound_policy=None,
     ):
         seen["request_meta"] = request_meta
         seen["verify_tls"] = verify_tls
+        seen["outbound_policy"] = outbound_policy
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
     monkeypatch.setattr(
@@ -2548,6 +2679,7 @@ def test_kubernetes_provider_can_skip_tls_verification_for_ingress_tool_call(
     )
 
     assert seen["verify_tls"] is False
+    assert seen["outbound_policy"] is None
 
 
 def test_kubernetes_provider_bubbles_supergateway_call_errors(
