@@ -505,6 +505,7 @@ async def validate_package_runtime_install(
             installation=installation,
             server=server,
             runtime_manager=manager,
+            prefer_registry_metadata=False,
         )
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__

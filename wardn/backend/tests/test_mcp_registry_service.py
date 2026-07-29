@@ -1448,6 +1448,7 @@ async def test_install_server_version_validates_kubernetes_package_runtime(monke
         seen["refresh_installation"] = kwargs["installation"]
         seen["refresh_server"] = kwargs["server"]
         seen["refresh_manager"] = kwargs["runtime_manager"]
+        seen["refresh_prefer_registry_metadata"] = kwargs["prefer_registry_metadata"]
 
     def install_runtime(_server, **kwargs):
         return MCPRuntimeInstall(
@@ -1488,6 +1489,70 @@ async def test_install_server_version_validates_kubernetes_package_runtime(monke
     assert seen["refresh_installation"] is installation
     assert seen["refresh_server"] is server
     assert seen["refresh_manager"] is manager
+    assert seen["refresh_prefer_registry_metadata"] is False
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_seeds_registry_tool_metadata(monkeypatch) -> None:
+    server = server_version("1.0.0", is_latest=True)
+    seen: dict[str, object] = {}
+
+    async def no_op(*args, **kwargs):
+        return None
+
+    async def count_installations_for_workspace(*args, **kwargs):
+        return 0
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    def install_runtime(_server, **kwargs):
+        return runtime_install("1.0.0")
+
+    async def seed_tool_schemas_from_registry_metadata(*args, **kwargs):
+        seen["seed_session"] = args[0]
+        seen["seed_installation"] = kwargs["installation"]
+        seen["seed_server"] = kwargs["server"]
+
+    monkeypatch.setattr(service.limits_service, "lock_quota_capacity", no_op)
+    monkeypatch.setattr(service.limits_service, "require_limit_available", no_op)
+    monkeypatch.setattr(
+        service.repository,
+        "count_installations_for_workspace",
+        count_installations_for_workspace,
+    )
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        installation_service,
+        "seed_tool_schemas_from_registry_metadata",
+        seed_tool_schemas_from_registry_metadata,
+    )
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    installation = session.added[0]
+    assert seen["seed_session"] is session
+    assert seen["seed_installation"] is installation
+    assert seen["seed_server"] is server
 
 
 @pytest.mark.asyncio
@@ -2122,6 +2187,200 @@ async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
     assert seen["upsert_installation"] is installation
     assert seen["server"] is server
     assert seen["tools"][0]["name"] == "get_forecast"
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_uses_registry_metadata_before_runtime(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.server_json["introspection"] = {
+        "tools/list": {
+            "tools": [
+                {
+                    "name": "get_forecast",
+                    "description": "Get weather forecast",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"location": {"type": "string"}},
+                    },
+                }
+            ]
+        }
+    }
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            raise AssertionError("registry metadata should avoid runtime discovery")
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["upsert_installation"] = kwargs["installation"]
+        seen["server"] = kwargs["server"]
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        raise AssertionError("registry metadata should not create a Hub proposal")
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas(
+        session,
+        "io.github.example/weather",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.server_name == "io.github.example/weather"
+    assert result.server_version == "1.0.0"
+    assert result.tool_count == 1
+    assert session.commit_count == 0
+    assert seen["upsert_installation"] is installation
+    assert seen["server"] is server
+    assert seen["tools"][0]["name"] == "get_forecast"
+    assert seen["tools"][0]["inputSchema"]["properties"]["location"]["type"] == "string"
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_accepts_empty_registry_metadata(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/context",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.name = "io.github.example/context"
+    server.server_json["introspection"] = {"tools/list": {"tools": []}}
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            raise AssertionError("empty registry inventory should avoid runtime discovery")
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        seen["installation_for_upsert"] = kwargs["installation"]
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        raise AssertionError("registry metadata should not create a Hub proposal")
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas(
+        session,
+        "io.github.example/context",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.server_name == "io.github.example/context"
+    assert result.server_version == "1.0.0"
+    assert result.tool_count == 0
+    assert session.commit_count == 0
+    assert seen["installation_for_upsert"] is installation
+    assert seen["tools"] == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_can_force_runtime_discovery(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.server_json["tools"] = [
+        {
+            "name": "registry_forecast",
+            "description": "Published forecast metadata",
+            "inputSchema": {"type": "object"},
+        }
+    ]
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            seen["runtime_installation"] = runtime_installation
+            return [
+                {
+                    "name": "live_forecast",
+                    "description": "Runtime forecast metadata",
+                    "inputSchema": {"type": "object"},
+                }
+            ]
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        seen["proposal_tools"] = kwargs["tools"]
+        return True
+
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas_for_installation(
+        session,
+        installation=installation,
+        server=server,
+        runtime_manager=FakeRuntimeManager(),
+        prefer_registry_metadata=False,
+    )
+
+    assert result.tool_count == 1
+    assert session.commit_count == 1
+    assert seen["runtime_installation"] is installation
+    assert seen["tools"][0]["name"] == "live_forecast"
+    assert seen["proposal_tools"][0]["name"] == "live_forecast"
 
 
 @pytest.mark.asyncio

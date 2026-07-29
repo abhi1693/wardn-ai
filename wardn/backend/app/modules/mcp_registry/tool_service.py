@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +9,11 @@ from app.modules.mcp_gateway import repository as gateway_repository
 from app.modules.mcp_gateway.client import MCPGatewayUnsupportedMethodError
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
-from app.modules.mcp_registry.hub_tool_proposals import queue_mcp_hub_tool_inventory_proposal
+from app.modules.mcp_registry.hub_tool_proposals import (
+    normalized_tool_inventory,
+    queue_mcp_hub_tool_inventory_proposal,
+    registry_tool_candidate_lists,
+)
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
 from app.modules.mcp_runtime.service import has_secret_handle_refs, list_tools_with_tracking
 
@@ -56,7 +61,17 @@ async def refresh_tool_schemas_for_installation(
     installation,
     server,
     runtime_manager: MCPRuntimeManager | None = None,
+    prefer_registry_metadata: bool = True,
 ) -> MCPToolRefreshResult:
+    if prefer_registry_metadata:
+        registry_result = await seed_tool_schemas_from_registry_metadata(
+            session,
+            installation=installation,
+            server=server,
+        )
+        if registry_result is not None:
+            return registry_result
+
     manager = runtime_manager or get_runtime_manager()
     try:
         if has_secret_handle_refs(installation.secret_references):
@@ -86,6 +101,33 @@ async def refresh_tool_schemas_for_installation(
         tools=tools,
     )
     queue_mcp_hub_tool_inventory_proposal(
+        session,
+        installation=installation,
+        server=server,
+        tools=tools,
+    )
+    return MCPToolRefreshResult(
+        server_name=server.name,
+        server_version=server.version,
+        tool_count=tool_count,
+    )
+
+
+async def seed_tool_schemas_from_registry_metadata(
+    session: AsyncSession,
+    *,
+    installation,
+    server,
+) -> MCPToolRefreshResult | None:
+    candidate_lists = registry_tool_candidate_lists(server.server_json)
+    if not candidate_lists:
+        return None
+    raw_tools: list[Any] = []
+    for candidate_list in candidate_lists:
+        raw_tools.extend(candidate_list)
+    tools = normalized_tool_inventory(raw_tools)
+
+    tool_count = await tool_repository.upsert_tool_schemas(
         session,
         installation=installation,
         server=server,
