@@ -1035,7 +1035,7 @@ async def stream_agent_chat(
             refresh_failures=tool_refresh_failures,
         )
         logger.warning(
-            "Continuing agent chat with unavailable MCP server tools omitted.",
+            "Continuing agent chat after MCP tool refresh failures; cached tools remain eligible.",
             extra={
                 **agent_log_extra(
                     organization_id=organization_id,
