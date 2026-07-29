@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -42,6 +43,37 @@ from app.modules.users.models import User
 
 INSTALL_SERVER_OPERATION = "install_server"
 BULK_UPDATE_SERVERS_OPERATION = "update_installed_servers"
+logger = logging.getLogger(__name__)
+
+
+def installation_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    server_name: str,
+    version: str | None = None,
+    config_name: str | None = None,
+    install_target: str | None = None,
+    job_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    extra: dict[str, Any] = {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "mcp_server_name": server_name,
+    }
+    if version:
+        extra["mcp_server_version"] = version
+    if config_name:
+        extra["mcp_config_name"] = config_name
+    if install_target:
+        extra["mcp_install_target"] = install_target
+    if job_id is not None:
+        extra["mcp_job_id"] = str(job_id)
+    return extra
+
+
+def response_job_id(response: Any) -> uuid.UUID | None:
+    return getattr(response, "job_id", None)
 
 
 def workspace_installations_resource_key(workspace_id: uuid.UUID) -> str:
@@ -100,6 +132,18 @@ async def enqueue_server_installation(
         request_deduplication_key,
     )
     if existing_job is not None:
+        logger.info(
+            "Reusing active MCP server installation job.",
+            extra=installation_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                server_name=server_name,
+                version=payload.version,
+                config_name=payload.config_name,
+                install_target=payload.install_target,
+                job_id=existing_job.id,
+            ),
+        )
         events = await job_repository.list_job_events(session, existing_job.id)
         return job_response(existing_job, events)
 
@@ -143,7 +187,7 @@ async def enqueue_server_installation(
         configValues=config_values,
         installTarget=payload.install_target,
     ).model_dump(mode="json", by_alias=True)
-    return await enqueue_operation_job(
+    response = await enqueue_operation_job(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -154,6 +198,19 @@ async def enqueue_server_installation(
         progress_total=4,
         deduplication_key=request_deduplication_key,
     )
+    logger.info(
+        "Queued MCP server installation.",
+        extra=installation_log_extra(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            server_name=server_name,
+            version=server.version,
+            config_name=payload.config_name,
+            install_target=payload.install_target,
+            job_id=response_job_id(response),
+        ),
+    )
+    return response
 
 
 async def enqueue_installed_server_updates(
@@ -195,7 +252,7 @@ async def enqueue_installed_server_updates(
             ).model_dump(mode="json", by_alias=True)
             targets.append({"serverName": server_name, "desiredState": desired_state})
 
-    return await enqueue_operation_job(
+    response = await enqueue_operation_job(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -205,6 +262,17 @@ async def enqueue_installed_server_updates(
         request_payload={"targets": targets},
         progress_total=max(1, len(targets) * 3),
     )
+    logger.info(
+        "Queued MCP installed-server updates.",
+        extra={
+            "organization_id": str(organization_id),
+            "workspace_id": str(workspace_id),
+            "mcp_job_id": str(response_job_id(response)) if response_job_id(response) else None,
+            "mcp_update_target_count": len(targets),
+            "mcp_update_server_count": len(set(payload.server_names)),
+        },
+    )
+    return response
 
 
 def cleanup_payload_for_server(
@@ -269,6 +337,18 @@ async def execute_installation_target(
             retryable=False,
         )
     payload = MCPServerInstallRequest.model_validate(desired_state)
+    logger.info(
+        "Preparing MCP server installation target.",
+        extra=installation_log_extra(
+            organization_id=job.organization_id,
+            workspace_id=job.workspace_id,
+            server_name=server_name,
+            version=payload.version,
+            config_name=payload.config_name,
+            install_target=payload.install_target,
+            job_id=job.id,
+        ),
+    )
     await reporter.update(
         progress_start,
         progress_total,
@@ -299,6 +379,18 @@ async def execute_installation_target(
                 f"Installing {server_name}",
                 details={"serverName": server_name, "phase": "install"},
             )
+            logger.info(
+                "Installing MCP server runtime.",
+                extra=installation_log_extra(
+                    organization_id=job.organization_id,
+                    workspace_id=job.workspace_id,
+                    server_name=server_name,
+                    version=server.version,
+                    config_name=payload.config_name,
+                    install_target=payload.install_target,
+                    job_id=job.id,
+                ),
+            )
             installation = await service.install_server_version(
                 session,
                 server_name,
@@ -310,6 +402,21 @@ async def execute_installation_target(
     except MCPJobExecutionError:
         raise
     except Exception as exc:
+        logger.warning(
+            "MCP server installation target failed.",
+            extra={
+                **installation_log_extra(
+                    organization_id=job.organization_id,
+                    workspace_id=job.workspace_id,
+                    server_name=server_name,
+                    version=payload.version,
+                    config_name=payload.config_name,
+                    install_target=payload.install_target,
+                    job_id=job.id,
+                ),
+                "error_type": exc.__class__.__name__,
+            },
+        )
         raise classify_installation_error(exc) from exc
 
     await reporter.register_cleanup({})
@@ -318,6 +425,26 @@ async def execute_installation_target(
         progress_total,
         f"Installed {server_name}",
         details={"serverName": server_name, "phase": "complete"},
+    )
+    logger.info(
+        "Installed MCP server.",
+        extra={
+            **installation_log_extra(
+                organization_id=job.organization_id,
+                workspace_id=job.workspace_id,
+                server_name=server_name,
+                version=getattr(installation, "installed_version", None),
+                config_name=getattr(installation, "config_name", None),
+                job_id=job.id,
+            ),
+            "mcp_installation_id": (
+                str(installation.id) if getattr(installation, "id", None) else None
+            ),
+            "mcp_install_type": getattr(installation, "install_type", None),
+            "mcp_install_status": (
+                str(installation.status) if getattr(installation, "status", None) else None
+            ),
+        },
     )
     return installation.model_dump(mode="json", by_alias=True)
 
@@ -409,4 +536,15 @@ async def cleanup_server_installation(
     job: MCPOperationJob,
     payload: dict[str, Any],
 ) -> None:
+    paths = payload.get("paths")
+    logger.info(
+        "Cleaning MCP server installation artifacts.",
+        extra={
+            "mcp_job_id": str(job.id),
+            "mcp_operation": job.operation,
+            "organization_id": str(job.organization_id),
+            "workspace_id": str(job.workspace_id) if job.workspace_id else None,
+            "mcp_cleanup_path_count": len(paths) if isinstance(paths, list) else None,
+        },
+    )
     await asyncio.to_thread(remove_retryable_install_paths, payload)

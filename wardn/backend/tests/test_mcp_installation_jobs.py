@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -227,7 +228,7 @@ async def test_enqueue_installation_reuses_retry_before_writing_secret_again(mon
 
 
 @pytest.mark.asyncio
-async def test_worker_executes_install_and_clears_retryable_cleanup(monkeypatch) -> None:
+async def test_worker_executes_install_and_clears_retryable_cleanup(monkeypatch, caplog) -> None:
     server = server_version()
     desired_state = MCPServerInstallRequest(version="1.0.0").model_dump(
         mode="json",
@@ -251,6 +252,7 @@ async def test_worker_executes_install_and_clears_retryable_cleanup(monkeypatch)
     monkeypatch.setattr(installation_jobs, "AsyncSessionLocal", session_factory)
     monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
     monkeypatch.setattr(installation_jobs.service, "install_server_version", install)
+    caplog.set_level(logging.INFO, logger=installation_jobs.logger.name)
 
     result = await installation_jobs.execute_server_installation(job, reporter)
 
@@ -260,6 +262,13 @@ async def test_worker_executes_install_and_clears_retryable_cleanup(monkeypatch)
     assert reporter.cleanup[0]["paths"][1].endswith(".backup")
     assert reporter.cleanup[-1] == {}
     assert reporter.progress[-1] == (3, 4, f"Installed {server.name}")
+    assert "Installing MCP server runtime." in caplog.text
+    assert "Installed MCP server." in caplog.text
+    installed = next(
+        record for record in caplog.records if record.message == "Installed MCP server."
+    )
+    assert installed.mcp_job_id == str(job.id)
+    assert installed.mcp_server_name == server.name
 
 
 @pytest.mark.asyncio

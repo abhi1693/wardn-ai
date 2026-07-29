@@ -160,6 +160,46 @@ def add_runtime_event(
     )
 
 
+def runtime_session_log_extra(
+    runtime_session: MCPRuntimeSession,
+    *,
+    tool_name: str | None = None,
+    invocation: Any | None = None,
+    error: BaseException | None = None,
+) -> dict[str, Any]:
+    extra: dict[str, Any] = {
+        "mcp_runtime_session_id": str(runtime_session.id) if runtime_session.id else None,
+        "mcp_installation_id": (
+            str(runtime_session.installation_id) if runtime_session.installation_id else None
+        ),
+        "organization_id": (
+            str(runtime_session.organization_id) if runtime_session.organization_id else None
+        ),
+        "workspace_id": str(runtime_session.workspace_id) if runtime_session.workspace_id else None,
+        "mcp_server_name": runtime_session.server_name,
+        "mcp_server_version": runtime_session.server_version,
+        "mcp_runtime_provider": runtime_session.runtime_provider,
+        "mcp_runtime_kind": runtime_session.runtime_kind,
+        "mcp_runtime_status": runtime_session.status,
+        "mcp_runtime_namespace": runtime_session.namespace,
+        "mcp_runtime_pod_name": runtime_session.pod_name,
+    }
+    if tool_name:
+        extra["mcp_tool_name"] = tool_name
+    if invocation is not None:
+        extra["mcp_tool_invocation_id"] = (
+            str(invocation.id) if getattr(invocation, "id", None) else None
+        )
+        extra["mcp_tool_invocation_status"] = getattr(invocation, "status", None)
+        extra["mcp_tool_duration_ms"] = getattr(invocation, "duration_ms", None)
+        extra["mcp_tool_input_size_bytes"] = getattr(invocation, "input_size_bytes", None)
+        extra["mcp_tool_output_size_bytes"] = getattr(invocation, "output_size_bytes", None)
+        extra["mcp_tool_is_error"] = getattr(invocation, "is_error", None)
+    if error is not None:
+        extra["error_type"] = error.__class__.__name__
+    return extra
+
+
 def is_active_runtime_session_conflict(exc: IntegrityError) -> bool:
     return ACTIVE_RUNTIME_SESSION_CONSTRAINT in str(exc)
 
@@ -193,6 +233,10 @@ async def reuse_conflicting_runtime_session(
         now=now,
     )
     await session.flush()
+    logger.info(
+        "Reused MCP runtime session after concurrent creation.",
+        extra=runtime_session_log_extra(existing),
+    )
     return existing
 
 
@@ -359,6 +403,13 @@ async def ensure_runtime_session(
                 now=now,
             )
             await session.flush()
+            logger.info(
+                "Replaced MCP runtime session.",
+                extra={
+                    **runtime_session_log_extra(existing),
+                    "mcp_runtime_replace_reason": reason,
+                },
+            )
         else:
             if existing.organization_id is None:
                 existing.organization_id = organization_id
@@ -375,6 +426,10 @@ async def ensure_runtime_session(
                 now=now,
             )
             await session.flush()
+            logger.debug(
+                "Reused MCP runtime session.",
+                extra=runtime_session_log_extra(existing),
+            )
             return existing
 
     runtime_session = repository.create_runtime_session(
@@ -420,6 +475,10 @@ async def ensure_runtime_session(
         now=now,
     )
     await session.flush()
+    logger.info(
+        "Created MCP runtime session.",
+        extra=runtime_session_log_extra(runtime_session),
+    )
     return runtime_session
 
 
@@ -462,6 +521,10 @@ async def warm_runtime_session(
     )
     await session.flush()
     await session.commit()
+    logger.info(
+        "Starting MCP runtime warmup.",
+        extra=runtime_session_log_extra(runtime_session),
+    )
 
     try:
         for deferred_runtime_session in deferred_runtime_stops:
@@ -487,6 +550,10 @@ async def warm_runtime_session(
             now=failed_at,
         )
         await session.flush()
+        logger.warning(
+            "MCP runtime warmup failed.",
+            extra=runtime_session_log_extra(runtime_session, error=exc),
+        )
         raise
 
     ready_at = datetime.now(UTC)
@@ -510,6 +577,14 @@ async def warm_runtime_session(
         now=ready_at,
     )
     await session.flush()
+    logger.info(
+        "MCP runtime warmup succeeded.",
+        extra={
+            **runtime_session_log_extra(runtime_session),
+            "mcp_runtime_health_status": health.status,
+            "mcp_runtime_ready": health.ready,
+        },
+    )
     return runtime_session
 
 
@@ -606,6 +681,14 @@ async def prepare_tool_call_tracking(
         now=now,
     )
     await session.flush()
+    logger.info(
+        "Started MCP tool invocation.",
+        extra=runtime_session_log_extra(
+            runtime_session,
+            tool_name=tool_name,
+            invocation=invocation,
+        ),
+    )
 
     if invocation.id is None:
         raise RuntimeError("tool invocation id was not generated")
@@ -701,6 +784,15 @@ async def finalize_prepared_tool_call(
                 "errorType": error.__class__.__name__,
             },
         )
+        logger.warning(
+            "MCP tool invocation failed.",
+            extra=runtime_session_log_extra(
+                runtime_session,
+                tool_name=tool_name,
+                invocation=invocation,
+                error=error,
+            ),
+        )
     elif result is not None:
         mark_invocation_success(
             runtime_session,
@@ -719,6 +811,14 @@ async def finalize_prepared_tool_call(
                 "outputSizeBytes": invocation.output_size_bytes,
                 "isError": invocation.is_error,
             },
+        )
+        logger.info(
+            "MCP tool invocation completed.",
+            extra=runtime_session_log_extra(
+                runtime_session,
+                tool_name=tool_name,
+                invocation=invocation,
+            ),
         )
     else:
         raise ValueError("result or error is required to finalize a tool call")
@@ -893,6 +993,10 @@ async def list_tools_with_tracking(
     )
     await session.flush()
     await session.commit()
+    logger.info(
+        "Starting MCP tool discovery.",
+        extra=runtime_session_log_extra(runtime_session, tool_name="tools/list"),
+    )
 
     try:
         for deferred_runtime_session in deferred_runtime_stops:
@@ -922,6 +1026,14 @@ async def list_tools_with_tracking(
         )
         await session.flush()
         await session.commit()
+        logger.warning(
+            "MCP tool discovery failed.",
+            extra=runtime_session_log_extra(
+                runtime_session,
+                tool_name="tools/list",
+                error=exc,
+            ),
+        )
         raise
 
     finished_at = datetime.now(UTC)
@@ -941,6 +1053,13 @@ async def list_tools_with_tracking(
         now=finished_at,
     )
     await session.flush()
+    logger.info(
+        "MCP tool discovery succeeded.",
+        extra={
+            **runtime_session_log_extra(runtime_session, tool_name="tools/list"),
+            "mcp_tool_count": len(tools),
+        },
+    )
     return tools
 
 

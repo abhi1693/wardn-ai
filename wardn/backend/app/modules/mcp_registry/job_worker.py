@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import socket
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -42,6 +43,32 @@ Sleep = Callable[[float], Awaitable[None]]
 class MCPJobHandlers:
     executors: Mapping[str, JobExecutor]
     cleanup_executors: Mapping[str, CleanupExecutor]
+
+
+def job_log_extra(job: MCPOperationJob, *, worker_id: str) -> dict[str, Any]:
+    return {
+        "mcp_job_id": str(job.id),
+        "mcp_operation": job.operation,
+        "mcp_resource_key": job.resource_key,
+        "mcp_job_status": job.status,
+        "organization_id": str(job.organization_id),
+        "workspace_id": str(job.workspace_id) if job.workspace_id else None,
+        "worker_id": worker_id,
+        "attempt_count": job.attempt_count,
+        "max_attempts": job.max_attempts,
+    }
+
+
+def cleanup_log_extra(job: MCPOperationJob, *, worker_id: str) -> dict[str, Any]:
+    extra = job_log_extra(job, worker_id=worker_id)
+    extra.update(
+        {
+            "cleanup_status": job.cleanup_status,
+            "cleanup_attempt_count": job.cleanup_attempt_count,
+            "cleanup_max_attempts": job.cleanup_max_attempts,
+        }
+    )
+    return extra
 
 
 def default_worker_id() -> str:
@@ -258,12 +285,17 @@ async def execute_job(
     retry_max_seconds: int,
 ) -> None:
     executor = handlers.executors.get(job.operation)
+    started_at = time.monotonic()
     reporter = JobProgressReporter(
         session_factory=session_factory,
         job_id=job.id,
         worker_id=worker_id,
     )
     try:
+        logger.info(
+            "Starting MCP operation job.",
+            extra=job_log_extra(job, worker_id=worker_id),
+        )
         if executor is None:
             raise MCPJobExecutionError(
                 f"Unsupported MCP operation: {job.operation}",
@@ -281,10 +313,20 @@ async def execute_job(
     except asyncio.CancelledError:
         raise
     except MCPJobLeaseLostError:
-        logger.warning("Lost lease for MCP operation job %s.", job.id)
+        logger.warning(
+            "Lost MCP operation job lease.",
+            extra=job_log_extra(job, worker_id=worker_id),
+        )
         return
     except Exception as exc:
-        logger.exception("MCP operation job %s failed.", job.id)
+        failure_extra = job_log_extra(job, worker_id=worker_id)
+        failure_extra.update(
+            {
+                "error_type": exc.__class__.__name__,
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            }
+        )
+        logger.exception("MCP operation job failed.", extra=failure_extra)
         try:
             await persist_job_failure(
                 session_factory=session_factory,
@@ -295,7 +337,10 @@ async def execute_job(
                 retry_max_seconds=retry_max_seconds,
             )
         except MCPJobLeaseLostError:
-            logger.warning("Could not persist failure after losing job %s lease.", job.id)
+            logger.warning(
+                "Could not persist MCP operation job failure after lease loss.",
+                extra=job_log_extra(job, worker_id=worker_id),
+            )
         return
 
     try:
@@ -306,7 +351,14 @@ async def execute_job(
             result=result,
         )
     except MCPJobLeaseLostError:
-        logger.warning("Could not persist success after losing job %s lease.", job.id)
+        logger.warning(
+            "Could not persist MCP operation job success after lease loss.",
+            extra=job_log_extra(job, worker_id=worker_id),
+        )
+        return
+    success_extra = job_log_extra(job, worker_id=worker_id)
+    success_extra["duration_ms"] = int((time.monotonic() - started_at) * 1000)
+    logger.info("Completed MCP operation job.", extra=success_extra)
 
 
 async def persist_cleanup_failure(
@@ -351,7 +403,12 @@ async def execute_cleanup(
     retry_max_seconds: int,
 ) -> None:
     executor = handlers.cleanup_executors.get(job.operation)
+    started_at = time.monotonic()
     try:
+        logger.info(
+            "Starting MCP operation job cleanup.",
+            extra=cleanup_log_extra(job, worker_id=worker_id),
+        )
         if executor is None:
             raise MCPJobCleanupError(
                 f"Unsupported cleanup for MCP operation: {job.operation}",
@@ -369,10 +426,20 @@ async def execute_cleanup(
     except asyncio.CancelledError:
         raise
     except MCPJobLeaseLostError:
-        logger.warning("Lost cleanup lease for MCP operation job %s.", job.id)
+        logger.warning(
+            "Lost MCP operation job cleanup lease.",
+            extra=cleanup_log_extra(job, worker_id=worker_id),
+        )
         return
     except Exception as exc:
-        logger.exception("Cleanup for MCP operation job %s failed.", job.id)
+        failure_extra = cleanup_log_extra(job, worker_id=worker_id)
+        failure_extra.update(
+            {
+                "error_type": exc.__class__.__name__,
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            }
+        )
+        logger.exception("MCP operation job cleanup failed.", extra=failure_extra)
         try:
             await persist_cleanup_failure(
                 session_factory=session_factory,
@@ -383,7 +450,10 @@ async def execute_cleanup(
                 retry_max_seconds=retry_max_seconds,
             )
         except MCPJobLeaseLostError:
-            logger.warning("Could not persist cleanup failure after losing job %s lease.", job.id)
+            logger.warning(
+                "Could not persist MCP operation cleanup failure after lease loss.",
+                extra=cleanup_log_extra(job, worker_id=worker_id),
+            )
         return
 
     async with session_factory() as session:
@@ -394,9 +464,15 @@ async def execute_cleanup(
         )
         if not completed:
             await session.rollback()
-            logger.warning("Could not persist cleanup success after losing job %s lease.", job.id)
+            logger.warning(
+                "Could not persist MCP operation cleanup success after lease loss.",
+                extra=cleanup_log_extra(job, worker_id=worker_id),
+            )
             return
         await session.commit()
+    success_extra = cleanup_log_extra(job, worker_id=worker_id)
+    success_extra["duration_ms"] = int((time.monotonic() - started_at) * 1000)
+    logger.info("Completed MCP operation job cleanup.", extra=success_extra)
 
 
 async def run_job_worker_once(
@@ -433,6 +509,10 @@ async def run_job_worker_once(
         await session.commit()
 
     if cleanup is not None:
+        logger.info(
+            "Claimed MCP operation job cleanup.",
+            extra=cleanup_log_extra(cleanup, worker_id=worker_id),
+        )
         await execute_cleanup(
             cleanup,
             worker_id=worker_id,
@@ -445,6 +525,10 @@ async def run_job_worker_once(
         )
         return True
     if job is not None:
+        logger.info(
+            "Claimed MCP operation job.",
+            extra=job_log_extra(job, worker_id=worker_id),
+        )
         await execute_job(
             job,
             worker_id=worker_id,

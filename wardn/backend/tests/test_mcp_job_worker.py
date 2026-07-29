@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -95,7 +96,7 @@ def test_retry_delay_uses_bounded_exponential_backoff() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_job_persists_success(monkeypatch) -> None:
+async def test_execute_job_persists_success(monkeypatch, caplog) -> None:
     job = make_job()
     seen: dict[str, object] = {}
 
@@ -107,6 +108,7 @@ async def test_execute_job_persists_success(monkeypatch) -> None:
         seen["success"] = kwargs
 
     monkeypatch.setattr(job_worker, "persist_job_success", persist_success)
+    caplog.set_level(logging.INFO, logger=job_worker.logger.name)
 
     await job_worker.execute_job(
         job,
@@ -124,6 +126,13 @@ async def test_execute_job_persists_success(monkeypatch) -> None:
 
     assert seen["executor"] == (job, "worker-1")
     assert seen["success"]["result"] == {"installationId": "installation-1"}
+    assert "Starting MCP operation job." in caplog.text
+    assert "Completed MCP operation job." in caplog.text
+    completed = next(
+        record for record in caplog.records if record.message == "Completed MCP operation job."
+    )
+    assert completed.mcp_job_id == str(job.id)
+    assert completed.mcp_operation == "install_server"
 
 
 @pytest.mark.asyncio

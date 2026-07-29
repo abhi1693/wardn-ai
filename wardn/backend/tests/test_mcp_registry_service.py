@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -534,7 +535,7 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
 
 
 @pytest.mark.asyncio
-async def test_sync_catalog_source_commits_and_clears_each_batch(monkeypatch) -> None:
+async def test_sync_catalog_source_commits_and_clears_each_batch(monkeypatch, caplog) -> None:
     source = catalog_source()
     batches = [
         [registry_payload(f"1.0.{index}") for index in range(100)],
@@ -573,6 +574,7 @@ async def test_sync_catalog_source_commits_and_clears_each_batch(monkeypatch) ->
     )
     monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
     session = FakeSession()
+    caplog.set_level(logging.INFO, logger=catalog_service.logger.name)
 
     response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
 
@@ -581,6 +583,13 @@ async def test_sync_catalog_source_commits_and_clears_each_batch(monkeypatch) ->
     assert calls["kwargs"]["limit"] == 100
     assert session.commit_count == 3
     assert batches == [[], [], []]
+    batch_records = [
+        record
+        for record in caplog.records
+        if record.message == "Synced MCP catalog source batch."
+    ]
+    assert [record.mcp_catalog_batch_size for record in batch_records] == [100, 100, 1]
+    assert batch_records[-1].mcp_catalog_synced_count == 201
 
 
 @pytest.mark.asyncio

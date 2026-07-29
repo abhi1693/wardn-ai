@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -10,6 +11,32 @@ from app.modules.mcp_registry import job_repository
 from app.modules.mcp_registry.exceptions import MCPOperationJobNotFoundError
 from app.modules.mcp_registry.models import MCPOperationJob, MCPOperationJobEvent
 from app.modules.mcp_registry.schemas import MCPOperationJobEventRead, MCPOperationJobRead
+
+logger = logging.getLogger(__name__)
+
+
+def operation_job_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    requested_by_id: uuid.UUID | None = None,
+    operation: str,
+    resource_key: str,
+    job_id: uuid.UUID | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    extra: dict[str, Any] = {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "requested_by_id": str(requested_by_id) if requested_by_id else None,
+        "mcp_operation": operation,
+        "mcp_resource_key": resource_key,
+    }
+    if job_id is not None:
+        extra["mcp_job_id"] = str(job_id)
+    if status is not None:
+        extra["mcp_job_status"] = status
+    return extra
 
 
 def operation_deduplication_key(
@@ -71,6 +98,18 @@ async def enqueue_operation_job(
         deduplication_key,
     )
     if existing is not None:
+        logger.info(
+            "Reusing active MCP operation job.",
+            extra=operation_job_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                requested_by_id=requested_by_id,
+                operation=operation,
+                resource_key=resource_key,
+                job_id=existing.id,
+                status=existing.status,
+            ),
+        )
         return job_response(existing, await job_repository.list_job_events(session, existing.id))
 
     job = MCPOperationJob(
@@ -118,9 +157,33 @@ async def enqueue_operation_job(
         )
         if existing is None:
             raise
+        logger.info(
+            "Reusing active MCP operation job after enqueue race.",
+            extra=operation_job_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                requested_by_id=requested_by_id,
+                operation=operation,
+                resource_key=resource_key,
+                job_id=existing.id,
+                status=existing.status,
+            ),
+        )
         return job_response(existing, await job_repository.list_job_events(session, existing.id))
 
     events = await job_repository.list_job_events(session, job.id)
+    logger.info(
+        "Queued MCP operation job.",
+        extra=operation_job_log_extra(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            requested_by_id=requested_by_id,
+            operation=operation,
+            resource_key=resource_key,
+            job_id=job.id,
+            status=job.status,
+        ),
+    )
     return job_response(job, events)
 
 

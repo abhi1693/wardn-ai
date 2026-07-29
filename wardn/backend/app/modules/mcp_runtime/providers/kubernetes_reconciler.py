@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -21,6 +22,26 @@ from app.modules.mcp_runtime.providers.kubernetes_types import (
     KubernetesRuntimeNotReadyError,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def kubernetes_runtime_log_extra(
+    names: KubernetesRuntimeNames,
+    *,
+    resource_kind: str | None = None,
+    resource_name: str | None = None,
+    action: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        "kubernetes_namespace": names.namespace,
+        "kubernetes_pod_name": names.pod_name,
+        "kubernetes_service_name": names.service_name,
+        "kubernetes_ingress_name": names.ingress_name,
+        "kubernetes_resource_kind": resource_kind,
+        "kubernetes_resource_name": resource_name,
+        "kubernetes_action": action,
+    }
+
 
 class KubernetesRuntimeReconciler:
     def __init__(
@@ -43,6 +64,14 @@ class KubernetesRuntimeReconciler:
         self.monotonic = monotonic
 
     def reconcile(self, manifest: KubernetesRuntimeManifest) -> KubernetesReconcileResult:
+        logger.info(
+            "Reconciling Kubernetes MCP runtime.",
+            extra={
+                **kubernetes_runtime_log_extra(manifest.names),
+                "kubernetes_network_policy_count": len(manifest.network_policies),
+                "kubernetes_ingress_enabled": manifest.ingress is not None,
+            },
+        )
         self.create_namespace(manifest)
         self.create_or_replace_network_policies(manifest)
         self.create_or_replace_secret(manifest)
@@ -57,6 +86,13 @@ class KubernetesRuntimeReconciler:
                 gateway_port=self.settings.mcp_runtime_kubernetes_service_port,
             )
         )
+        logger.info(
+            "Reconciled Kubernetes MCP runtime.",
+            extra={
+                **kubernetes_runtime_log_extra(manifest.names),
+                "mcp_runtime_endpoint_url": endpoint_url,
+            },
+        )
         return KubernetesReconcileResult(
             endpoint_url=endpoint_url,
         )
@@ -66,10 +102,28 @@ class KubernetesRuntimeReconciler:
             self._call_api(self.core_v1.create_namespace, body=manifest.namespace)
         except self.api_exception_class as exc:
             if self._is_status(exc, 409):
+                logger.info(
+                    "Kubernetes MCP runtime namespace already exists.",
+                    extra=kubernetes_runtime_log_extra(
+                        manifest.names,
+                        resource_kind="Namespace",
+                        resource_name=manifest.names.namespace,
+                        action="exists",
+                    ),
+                )
                 return
             raise KubernetesReconcileError(
                 f"Kubernetes namespace reconcile failed: {self._api_error_detail(exc)}"
             ) from exc
+        logger.info(
+            "Created Kubernetes MCP runtime namespace.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="Namespace",
+                resource_name=manifest.names.namespace,
+                action="create",
+            ),
+        )
 
     def create_or_replace_network_policies(self, manifest: KubernetesRuntimeManifest) -> None:
         for network_policy in manifest.network_policies:
@@ -104,6 +158,25 @@ class KubernetesRuntimeReconciler:
                     "Kubernetes network policy replace failed: "
                     f"{self._api_error_detail(replace_exc)}"
                 ) from replace_exc
+            logger.info(
+                "Replaced Kubernetes MCP runtime NetworkPolicy.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="NetworkPolicy",
+                    resource_name=policy_name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            "Created Kubernetes MCP runtime NetworkPolicy.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="NetworkPolicy",
+                resource_name=policy_name,
+                action="create",
+            ),
+        )
 
     def create_or_replace_secret(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
@@ -128,6 +201,25 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes secret replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
+            logger.info(
+                "Replaced Kubernetes MCP runtime Secret.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="Secret",
+                    resource_name=manifest.names.secret_name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            "Created Kubernetes MCP runtime Secret.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="Secret",
+                resource_name=manifest.names.secret_name,
+                action="create",
+            ),
+        )
 
     def create_or_replace_deployment(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
@@ -153,6 +245,25 @@ class KubernetesRuntimeReconciler:
                     "Kubernetes deployment replace failed: "
                     f"{self._api_error_detail(replace_exc)}"
                 ) from replace_exc
+            logger.info(
+                "Replaced Kubernetes MCP runtime Deployment.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="Deployment",
+                    resource_name=manifest.names.pod_name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            "Created Kubernetes MCP runtime Deployment.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="Deployment",
+                resource_name=manifest.names.pod_name,
+                action="create",
+            ),
+        )
 
     def create_or_replace_service(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
@@ -177,6 +288,25 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes service replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
+            logger.info(
+                "Replaced Kubernetes MCP runtime Service.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="Service",
+                    resource_name=manifest.names.service_name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            "Created Kubernetes MCP runtime Service.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="Service",
+                resource_name=manifest.names.service_name,
+                action="create",
+            ),
+        )
 
     def create_or_replace_ingress(self, manifest: KubernetesRuntimeManifest) -> None:
         if manifest.ingress is None:
@@ -203,6 +333,25 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes ingress replace failed: {self._api_error_detail(replace_exc)}"
                 ) from replace_exc
+            logger.info(
+                "Replaced Kubernetes MCP runtime Ingress.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="Ingress",
+                    resource_name=manifest.names.ingress_name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            "Created Kubernetes MCP runtime Ingress.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind="Ingress",
+                resource_name=manifest.names.ingress_name,
+                action="create",
+            ),
+        )
 
     def delete_runtime_objects(
         self,
@@ -211,8 +360,24 @@ class KubernetesRuntimeReconciler:
         delete_resources: bool = False,
     ) -> None:
         if not delete_resources:
+            logger.info(
+                "Scaling Kubernetes MCP runtime deployment to stop runtime.",
+                extra={
+                    **kubernetes_runtime_log_extra(
+                        names,
+                        resource_kind="Deployment",
+                        resource_name=names.pod_name,
+                        action="scale",
+                    ),
+                    "kubernetes_replicas": 0,
+                },
+            )
             self.scale_deployment(names, replicas=0)
             return
+        logger.info(
+            "Deleting Kubernetes MCP runtime resources.",
+            extra=kubernetes_runtime_log_extra(names, action="delete"),
+        )
         self.delete_ingress(names)
         self.delete_network_policies(names)
         self.delete_service(names)
@@ -231,6 +396,16 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes ingress delete failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Deleted Kubernetes MCP runtime Ingress.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind="Ingress",
+                resource_name=names.ingress_name,
+                action="delete",
+            ),
+        )
 
     def delete_network_policies(self, names: KubernetesRuntimeNames) -> None:
         for policy_name in runtime_network_policy_names(names):
@@ -248,6 +423,16 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes network policy delete failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Deleted Kubernetes MCP runtime NetworkPolicy.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind="NetworkPolicy",
+                resource_name=policy_name,
+                action="delete",
+            ),
+        )
 
     def delete_service(self, names: KubernetesRuntimeNames) -> None:
         try:
@@ -261,6 +446,16 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes service delete failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Deleted Kubernetes MCP runtime Service.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind="Service",
+                resource_name=names.service_name,
+                action="delete",
+            ),
+        )
 
     def scale_deployment(self, names: KubernetesRuntimeNames, *, replicas: int) -> None:
         try:
@@ -275,6 +470,19 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes deployment scale failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Scaled Kubernetes MCP runtime Deployment.",
+            extra={
+                **kubernetes_runtime_log_extra(
+                    names,
+                    resource_kind="Deployment",
+                    resource_name=names.pod_name,
+                    action="scale",
+                ),
+                "kubernetes_replicas": replicas,
+            },
+        )
 
     def delete_deployment(self, names: KubernetesRuntimeNames) -> None:
         try:
@@ -288,6 +496,16 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes deployment delete failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Deleted Kubernetes MCP runtime Deployment.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind="Deployment",
+                resource_name=names.pod_name,
+                action="delete",
+            ),
+        )
 
     def delete_secret(self, names: KubernetesRuntimeNames) -> None:
         try:
@@ -301,6 +519,16 @@ class KubernetesRuntimeReconciler:
                 raise KubernetesReconcileError(
                     f"Kubernetes secret delete failed: {self._api_error_detail(exc)}"
                 ) from exc
+            return
+        logger.info(
+            "Deleted Kubernetes MCP runtime Secret.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind="Secret",
+                resource_name=names.secret_name,
+                action="delete",
+            ),
+        )
 
     def read_deployment(self, names: KubernetesRuntimeNames) -> Any:
         try:

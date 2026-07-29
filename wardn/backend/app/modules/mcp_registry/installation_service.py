@@ -1,6 +1,7 @@
 """MCP installation, tool-discovery, and validation application services."""
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -53,6 +54,29 @@ from app.modules.mcp_runtime import repository as runtime_repository
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
 from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.users.models import User
+
+logger = logging.getLogger(__name__)
+
+
+def installation_service_log_extra(
+    *,
+    workspace_id: uuid.UUID | None,
+    server_name: str,
+    version: str | None = None,
+    config_name: str | None = None,
+    installation_id: uuid.UUID | None = None,
+    install_type: str | None = None,
+    install_target: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "mcp_server_name": server_name,
+        "mcp_server_version": version,
+        "mcp_config_name": config_name,
+        "mcp_installation_id": str(installation_id) if installation_id else None,
+        "mcp_install_type": install_type,
+        "mcp_install_target": install_target,
+    }
 
 
 async def installation_response(
@@ -306,6 +330,20 @@ async def install_server_version(
     )
     config_values = merged_install_config_values(installation, payload.config_values)
     is_new_installation = installation is None
+    logger.info(
+        "Starting MCP server installation.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=workspace_id,
+                server_name=name,
+                version=server.version,
+                config_name=payload.config_name,
+                installation_id=installation.id if installation else None,
+                install_target=payload.install_target,
+            ),
+            "mcp_installation_new": is_new_installation,
+        },
+    )
     if is_new_installation:
         installation_count = await repository.count_installations_for_workspace(
             session,
@@ -378,6 +416,18 @@ async def install_server_version(
     try:
         await validate_package_runtime_install(session, installation, server)
     except MCPServerInstallationFailedError:
+        logger.warning(
+            "MCP server installation validation failed.",
+            extra=installation_service_log_extra(
+                workspace_id=workspace_id,
+                server_name=name,
+                version=server.version,
+                config_name=payload.config_name,
+                installation_id=installation.id,
+                install_type=runtime_install.install_type,
+                install_target=payload.install_target,
+            ),
+        )
         if is_new_installation or previous_install_path != runtime_install.install_path:
             remove_installation_artifacts(runtime_install.install_path)
         raise
@@ -385,7 +435,23 @@ async def install_server_version(
     if previous_install_path and previous_install_path != runtime_install.install_path:
         remove_installation_artifacts(previous_install_path)
 
-    return await installation_response(session, installation, organization_id=organization_id)
+    response = await installation_response(session, installation, organization_id=organization_id)
+    logger.info(
+        "Completed MCP server installation.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=workspace_id,
+                server_name=name,
+                version=server.version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+                install_target=payload.install_target,
+            ),
+            "mcp_install_status": str(installation.status),
+        },
+    )
+    return response
 
 
 async def uninstall_server(
@@ -399,10 +465,32 @@ async def uninstall_server(
     if installation is None:
         raise MCPServerInstallationNotFoundError("server is not installed")
 
+    logger.info(
+        "Uninstalling MCP server.",
+        extra=installation_service_log_extra(
+            workspace_id=workspace_id,
+            server_name=installation.server_name,
+            version=installation.installed_version,
+            config_name=installation.config_name,
+            installation_id=installation.id,
+            install_type=installation.install_type,
+        ),
+    )
     await delete_installation_runtime_resources(session, installation)
     remove_installation_artifacts(installation.install_path)
     await repository.delete_installation(session, installation)
     await session.flush()
+    logger.info(
+        "Uninstalled MCP server.",
+        extra=installation_service_log_extra(
+            workspace_id=workspace_id,
+            server_name=installation.server_name,
+            version=installation.installed_version,
+            config_name=installation.config_name,
+            installation_id=installation.id,
+            install_type=installation.install_type,
+        ),
+    )
 
 
 async def uninstall_installation(
@@ -414,10 +502,32 @@ async def uninstall_installation(
     if installation is None:
         raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
+    logger.info(
+        "Uninstalling MCP server configuration.",
+        extra=installation_service_log_extra(
+            workspace_id=installation.workspace_id,
+            server_name=installation.server_name,
+            version=installation.installed_version,
+            config_name=installation.config_name,
+            installation_id=installation.id,
+            install_type=installation.install_type,
+        ),
+    )
     await delete_installation_runtime_resources(session, installation)
     remove_installation_artifacts(installation.install_path)
     await repository.delete_installation(session, installation)
     await session.flush()
+    logger.info(
+        "Uninstalled MCP server configuration.",
+        extra=installation_service_log_extra(
+            workspace_id=installation.workspace_id,
+            server_name=installation.server_name,
+            version=installation.installed_version,
+            config_name=installation.config_name,
+            installation_id=installation.id,
+            install_type=installation.install_type,
+        ),
+    )
 
 
 async def delete_installation_runtime_resources(
@@ -435,12 +545,40 @@ async def delete_installation_runtime_resources(
 
     manager = manager or get_runtime_manager()
     await session.commit()
+    logger.info(
+        "Deleting MCP installation runtime resources.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=installation.workspace_id,
+                server_name=installation.server_name,
+                version=installation.installed_version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+            ),
+            "mcp_runtime_session_count": len(runtime_sessions),
+        },
+    )
     for runtime_session in runtime_sessions:
         await asyncio.to_thread(
             manager.stop_runtime,
             runtime_session,
             delete_resources=True,
         )
+    logger.info(
+        "Deleted MCP installation runtime resources.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=installation.workspace_id,
+                server_name=installation.server_name,
+                version=installation.installed_version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+            ),
+            "mcp_runtime_session_count": len(runtime_sessions),
+        },
+    )
 
 
 async def update_installed_servers(

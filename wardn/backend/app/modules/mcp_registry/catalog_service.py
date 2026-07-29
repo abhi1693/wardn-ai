@@ -2,6 +2,7 @@
 
 import asyncio
 import gc
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -68,6 +69,7 @@ CATALOG_SOURCE_TOKEN_KEY = "api_token"
 CATALOG_SOURCE_META_KEY = "wardnCatalogSource"
 CATALOG_SYNC_BATCH_SIZE = 100
 NO_CATALOG_SYNC_BATCH = object()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -667,6 +669,19 @@ async def sync_catalog_source(
     else:
         pagination = "cursor"
     sync_started_at = datetime.now(UTC)
+    logger.info(
+        "Starting MCP catalog source sync.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(source.id),
+            "mcp_catalog_source_name": source.name,
+            "mcp_catalog_provider": source.provider,
+            "mcp_catalog_sync_mode": source.sync_mode,
+            "mcp_catalog_updated_since": updated_since,
+            "mcp_catalog_pagination": pagination,
+            "mcp_catalog_source_url_count": len(source_urls),
+        },
+    )
 
     try:
         headers = registry_headers(source_type, api_key=None, tenant_id=source.tenant_id or None)
@@ -676,7 +691,20 @@ async def sync_catalog_source(
         loaded_source = False
         for source_url in source_urls:
             source_batch_count = 0
+            batch_index = 0
             try:
+                logger.info(
+                    "Fetching MCP catalog source URL.",
+                    extra={
+                        "organization_id": str(organization_id),
+                        "mcp_catalog_source_id": str(source.id),
+                        "mcp_catalog_source_name": source.name,
+                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_url": source_url,
+                        "mcp_catalog_updated_since": updated_since,
+                        "mcp_catalog_batch_size": CATALOG_SYNC_BATCH_SIZE,
+                    },
+                )
                 batch_iterator = iter_supported_server_batches_from_registry_url(
                     source_url,
                     limit=CATALOG_SYNC_BATCH_SIZE,
@@ -694,6 +722,7 @@ async def sync_catalog_source(
                     batch = await asyncio.to_thread(next_catalog_sync_batch, batch_iterator)
                     if batch is NO_CATALOG_SYNC_BATCH:
                         break
+                    batch_index += 1
                     source_batch_count += len(batch)
                     sourced_servers: list[MCPServerCreate] = []
                     try:
@@ -701,20 +730,60 @@ async def sync_catalog_source(
                             catalog_source_payload(server, source=source, source_url=source_url)
                             for server in batch
                         ]
-                        synced_count += await sync_supported_servers(
+                        synced_batch_count = await sync_supported_servers(
                             session,
                             sourced_servers,
                             organization_id=organization_id,
                             catalog_source_id=source.id,
                         )
+                        synced_count += synced_batch_count
                         await session.commit()
+                        logger.info(
+                            "Synced MCP catalog source batch.",
+                            extra={
+                                "organization_id": str(organization_id),
+                                "mcp_catalog_source_id": str(source.id),
+                                "mcp_catalog_source_name": source.name,
+                                "mcp_catalog_provider": source.provider,
+                                "mcp_catalog_source_url": source_url,
+                                "mcp_catalog_batch_index": batch_index,
+                                "mcp_catalog_batch_size": len(batch),
+                                "mcp_catalog_batch_synced_count": synced_batch_count,
+                                "mcp_catalog_synced_count": synced_count,
+                            },
+                        )
                     finally:
                         release_catalog_sync_batch_memory(batch, sourced_servers)
                 loaded_source = True
+                logger.info(
+                    "Finished MCP catalog source URL.",
+                    extra={
+                        "organization_id": str(organization_id),
+                        "mcp_catalog_source_id": str(source.id),
+                        "mcp_catalog_source_name": source.name,
+                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_url": source_url,
+                        "mcp_catalog_source_count": source_batch_count,
+                        "mcp_catalog_batch_count": batch_index,
+                    },
+                )
                 break
             except Exception as exc:
                 last_error = exc
                 await session.rollback()
+                logger.warning(
+                    "MCP catalog source URL failed.",
+                    extra={
+                        "organization_id": str(organization_id),
+                        "mcp_catalog_source_id": str(source.id),
+                        "mcp_catalog_source_name": source.name,
+                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_url": source_url,
+                        "mcp_catalog_source_count": source_batch_count,
+                        "mcp_catalog_batch_count": batch_index,
+                        "error_type": exc.__class__.__name__,
+                    },
+                )
                 if source_batch_count > 0:
                     raise
         if not loaded_source:
@@ -723,6 +792,16 @@ async def sync_catalog_source(
             )
     except Exception as exc:
         await session.rollback()
+        logger.warning(
+            "MCP catalog source sync failed.",
+            extra={
+                "organization_id": str(organization_id),
+                "mcp_catalog_source_id": str(source_id),
+                "mcp_catalog_source_name": getattr(source, "name", None),
+                "mcp_catalog_provider": getattr(source, "provider", None),
+                "error_type": exc.__class__.__name__,
+            },
+        )
         source = await repository.get_catalog_source(
             session,
             source_id,
@@ -740,6 +819,18 @@ async def sync_catalog_source(
     source.last_error = ""
     await session.flush()
     await session.refresh(source)
+    logger.info(
+        "Completed MCP catalog source sync.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(source.id),
+            "mcp_catalog_source_name": source.name,
+            "mcp_catalog_provider": source.provider,
+            "mcp_catalog_sync_mode": source.sync_mode,
+            "mcp_catalog_synced_count": synced_count,
+            "mcp_catalog_updated_since": updated_since,
+        },
+    )
     return MCPCatalogSourceSyncResponse(
         source=catalog_source_response(source),
         synced_count=synced_count,
@@ -913,6 +1004,7 @@ async def sync_supported_servers(
             for payload in payloads
         }.values()
     )
+    duplicate_count = len(payloads) - len(unique_payloads)
     current_version_count = 0
     await limits_service.lock_quota_capacity(
         session,
@@ -985,6 +1077,19 @@ async def sync_supported_servers(
         update_published_metadata=False,
     )
     await session.flush()
+    logger.info(
+        "Upserted MCP catalog server batch.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(catalog_source_id) if catalog_source_id else None,
+            "mcp_catalog_payload_count": len(payloads),
+            "mcp_catalog_unique_count": len(unique_payloads),
+            "mcp_catalog_duplicate_count": duplicate_count,
+            "mcp_catalog_activated_count": activated_version_count,
+            "mcp_catalog_metadata_count": len(rows_with_metadata),
+            "mcp_catalog_without_metadata_count": len(rows_without_metadata),
+        },
+    )
     return len(unique_payloads)
 
 

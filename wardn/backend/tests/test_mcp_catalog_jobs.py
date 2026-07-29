@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -133,7 +134,7 @@ async def test_enqueue_catalog_sync_records_source_revision(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_catalog_worker_persists_success_and_progress(monkeypatch) -> None:
+async def test_catalog_worker_persists_success_and_progress(monkeypatch, caplog) -> None:
     source = catalog_source()
     job = operation_job(source)
     reporter = FakeReporter()
@@ -151,12 +152,22 @@ async def test_catalog_worker_persists_success_and_progress(monkeypatch) -> None
     monkeypatch.setattr(catalog_jobs, "AsyncSessionLocal", session_factory)
     monkeypatch.setattr(catalog_jobs.repository, "get_catalog_source", get_source)
     monkeypatch.setattr(catalog_jobs.service, "sync_catalog_source", sync)
+    caplog.set_level(logging.INFO, logger=catalog_jobs.logger.name)
 
     result = await catalog_jobs.execute_catalog_source_sync(job, reporter)
 
     assert result["syncedCount"] == 7
     assert session_factory.session.commit_count == 1
     assert reporter.progress[-1] == (3, 3, "Synchronized 7 server definitions")
+    assert "Synchronizing MCP catalog source." in caplog.text
+    assert "Synchronized MCP catalog source." in caplog.text
+    synchronized = next(
+        record
+        for record in caplog.records
+        if record.message == "Synchronized MCP catalog source."
+    )
+    assert synchronized.mcp_job_id == str(job.id)
+    assert synchronized.mcp_catalog_synced_count == 7
 
 
 @pytest.mark.asyncio
