@@ -1,10 +1,12 @@
 import base64
 import binascii
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,8 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerPackageUnavailableError,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
+
+logger = logging.getLogger(__name__)
 
 RUNTIME_FILE_DIR_NAME = "runtime-files"
 KUBERNETES_RUNTIME_FILE_MOUNT_PATH = "/opt/wardn/runtime-files"
@@ -436,6 +440,17 @@ def package_secret_config(
 def run_install_command(command: list[str], *, cwd: Path) -> None:
     cache_root = cwd / ".installer-cache"
     cache_root.mkdir(parents=True, exist_ok=True)
+    started_at = time.monotonic()
+    executable = Path(command[0]).name if command else ""
+    logger.info(
+        "Starting MCP package installer command: %s in %s.",
+        executable,
+        cwd,
+        extra={
+            "mcp_installer_executable": executable,
+            "mcp_installer_cwd": str(cwd),
+        },
+    )
     environment = {
         "PATH": os.environ.get("PATH", os.defpath),
         "HOME": str(cache_root),
@@ -460,17 +475,58 @@ def run_install_command(command: list[str], *, cwd: Path) -> None:
             text=True,
             timeout=300,
         )
+        logger.info(
+            "Completed MCP package installer command: %s in %s.",
+            executable,
+            cwd,
+            extra={
+                "mcp_installer_executable": executable,
+                "mcp_installer_cwd": str(cwd),
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            },
+        )
     except FileNotFoundError as exc:
+        logger.warning(
+            "MCP package installer command is unavailable: %s in %s.",
+            executable,
+            cwd,
+            extra={
+                "mcp_installer_executable": executable,
+                "mcp_installer_cwd": str(cwd),
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            },
+        )
         raise MCPServerInstallationUnsupportedError(
             f"required installer is not available: {command[0]}"
         ) from exc
     except subprocess.CalledProcessError as exc:
         output = (exc.stderr or exc.stdout or "").strip()
         detail = output.splitlines()[-1] if output else str(exc)
+        logger.warning(
+            "MCP package installer command failed: %s in %s.",
+            executable,
+            cwd,
+            extra={
+                "mcp_installer_executable": executable,
+                "mcp_installer_cwd": str(cwd),
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+                "return_code": exc.returncode,
+            },
+        )
         if any(marker in output.casefold() for marker in PACKAGE_UNAVAILABLE_MARKERS):
             raise MCPServerPackageUnavailableError(detail) from exc
         raise MCPServerInstallationFailedError(detail) from exc
     except subprocess.TimeoutExpired as exc:
+        logger.warning(
+            "MCP package installer command timed out: %s in %s.",
+            executable,
+            cwd,
+            extra={
+                "mcp_installer_executable": executable,
+                "mcp_installer_cwd": str(cwd),
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            },
+        )
         raise MCPServerInstallationFailedError("installer timed out") from exc
 
 def npm_package_bin(install_path: Path, identifier: str) -> Path | None:

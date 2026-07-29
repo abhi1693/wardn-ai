@@ -4,6 +4,7 @@ import logging
 import sys
 from contextlib import suppress
 
+from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.commands.registry import CommandRegistry
@@ -41,8 +42,8 @@ def configure_runmcpjobs_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def configure_command_logging(*, verbose: bool) -> None:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     handler.setLevel(logging.DEBUG if verbose else logging.INFO)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()

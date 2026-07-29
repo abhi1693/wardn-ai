@@ -13,7 +13,11 @@ from app.modules.mcp_registry import job_commands, job_repository, job_worker
 from app.modules.mcp_registry.models import MCPOperationJob
 
 
-def make_job(*, operation: str = "install_server") -> MCPOperationJob:
+def make_job(
+    *,
+    operation: str = "install_server",
+    request_payload: dict[str, object] | None = None,
+) -> MCPOperationJob:
     timestamp = datetime.now(UTC)
     return MCPOperationJob(
         id=uuid.uuid4(),
@@ -23,7 +27,7 @@ def make_job(*, operation: str = "install_server") -> MCPOperationJob:
         resource_key="workspace:test/server:example",
         deduplication_key=uuid.uuid4().hex,
         status="running",
-        request_payload={},
+        request_payload=request_payload or {},
         result={},
         progress_current=0,
         progress_total=4,
@@ -93,6 +97,61 @@ def test_retry_delay_uses_bounded_exponential_backoff() -> None:
     assert job_worker.retry_delay_seconds(1, base_seconds=10, max_seconds=60) == 10
     assert job_worker.retry_delay_seconds(3, base_seconds=10, max_seconds=60) == 40
     assert job_worker.retry_delay_seconds(10, base_seconds=10, max_seconds=60) == 60
+
+
+def test_job_log_extra_includes_install_target_context() -> None:
+    job = make_job(
+        request_payload={
+            "serverName": "io.github.AIops-tools/k8s-aiops",
+            "desiredState": {
+                "version": "1.0.0",
+                "configName": "default",
+                "installTarget": "package",
+            },
+        }
+    )
+
+    extra = job_worker.job_log_extra(job, worker_id="worker-1")
+
+    assert extra["mcp_server_name"] == "io.github.AIops-tools/k8s-aiops"
+    assert extra["mcp_server_version"] == "1.0.0"
+    assert extra["mcp_config_name"] == "default"
+    assert extra["mcp_install_target"] == "package"
+
+
+@pytest.mark.asyncio
+async def test_progress_reporter_logs_progress(monkeypatch, caplog) -> None:
+    async def record_progress(session, job_id, **kwargs):
+        assert job_id == progress_job_id
+        assert kwargs["message"] == "Installing io.github.AIops-tools/k8s-aiops"
+        return True
+
+    progress_job_id = uuid.uuid4()
+    monkeypatch.setattr(job_worker.job_repository, "record_job_progress", record_progress)
+    caplog.set_level(logging.INFO, logger=job_worker.logger.name)
+    reporter = job_worker.JobProgressReporter(
+        session_factory=FakeSessionFactory(),
+        job_id=progress_job_id,
+        worker_id="worker-1",
+        log_extra={"mcp_server_name": "io.github.AIops-tools/k8s-aiops"},
+    )
+
+    await reporter.update(
+        2,
+        4,
+        "Installing io.github.AIops-tools/k8s-aiops",
+        details={"phase": "install"},
+    )
+
+    progress = next(
+        record
+        for record in caplog.records
+        if record.message
+        == "MCP operation job progress: Installing io.github.AIops-tools/k8s-aiops"
+    )
+    assert progress.mcp_server_name == "io.github.AIops-tools/k8s-aiops"
+    assert progress.mcp_job_progress_current == 2
+    assert progress.mcp_job_progress_total == 4
 
 
 @pytest.mark.asyncio

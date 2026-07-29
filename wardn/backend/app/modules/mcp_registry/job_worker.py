@@ -46,7 +46,7 @@ class MCPJobHandlers:
 
 
 def job_log_extra(job: MCPOperationJob, *, worker_id: str) -> dict[str, Any]:
-    return {
+    extra: dict[str, Any] = {
         "mcp_job_id": str(job.id),
         "mcp_operation": job.operation,
         "mcp_resource_key": job.resource_key,
@@ -57,6 +57,28 @@ def job_log_extra(job: MCPOperationJob, *, worker_id: str) -> dict[str, Any]:
         "attempt_count": job.attempt_count,
         "max_attempts": job.max_attempts,
     }
+    request_payload = job.request_payload if isinstance(job.request_payload, dict) else {}
+    if isinstance(request_payload.get("serverName"), str):
+        extra["mcp_server_name"] = request_payload["serverName"]
+    desired_state = request_payload.get("desiredState")
+    if isinstance(desired_state, dict):
+        if isinstance(desired_state.get("version"), str):
+            extra["mcp_server_version"] = desired_state["version"]
+        if isinstance(desired_state.get("configName"), str):
+            extra["mcp_config_name"] = desired_state["configName"]
+        if isinstance(desired_state.get("installTarget"), str):
+            extra["mcp_install_target"] = desired_state["installTarget"]
+    targets = request_payload.get("targets")
+    if isinstance(targets, list):
+        extra["mcp_update_target_count"] = len(targets)
+        extra["mcp_update_server_count"] = len(
+            {
+                target.get("serverName")
+                for target in targets
+                if isinstance(target, dict) and isinstance(target.get("serverName"), str)
+            }
+        )
+    return extra
 
 
 def cleanup_log_extra(job: MCPOperationJob, *, worker_id: str) -> dict[str, Any]:
@@ -85,10 +107,18 @@ def public_error_message(exc: BaseException, *, limit: int = 4000) -> str:
 
 
 class JobProgressReporter:
-    def __init__(self, *, session_factory, job_id: uuid.UUID, worker_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        session_factory,
+        job_id: uuid.UUID,
+        worker_id: str,
+        log_extra: dict[str, Any] | None = None,
+    ) -> None:
         self.session_factory = session_factory
         self.job_id = job_id
         self.worker_id = worker_id
+        self.log_extra = dict(log_extra or {})
 
     async def update(
         self,
@@ -114,6 +144,17 @@ class JobProgressReporter:
                 await session.rollback()
                 raise MCPJobLeaseLostError()
             await session.commit()
+        progress_extra = dict(self.log_extra)
+        progress_extra.update(
+            {
+                "mcp_job_progress_current": current,
+                "mcp_job_progress_total": total,
+                "mcp_job_progress_message": message,
+            }
+        )
+        if details:
+            progress_extra["mcp_job_progress_details"] = details
+        logger.info("MCP operation job progress: %s", message, extra=progress_extra)
 
     async def register_cleanup(self, payload: dict[str, Any]) -> None:
         async with self.session_factory() as session:
@@ -290,6 +331,7 @@ async def execute_job(
         session_factory=session_factory,
         job_id=job.id,
         worker_id=worker_id,
+        log_extra=job_log_extra(job, worker_id=worker_id),
     )
     try:
         logger.info(
