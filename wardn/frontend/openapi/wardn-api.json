@@ -3124,9 +3124,16 @@
       "MCPFileConfigValue": {
         "properties": {
           "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MCPSecretHandleConfigValue"
+              }
+            ],
             "default": "",
-            "title": "Content",
-            "type": "string"
+            "title": "Content"
           },
           "contentBase64": {
             "default": "",

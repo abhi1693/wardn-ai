@@ -1,4 +1,6 @@
-from app.modules.mcp_registry.schemas import MCPServerCreate
+from uuid import UUID
+
+from app.modules.mcp_registry.schemas import MCPServerCreate, MCPServerInstallRequest
 
 
 def test_mcp_server_document_preserves_official_aliases() -> None:
@@ -63,6 +65,40 @@ def test_mcp_server_description_accepts_text_field_length() -> None:
     )
 
     assert payload.description == description
+
+
+def test_install_request_accepts_secret_handle_file_content() -> None:
+    handle_id = "11111111-1111-4111-8111-111111111111"
+
+    payload = MCPServerInstallRequest(
+        configValues={
+            "KUBECONFIG": {
+                "type": "file",
+                "filename": "config",
+                "content": {
+                    "type": "secret_handle",
+                    "secretHandleId": handle_id,
+                },
+            }
+        }
+    )
+
+    file_value = payload.config_values["KUBECONFIG"]
+    assert not isinstance(file_value, str)
+    assert not isinstance(file_value.content, str)
+    assert file_value.content.secret_handle_id == UUID(handle_id)
+    assert payload.model_dump(mode="json", by_alias=True)["configValues"] == {
+        "KUBECONFIG": {
+            "type": "file",
+            "filename": "config",
+            "content": {
+                "type": "secret_handle",
+                "secretHandleId": handle_id,
+            },
+            "contentBase64": "",
+            "path": "",
+        }
+    }
 
 
 def test_mcp_server_document_rejects_mcpb_packages() -> None:

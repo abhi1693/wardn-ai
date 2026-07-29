@@ -183,6 +183,104 @@ async def test_enqueue_installation_externalizes_secrets_before_persisting_job(m
 
 
 @pytest.mark.asyncio
+async def test_enqueue_installation_allows_externalized_file_content(monkeypatch) -> None:
+    server = server_version()
+    server.packages = [
+        {
+            "registryType": "pypi",
+            "identifier": "k8s-aiops",
+            "version": "0.2.0",
+            "transport": {"type": "stdio"},
+            "environmentVariables": [
+                {
+                    "name": "K8S_AIOPS_CONFIG",
+                    "format": "file",
+                    "isSecret": True,
+                }
+            ],
+        }
+    ]
+    user = User(id=uuid.uuid4(), email="admin@example.com")
+    handle_id = uuid.uuid4()
+    seen: dict[str, object] = {}
+
+    async def get_server(*args, **kwargs):
+        return server
+
+    async def no_existing_job(*args, **kwargs):
+        return None
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def require_capacity(*args, **kwargs):
+        return None
+
+    async def externalize(*args, **kwargs):
+        return {
+            "K8S_AIOPS_CONFIG": {
+                "type": "file",
+                "filename": "local.yaml",
+                "content": {
+                    "type": "secret_handle",
+                    "secretHandleId": str(handle_id),
+                },
+            }
+        }
+
+    async def enqueue(*args, **kwargs):
+        seen["job"] = kwargs
+        return "queued-job"
+
+    monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
+    monkeypatch.setattr(
+        installation_jobs.job_repository,
+        "get_active_job_by_deduplication_key",
+        no_existing_job,
+    )
+    monkeypatch.setattr(installation_jobs.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_jobs, "require_new_installation_capacity", require_capacity)
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "externalize_install_config_secrets",
+        externalize,
+    )
+    monkeypatch.setattr(installation_jobs, "enqueue_operation_job", enqueue)
+
+    result = await installation_jobs.enqueue_server_installation(
+        object(),
+        organization_id=ORGANIZATION_ID,
+        workspace_id=WORKSPACE_ID,
+        user=user,
+        server_name=server.name,
+        payload=MCPServerInstallRequest(
+            version="latest",
+            configValues={
+                "K8S_AIOPS_CONFIG": {
+                    "type": "file",
+                    "filename": "local.yaml",
+                    "content": "apiVersion: v1\n",
+                }
+            },
+            configSecretStoreId=uuid.uuid4(),
+        ),
+    )
+
+    assert result == "queued-job"
+    desired_state = seen["job"]["request_payload"]["desiredState"]
+    assert desired_state["configValues"]["K8S_AIOPS_CONFIG"] == {
+        "type": "file",
+        "filename": "local.yaml",
+        "content": {
+            "type": "secret_handle",
+            "secretHandleId": str(handle_id),
+        },
+        "contentBase64": "",
+        "path": "",
+    }
+
+
+@pytest.mark.asyncio
 async def test_enqueue_installation_reuses_retry_before_writing_secret_again(monkeypatch) -> None:
     server = server_version()
     user = User(id=uuid.uuid4(), email="admin@example.com")

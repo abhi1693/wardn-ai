@@ -23,17 +23,17 @@ MCPOperationCleanupStatus = Literal[
 ]
 
 
-class MCPFileConfigValue(APIModel):
-    type: Literal["file"] = "file"
-    filename: str = Field(default="", max_length=255)
-    content: str = ""
-    content_base64: str = ""
-    path: str = Field(default="", max_length=4096)
-
-
 class MCPSecretHandleConfigValue(APIModel):
     type: Literal["secret_handle"] = "secret_handle"
     secret_handle_id: UUID
+
+
+class MCPFileConfigValue(APIModel):
+    type: Literal["file"] = "file"
+    filename: str = Field(default="", max_length=255)
+    content: str | MCPSecretHandleConfigValue = ""
+    content_base64: str = ""
+    path: str = Field(default="", max_length=4096)
 
 
 MCPConfigValue = str | MCPFileConfigValue | MCPSecretHandleConfigValue

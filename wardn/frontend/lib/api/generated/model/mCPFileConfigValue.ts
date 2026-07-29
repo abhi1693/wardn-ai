@@ -4,9 +4,10 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { MCPSecretHandleConfigValue } from './mCPSecretHandleConfigValue';
 
 export interface MCPFileConfigValue {
-  content?: string;
+  content?: string | MCPSecretHandleConfigValue;
   contentBase64?: string;
   /** @maxLength 255 */
   filename?: string;
