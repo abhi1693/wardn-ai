@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.pagination import InvalidCursorError
+from app.modules.mcp_gateway.client import MCPGatewayUnsupportedMethodError
 from app.modules.mcp_registry import (
     catalog_service,
     config_service,
@@ -1909,3 +1910,55 @@ async def test_refresh_tool_schemas_falls_back_to_tracked_discovery(monkeypatch)
     assert seen["tracked_args"][2] is server
     assert seen["tracked_manager"] is manager
     assert seen["tools"][0]["name"] == "get_forecast"
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_treats_missing_tools_list_as_empty(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/context",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.name = "io.github.example/context"
+    seen = {}
+
+    class MissingToolsListRuntimeManager:
+        def list_tools(self, runtime_installation):
+            seen["installation"] = runtime_installation
+            raise MCPGatewayUnsupportedMethodError(
+                "tools/list",
+                {"code": -32601, "message": "Method not found"},
+            )
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        seen["installation_for_upsert"] = kwargs["installation"]
+        return len(kwargs["tools"])
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+
+    result = await tool_service.refresh_tool_schemas(
+        FakeSession(),
+        "io.github.example/context",
+        runtime_manager=MissingToolsListRuntimeManager(),
+    )
+
+    assert result.server_name == "io.github.example/context"
+    assert result.server_version == "1.0.0"
+    assert result.tool_count == 0
+    assert seen["installation"] is installation
+    assert seen["installation_for_upsert"] is installation
+    assert seen["tools"] == []

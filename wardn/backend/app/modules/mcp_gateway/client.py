@@ -40,6 +40,19 @@ class MCPGatewayUpstreamError(Exception):
     pass
 
 
+class MCPGatewayUnsupportedMethodError(MCPGatewayUpstreamError):
+    def __init__(self, method: str, error: Mapping[str, Any]) -> None:
+        self.method = method
+        self.error = dict(error)
+        super().__init__(f"upstream {method} is not supported")
+
+
+def raise_jsonrpc_method_error(method: str, error: Any) -> None:
+    if isinstance(error, Mapping) and error.get("code") == -32601:
+        raise MCPGatewayUnsupportedMethodError(method, error)
+    raise MCPGatewayUpstreamError(f"upstream {method} failed: {error}")
+
+
 @dataclass(frozen=True)
 class MCPRemoteSession:
     url: str
@@ -419,7 +432,7 @@ def list_tools(
             outbound_policy=session.outbound_policy,
         )
         if "error" in response:
-            raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
+            raise_jsonrpc_method_error("tools/list", response["error"])
         result = response.get("result")
         if not isinstance(result, dict) or not isinstance(result.get("tools"), list):
             raise MCPGatewayUpstreamError("upstream tools/list returned no tools array")
@@ -455,7 +468,7 @@ def list_stdio_tools(
             )
             response = read_stdio_response(session, request_id)
             if "error" in response:
-                raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
+                raise_jsonrpc_method_error("tools/list", response["error"])
             result = response.get("result")
             if not isinstance(result, dict) or not isinstance(result.get("tools"), list):
                 raise MCPGatewayUpstreamError("upstream tools/list returned no tools array")
@@ -491,7 +504,7 @@ def list_stdio_session_tools(
         )
         response = read_stdio_response(session, request_id)
         if "error" in response:
-            raise MCPGatewayUpstreamError(f"upstream tools/list failed: {response['error']}")
+            raise_jsonrpc_method_error("tools/list", response["error"])
         result = response.get("result")
         if not isinstance(result, dict) or not isinstance(result.get("tools"), list):
             raise MCPGatewayUpstreamError("upstream tools/list returned no tools array")

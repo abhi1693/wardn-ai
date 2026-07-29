@@ -6,6 +6,7 @@ import pytest
 
 from app.core.outbound_http import OutboundURLPolicy, UnsafeOutboundURLError
 from app.modules.mcp_gateway.client import (
+    MCPGatewayUnsupportedMethodError,
     MCPGatewayUpstreamError,
     call_stdio_tool,
     list_stdio_tools,
@@ -65,6 +66,44 @@ print(
     tools = list_stdio_tools(sys.executable, ["-c", script], cwd="", environment={})
 
     assert tools == [{"name": "health", "inputSchema": {"type": "object"}}]
+
+
+def test_list_stdio_tools_classifies_missing_tools_list_method() -> None:
+    script = r"""
+import json
+import sys
+
+initialize = json.loads(sys.stdin.readline())
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": initialize["id"],
+            "result": {"protocolVersion": "2025-06-18"},
+        }
+    ),
+    flush=True,
+)
+sys.stdin.readline()
+tools_request = json.loads(sys.stdin.readline())
+print(
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": tools_request["id"],
+            "error": {"code": -32601, "message": "Method not found"},
+        }
+    ),
+    flush=True,
+)
+"""
+
+    with pytest.raises(MCPGatewayUnsupportedMethodError) as exc_info:
+        list_stdio_tools(sys.executable, ["-c", script], cwd="", environment={})
+
+    assert exc_info.value.method == "tools/list"
+    assert exc_info.value.error == {"code": -32601, "message": "Method not found"}
+    assert str(exc_info.value) == "upstream tools/list is not supported"
 
 
 def test_call_stdio_tool_sends_progress_token_and_ignores_progress_notification() -> None:
