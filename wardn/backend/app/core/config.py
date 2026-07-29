@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     app_name: str = Field(default="Wardn AI API", min_length=1, max_length=100)
     app_version: str = Field(default_factory=package_version, min_length=1, max_length=64)
+    telemetry: bool = True
     environment: Literal["local", "development", "test", "staging", "production"] = "local"
     api_prefix: str = Field(default="/api/v1", pattern=r"^/[A-Za-z0-9/_-]*$")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

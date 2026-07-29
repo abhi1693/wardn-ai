@@ -970,10 +970,18 @@ async def test_delete_server_version_soft_deletes_and_promotes_replacement(monke
 
 @pytest.mark.asyncio
 async def test_install_server_version_pins_requested_version(monkeypatch) -> None:
+    catalog_server = server_version("1.0.0", is_latest=True)
+
     async def get_server_version(*args, **kwargs):
-        return server_version("1.0.0", is_latest=True)
+        return catalog_server
 
     async def get_installation(*args, **kwargs):
+        return None
+
+    telemetry_calls = []
+
+    def schedule_telemetry(server, *, install_type):
+        telemetry_calls.append({"server": server, "install_type": install_type})
         return None
 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
@@ -982,6 +990,11 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
         installation_service,
         "install_server_runtime",
         lambda server, **kwargs: runtime_install(),
+    )
+    monkeypatch.setattr(
+        installation_service,
+        "schedule_mcp_server_install_telemetry",
+        schedule_telemetry,
     )
     session = FakeSession()
 
@@ -1001,6 +1014,7 @@ async def test_install_server_version_pins_requested_version(monkeypatch) -> Non
     assert response.install_type == "remote"
     assert response.runtime_config["kind"] == "remote"
     assert session.flushed is True
+    assert telemetry_calls == [{"server": catalog_server, "install_type": "remote"}]
 
 
 @pytest.mark.asyncio

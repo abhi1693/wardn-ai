@@ -62,6 +62,14 @@ def test_settings_hide_secret_values() -> None:
     assert "postgresql+asyncpg" not in repr(settings)
 
 
+def test_settings_enable_telemetry_by_default() -> None:
+    assert make_settings().telemetry is True
+
+
+def test_settings_allow_telemetry_opt_out() -> None:
+    assert make_settings(telemetry=False).telemetry is False
+
+
 def test_settings_require_complete_oidc_config_in_production() -> None:
     with pytest.raises(ValidationError, match="OIDC mode requires"):
         make_settings(

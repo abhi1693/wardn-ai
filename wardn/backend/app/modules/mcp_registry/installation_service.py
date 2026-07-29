@@ -49,6 +49,7 @@ from app.modules.mcp_registry.scope_service import (
     default_workspace_id,
     organization_id_for_workspace,
 )
+from app.modules.mcp_registry.telemetry import schedule_mcp_server_install_telemetry
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime import repository as runtime_repository
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
@@ -435,6 +436,7 @@ async def install_server_version(
     if previous_install_path and previous_install_path != runtime_install.install_path:
         remove_installation_artifacts(previous_install_path)
 
+    schedule_mcp_server_install_telemetry(server, install_type=installation.install_type)
     response = await installation_response(session, installation, organization_id=organization_id)
     logger.info(
         "Completed MCP server installation.",
