@@ -1241,28 +1241,170 @@ async def test_refresh_wildcard_agent_server_tools_returns_failed_servers(
             error="upstream initialize returned no result",
         )
     ]
-    assert "omitting server tools for chat run" in caplog.text
+    assert "cached tools remain eligible" in caplog.text
     assert session.commits == 0
 
 
-def test_omit_failed_mcp_runtime_rows_filters_failed_installations() -> None:
-    failed_installation = MCPServerInstallation(id=uuid4())
-    healthy_installation = MCPServerInstallation(id=uuid4())
-    failed_row = (object(), object(), failed_installation, object())
-    healthy_row = (object(), object(), healthy_installation, object())
+@pytest.mark.asyncio
+async def test_stream_agent_chat_keeps_cached_tools_after_refresh_failure(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        trigger_type="chat",
+        status="running",
+    )
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent.id,
+        installation_id=uuid4(),
+    )
+    installation = MCPServerInstallation(
+        id=assignment.installation_id,
+        workspace_id=workspace_id,
+        server_name="io.github.markswendsen-code/gmail",
+        config_name="desk.abhimanyu",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Gmail",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name="send_email",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
     failure = service.AgentToolRefreshFailure(
-        installation_id=failed_installation.id,
-        server_name="io.github.example/failing-server",
+        installation_id=installation.id,
+        server_name=installation.server_name,
         server_version="1.0.0",
-        config_name="default",
+        config_name=installation.config_name,
         error_type="MCPGatewayUpstreamError",
         error="upstream initialize returned no result",
     )
+    steps: list[dict] = []
+    seen_filter_tools: list[dict] = []
+    seen_provider_tools: list[dict] = []
 
-    assert service.omit_failed_mcp_runtime_rows([failed_row, healthy_row], [failure]) == [
-        healthy_row
-    ]
-    assert service.omit_failed_mcp_runtime_rows([failed_row], []) == [failed_row]
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def create_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def finish_agent_run(*args, **kwargs):
+        return None
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def refresh_wildcard_agent_server_tools(*args, **kwargs):
+        return [failure]
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return [(assignment, tool_schema, installation, server)]
+
+    async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
+        seen_filter_tools.append(args[1])
+        return service.AgentRuntimeToolGuardrailFilter(allowed_tools=args[1], denied_tools={})
+
+    async def run_agent_chat(*args, **kwargs):
+        seen_provider_tools.append(args[3])
+        yield service.AgentChatTextEvent(text="ok")
+
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service,
+        "refresh_wildcard_agent_server_tools",
+        refresh_wildcard_agent_server_tools,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            messages=[
+                AgentChatMessage(role="user", parts=[{"type": "text", "text": "send mail"}])
+            ]
+        ),
+        workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    wire_name = service.agent_runtime_tools(
+        [(assignment, tool_schema, installation, server)]
+    ).popitem()[0]
+    assert wire_name in seen_filter_tools[0]
+    assert wire_name in seen_provider_tools[0]
+    assert steps[1]["step_type"] == "tool_discovery"
+    assert steps[1]["status"] == "failed"
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
 
 
 def patch_org_owner(monkeypatch, organization_id, user):

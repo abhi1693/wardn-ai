@@ -930,7 +930,7 @@ async def refresh_wildcard_agent_server_tools(
             )
             failures.append(failure)
             logger.warning(
-                "Failed to refresh wildcard MCP server tools; omitting server tools for chat run.",
+                "Failed to refresh wildcard MCP server tools; cached tools remain eligible.",
                 extra={
                     "agent_id": str(agent_id),
                     "workspace_id": str(installation.workspace_id),
@@ -943,16 +943,6 @@ async def refresh_wildcard_agent_server_tools(
                 },
             )
     return failures
-
-
-def omit_failed_mcp_runtime_rows(
-    rows: list[tuple],
-    refresh_failures: list[AgentToolRefreshFailure],
-) -> list[tuple]:
-    failed_installation_ids = {failure.installation_id for failure in refresh_failures}
-    if not failed_installation_ids:
-        return rows
-    return [row for row in rows if row[2].id not in failed_installation_ids]
 
 
 async def record_agent_tool_refresh_failures(
@@ -1061,10 +1051,7 @@ async def stream_agent_chat(
             },
         )
     runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
-    runtime_rows = omit_failed_mcp_runtime_rows(runtime_rows, tool_refresh_failures or [])
-    tools = agent_runtime_tools(
-        runtime_rows
-    )
+    tools = agent_runtime_tools(runtime_rows)
     guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
         session,
         tools,
