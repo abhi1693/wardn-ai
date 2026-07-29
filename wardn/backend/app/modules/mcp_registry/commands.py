@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -29,6 +30,8 @@ WARDN_HUB_SERVERS_PATH = "/api/v1/mcp/servers"
 DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
 REGISTRY_SYNC_USER_AGENT = "Wardn/0.1 (+https://wardnai.dev)"
+DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY = 20
+WARDN_HUB_VERSION_SUMMARY_FIELDS = "name,latestVersion,metadata"
 CURATED_SERVERS = {
     "grafana": {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
@@ -320,22 +323,49 @@ def load_wardn_hub_version_detail_documents(
     *,
     source_url: str,
     headers: dict[str, str] | None = None,
+    concurrency: int = DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY,
 ) -> list[dict]:
+    if concurrency < 1:
+        raise ValueError("Wardn Hub version detail concurrency must be greater than 0")
+
     documents: list[dict] = []
     servers = payload.get("servers", []) if isinstance(payload, dict) else []
+    summaries: list[tuple[str, str]] = []
     for item in servers:
         if not isinstance(item, dict):
             continue
         summary = _wardn_hub_latest_version_summary(item)
         if summary is None:
             continue
+        summaries.append(summary)
+
+    if not summaries:
+        return documents
+
+    def fetch_detail_documents(summary: tuple[str, str]) -> list[dict]:
         server_name, version = summary
         detail_payload = fetch_registry_payload(
             wardn_hub_version_detail_url(source_url, server_name, version),
             headers=headers,
         )
         if isinstance(detail_payload, dict):
-            documents.extend(_wardn_hub_version_detail_documents(detail_payload))
+            return _wardn_hub_version_detail_documents(detail_payload)
+        return []
+
+    max_workers = min(concurrency, len(summaries))
+    if max_workers == 1:
+        detail_batches = map(fetch_detail_documents, summaries)
+    else:
+        logger.debug(
+            "Fetching %s Wardn Hub version detail documents with concurrency %s.",
+            len(summaries),
+            max_workers,
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            detail_batches = executor.map(fetch_detail_documents, summaries)
+
+    for detail_documents in detail_batches:
+        documents.extend(detail_documents)
     return documents
 
 
@@ -586,6 +616,7 @@ def url_with_query_params(
     limit: int | None = None,
     updated_since: str | None = None,
     version: str | None = None,
+    fields: str | None = None,
 ) -> str:
     split_url = urlsplit(url)
     query = dict(parse_qsl(split_url.query, keep_blank_values=True))
@@ -595,6 +626,8 @@ def url_with_query_params(
         query["updated_since"] = updated_since
     if version and "version" not in query:
         query["version"] = version
+    if fields and "fields" not in query:
+        query["fields"] = fields
     if cursor:
         query["cursor"] = cursor
     elif "cursor" in query:
@@ -657,6 +690,7 @@ def iter_supported_server_batches_from_registry_url(
     readme_descriptions: bool = False,
     github_token: str | None = None,
     wardn_hub_version_details: bool = False,
+    wardn_hub_version_detail_concurrency: int = DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY,
 ) -> Iterator[list[MCPServerCreate]]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
@@ -681,6 +715,11 @@ def iter_supported_server_batches_from_registry_url(
             limit=limit if pagination == "cursor" else None,
             updated_since=updated_since if pagination == "cursor" else None,
             version=version if pagination == "cursor" else None,
+            fields=(
+                WARDN_HUB_VERSION_SUMMARY_FIELDS
+                if wardn_hub_version_details
+                else None
+            ),
         )
         logger.debug("Fetching registry page %s, cursor=%s", pages_fetched + 1, cursor)
         if headers:
@@ -693,6 +732,7 @@ def iter_supported_server_batches_from_registry_url(
                 payload,
                 source_url=source_url,
                 headers=headers,
+                concurrency=wardn_hub_version_detail_concurrency,
             )
             documents = [strip_unsupported_package_targets(server) for server in documents]
             documents = [sanitize_source_urls(server) for server in documents]
@@ -782,6 +822,7 @@ def load_supported_servers_from_registry_url(
     readme_descriptions: bool = False,
     github_token: str | None = None,
     wardn_hub_version_details: bool = False,
+    wardn_hub_version_detail_concurrency: int = DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY,
 ) -> list[MCPServerCreate]:
     servers: list[MCPServerCreate] = []
     for batch in iter_supported_server_batches_from_registry_url(
@@ -795,6 +836,7 @@ def load_supported_servers_from_registry_url(
         readme_descriptions=readme_descriptions,
         github_token=github_token,
         wardn_hub_version_details=wardn_hub_version_details,
+        wardn_hub_version_detail_concurrency=wardn_hub_version_detail_concurrency,
     ):
         servers.extend(batch)
     return servers

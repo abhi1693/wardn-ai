@@ -502,6 +502,7 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     assert calls["kwargs"]["version"] == "latest"
     assert calls["kwargs"]["pagination"] == "cursor"
     assert calls["kwargs"]["wardn_hub_version_details"] is True
+    assert calls["kwargs"]["wardn_hub_version_detail_concurrency"] == 20
     assert calls["servers"][0].meta[service.CATALOG_SOURCE_META_KEY]["sourceUrl"] == (
         "https://hub.wardnai.dev/api/v1/mcp/servers"
     )

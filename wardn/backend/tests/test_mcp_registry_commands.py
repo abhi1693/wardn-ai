@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import threading
 
 from app.commands.registry import CommandRegistry
 from app.modules.mcp_registry import commands
@@ -763,10 +764,99 @@ def test_registry_url_loader_fetches_wardn_hub_changed_version_details(monkeypat
     assert fetched_urls == [
         (
             "https://hub.wardnai.dev/api/v1/mcp/servers?"
-            "limit=100&updated_since=2026-07-28T00%3A00%3A00Z&version=latest"
+            "limit=100&updated_since=2026-07-28T00%3A00%3A00Z&version=latest&"
+            "fields=name%2ClatestVersion%2Cmetadata"
         ),
         "https://hub.wardnai.dev/api/v1/mcp/servers/io.github.example/weather/versions/1.0.1",
     ]
+
+
+def test_registry_url_loader_fetches_wardn_hub_details_concurrently(monkeypatch) -> None:
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    active_detail_fetches = 0
+    max_active_detail_fetches = 0
+
+    def detail_payload(server_name: str) -> dict:
+        return {
+            "server": {
+                "name": f"io.github.example/{server_name}",
+                "title": server_name.title(),
+                "description": f"{server_name.title()} tools",
+                "documentation": f"# {server_name.title()}",
+                "websiteUrl": "https://example.com",
+                "repository": {"url": f"https://github.com/example/{server_name}"},
+                "icons": [],
+            },
+            "version": {
+                "version": "1.0.1",
+                "status": "active",
+                "isLatest": True,
+                "publishedAt": "2026-07-28T00:00:00Z",
+                "statusChangedAt": "2026-07-28T00:00:00Z",
+                "createdAt": "2026-07-28T00:00:00Z",
+                "updatedAt": "2026-07-28T00:00:00Z",
+                "packages": [],
+                "remotes": [],
+                "serverJson": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": f"io.github.example/{server_name}",
+                    "title": server_name.title(),
+                    "description": f"{server_name.title()} tools",
+                    "version": "1.0.1",
+                },
+            },
+        }
+
+    def fetch_registry_payload(url, headers=None):
+        nonlocal active_detail_fetches, max_active_detail_fetches
+        if "/versions/" not in url:
+            return {
+                "servers": [
+                    {
+                        "name": "io.github.example/weather",
+                        "latestVersion": {"version": "1.0.1"},
+                    },
+                    {
+                        "name": "io.github.example/calendar",
+                        "latestVersion": {"version": "1.0.1"},
+                    },
+                ],
+                "metadata": {"count": 2},
+            }
+
+        with lock:
+            active_detail_fetches += 1
+            max_active_detail_fetches = max(max_active_detail_fetches, active_detail_fetches)
+        try:
+            barrier.wait(timeout=2)
+        finally:
+            with lock:
+                active_detail_fetches -= 1
+
+        server_name = url.rsplit("/", 3)[-3]
+        return detail_payload(server_name)
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", fetch_registry_payload)
+
+    servers = commands.load_supported_servers_from_registry_url(
+        "https://hub.wardnai.dev/api/v1/mcp/servers",
+        limit=2,
+        max_pages=1,
+        updated_since="2026-07-28T00:00:00Z",
+        version="latest",
+        wardn_hub_version_details=True,
+        wardn_hub_version_detail_concurrency=2,
+    )
+
+    assert {server.name for server in servers} == {
+        "io.github.example/calendar",
+        "io.github.example/weather",
+    }
+    assert max_active_detail_fetches == 2
 
 
 def test_pulsemcp_registry_source_uses_default_url_and_auth_headers() -> None:

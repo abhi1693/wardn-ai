@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
 from app.core.pagination import InvalidCursorError
 from app.db.domain_types import MCPServerStatus as MCPServerStatusEnum
 from app.db.errors import is_constraint_violation
@@ -685,6 +686,9 @@ async def sync_catalog_source(
                     version=version,
                     pagination=pagination,
                     wardn_hub_version_details=bool(updated_since),
+                    wardn_hub_version_detail_concurrency=(
+                        get_settings().mcp_catalog_sync_detail_concurrency
+                    ),
                 )
                 while True:
                     batch = await asyncio.to_thread(next_catalog_sync_batch, batch_iterator)

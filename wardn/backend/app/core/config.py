@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     mcp_job_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
     mcp_job_worker_retry_base_seconds: int = Field(default=15, ge=1, le=3600)
     mcp_job_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
+    mcp_catalog_sync_detail_concurrency: int = Field(default=20, ge=1, le=100)
     mcp_runtime_provider: Literal["auto", "local", "kubernetes", "remote"] = "local"
     mcp_runtime_namespace: str = Field(default="wardn-runtimes", min_length=1, max_length=63)
     mcp_runtime_kubernetes_namespace_prefix: str = Field(
