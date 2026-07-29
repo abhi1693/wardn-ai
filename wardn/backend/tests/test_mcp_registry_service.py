@@ -454,9 +454,9 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
 
     assert response.synced_count == 1
-    assert calls["source_url"] == "https://hub.wardnai.dev/api/v1/mcp/catalog"
+    assert calls["source_url"] == "https://hub.wardnai.dev/api/v1/mcp/servers"
     assert calls["kwargs"]["version"] == "latest"
-    assert calls["kwargs"]["pagination"] == "page"
+    assert calls["kwargs"]["pagination"] == "cursor"
     assert calls["kwargs"]["wardn_hub_version_details"] is True
     assert calls["kwargs"]["headers"]["Authorization"] == "Bearer hub-token"
     assert calls["kwargs"]["headers"]["X-API-Key"] == "hub-token"
@@ -466,7 +466,7 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
         "name": "Wardn Hub",
         "provider": "wardn_hub",
         "baseUrl": "https://hub.wardnai.dev",
-        "sourceUrl": "https://hub.wardnai.dev/api/v1/mcp/catalog",
+        "sourceUrl": "https://hub.wardnai.dev/api/v1/mcp/servers",
     }
     assert calls["organization_id"] == ORGANIZATION_ID
     assert calls["catalog_source_id"] == source.id

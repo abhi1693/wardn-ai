@@ -713,17 +713,13 @@ async def sync_catalog_source(
     source_type = registry_source_type(source.provider)
     version = "latest" if source.sync_mode == "latest_only" else None
     updated_since = catalog_source_updated_since(source)
+    is_wardn_hub_source = source.provider == "wardn_hub"
     source_urls = (
         [wardn_hub_servers_url(source.base_url)]
-        if updated_since
+        if is_wardn_hub_source
         else catalog_source_urls(source)
     )
-    if updated_since:
-        pagination = "cursor"
-    elif source.provider == "wardn_hub":
-        pagination = "page"
-    else:
-        pagination = "cursor"
+    pagination = "cursor"
     sync_started_at = datetime.now(UTC)
     logger.info(
         "Starting MCP catalog source sync.",
@@ -769,7 +765,7 @@ async def sync_catalog_source(
                     updated_since=updated_since,
                     version=version,
                     pagination=pagination,
-                    wardn_hub_version_details=source.provider == "wardn_hub",
+                    wardn_hub_version_details=is_wardn_hub_source,
                     wardn_hub_version_detail_concurrency=(
                         get_settings().mcp_catalog_sync_detail_concurrency
                     ),
