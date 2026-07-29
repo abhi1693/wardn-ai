@@ -49,6 +49,8 @@ from app.modules.mcp_registry.scope_service import (
     organization_id_for_workspace,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
+from app.modules.mcp_runtime import repository as runtime_repository
+from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
 from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.users.models import User
 
@@ -397,6 +399,7 @@ async def uninstall_server(
     if installation is None:
         raise MCPServerInstallationNotFoundError("server is not installed")
 
+    await delete_installation_runtime_resources(session, installation)
     remove_installation_artifacts(installation.install_path)
     await repository.delete_installation(session, installation)
     await session.flush()
@@ -411,9 +414,33 @@ async def uninstall_installation(
     if installation is None:
         raise MCPServerInstallationNotFoundError("server configuration is not installed")
 
+    await delete_installation_runtime_resources(session, installation)
     remove_installation_artifacts(installation.install_path)
     await repository.delete_installation(session, installation)
     await session.flush()
+
+
+async def delete_installation_runtime_resources(
+    session,
+    installation: MCPServerInstallation,
+    *,
+    manager: MCPRuntimeManager | None = None,
+) -> None:
+    runtime_sessions = await runtime_repository.list_runtime_sessions_for_installation(
+        session,
+        installation.id,
+    )
+    if not runtime_sessions:
+        return
+
+    manager = manager or get_runtime_manager()
+    await session.commit()
+    for runtime_session in runtime_sessions:
+        await asyncio.to_thread(
+            manager.stop_runtime,
+            runtime_session,
+            delete_resources=True,
+        )
 
 
 async def update_installed_servers(

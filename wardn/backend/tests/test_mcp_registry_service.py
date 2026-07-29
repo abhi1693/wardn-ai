@@ -37,12 +37,31 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallationToolValidationRequest,
     MCPServerInstallRequest,
 )
+from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
 WORKSPACE_ID = uuid4()
 ORGANIZATION_ID = uuid4()
 USER = User(id=uuid4(), email="owner@example.com", is_superuser=True)
+
+
+def runtime_session_for_installation(installation: MCPServerInstallation) -> MCPRuntimeSession:
+    return MCPRuntimeSession(
+        id=uuid4(),
+        organization_id=ORGANIZATION_ID,
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider="kubernetes",
+        runtime_kind="package",
+        config_fingerprint="fingerprint",
+        status="running",
+        pod_name="io-github-example-weather-default",
+        namespace="wardn-org-example-ws-example",
+        endpoint_url="http://io-github-example-weather-default-svc.wardn-org-example.svc/mcp",
+    )
 
 
 class FakeSession:
@@ -1404,6 +1423,51 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_uninstall_server_deletes_runtime_resources_before_installation(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    runtime_session = runtime_session_for_installation(installation)
+    stopped: list[tuple[MCPRuntimeSession, bool]] = []
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    async def list_runtime_sessions_for_installation(*args, **kwargs):
+        assert args[1] == installation.id
+        return [runtime_session]
+
+    class FakeRuntimeManager:
+        def stop_runtime(self, runtime_session_arg, *, delete_resources=False):
+            stopped.append((runtime_session_arg, delete_resources))
+
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        installation_service.runtime_repository,
+        "list_runtime_sessions_for_installation",
+        list_runtime_sessions_for_installation,
+    )
+    monkeypatch.setattr(
+        installation_service,
+        "get_runtime_manager",
+        lambda: FakeRuntimeManager(),
+    )
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", lambda path: None)
+    session = FakeSession()
+
+    await service.uninstall_server(session, "io.github.example/weather", workspace_id=WORKSPACE_ID)
+
+    assert stopped == [(runtime_session, True)]
+    assert session.commit_count == 1
+    assert session.deleted == [installation]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
 async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",
@@ -1423,6 +1487,54 @@ async def test_uninstall_installation_deletes_selected_config(monkeypatch) -> No
 
     await service.uninstall_installation(session, installation.id, workspace_id=WORKSPACE_ID)
 
+    assert session.deleted == [installation]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_uninstall_installation_deletes_runtime_resources_before_config(
+    monkeypatch,
+) -> None:
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="home",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    runtime_session = runtime_session_for_installation(installation)
+    stopped: list[tuple[MCPRuntimeSession, bool]] = []
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def list_runtime_sessions_for_installation(*args, **kwargs):
+        assert args[1] == installation.id
+        return [runtime_session]
+
+    class FakeRuntimeManager:
+        def stop_runtime(self, runtime_session_arg, *, delete_resources=False):
+            stopped.append((runtime_session_arg, delete_resources))
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(
+        installation_service.runtime_repository,
+        "list_runtime_sessions_for_installation",
+        list_runtime_sessions_for_installation,
+    )
+    monkeypatch.setattr(
+        installation_service,
+        "get_runtime_manager",
+        lambda: FakeRuntimeManager(),
+    )
+    monkeypatch.setattr(installation_service, "remove_installation_artifacts", lambda path: None)
+    session = FakeSession()
+
+    await service.uninstall_installation(session, installation.id, workspace_id=WORKSPACE_ID)
+
+    assert stopped == [(runtime_session, True)]
+    assert session.commit_count == 1
     assert session.deleted == [installation]
     assert session.flushed is True
 

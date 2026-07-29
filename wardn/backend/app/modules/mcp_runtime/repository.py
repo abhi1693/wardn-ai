@@ -80,6 +80,21 @@ async def list_runtime_sessions(
     return list(result.scalars().all())
 
 
+async def list_runtime_sessions_for_installation(
+    session: AsyncSession,
+    installation_id: Any,
+    *,
+    limit: int = 100,
+) -> list[MCPRuntimeSession]:
+    result = await session.execute(
+        select(MCPRuntimeSession)
+        .where(MCPRuntimeSession.installation_id == installation_id)
+        .order_by(MCPRuntimeSession.updated_at.desc())
+        .limit(max(1, limit))
+    )
+    return list(result.scalars().all())
+
+
 async def count_runtime_sessions_by_status(
     session: AsyncSession,
     *,
