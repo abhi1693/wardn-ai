@@ -13,8 +13,7 @@ import {
 } from "@/lib/workspace-context";
 
 import { InstallFormClient } from "./install-form-client";
-
-const SERVER_PICKER_PAGE_SIZE = 10;
+import { SERVER_PICKER_PAGE_SIZE } from "./install-form-domain";
 
 async function getInitialInstallations(context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");

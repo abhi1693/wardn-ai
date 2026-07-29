@@ -25,7 +25,12 @@ async function backendRequests(request: APIRequestContext) {
   expect(response.ok()).toBeTruthy();
   return (
     (await response.json()) as {
-      requests: Array<{ method: string; path: string; body?: Record<string, unknown> }>;
+      requests: Array<{
+        method: string;
+        path: string;
+        query?: Record<string, string>;
+        body?: Record<string, unknown>;
+      }>;
     }
   ).requests;
 }
@@ -33,6 +38,23 @@ async function backendRequests(request: APIRequestContext) {
 test.describe("MCP install runtime selection", () => {
   test.beforeEach(async ({ request }) => {
     await resetBackend(request);
+  });
+
+  test("loads twelve supported servers for the picker page", async ({ baseURL, page, request }) => {
+    await authenticate(page.context(), baseURL ?? "");
+    await page.goto(`/org/${organizationId}/workspace/${workspaceId}/install/new`);
+
+    await expect(page.getByRole("heading", { name: "Add MCP server" })).toBeVisible();
+
+    const serverListRequest = (await backendRequests(request)).find(
+      (entry) =>
+        entry.method === "GET" &&
+        entry.path === `/api/v1/organizations/${organizationId}/mcp/registry/servers`
+    );
+    expect(serverListRequest?.query).toMatchObject({
+      limit: "12",
+      version: "latest",
+    });
   });
 
   test("shows the selected package version and submits the switched runtime", async ({

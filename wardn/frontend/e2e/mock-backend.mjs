@@ -303,6 +303,7 @@ function record(request, url, body) {
   state.requests.push({
     method: request.method,
     path: url.pathname,
+    query: Object.fromEntries(url.searchParams),
     body,
   });
 }
