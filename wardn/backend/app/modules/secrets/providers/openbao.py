@@ -171,16 +171,31 @@ class OpenBaoSecretProvider:
         url = f"{settings['base_url']}/v1/{mount}/data/{secret_path}"
         headers = self._headers(settings, token.token)
 
+        existing_data: dict[str, Any] = {}
         async with httpx.AsyncClient(
             timeout=float(settings["timeout_seconds"]),
             verify=settings["tls_verify"],
             follow_redirects=False,
         ) as client:
-            response = await client.post(url, headers=headers, json={"data": values})
+            read_response = await client.get(url, headers=headers, params={})
+            if read_response.status_code in {401, 403}:
+                token = await self._refresh_client_token(store)
+                headers = self._headers(settings, token.token)
+                read_response = await client.get(url, headers=headers, params={})
+            if read_response.is_success:
+                existing_payload = record(response_json(read_response).get("data"))
+                existing_data = dict(record(existing_payload.get("data")))
+            elif read_response.status_code != 404:
+                raise InvalidSecretHandleError(
+                    f"OpenBao secret read before write failed with HTTP {read_response.status_code}"
+                )
+
+            write_data = {**existing_data, **values}
+            response = await client.post(url, headers=headers, json={"data": write_data})
             if response.status_code in {401, 403}:
                 token = await self._refresh_client_token(store)
                 headers = self._headers(settings, token.token)
-                response = await client.post(url, headers=headers, json={"data": values})
+                response = await client.post(url, headers=headers, json={"data": write_data})
         if not response.is_success:
             raise InvalidSecretHandleError(
                 f"OpenBao secret write failed with HTTP {response.status_code}"

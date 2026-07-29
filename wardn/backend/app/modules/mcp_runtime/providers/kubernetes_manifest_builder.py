@@ -7,7 +7,13 @@ from uuid import UUID
 from app.core.config import get_settings
 from app.modules.mcp_registry.models import MCPServerInstallation
 from app.modules.mcp_runtime.models import MCPRuntimeSession
-from app.modules.mcp_runtime.provider import package_runtime, secret_environment, secret_headers
+from app.modules.mcp_runtime.provider import (
+    fingerprint_payload,
+    package_runtime,
+    secret_environment,
+    secret_fingerprint_payload,
+    secret_headers,
+)
 from app.modules.mcp_runtime.providers.kubernetes_client import kubernetes_client_module
 from app.modules.mcp_runtime.providers.kubernetes_naming import (
     custom_namespace_annotations,
@@ -80,6 +86,8 @@ RUNTIME_SANDBOX_ENVIRONMENT = {
     "UV_CACHE_DIR": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache/uv",
     "NPM_CONFIG_CACHE": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache/npm",
 }
+WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION = "wardn.ai/runtime-config-checksum"
+WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION = "wardn.ai/runtime-secret-checksum"
 
 
 def runtime_labels(
@@ -886,10 +894,33 @@ def runtime_sandbox_env_vars(client_module: Any | None = None) -> list[Any]:
         for name, value in sorted(RUNTIME_SANDBOX_ENVIRONMENT.items())
     ]
 
+
+def runtime_rollout_annotations(
+    *,
+    runtime_session: MCPRuntimeSession,
+    secret_data: dict[str, str],
+) -> dict[str, str]:
+    config_checksum = runtime_session.config_fingerprint or fingerprint_payload(
+        {
+            "runtimeSessionId": runtime_session.id,
+            "installationId": runtime_session.installation_id,
+            "serverName": runtime_session.server_name,
+            "serverVersion": runtime_session.server_version,
+            "runtimeProvider": runtime_session.runtime_provider,
+            "runtimeKind": runtime_session.runtime_kind,
+        }
+    )
+    return {
+        WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION: config_checksum,
+        WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION: secret_fingerprint_payload(secret_data),
+    }
+
+
 def build_pod_template_manifest(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
+    annotations: dict[str, str] | None = None,
     secret_keys: list[str],
     container_name: str,
     container_image: str,
@@ -926,6 +957,7 @@ def build_pod_template_manifest(
             name=names.pod_name,
             namespace=names.namespace,
             labels=labels,
+            annotations=annotations or {},
         ),
         spec=client.V1PodSpec(
             automount_service_account_token=False,
@@ -1396,6 +1428,10 @@ def build_runtime_manifests(
     pod_template = build_pod_template_manifest(
         names=names,
         labels=workload_labels,
+        annotations=runtime_rollout_annotations(
+            runtime_session=runtime_session,
+            secret_data=secret_data,
+        ),
         secret_keys=list(secret_env_data),
         container_name=container_name,
         container_image=container_image,

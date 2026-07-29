@@ -180,6 +180,7 @@ async def enqueue_server_installation(
         server,
         payload,
         config_values,
+        existing_installation=installation,
     )
     desired_state = MCPServerInstallRequest(
         version=server.version,

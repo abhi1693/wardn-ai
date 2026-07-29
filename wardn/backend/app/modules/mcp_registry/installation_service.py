@@ -426,6 +426,7 @@ async def install_server_version(
             server,
             payload,
             config_values,
+            existing_installation=installation,
         )
     resolved_config_values, handle_refs = await resolve_install_config_values(
         session,

@@ -13,6 +13,8 @@ from app.modules.mcp_runtime.providers.kubernetes_client import (
     runtime_service_endpoint_url,
 )
 from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
+    WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION,
+    WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION,
     build_default_deny_network_policy,
     build_deployment_manifest,
     build_dns_egress_network_policy,
@@ -61,6 +63,7 @@ from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
     runtime_package_version,
     runtime_pod_security_context,
     runtime_request_headers,
+    runtime_rollout_annotations,
     runtime_sandbox_env_vars,
     runtime_secret_data,
     runtime_tmp_volume,
@@ -257,6 +260,9 @@ __all__ = [
     "oci_native_http_container_args",
     "oci_runtime_container_args",
     "runtime_request_headers",
+    "runtime_rollout_annotations",
+    "WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION",
+    "WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION",
     "build_namespace_manifest",
     "build_secret_manifest",
     "secret_env_vars",

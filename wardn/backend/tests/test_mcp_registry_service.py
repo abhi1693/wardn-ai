@@ -39,6 +39,8 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallRequest,
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession
+from app.modules.secrets.models import SecretHandle
+from app.modules.secrets.provider import SecretWriteResult
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
@@ -1225,6 +1227,144 @@ async def test_install_server_version_writes_raw_secrets_to_backend(monkeypatch)
     assert handle_calls[0].workspace_id == WORKSPACE_ID
     assert handle_calls[0].purpose == "mcp_env"
     installation = session.added[0]
+    assert installation.secret_references == {
+        "environment": {
+            "WEATHER_TOKEN": {
+                "type": "secret_handle",
+                "secretHandleId": str(handle_id),
+            },
+            "WEATHER_URL": "https://weather.example.com",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_updates_existing_secret_handle_in_place(
+    monkeypatch,
+) -> None:
+    store_id = uuid4()
+    handle_id = uuid4()
+    write_calls: list[dict[str, object]] = []
+    seen: dict[str, object] = {}
+    handle = SecretHandle(
+        id=handle_id,
+        organization_id=ORGANIZATION_ID,
+        workspace_id=WORKSPACE_ID,
+        store_id=store_id,
+        purpose="mcp_env",
+        display_name="MCP default WEATHER_TOKEN",
+        external_ref="wardn/orgs/acme/mcp/weather/default",
+        key_name="WEATHER_TOKEN",
+        version="1",
+    )
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={
+            "environment": {
+                "WEATHER_TOKEN": {
+                    "type": "secret_handle",
+                    "secretHandleId": str(handle_id),
+                },
+                "WEATHER_URL": "https://weather.example.com",
+            }
+        },
+    )
+    server = server_version("1.0.0", is_latest=True)
+    server.packages = [
+        {
+            "registryType": "oci",
+            "identifier": "ghcr.io/example/weather",
+            "environmentVariables": [
+                {"name": "WEATHER_TOKEN", "isSecret": True},
+                {"name": "WEATHER_URL"},
+            ],
+        }
+    ]
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    async def organization_id_for_workspace(*args, **kwargs):
+        return ORGANIZATION_ID
+
+    async def get_handle(*args, **kwargs):
+        assert kwargs["organization_id"] == ORGANIZATION_ID
+        assert kwargs["handle_id"] == handle_id
+        return handle
+
+    async def write_secret_values(*args, **kwargs):
+        write_calls.append({"args": args, "kwargs": kwargs})
+        return SecretWriteResult(version="2")
+
+    async def create_secret_handle(*args, **kwargs):
+        raise AssertionError("existing MCP secret handle should be reused")
+
+    async def resolve_secret(*args, **kwargs):
+        requested_handle_id = args[2]
+        assert requested_handle_id == handle_id
+        return SimpleNamespace(value="new-token")
+
+    def install_runtime(_server, **kwargs):
+        seen["config_values"] = kwargs["config_values"]
+        return MCPRuntimeInstall(
+            install_type="package",
+            install_path="/tmp/wardn/mcp/weather/1.0.0",
+            runtime_config={"kind": "package"},
+            secret_config={
+                "environment": {
+                    "WEATHER_TOKEN": kwargs["config_values"]["WEATHER_TOKEN"],
+                    "WEATHER_URL": kwargs["config_values"]["WEATHER_URL"],
+                }
+            },
+            status="enabled",
+        )
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        installation_service,
+        "organization_id_for_workspace",
+        organization_id_for_workspace,
+    )
+    monkeypatch.setattr(config_service.secrets_repository, "get_handle", get_handle)
+    monkeypatch.setattr(config_service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(config_service, "create_secret_handle", create_secret_handle)
+    monkeypatch.setattr(config_service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        config_service,
+        "get_runtime_manager",
+        lambda: SimpleNamespace(provider_name=lambda installation: "local"),
+    )
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            configValues={"WEATHER_TOKEN": "new-token"},
+            installTarget="package",
+        ),
+        workspace_id=WORKSPACE_ID,
+        user=USER,
+    )
+
+    assert seen["config_values"] == {
+        "WEATHER_TOKEN": "new-token",
+        "WEATHER_URL": "https://weather.example.com",
+    }
+    assert write_calls[0]["args"][3] == store_id
+    assert write_calls[0]["kwargs"]["workspace_id"] == WORKSPACE_ID
+    assert write_calls[0]["kwargs"]["external_ref"] == handle.external_ref
+    assert write_calls[0]["kwargs"]["values"] == {"WEATHER_TOKEN": "new-token"}
+    assert handle.version == "2"
     assert installation.secret_references == {
         "environment": {
             "WEATHER_TOKEN": {

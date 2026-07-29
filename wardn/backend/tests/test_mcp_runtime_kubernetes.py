@@ -19,6 +19,8 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     WARDN_LABEL_RUNTIME_SESSION_ID,
     WARDN_LABEL_SERVER_NAME,
     WARDN_LABEL_WORKSPACE_ID,
+    WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION,
+    WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION,
     KubernetesClientFactory,
     KubernetesConfigError,
     KubernetesImagePullSecretError,
@@ -1038,6 +1040,75 @@ def test_kubernetes_runtime_manifest_keeps_secret_values_only_in_secret(
     assert secret_value not in repr(manifest.pod)
     assert secret_value not in repr(manifest.service)
     assert secret_value not in repr(manifest.network_policies)
+
+
+def test_kubernetes_runtime_manifest_rolls_pod_when_secret_values_change(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation_id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    def build_manifest(secret_value: str):
+        installation = MCPServerInstallation(
+            workspace_id=workspace_id,
+            server_name="io.github.example/weather",
+            installed_version="1.0.0",
+            status="enabled",
+            install_type="npm",
+            install_path=str(tmp_path),
+            runtime_config={
+                "kind": RUNTIME_KIND_PACKAGE,
+                "command": "node",
+                "args": ["weather-mcp"],
+                "cwd": str(tmp_path),
+                "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            },
+            secret_references={"environment": {"WEATHER_TOKEN": secret_value}},
+        )
+        installation.id = installation_id
+        return build_runtime_manifests(
+            installation,
+            runtime_session,
+            settings=FakeSettings(),
+            client_module=FakeKubernetesClient,
+        )
+
+    first = build_manifest("first-secret")
+    second = build_manifest("second-secret")
+    first_annotations = first.pod.metadata.annotations
+    second_annotations = second.pod.metadata.annotations
+
+    assert (
+        first_annotations[WARDN_RUNTIME_CONFIG_CHECKSUM_ANNOTATION]
+        == "runtime-fingerprint"
+    )
+    assert first_annotations[WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION]
+    assert first_annotations[WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION] != (
+        second_annotations[WARDN_RUNTIME_SECRET_CHECKSUM_ANNOTATION]
+    )
+    assert "first-secret" not in repr(first.pod)
+    assert "second-secret" not in repr(second.pod)
 
 
 def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(

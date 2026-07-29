@@ -386,9 +386,20 @@ async def test_openbao_writes_kv_v2_secret(monkeypatch, tmp_path) -> None:
             {"role": "wardn-prod", "jwt": "service-account-jwt"},
         ),
         (
+            "GET",
+            "https://bao.example.com/v1/secret/data/wardn/orgs/acme/chatgpt",
+            {},
+        ),
+        (
             "POST",
             "https://bao.example.com/v1/secret/data/wardn/orgs/acme/chatgpt",
-            {"data": {"access_token": "access", "refresh_token": "refresh"}},
+            {
+                "data": {
+                    "api_key": "sk-test",
+                    "access_token": "access",
+                    "refresh_token": "refresh",
+                }
+            },
         ),
     ]
 

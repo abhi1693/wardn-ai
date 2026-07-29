@@ -29,6 +29,7 @@ from app.modules.mcp_registry.schemas import (
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
 from app.modules.mcp_runtime.manager import RUNTIME_PROVIDER_KUBERNETES, get_runtime_manager
+from app.modules.secrets import repository as secrets_repository
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.secrets.schemas import SecretHandleCreate, SecretPurpose
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
@@ -55,6 +56,16 @@ def secret_handle_id_from_value(value) -> uuid.UUID | None:
     if not raw_handle_id:
         return None
     return uuid.UUID(str(raw_handle_id))
+
+
+def secret_handle_id_from_config_value(value) -> uuid.UUID | None:
+    handle_id = secret_handle_id_from_value(value)
+    if handle_id is not None:
+        return handle_id
+    mapping = config_value_mapping(value)
+    if mapping.get("type") != "file":
+        return None
+    return secret_handle_id_from_value(mapping.get("content"))
 
 
 def parse_install_target_value(
@@ -177,11 +188,18 @@ async def externalize_install_config_secrets(
     server: MCPServerVersion,
     payload: MCPServerInstallRequest,
     config_values: ConfigValues,
+    *,
+    existing_installation: MCPServerInstallation | None = None,
 ) -> ConfigValues:
     secret_fields = selected_install_secret_fields(server, payload.install_target, config_values)
+    existing_values = install_config_values_from_secret_references(
+        existing_installation.secret_references if existing_installation else None
+    )
     raw_values: dict[str, str] = {}
     replacements: dict[str, dict | None] = {}
     field_key_names: dict[str, str] = {}
+    updated = dict(config_values)
+    updated_existing_handles: list[str] = []
 
     for field_name in secret_fields:
         value = config_values.get(field_name)
@@ -192,6 +210,47 @@ async def externalize_install_config_secrets(
             continue
         secret_value, replacement = install_secret_value(value)
         if not secret_value:
+            continue
+        existing_handle_id = secret_handle_id_from_config_value(existing_values.get(field_name))
+        if existing_handle_id is not None:
+            if user is None:
+                raise MCPServerInstallationUnsupportedError(
+                    "authenticated user is required for MCP secrets"
+                )
+            existing_handle = await secrets_repository.get_handle(
+                session,
+                organization_id=organization_id,
+                handle_id=existing_handle_id,
+            )
+            if existing_handle is None:
+                raise MCPServerInstallationUnsupportedError(
+                    "existing MCP secret handle is not available"
+                )
+            key_name = str(existing_handle.key_name or "").strip() or install_secret_key_name(
+                field_name
+            )
+            result = await write_secret_values(
+                session,
+                user,
+                organization_id,
+                existing_handle.store_id,
+                workspace_id=existing_handle.workspace_id,
+                external_ref=existing_handle.external_ref,
+                values={key_name: secret_value},
+                purpose=existing_handle.purpose,
+            )
+            if result.version:
+                existing_handle.version = result.version
+            if not str(existing_handle.key_name or "").strip():
+                existing_handle.key_name = key_name
+            if replacement is not None:
+                updated[field_name] = {
+                    **replacement,
+                    "content": secret_handle_ref(existing_handle.id),
+                }
+            else:
+                updated[field_name] = secret_handle_ref(existing_handle.id)
+            updated_existing_handles.append(str(existing_handle.id))
             continue
         key_name = install_secret_key_name(field_name)
         candidate = key_name
@@ -204,7 +263,20 @@ async def externalize_install_config_secrets(
         field_key_names[field_name] = candidate
 
     if not raw_values:
-        return config_values
+        if updated_existing_handles:
+            logger.info(
+                "Updated MCP install secrets in place.",
+                extra={
+                    "organization_id": str(organization_id),
+                    "workspace_id": str(workspace_id),
+                    "mcp_server_name": server.name,
+                    "mcp_server_version": server.version,
+                    "mcp_config_name": payload.config_name,
+                    "mcp_install_target": payload.install_target,
+                    "secret_handle_ids": updated_existing_handles,
+                },
+            )
+        return updated
     if payload.config_secret_store_id is None:
         raise MCPServerInstallationUnsupportedError("secret backend is required for MCP secrets")
     if user is None:
@@ -262,12 +334,11 @@ async def externalize_install_config_secrets(
         )
         raise MCPServerInstallationUnsupportedError(str(exc)) from exc
 
-    updated = dict(config_values)
     handle_ids: list[str] = []
     for field_name, key_name in field_key_names.items():
         purpose: SecretPurpose = secret_fields[field_name]
         try:
-            handle = await create_secret_handle(
+            created_handle = await create_secret_handle(
                 session,
                 user,
                 organization_id,
@@ -307,12 +378,12 @@ async def externalize_install_config_secrets(
             )
             raise MCPServerInstallationUnsupportedError(str(exc)) from exc
 
-        handle_ids.append(str(handle.id))
+        handle_ids.append(str(created_handle.id))
         replacement = replacements[field_name]
         if replacement is not None:
-            updated[field_name] = {**replacement, "content": secret_handle_ref(handle.id)}
+            updated[field_name] = {**replacement, "content": secret_handle_ref(created_handle.id)}
         else:
-            updated[field_name] = secret_handle_ref(handle.id)
+            updated[field_name] = secret_handle_ref(created_handle.id)
     logger.info(
         "Externalized MCP install secrets.",
         extra={
@@ -325,6 +396,7 @@ async def externalize_install_config_secrets(
             "secret_store_id": str(payload.config_secret_store_id),
             "mcp_secret_field_count": len(field_key_names),
             "secret_handle_ids": handle_ids,
+            "updated_secret_handle_ids": updated_existing_handles,
         },
     )
     return updated
