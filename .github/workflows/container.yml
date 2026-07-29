@@ -56,6 +56,28 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  worker:
+    name: Worker linux/arm64
+    uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
+    with:
+      runs-on: ubuntu-24.04-arm
+      image: ghcr.io/abhi1693/wardn-ai-worker
+      context: wardn/backend
+      file: wardn/backend/Dockerfile
+      target: worker
+      platforms: linux/arm64
+      cache-scope: wardn-ai-worker-arm64
+      build-args: |
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+      tags: |
+        type=semver,pattern={{version}}
+        type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+      labels: |
+        org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
+        org.opencontainers.image.title=wardn-ai-worker
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   mcp-runtime:
     name: MCP runtime linux/arm64
     uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master

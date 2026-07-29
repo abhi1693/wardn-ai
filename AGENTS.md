@@ -47,7 +47,7 @@ Use this checklist when asked to release Wardn AI and related home-lab workloads
    - Watch the container image workflow until it succeeds.
 
 3. Confirm images before updating workloads:
-   - Check the expected GHCR tags exist for Wardn AI backend and frontend.
+   - Check the expected GHCR tags exist for Wardn AI backend, frontend, worker, and MCP runtime.
    - Check the `registry.home/ghcr.io/...` mirror resolves those same tags.
 
 4. Update home-lab workloads:
