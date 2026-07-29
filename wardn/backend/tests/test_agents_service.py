@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -1168,10 +1169,100 @@ async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monk
     )
 
     session = FakeSession()
-    await service.refresh_wildcard_agent_server_tools(session, agent_id)
+    failures = await service.refresh_wildcard_agent_server_tools(session, agent_id)
 
     assert refreshed == [(installation, server)]
+    assert failures == []
     assert session.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_wildcard_agent_server_tools_returns_failed_servers(
+    monkeypatch,
+    caplog,
+) -> None:
+    agent_id = uuid4()
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent_id,
+        installation_id=uuid4(),
+    )
+    installation = MCPServerInstallation(
+        id=assignment.installation_id,
+        workspace_id=uuid4(),
+        server_name="io.github.example/failing-server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Server",
+        server_json={
+            "$schema": "https://example.com/schema.json",
+            "name": installation.server_name,
+            "description": "Server",
+            "version": installation.installed_version,
+        },
+        is_latest=True,
+    )
+
+    async def list_agent_wildcard_server_version_rows(*args, **kwargs):
+        assert kwargs["agent_id"] == agent_id
+        return [(assignment, installation, server)]
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        raise service.MCPGatewayUpstreamError("upstream initialize returned no result")
+
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_wildcard_server_version_rows",
+        list_agent_wildcard_server_version_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+
+    session = FakeSession()
+    with caplog.at_level(logging.WARNING, logger=service.logger.name):
+        failures = await service.refresh_wildcard_agent_server_tools(session, agent_id)
+
+    assert failures == [
+        service.AgentToolRefreshFailure(
+            installation_id=installation.id,
+            server_name=installation.server_name,
+            server_version=installation.installed_version,
+            config_name=installation.config_name,
+            error_type="MCPGatewayUpstreamError",
+            error="upstream initialize returned no result",
+        )
+    ]
+    assert "omitting server tools for chat run" in caplog.text
+    assert session.commits == 0
+
+
+def test_omit_failed_mcp_runtime_rows_filters_failed_installations() -> None:
+    failed_installation = MCPServerInstallation(id=uuid4())
+    healthy_installation = MCPServerInstallation(id=uuid4())
+    failed_row = (object(), object(), failed_installation, object())
+    healthy_row = (object(), object(), healthy_installation, object())
+    failure = service.AgentToolRefreshFailure(
+        installation_id=failed_installation.id,
+        server_name="io.github.example/failing-server",
+        server_version="1.0.0",
+        config_name="default",
+        error_type="MCPGatewayUpstreamError",
+        error="upstream initialize returned no result",
+    )
+
+    assert service.omit_failed_mcp_runtime_rows([failed_row, healthy_row], [failure]) == [
+        healthy_row
+    ]
+    assert service.omit_failed_mcp_runtime_rows([failed_row], []) == [failed_row]
 
 
 def patch_org_owner(monkeypatch, organization_id, user):

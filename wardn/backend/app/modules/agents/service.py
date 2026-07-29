@@ -1,6 +1,7 @@
 import logging
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,12 +160,15 @@ from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.service import OPENAI_API_KEY_PROVIDER as OPENAI_API_KEY_PROVIDER
 from app.modules.llm_providers.service import OPENAI_CHATGPT_PROVIDER as OPENAI_CHATGPT_PROVIDER
 from app.modules.llm_providers.service import list_models_for_credential, user_can_see_credential
+from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository as mcp_registry_repository
+from app.modules.mcp_registry.exceptions import MCPServerInstallationFailedError
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.observability import service as observability_service
 from app.modules.organizations.service import (
     require_organization_admin,
@@ -184,6 +188,16 @@ QUICK_START_AGENT_INSTRUCTIONS = (
     "You are a workspace assistant. Use available tools when they help answer accurately. "
     "Ask before destructive actions."
 )
+
+
+@dataclass(frozen=True)
+class AgentToolRefreshFailure:
+    installation_id: uuid.UUID
+    server_name: str
+    server_version: str
+    config_name: str
+    error_type: str
+    error: str
 
 
 def agent_log_extra(
@@ -890,8 +904,9 @@ async def list_available_agent_tools(
 async def refresh_wildcard_agent_server_tools(
     session: AsyncSession,
     agent_id: uuid.UUID,
-) -> None:
+) -> list[AgentToolRefreshFailure]:
     rows = await repository.list_agent_wildcard_server_version_rows(session, agent_id=agent_id)
+    failures: list[AgentToolRefreshFailure] = []
     for _assignment, installation, server in rows:
         try:
             await refresh_tool_schemas_for_installation(
@@ -899,10 +914,71 @@ async def refresh_wildcard_agent_server_tools(
                 installation=installation,
                 server=server,
             )
-        except Exception as exc:
-            raise InvalidAgentScopeError(
-                f"MCP server tools could not be loaded for {installation.config_name}: {exc}"
-            ) from exc
+        except (
+            MCPGatewayUpstreamError,
+            MCPServerInstallationFailedError,
+            KubernetesRuntimeProviderError,
+            ValueError,
+        ) as exc:
+            failure = AgentToolRefreshFailure(
+                installation_id=installation.id,
+                server_name=installation.server_name,
+                server_version=installation.installed_version,
+                config_name=installation.config_name,
+                error_type=exc.__class__.__name__,
+                error=str(exc),
+            )
+            failures.append(failure)
+            logger.warning(
+                "Failed to refresh wildcard MCP server tools; omitting server tools for chat run.",
+                extra={
+                    "agent_id": str(agent_id),
+                    "workspace_id": str(installation.workspace_id),
+                    "mcp_server_name": installation.server_name,
+                    "mcp_server_version": installation.installed_version,
+                    "mcp_installation_id": str(installation.id),
+                    "mcp_config_name": installation.config_name,
+                    "error_type": failure.error_type,
+                    "error": failure.error,
+                },
+            )
+    return failures
+
+
+def omit_failed_mcp_runtime_rows(
+    rows: list[tuple],
+    refresh_failures: list[AgentToolRefreshFailure],
+) -> list[tuple]:
+    failed_installation_ids = {failure.installation_id for failure in refresh_failures}
+    if not failed_installation_ids:
+        return rows
+    return [row for row in rows if row[2].id not in failed_installation_ids]
+
+
+async def record_agent_tool_refresh_failures(
+    session: AsyncSession,
+    *,
+    agent_run_id: uuid.UUID,
+    refresh_failures: list[AgentToolRefreshFailure],
+) -> None:
+    for failure in refresh_failures:
+        await repository.append_agent_run_step(
+            session,
+            agent_run_id=agent_run_id,
+            step_type="tool_discovery",
+            status="failed",
+            title=f"{failure.config_name} tools",
+            payload={
+                "installationId": str(failure.installation_id),
+                "serverName": failure.server_name,
+                "serverVersion": failure.server_version,
+                "configName": failure.config_name,
+                "errorType": failure.error_type,
+                "error": sanitize_run_payload(failure.error),
+            },
+        )
+
+
 async def stream_agent_chat(
     session: AsyncSession,
     user: User,
@@ -961,9 +1037,33 @@ async def stream_agent_chat(
     )
     if conversation is not None:
         await persist_chat_turn_user_message(session, conversation, payload, agent_run)
-    await refresh_wildcard_agent_server_tools(session, agent.id)
+    tool_refresh_failures = await refresh_wildcard_agent_server_tools(session, agent.id)
+    if tool_refresh_failures:
+        await record_agent_tool_refresh_failures(
+            session,
+            agent_run_id=agent_run.id,
+            refresh_failures=tool_refresh_failures,
+        )
+        logger.warning(
+            "Continuing agent chat with unavailable MCP server tools omitted.",
+            extra={
+                **agent_log_extra(
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    user_id=user.id,
+                    scope=agent.scope,
+                ),
+                "mcp_refresh_failure_count": len(tool_refresh_failures),
+                "mcp_failed_installation_ids": [
+                    str(failure.installation_id) for failure in tool_refresh_failures
+                ],
+            },
+        )
+    runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+    runtime_rows = omit_failed_mcp_runtime_rows(runtime_rows, tool_refresh_failures or [])
     tools = agent_runtime_tools(
-        await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+        runtime_rows
     )
     guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
         session,
