@@ -4,6 +4,13 @@
   "workspaces": [
     "wardn/frontend"
   ],
+  "overrides": {
+    "minimatch": "10.2.6",
+    "next": {
+      "postcss": "8.5.25",
+      "sharp": "0.35.3"
+    }
+  },
   "scripts": {
     "api:openapi": "cd wardn/backend && uv run --extra dev python -m app.openapi --output ../frontend/openapi/wardn-api.json",
     "web:api:generate": "npm run api:openapi && npm --workspace wardn/frontend run api:generate",
