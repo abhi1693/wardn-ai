@@ -454,6 +454,41 @@ def test_registry_url_loader_removes_invalid_repository_url(monkeypatch) -> None
     assert servers[0].repository == {"source": "github"}
 
 
+def test_registry_url_batch_iterator_chunks_large_pages(monkeypatch) -> None:
+    payload = {
+        "servers": [
+            {
+                "server": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": f"io.github.example/server-{index}",
+                    "description": "Chunked server",
+                    "title": f"Server {index}",
+                    "version": "1.0.0",
+                },
+            }
+            for index in range(205)
+        ],
+        "metadata": {"count": 205},
+    }
+
+    monkeypatch.setattr(commands, "fetch_registry_payload", lambda url: payload)
+
+    batches = list(
+        commands.iter_supported_server_batches_from_registry_url(
+            "https://registry.modelcontextprotocol.io/v0/servers",
+            limit=100,
+            max_pages=1,
+        )
+    )
+
+    assert [len(batch) for batch in batches] == [100, 100, 5]
+    assert batches[0][0].name == "io.github.example/server-0"
+    assert batches[2][-1].name == "io.github.example/server-204"
+
+
 def test_github_repo_from_url_parses_repository_urls() -> None:
     assert commands.github_repo_from_url("https://github.com/example/weather") == (
         "example",

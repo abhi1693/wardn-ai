@@ -50,6 +50,7 @@ class FakeSession:
         self.deleted: list[object] = []
         self.flushed = False
         self.committed = False
+        self.commit_count = 0
         self.refreshed: list[object] = []
 
     def add(self, instance: object) -> None:
@@ -63,6 +64,7 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.committed = True
+        self.commit_count += 1
 
     async def refresh(self, instance) -> None:
         now = datetime(2026, 6, 21, tzinfo=UTC)
@@ -402,13 +404,13 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     def registry_headers(*args, **kwargs):
         return {"x-test": "1"}
 
-    def load_supported_servers_from_registry_url(source_url, **kwargs):
+    def iter_supported_server_batches_from_registry_url(source_url, **kwargs):
         calls["source_url"] = source_url
         calls["kwargs"] = kwargs
-        return [payload]
+        return iter([[payload]])
 
     async def sync_supported_servers(*args, **kwargs):
-        calls["servers"] = args[1]
+        calls["servers"] = list(args[1])
         calls["organization_id"] = kwargs["organization_id"]
         calls["catalog_source_id"] = kwargs["catalog_source_id"]
         return 1
@@ -420,8 +422,8 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     monkeypatch.setattr(commands, "registry_headers", registry_headers)
     monkeypatch.setattr(
         commands,
-        "load_supported_servers_from_registry_url",
-        load_supported_servers_from_registry_url,
+        "iter_supported_server_batches_from_registry_url",
+        iter_supported_server_batches_from_registry_url,
     )
     monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
     session = FakeSession()
@@ -444,6 +446,7 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     }
     assert calls["organization_id"] == ORGANIZATION_ID
     assert calls["catalog_source_id"] == source.id
+    assert session.commit_count == 1
     assert source.last_success_at is not None
     assert source.last_error == ""
 
@@ -466,13 +469,13 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     def registry_headers(*args, **kwargs):
         return {"x-test": "1"}
 
-    def load_supported_servers_from_registry_url(source_url, **kwargs):
+    def iter_supported_server_batches_from_registry_url(source_url, **kwargs):
         calls["source_url"] = source_url
         calls["kwargs"] = kwargs
-        return [payload]
+        return iter([[payload]])
 
     async def sync_supported_servers(*args, **kwargs):
-        calls["servers"] = args[1]
+        calls["servers"] = list(args[1])
         calls["organization_id"] = kwargs["organization_id"]
         calls["catalog_source_id"] = kwargs["catalog_source_id"]
         return 1
@@ -484,8 +487,8 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     monkeypatch.setattr(commands, "registry_headers", registry_headers)
     monkeypatch.setattr(
         commands,
-        "load_supported_servers_from_registry_url",
-        load_supported_servers_from_registry_url,
+        "iter_supported_server_batches_from_registry_url",
+        iter_supported_server_batches_from_registry_url,
     )
     monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
     session = FakeSession()
@@ -503,9 +506,60 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     )
     assert calls["organization_id"] == ORGANIZATION_ID
     assert calls["catalog_source_id"] == source.id
+    assert session.commit_count == 1
     assert source.last_success_at is not None
     assert source.last_synced_updated_since > datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
     assert source.last_error == ""
+
+
+@pytest.mark.asyncio
+async def test_sync_catalog_source_commits_and_clears_each_batch(monkeypatch) -> None:
+    source = catalog_source()
+    batches = [
+        [registry_payload(f"1.0.{index}") for index in range(100)],
+        [registry_payload(f"1.1.{index}") for index in range(100)],
+        [registry_payload("1.2.0")],
+    ]
+    calls = {"batch_lengths": []}
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def resolve_secret(*args, **kwargs):
+        return SimpleNamespace(value="hub-token")
+
+    def registry_headers(*args, **kwargs):
+        return {"x-test": "1"}
+
+    def iter_supported_server_batches_from_registry_url(source_url, **kwargs):
+        calls["source_url"] = source_url
+        calls["kwargs"] = kwargs
+        return iter(batches)
+
+    async def sync_supported_servers(*args, **kwargs):
+        calls["batch_lengths"].append(len(args[1]))
+        return len(args[1])
+
+    from app.modules.mcp_registry import commands
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(catalog_service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(commands, "registry_headers", registry_headers)
+    monkeypatch.setattr(
+        commands,
+        "iter_supported_server_batches_from_registry_url",
+        iter_supported_server_batches_from_registry_url,
+    )
+    monkeypatch.setattr(catalog_service, "sync_supported_servers", sync_supported_servers)
+    session = FakeSession()
+
+    response = await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
+
+    assert response.synced_count == 201
+    assert calls["batch_lengths"] == [100, 100, 1]
+    assert calls["kwargs"]["limit"] == 100
+    assert session.commit_count == 3
+    assert batches == [[], [], []]
 
 
 @pytest.mark.asyncio

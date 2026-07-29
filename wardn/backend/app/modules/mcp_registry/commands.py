@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -644,7 +645,7 @@ def registry_source_url(source: str, source_url: str) -> str:
     return source_url
 
 
-def load_supported_servers_from_registry_url(
+def iter_supported_server_batches_from_registry_url(
     source_url: str,
     *,
     limit: int,
@@ -656,18 +657,18 @@ def load_supported_servers_from_registry_url(
     readme_descriptions: bool = False,
     github_token: str | None = None,
     wardn_hub_version_details: bool = False,
-) -> list[MCPServerCreate]:
+) -> Iterator[list[MCPServerCreate]]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
     if max_pages is not None and max_pages < 1:
         raise ValueError("--max-pages must be greater than 0")
 
-    servers = []
     seen_server_versions: set[tuple[str, str]] = set()
     readme_cache: dict[tuple[str, str], str | None] = {}
     cursor = None
     page = 1
     pages_fetched = 0
+    server_count = 0
 
     logger.info("Loading supported MCP servers from registry: %s", source_url)
 
@@ -686,6 +687,7 @@ def load_supported_servers_from_registry_url(
             payload = fetch_registry_payload(page_url, headers=headers)
         else:
             payload = fetch_registry_payload(page_url)
+        documents: list[dict] = []
         if wardn_hub_version_details:
             documents = load_wardn_hub_version_detail_documents(
                 payload,
@@ -714,9 +716,11 @@ def load_supported_servers_from_registry_url(
                 continue
             seen_server_versions.add(key)
             unique_page_servers.append(server)
-        servers.extend(unique_page_servers)
+        server_count += len(unique_page_servers)
         pages_fetched += 1
         repeated_count = len(page_servers) - len(unique_page_servers)
+        page_had_servers = bool(page_servers)
+        page_only_repeated = page_had_servers and not unique_page_servers
 
         metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
         cursor = metadata.get("nextCursor") if pagination == "cursor" else None
@@ -731,8 +735,16 @@ def load_supported_servers_from_registry_url(
             logger.info(
                 "Fetched %s registry pages (%s server versions).",
                 pages_fetched,
-                len(servers),
+                server_count,
             )
+
+        documents.clear()
+        page_servers.clear()
+        payload = None
+        while unique_page_servers:
+            batch = unique_page_servers[:limit]
+            del unique_page_servers[:limit]
+            yield batch
 
         if max_pages is not None and pages_fetched >= max_pages:
             logger.info("Stopped after %s registry pages.", pages_fetched)
@@ -742,7 +754,7 @@ def load_supported_servers_from_registry_url(
             if isinstance(total_pages, int) and page >= total_pages:
                 logger.info("Finished paged registry fetch after %s pages.", pages_fetched)
                 break
-            if not page_servers:
+            if not page_had_servers:
                 logger.info("Finished paged registry fetch after empty page %s.", page)
                 break
             page += 1
@@ -753,10 +765,38 @@ def load_supported_servers_from_registry_url(
         if cursor == previous_cursor:
             logger.warning("Stopped registry fetch because cursor did not advance: %s", cursor)
             break
-        if page_servers and not unique_page_servers:
+        if page_only_repeated:
             logger.warning("Stopped registry fetch because page only repeated earlier entries.")
             break
 
+
+def load_supported_servers_from_registry_url(
+    source_url: str,
+    *,
+    limit: int,
+    max_pages: int | None,
+    headers: dict[str, str] | None = None,
+    updated_since: str | None = None,
+    version: str | None = None,
+    pagination: str = "cursor",
+    readme_descriptions: bool = False,
+    github_token: str | None = None,
+    wardn_hub_version_details: bool = False,
+) -> list[MCPServerCreate]:
+    servers: list[MCPServerCreate] = []
+    for batch in iter_supported_server_batches_from_registry_url(
+        source_url,
+        limit=limit,
+        max_pages=max_pages,
+        headers=headers,
+        updated_since=updated_since,
+        version=version,
+        pagination=pagination,
+        readme_descriptions=readme_descriptions,
+        github_token=github_token,
+        wardn_hub_version_details=wardn_hub_version_details,
+    ):
+        servers.extend(batch)
     return servers
 
 

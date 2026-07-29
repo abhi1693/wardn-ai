@@ -1,6 +1,7 @@
 """MCP catalog source and server-version application services."""
 
 import asyncio
+import gc
 import re
 import uuid
 from dataclasses import dataclass
@@ -64,6 +65,8 @@ WARDN_HUB_CATALOG_PATH = "/api/v1/mcp/catalog"
 WARDN_HUB_SERVERS_PATH = "/api/v1/mcp/servers"
 CATALOG_SOURCE_TOKEN_KEY = "api_token"
 CATALOG_SOURCE_META_KEY = "wardnCatalogSource"
+CATALOG_SYNC_BATCH_SIZE = 100
+NO_CATALOG_SYNC_BATCH = object()
 
 
 @dataclass(frozen=True)
@@ -618,6 +621,16 @@ async def catalog_source_auth_headers(
     }
 
 
+def next_catalog_sync_batch(iterator):
+    return next(iterator, NO_CATALOG_SYNC_BATCH)
+
+
+def release_catalog_sync_batch_memory(*batches: list) -> None:
+    for batch in batches:
+        batch.clear()
+    gc.collect()
+
+
 async def sync_catalog_source(
     session,
     organization_id: uuid.UUID,
@@ -634,7 +647,7 @@ async def sync_catalog_source(
         raise ValueError("catalog source is disabled")
 
     from app.modules.mcp_registry.commands import (
-        load_supported_servers_from_registry_url,
+        iter_supported_server_batches_from_registry_url,
         registry_headers,
     )
 
@@ -658,14 +671,14 @@ async def sync_catalog_source(
         headers = registry_headers(source_type, api_key=None, tenant_id=source.tenant_id or None)
         headers.update(await catalog_source_auth_headers(session, organization_id, source))
         last_error: Exception | None = None
-        servers = None
-        synced_source_url = ""
+        synced_count = 0
+        loaded_source = False
         for source_url in source_urls:
+            source_batch_count = 0
             try:
-                servers = await asyncio.to_thread(
-                    load_supported_servers_from_registry_url,
+                batch_iterator = iter_supported_server_batches_from_registry_url(
                     source_url,
-                    limit=CATALOG_SYNC_PAGE_SIZE,
+                    limit=CATALOG_SYNC_BATCH_SIZE,
                     max_pages=None,
                     headers=headers,
                     updated_since=updated_since,
@@ -673,25 +686,46 @@ async def sync_catalog_source(
                     pagination=pagination,
                     wardn_hub_version_details=bool(updated_since),
                 )
-                synced_source_url = source_url
+                while True:
+                    batch = await asyncio.to_thread(next_catalog_sync_batch, batch_iterator)
+                    if batch is NO_CATALOG_SYNC_BATCH:
+                        break
+                    source_batch_count += len(batch)
+                    sourced_servers: list[MCPServerCreate] = []
+                    try:
+                        sourced_servers = [
+                            catalog_source_payload(server, source=source, source_url=source_url)
+                            for server in batch
+                        ]
+                        synced_count += await sync_supported_servers(
+                            session,
+                            sourced_servers,
+                            organization_id=organization_id,
+                            catalog_source_id=source.id,
+                        )
+                        await session.commit()
+                    finally:
+                        release_catalog_sync_batch_memory(batch, sourced_servers)
+                loaded_source = True
                 break
             except Exception as exc:
                 last_error = exc
-        if servers is None:
+                await session.rollback()
+                if source_batch_count > 0:
+                    raise
+        if not loaded_source:
             raise ValueError(
                 f"no supported catalog API found at {source.base_url}: {last_error}"
             )
-        sourced_servers = [
-            catalog_source_payload(server, source=source, source_url=synced_source_url)
-            for server in servers
-        ]
-        count = await sync_supported_servers(
-            session,
-            sourced_servers,
-            organization_id=organization_id,
-            catalog_source_id=source.id,
-        )
     except Exception as exc:
+        await session.rollback()
+        source = await repository.get_catalog_source(
+            session,
+            source_id,
+            organization_id=organization_id,
+        )
+        if source is None:
+            raise MCPCatalogSourceNotFoundError("catalog source not found") from exc
         source.last_error = str(exc)
         await session.flush()
         raise ValueError(f"catalog sync failed: {exc}") from exc
@@ -704,7 +738,7 @@ async def sync_catalog_source(
     await session.refresh(source)
     return MCPCatalogSourceSyncResponse(
         source=catalog_source_response(source),
-        synced_count=count,
+        synced_count=synced_count,
     )
 
 
