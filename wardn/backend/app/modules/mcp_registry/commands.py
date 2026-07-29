@@ -262,6 +262,9 @@ def _wardn_hub_catalog_documents(server: dict) -> list[dict]:
             if key not in document and key in server:
                 document[key] = server[key]
         document["version"] = str(version.get("version") or document.get("version") or "").strip()
+        version_id = str(version.get("id") or "").strip()
+        if version_id:
+            document["id"] = version_id
         document["packages"] = version.get("packages", document.get("packages", [])) or []
         document["remotes"] = version.get("remotes", document.get("remotes", [])) or []
         metadata = dict(document.get("_meta") or {})
@@ -273,10 +276,16 @@ def _wardn_hub_catalog_documents(server: dict) -> list[dict]:
             "updatedAt": version.get("updatedAt") or version.get("publishedAt"),
             "isLatest": bool(version.get("isLatest")),
         }
-        metadata["dev.wardnai.hub/catalog"] = {
+        hub_catalog_metadata = {
             "qualityScore": version.get("qualityScore"),
             "trustReport": version.get("trustReport"),
         }
+        if version_id:
+            hub_catalog_metadata["versionId"] = version_id
+        server_id = str(version.get("serverId") or server.get("id") or "").strip()
+        if server_id:
+            hub_catalog_metadata["serverId"] = server_id
+        metadata["dev.wardnai.hub/catalog"] = hub_catalog_metadata
         document["_meta"] = metadata
         documents.append(document)
     return documents

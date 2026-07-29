@@ -217,6 +217,8 @@ def test_load_supported_servers_reads_wardn_hub_catalog_payload() -> None:
                 "icons": [{"src": "https://example.com/icon.png"}],
                 "versions": [
                     {
+                        "id": "5eb8da81-ae8f-4450-b74c-0fef036ce07a",
+                        "serverId": "43f8b47b-ee45-4121-b89f-9a875dc536d5",
                         "version": "1.0.0",
                         "qualityScore": 95,
                         "packages": [
@@ -248,8 +250,17 @@ def test_load_supported_servers_reads_wardn_hub_catalog_payload() -> None:
     assert servers[0].name == "io.github.example/weather"
     assert servers[0].version == "1.0.0"
     assert servers[0].packages[0]["identifier"] == "@example/weather-mcp"
+    assert servers[0].model_dump(by_alias=True)["id"] == (
+        "5eb8da81-ae8f-4450-b74c-0fef036ce07a"
+    )
     assert servers[0].meta["io.modelcontextprotocol.registry/official"]["isLatest"] is True
     assert servers[0].meta["dev.wardnai.hub/catalog"]["qualityScore"] == 95
+    assert servers[0].meta["dev.wardnai.hub/catalog"]["versionId"] == (
+        "5eb8da81-ae8f-4450-b74c-0fef036ce07a"
+    )
+    assert servers[0].meta["dev.wardnai.hub/catalog"]["serverId"] == (
+        "43f8b47b-ee45-4121-b89f-9a875dc536d5"
+    )
 
 
 def test_fetch_registry_payload_sends_default_user_agent(monkeypatch) -> None:

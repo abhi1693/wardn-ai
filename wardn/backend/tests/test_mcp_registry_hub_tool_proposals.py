@@ -105,6 +105,23 @@ def test_hub_tool_inventory_proposal_event_targets_metadata_edit_endpoint() -> N
     )
 
 
+def test_hub_tool_inventory_proposal_event_uses_hub_catalog_metadata_version_id() -> None:
+    hub_id = str(uuid4())
+    server = server_version()
+    server.server_json.pop("id")
+    server.server_json["_meta"]["dev.wardnai.hub/catalog"] = {"versionId": hub_id}
+
+    event = hub_tool_proposals.mcp_hub_tool_inventory_proposal_event(
+        server,
+        tools=runtime_tools(),
+        settings=make_settings(mcp_tool_proposal_api_token="hub-token"),
+    )
+
+    assert event is not None
+    assert event.hub_version_id == hub_id
+    assert event.server_json["_meta"]["wardnAiToolInventory"]["hubVersionId"] == hub_id
+
+
 def test_hub_tool_inventory_proposal_event_skips_matching_hub_tools() -> None:
     event = hub_tool_proposals.mcp_hub_tool_inventory_proposal_event(
         server_version(

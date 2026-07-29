@@ -42,13 +42,21 @@ def hub_source_metadata(server: MCPServerVersion) -> dict[str, str] | None:
 
 
 def hub_version_id(server: MCPServerVersion) -> str | None:
-    value = server.server_json.get("id")
-    if not isinstance(value, str):
-        return None
-    try:
-        return str(uuid.UUID(value))
-    except ValueError:
-        return None
+    values = [server.server_json.get("id")]
+    metadata = server.server_json.get("_meta")
+    if isinstance(metadata, dict):
+        hub_catalog_metadata = metadata.get("dev.wardnai.hub/catalog")
+        if isinstance(hub_catalog_metadata, dict):
+            values.append(hub_catalog_metadata.get("versionId"))
+
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        try:
+            return str(uuid.UUID(value.strip()))
+        except ValueError:
+            continue
+    return None
 
 
 def hub_api_base_url(value: str) -> str | None:
