@@ -5,7 +5,11 @@ import pytest
 from app.core.config import Settings
 from app.db.session import DEFERRED_SESSION_WORK_KEY
 from app.modules.mcp_registry import hub_tool_proposals
-from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
+from app.modules.mcp_registry.models import (
+    MCPHubToolInventoryProposal,
+    MCPServerInstallation,
+    MCPServerVersion,
+)
 
 
 def make_settings(**values: object) -> Settings:
@@ -88,7 +92,7 @@ def test_hub_tool_inventory_proposal_event_targets_metadata_edit_endpoint() -> N
     event = hub_tool_proposals.mcp_hub_tool_inventory_proposal_event(
         server_version(hub_version_id=hub_id),
         tools=runtime_tools(),
-        settings=make_settings(mcp_tool_proposal_api_token="hub-token"),
+        settings=make_settings(app_version="1.2.3", mcp_tool_proposal_api_token="hub-token"),
     )
 
     assert event is not None
@@ -103,6 +107,118 @@ def test_hub_tool_inventory_proposal_event_targets_metadata_edit_endpoint() -> N
     assert event.server_json["_meta"]["wardnAiToolInventory"]["inventoryHash"] == (
         event.inventory_hash
     )
+    assert event.user_agent == "wardn-ai/1.2.3 (+https://github.com/abhi1693/wardn-ai)"
+
+
+def test_post_hub_tool_inventory_proposal_uses_user_agent(monkeypatch) -> None:
+    calls = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self) -> bytes:
+            return b'{"id":"submission-1"}'
+
+    def open_outbound_request(request, *, timeout):
+        calls.append(
+            {
+                "method": request.get_method(),
+                "timeout": timeout,
+                "user_agent": request.get_header("User-agent"),
+                "content_type": request.get_header("Content-type"),
+            }
+        )
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        hub_tool_proposals,
+        "open_outbound_request",
+        open_outbound_request,
+    )
+    event = hub_tool_proposals.mcp_hub_tool_inventory_proposal_event(
+        server_version(),
+        tools=runtime_tools(),
+        settings=make_settings(
+            app_version="1.2.3",
+            mcp_tool_proposal_api_token="hub-token",
+        ),
+    )
+
+    assert event is not None
+    response = hub_tool_proposals.post_mcp_hub_tool_inventory_proposal(event)
+
+    assert response.submission_id == "submission-1"
+    assert calls == [
+        {
+            "method": "POST",
+            "timeout": event.timeout_seconds,
+            "user_agent": "wardn-ai/1.2.3 (+https://github.com/abhi1693/wardn-ai)",
+            "content_type": "application/json",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reserve_hub_tool_inventory_proposal_retries_failed(monkeypatch) -> None:
+    existing = MCPHubToolInventoryProposal(
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        installation_id=uuid4(),
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        hub_version_id=str(uuid4()),
+        inventory_hash="old",
+        tool_count=0,
+        status="failed",
+        submission_id="",
+        last_error="HTTP 403",
+    )
+
+    async def existing_proposal(*args, **kwargs):
+        return existing
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.flushed = False
+
+        async def flush(self) -> None:
+            self.flushed = True
+
+    monkeypatch.setattr(
+        hub_tool_proposals,
+        "existing_hub_tool_inventory_proposal",
+        existing_proposal,
+    )
+    event = hub_tool_proposals.mcp_hub_tool_inventory_proposal_event(
+        server_version(hub_version_id=existing.hub_version_id),
+        tools=runtime_tools(),
+        settings=make_settings(
+            app_version="1.2.3",
+            mcp_tool_proposal_api_token="hub-token",
+        ),
+    )
+    assert event is not None
+    existing.inventory_hash = event.inventory_hash
+    session = FakeSession()
+
+    proposal = await hub_tool_proposals.reserve_hub_tool_inventory_proposal(
+        session,
+        event=event,
+        installation_id=uuid4(),
+        workspace_id=uuid4(),
+        organization_id=uuid4(),
+    )
+
+    assert proposal is existing
+    assert existing.status == "pending"
+    assert existing.last_error == ""
+    assert existing.inventory_hash == event.inventory_hash
+    assert existing.tool_count == event.tool_count
+    assert session.flushed is True
 
 
 def test_hub_tool_inventory_proposal_event_uses_hub_catalog_metadata_version_id() -> None:

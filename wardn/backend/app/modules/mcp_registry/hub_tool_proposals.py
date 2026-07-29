@@ -46,6 +46,7 @@ class MCPHubToolInventoryProposalEvent:
     tools: list[dict[str, Any]]
     server_json: dict[str, Any]
     timeout_seconds: float
+    user_agent: str
 
     @property
     def tool_count(self) -> int:
@@ -66,6 +67,10 @@ class MCPHubToolInventoryProposalHTTPError(Exception):
 
 def json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True, default=str))
+
+
+def wardn_ai_user_agent(settings: Settings) -> str:
+    return f"wardn-ai/{settings.app_version} (+https://github.com/abhi1693/wardn-ai)"
 
 
 def record(value: Any) -> dict[str, Any]:
@@ -268,6 +273,7 @@ def mcp_hub_tool_inventory_proposal_event(
         tools=observed_tools,
         server_json=server_json,
         timeout_seconds=settings.mcp_tool_proposal_timeout_seconds,
+        user_agent=wardn_ai_user_agent(settings),
     )
 
 
@@ -295,7 +301,17 @@ async def reserve_hub_tool_inventory_proposal(
 ) -> MCPHubToolInventoryProposal | None:
     existing = await existing_hub_tool_inventory_proposal(session, event=event)
     if existing is not None:
-        return None
+        if existing.status != "failed":
+            return None
+        existing.organization_id = organization_id
+        existing.workspace_id = workspace_id
+        existing.installation_id = installation_id
+        existing.tool_count = event.tool_count
+        existing.status = "pending"
+        existing.submission_id = ""
+        existing.last_error = ""
+        await session.flush()
+        return existing
 
     proposal = MCPHubToolInventoryProposal(
         organization_id=organization_id,
@@ -332,6 +348,7 @@ def post_mcp_hub_tool_inventory_proposal(
             "Authorization": f"Bearer {event.api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": event.user_agent,
         },
         method="POST",
     )

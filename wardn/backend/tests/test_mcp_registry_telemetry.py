@@ -134,6 +134,7 @@ async def test_record_mcp_server_install_telemetry_posts_event(monkeypatch) -> N
         calls.append(
             {
                 "method": request.get_method(),
+                "user_agent": request.get_header("User-agent"),
                 "timeout": timeout,
                 "url": request.full_url,
             }
@@ -155,6 +156,7 @@ async def test_record_mcp_server_install_telemetry_posts_event(monkeypatch) -> N
     assert calls == [
         {
             "method": "POST",
+            "user_agent": "wardn-ai/1.2.3 (+https://github.com/abhi1693/wardn-ai)",
             "timeout": telemetry.WARDN_HUB_TELEMETRY_TIMEOUT_SECONDS,
             "url": event.url,
         },

@@ -29,6 +29,10 @@ class MCPServerInstallTelemetryEvent:
     client_version: str
 
 
+def wardn_ai_user_agent(version: str) -> str:
+    return f"wardn-ai/{version} (+https://github.com/abhi1693/wardn-ai)"
+
+
 def hub_source_metadata(server: MCPServerVersion) -> dict[str, str] | None:
     metadata = server.server_json.get("_meta")
     if not isinstance(metadata, dict):
@@ -125,7 +129,11 @@ def mcp_server_install_telemetry_event(
 
 
 def post_mcp_server_install_telemetry_event(event: MCPServerInstallTelemetryEvent) -> None:
-    request = Request(event.url, method="POST")
+    request = Request(
+        event.url,
+        headers={"User-Agent": wardn_ai_user_agent(event.client_version)},
+        method="POST",
+    )
     with open_outbound_request(
         request,
         timeout=WARDN_HUB_TELEMETRY_TIMEOUT_SECONDS,
