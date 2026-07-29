@@ -331,6 +331,7 @@ def pypi_runtime_dependency_args(runtime_config: dict[str, Any]) -> list[str]:
         args.extend(["--with", dependency])
     return args
 
+
 def pypi_transport_process_args(
     runtime_config: dict[str, Any],
     *,
@@ -356,6 +357,16 @@ def pypi_transport_process_args(
             *configured_args,
         ]
     return []
+
+
+def python_module_invocation(args: list[str]) -> tuple[str, list[str]] | None:
+    if len(args) < 2 or args[0] != "-m":
+        return None
+    module_name = str(args[1]).strip()
+    if not module_name:
+        return None
+    return module_name, args[2:]
+
 
 def kubernetes_runtime_process(
     runtime,
@@ -390,8 +401,9 @@ def kubernetes_runtime_process(
         package_spec = identifier if version == "latest" else f"{identifier}=={version}"
         module_name = identifier.replace("-", "_")
         configured_args = runtime.args
-        if len(configured_args) >= 2 and configured_args[:2] == ["-m", module_name]:
-            configured_args = configured_args[2:]
+        declared_module = python_module_invocation(configured_args)
+        if declared_module is not None:
+            module_name, configured_args = declared_module
         transport_args = pypi_transport_process_args(
             runtime_config,
             package_spec=package_spec,

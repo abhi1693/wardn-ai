@@ -92,7 +92,7 @@ class FakeRuntimeManager:
     def runtime_fingerprint(self, installation):
         return self.fingerprint
 
-    def list_tools(self, installation):
+    def list_tools(self, installation, *, runtime_session=None):
         return []
 
     def call_tool(
@@ -148,6 +148,18 @@ class FailingRuntimeManager(FakeRuntimeManager):
         runtime_session=None,
     ):
         raise RuntimeError("tool failed")
+
+
+class FailingListRuntimeManager(FakeRuntimeManager):
+    def list_tools(self, installation, *, runtime_session=None):
+        if runtime_session is not None:
+            runtime_session.namespace = "wardn-org-test"
+            runtime_session.pod_name = "io-github-example-weather-default"
+            runtime_session.endpoint_url = (
+                "http://io-github-example-weather-default-svc.wardn-org-test.svc"
+                ".cluster.local:8000/mcp"
+            )
+        raise RuntimeError("tools/list failed")
 
 
 class ThreadRecordingRuntimeManager(FakeRuntimeManager):
@@ -371,6 +383,40 @@ async def test_call_tool_with_tracking_records_failure(monkeypatch) -> None:
     assert invocation.status == "failed"
     assert invocation.is_error is True
     assert invocation.error == "tool failed"
+    assert event_types == [
+        service.RUNTIME_EVENT_SESSION_CREATED,
+        service.RUNTIME_EVENT_TOOL_CALL_STARTED,
+        service.RUNTIME_EVENT_TOOL_CALL_FAILED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_tools_with_tracking_commits_reconciled_state_before_raising(
+    monkeypatch,
+) -> None:
+    async def get_active_runtime_session(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(repository, "get_active_runtime_session", get_active_runtime_session)
+    installation, server = installed_server()
+    session = FakeSession()
+
+    with pytest.raises(RuntimeError, match="tools/list failed"):
+        await service.list_tools_with_tracking(
+            session,
+            installation,
+            server,
+            manager=FailingListRuntimeManager(),
+        )
+
+    runtime_session = added_one(session, MCPRuntimeSession)
+    event_types = [event.event_type for event in added_events(session)]
+    assert session.committed is True
+    assert runtime_session.status == "idle"
+    assert runtime_session.namespace == "wardn-org-test"
+    assert runtime_session.pod_name == "io-github-example-weather-default"
+    assert runtime_session.endpoint_url.startswith("http://io-github-example-weather-default-svc")
+    assert runtime_session.last_error == "tools/list failed"
     assert event_types == [
         service.RUNTIME_EVENT_SESSION_CREATED,
         service.RUNTIME_EVENT_TOOL_CALL_STARTED,

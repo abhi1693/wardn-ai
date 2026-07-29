@@ -921,6 +921,7 @@ async def list_tools_with_tracking(
             now=failed_at,
         )
         await session.flush()
+        await session.commit()
         raise
 
     finished_at = datetime.now(UTC)

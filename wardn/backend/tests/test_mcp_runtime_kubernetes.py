@@ -1533,6 +1533,78 @@ def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
 
 
+def test_kubernetes_runtime_manifest_uses_declared_pypi_python_module(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.crypto-ninja/github-mcp-server",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "github_mcp"],
+            "cwd": str(tmp_path),
+            "package": {
+                "identifier": "github-mcp-server",
+                "version": "2.5.7",
+                "transport": {
+                    "type": RUNTIME_TRANSPORT_STDIO,
+                    "command": "python3",
+                    "args": ["-m", "github_mcp"],
+                },
+            },
+            "transport": {
+                "type": RUNTIME_TRANSPORT_STDIO,
+                "command": "python3",
+                "args": ["-m", "github_mcp"],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert supergateway_stdio_arg(manifest) == (
+        "uvx --from github-mcp-server==2.5.7 python -m github_mcp"
+    )
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+
+
 def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(
     tmp_path,
     monkeypatch,
