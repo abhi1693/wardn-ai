@@ -769,7 +769,7 @@ async def sync_catalog_source(
                     updated_since=updated_since,
                     version=version,
                     pagination=pagination,
-                    wardn_hub_version_details=bool(updated_since),
+                    wardn_hub_version_details=source.provider == "wardn_hub",
                     wardn_hub_version_detail_concurrency=(
                         get_settings().mcp_catalog_sync_detail_concurrency
                     ),

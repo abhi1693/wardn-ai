@@ -457,6 +457,7 @@ async def test_sync_catalog_source_fetches_and_writes_server_definitions(monkeyp
     assert calls["source_url"] == "https://hub.wardnai.dev/api/v1/mcp/catalog"
     assert calls["kwargs"]["version"] == "latest"
     assert calls["kwargs"]["pagination"] == "page"
+    assert calls["kwargs"]["wardn_hub_version_details"] is True
     assert calls["kwargs"]["headers"]["Authorization"] == "Bearer hub-token"
     assert calls["kwargs"]["headers"]["X-API-Key"] == "hub-token"
     assert calls["servers"][0].name == payload.name
