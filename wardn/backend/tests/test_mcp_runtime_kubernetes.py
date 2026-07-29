@@ -203,6 +203,7 @@ class FakeCoreV1Api:
         self.calls: list[tuple[str, str, str]] = []
         self.conflicts: set[str] = set()
         self.errors: dict[str, FakeApiException] = {}
+        self.namespaces: set[str] = set()
         self.pods: deque = deque()
         self.deployments: deque = deque()
 
@@ -215,6 +216,13 @@ class FakeCoreV1Api:
 
     def create_namespace(self, *, body):
         self._call("create_namespace", body.metadata.name, "")
+        self.namespaces.add(body.metadata.name)
+
+    def read_namespace(self, *, name):
+        self._call("read_namespace", name, "")
+        if name not in self.namespaces:
+            raise FakeApiException(404, "NotFound")
+        return FakeKubernetesModel(metadata=FakeKubernetesModel(name=name))
 
     def create_namespaced_secret(self, *, namespace, body):
         self._call("create_namespaced_secret", body.metadata.name, namespace)
@@ -2589,6 +2597,7 @@ def test_kubernetes_reconciler_creates_runtime_objects(tmp_path, monkeypatch) ->
         for policy in manifest.network_policies
     ]
     assert core_v1.calls == [
+        ("read_namespace", manifest.names.namespace, ""),
         ("create_namespace", manifest.names.namespace, ""),
         *network_policy_calls,
         ("create_namespaced_secret", manifest.names.secret_name, manifest.names.namespace),
@@ -2658,6 +2667,7 @@ def test_kubernetes_reconciler_creates_ingress_when_enabled(tmp_path, monkeypatc
         for policy in manifest.network_policies
     ]
     assert core_v1.calls == [
+        ("read_namespace", manifest.names.namespace, ""),
         ("create_namespace", manifest.names.namespace, ""),
         *network_policy_calls,
         ("create_namespaced_secret", manifest.names.secret_name, manifest.names.namespace),
@@ -2748,6 +2758,72 @@ def test_kubernetes_reconciler_replaces_secret_and_service_on_conflict(
     ) in core_v1.calls
     assert (
         "replace_namespaced_deployment",
+        manifest.names.pod_name,
+        manifest.names.namespace,
+    ) in core_v1.calls
+
+
+def test_kubernetes_reconciler_uses_existing_runtime_namespace(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    core_v1 = FakeCoreV1Api()
+    core_v1.namespaces.add(manifest.names.namespace)
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=core_v1,
+        api_exception_class=FakeApiException,
+        settings=FakeSettings(),
+    )
+
+    reconciler.reconcile(manifest)
+
+    assert ("read_namespace", manifest.names.namespace, "") in core_v1.calls
+    assert ("create_namespace", manifest.names.namespace, "") not in core_v1.calls
+    assert (
+        "create_namespaced_deployment",
         manifest.names.pod_name,
         manifest.names.namespace,
     ) in core_v1.calls

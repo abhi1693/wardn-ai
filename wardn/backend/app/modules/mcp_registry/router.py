@@ -69,6 +69,7 @@ from app.modules.mcp_registry.source_metadata import (
 from app.modules.mcp_registry.source_metadata_rate_limit import (
     consume_repository_metadata_rate_limit,
 )
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
@@ -570,7 +571,7 @@ async def list_workspace_installed_mcp_server_tools(
     await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
     try:
         response = await list_installation_tools(session, installation_id, workspace_id)
-    except MCPGatewayUpstreamError as exc:
+    except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
         logger.warning(
             "Installed MCP server tool discovery failed",
             extra={

@@ -99,6 +99,25 @@ class KubernetesRuntimeReconciler:
 
     def create_namespace(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
+            self._call_api(self.core_v1.read_namespace, name=manifest.names.namespace)
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes namespace read failed: {self._api_error_detail(exc)}"
+                ) from exc
+        else:
+            logger.info(
+                "Kubernetes MCP runtime namespace already exists.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind="Namespace",
+                    resource_name=manifest.names.namespace,
+                    action="exists",
+                ),
+            )
+            return
+
+        try:
             self._call_api(self.core_v1.create_namespace, body=manifest.namespace)
         except self.api_exception_class as exc:
             if self._is_status(exc, 409):
