@@ -1,5 +1,6 @@
 """Installation configuration and secret-materialization application services."""
 
+import logging
 import re
 import uuid
 from copy import deepcopy
@@ -33,6 +34,7 @@ from app.modules.secrets.schemas import SecretHandleCreate, SecretPurpose
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
 
+logger = logging.getLogger(__name__)
 MCP_INSTALL_SECRET_VALUE_KEY_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
@@ -219,6 +221,19 @@ async def externalize_install_config_secrets(
         run_id,
     )
     primary_purpose: SecretPurpose = next(iter(secret_fields.values()), "other")
+    logger.info(
+        "Externalizing MCP install secrets.",
+        extra={
+            "organization_id": str(organization_id),
+            "workspace_id": str(workspace_id),
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_config_name": payload.config_name,
+            "mcp_install_target": payload.install_target,
+            "secret_store_id": str(payload.config_secret_store_id),
+            "mcp_secret_field_count": len(field_key_names),
+        },
+    )
     try:
         await write_secret_values(
             session,
@@ -231,9 +246,24 @@ async def externalize_install_config_secrets(
             purpose=primary_purpose,
         )
     except SecretsError as exc:
+        logger.warning(
+            "MCP install secret externalization failed.",
+            extra={
+                "organization_id": str(organization_id),
+                "workspace_id": str(workspace_id),
+                "mcp_server_name": server.name,
+                "mcp_server_version": server.version,
+                "mcp_config_name": payload.config_name,
+                "mcp_install_target": payload.install_target,
+                "secret_store_id": str(payload.config_secret_store_id),
+                "mcp_secret_field_count": len(field_key_names),
+                "error_type": exc.__class__.__name__,
+            },
+        )
         raise MCPServerInstallationUnsupportedError(str(exc)) from exc
 
     updated = dict(config_values)
+    handle_ids: list[str] = []
     for field_name, key_name in field_key_names.items():
         purpose: SecretPurpose = secret_fields[field_name]
         try:
@@ -261,13 +291,42 @@ async def externalize_install_config_secrets(
                 ),
             )
         except SecretsError as exc:
+            logger.warning(
+                "MCP install secret handle creation failed.",
+                extra={
+                    "organization_id": str(organization_id),
+                    "workspace_id": str(workspace_id),
+                    "mcp_server_name": server.name,
+                    "mcp_server_version": server.version,
+                    "mcp_config_name": payload.config_name,
+                    "mcp_install_target": payload.install_target,
+                    "secret_store_id": str(payload.config_secret_store_id),
+                    "mcp_secret_field_count": len(field_key_names),
+                    "error_type": exc.__class__.__name__,
+                },
+            )
             raise MCPServerInstallationUnsupportedError(str(exc)) from exc
 
+        handle_ids.append(str(handle.id))
         replacement = replacements[field_name]
         if replacement is not None:
             updated[field_name] = {**replacement, "content": secret_handle_ref(handle.id)}
         else:
             updated[field_name] = secret_handle_ref(handle.id)
+    logger.info(
+        "Externalized MCP install secrets.",
+        extra={
+            "organization_id": str(organization_id),
+            "workspace_id": str(workspace_id),
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_config_name": payload.config_name,
+            "mcp_install_target": payload.install_target,
+            "secret_store_id": str(payload.config_secret_store_id),
+            "mcp_secret_field_count": len(field_key_names),
+            "secret_handle_ids": handle_ids,
+        },
+    )
     return updated
 
 
@@ -307,6 +366,16 @@ async def resolve_install_config_values(
         else:
             resolved[key] = secret.value
         handle_refs[key] = handle_id
+    if handle_refs:
+        logger.info(
+            "Resolved MCP install secret handles.",
+            extra={
+                "organization_id": str(organization_id) if organization_id else None,
+                "workspace_id": str(workspace_id),
+                "secret_handle_count": len(handle_refs),
+                "secret_handle_ids": [str(handle_id) for handle_id in handle_refs.values()],
+            },
+        )
     return resolved, handle_refs
 
 

@@ -218,6 +218,17 @@ async def list_installation_tools(
     if server is None:
         raise MCPServerNotFoundError("installed server version not found")
 
+    logger.info(
+        "Refreshing MCP installation tools.",
+        extra=installation_service_log_extra(
+            workspace_id=installation.workspace_id,
+            server_name=installation.server_name,
+            version=installation.installed_version,
+            config_name=installation.config_name,
+            installation_id=installation.id,
+            install_type=installation.install_type,
+        ),
+    )
     await refresh_tool_schemas_for_installation(
         session,
         installation=installation,
@@ -229,6 +240,20 @@ async def list_installation_tools(
         installation_id=installation.id,
         server_name=server.name,
         server_version=server.version,
+    )
+    logger.info(
+        "Refreshed MCP installation tools.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=installation.workspace_id,
+                server_name=installation.server_name,
+                version=installation.installed_version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+            ),
+            "mcp_tool_count": len(tools),
+        },
     )
     return MCPServerInstallationToolsResponse(
         server_name=installation.server_name,
@@ -268,7 +293,22 @@ async def validate_installation_tool(
         raise MCPServerNotFoundError("installed server version not found")
 
     error = ""
+    error_type = None
     result = None
+    logger.info(
+        "Validating MCP installation tool.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=installation.workspace_id,
+                server_name=installation.server_name,
+                version=installation.installed_version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+            ),
+            "mcp_tool_name": payload.tool_name,
+        },
+    )
     try:
         result = await call_tool_with_isolated_tracking(
             session,
@@ -282,7 +322,25 @@ async def validate_installation_tool(
     except (MCPGatewayUpstreamError, ValueError) as exc:
         is_error = True
         error = str(exc)
+        error_type = exc.__class__.__name__
 
+    logger.info(
+        "Validated MCP installation tool.",
+        extra={
+            **installation_service_log_extra(
+                workspace_id=installation.workspace_id,
+                server_name=installation.server_name,
+                version=installation.installed_version,
+                config_name=installation.config_name,
+                installation_id=installation.id,
+                install_type=installation.install_type,
+            ),
+            "mcp_tool_name": payload.tool_name,
+            "mcp_validation_status": "failed" if is_error else "passed",
+            "mcp_validation_error_type": error_type,
+            "mcp_validation_error_present": bool(error),
+        },
+    )
     return MCPServerInstallationToolValidationResponse(
         server_name=installation.server_name,
         config_name=installation.config_name or "default",
@@ -591,6 +649,14 @@ async def update_installed_servers(
     workspace_id = workspace_id or await default_workspace_id(session)
     organization_id = await organization_id_for_workspace(session, workspace_id)
     updated: list[MCPServerInstallationRead] = []
+    logger.info(
+        "Starting MCP installed server bulk update.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "workspace_id": str(workspace_id),
+            "mcp_server_count": len(payload.server_names),
+        },
+    )
     for server_name in payload.server_names:
         installations = await repository.list_installations_for_server(
             session,
@@ -610,6 +676,18 @@ async def update_installed_servers(
             raise MCPServerNotFoundError("latest server version not found")
         for installation in installations:
             install_target = "remote" if installation.install_type == "remote" else "package"
+            logger.info(
+                "Updating MCP installed server.",
+                extra=installation_service_log_extra(
+                    workspace_id=workspace_id,
+                    server_name=server_name,
+                    version=latest.version,
+                    config_name=installation.config_name,
+                    installation_id=installation.id,
+                    install_type=installation.install_type,
+                    install_target=install_target,
+                ),
+            )
             config_values = install_config_values_from_secret_references(
                 installation.secret_references
             )
@@ -644,6 +722,18 @@ async def update_installed_servers(
                 remove_installation_artifacts(previous_install_path)
             await session.flush()
             await session.refresh(installation)
+            logger.info(
+                "Updated MCP installed server.",
+                extra=installation_service_log_extra(
+                    workspace_id=workspace_id,
+                    server_name=server_name,
+                    version=latest.version,
+                    config_name=installation.config_name,
+                    installation_id=installation.id,
+                    install_type=installation.install_type,
+                    install_target=install_target,
+                ),
+            )
             updated.append(
                 await installation_response(
                     session,
@@ -652,6 +742,15 @@ async def update_installed_servers(
                 )
             )
 
+    logger.info(
+        "Completed MCP installed server bulk update.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "workspace_id": str(workspace_id),
+            "mcp_server_count": len(payload.server_names),
+            "mcp_installation_update_count": len(updated),
+        },
+    )
     return MCPServerInstallationListResponse(
         installations=updated,
         metadata=CursorPageMetadata(count=len(updated), next_cursor=""),

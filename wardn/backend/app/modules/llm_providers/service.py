@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -168,12 +169,36 @@ from app.modules.secrets.schemas import SecretHandleCreate
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ResolvedLLMCredentialSecrets:
     api_key: str = ""
     oauth_access_token: str = ""
     oauth_refresh_token: str = ""
+
+
+def credential_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    credential_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    auth_method: str | None = None,
+    visibility: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "user_id": str(user_id) if user_id else None,
+        "llm_provider_credential_id": str(credential_id) if credential_id else None,
+        "llm_provider": provider,
+        "llm_auth_method": auth_method,
+        "llm_credential_visibility": visibility,
+    }
+
 
 def normalize_provider(value: str) -> str:
     return value.strip().casefold()
@@ -301,7 +326,40 @@ async def write_oauth_secret_values(
             ),
         )
     except (InvalidSecretHandleError, SecretsError) as exc:
+        logger.warning(
+            "LLM OAuth secret value write failed.",
+            extra={
+                **credential_log_extra(
+                    organization_id=credential.organization_id,
+                    workspace_id=handle.workspace_id or credential.workspace_id,
+                    credential_id=credential.id,
+                    provider=credential.provider,
+                    auth_method=credential.auth_method,
+                    visibility=credential.visibility,
+                ),
+                "secret_store_id": str(store.id),
+                "secret_handle_id": str(handle.id),
+                "secret_value_count": len(values),
+                "error_type": exc.__class__.__name__,
+            },
+        )
         raise InvalidLLMProviderCredentialAuthError(str(exc)) from exc
+    logger.info(
+        "Wrote LLM OAuth secret values.",
+        extra={
+            **credential_log_extra(
+                organization_id=credential.organization_id,
+                workspace_id=handle.workspace_id or credential.workspace_id,
+                credential_id=credential.id,
+                provider=credential.provider,
+                auth_method=credential.auth_method,
+                visibility=credential.visibility,
+            ),
+            "secret_store_id": str(store.id),
+            "secret_handle_id": str(handle.id),
+            "secret_value_count": len(values),
+        },
+    )
 
 
 async def refresh_chatgpt_oauth_credential(
@@ -317,6 +375,17 @@ async def refresh_chatgpt_oauth_credential(
         raise InvalidLLMProviderCredentialAuthError(
             "ChatGPT OAuth refresh token secret handle is required"
         )
+    logger.info(
+        "Refreshing ChatGPT OAuth credential.",
+        extra=credential_log_extra(
+            organization_id=credential.organization_id,
+            workspace_id=credential.workspace_id,
+            credential_id=credential.id,
+            provider=credential.provider,
+            auth_method=credential.auth_method,
+            visibility=credential.visibility,
+        ),
+    )
     payload = await refresh_chatgpt_oauth_token(secrets.oauth_refresh_token)
     access_token = payload["access_token"]
     refresh_token = payload.get("refresh_token")
@@ -360,6 +429,17 @@ async def refresh_chatgpt_oauth_credential(
     if isinstance(payload.get("scope"), str):
         credential.oauth_scopes = payload["scope"].split()
     await session.flush()
+    logger.info(
+        "Refreshed ChatGPT OAuth credential.",
+        extra=credential_log_extra(
+            organization_id=credential.organization_id,
+            workspace_id=credential.workspace_id,
+            credential_id=credential.id,
+            provider=credential.provider,
+            auth_method=credential.auth_method,
+            visibility=credential.visibility,
+        ),
+    )
     return ResolvedLLMCredentialSecrets(
         oauth_access_token=access_token,
         oauth_refresh_token=refresh_token,
@@ -389,6 +469,17 @@ async def replace_chatgpt_oauth_credential_tokens(
         raise InvalidLLMProviderCredentialAuthError(
             "ChatGPT OAuth refresh token secret handle is required"
         )
+    logger.info(
+        "Replacing ChatGPT OAuth credential tokens.",
+        extra=credential_log_extra(
+            organization_id=credential.organization_id,
+            workspace_id=credential.workspace_id,
+            credential_id=credential.id,
+            provider=credential.provider,
+            auth_method=credential.auth_method,
+            visibility=credential.visibility,
+        ),
+    )
     access_handle, access_store = await get_oauth_secret_handle(
         session,
         credential,
@@ -423,6 +514,17 @@ async def replace_chatgpt_oauth_credential_tokens(
     if isinstance(token_payload.get("scope"), str):
         credential.oauth_scopes = token_payload["scope"].split()
     await session.flush()
+    logger.info(
+        "Replaced ChatGPT OAuth credential tokens.",
+        extra=credential_log_extra(
+            organization_id=credential.organization_id,
+            workspace_id=credential.workspace_id,
+            credential_id=credential.id,
+            provider=credential.provider,
+            auth_method=credential.auth_method,
+            visibility=credential.visibility,
+        ),
+    )
 
 
 def chatgpt_oauth_scopes(token_payload: dict[str, Any]) -> list[str]:
@@ -554,6 +656,10 @@ async def start_chatgpt_device_authorization(
 ) -> ChatGPTDeviceAuthorizationStartResponse:
     await require_organization_member(session, user, organization_id)
     device_code = await request_chatgpt_device_code()
+    logger.info(
+        "Started ChatGPT device authorization.",
+        extra=credential_log_extra(organization_id=organization_id, user_id=user.id),
+    )
     return ChatGPTDeviceAuthorizationStartResponse(
         deviceAuthId=device_code.device_auth_id,
         userCode=device_code.user_code,
@@ -605,6 +711,18 @@ async def complete_chatgpt_device_authorization(
         )
         await replace_chatgpt_oauth_credential_tokens(session, credential, token_payload)
         await session.refresh(credential)
+        logger.info(
+            "Reconnected ChatGPT OAuth credential.",
+            extra=credential_log_extra(
+                organization_id=organization_id,
+                workspace_id=credential.workspace_id,
+                user_id=user.id,
+                credential_id=credential.id,
+                provider=credential.provider,
+                auth_method=credential.auth_method,
+                visibility=credential.visibility,
+            ),
+        )
         return ChatGPTDeviceAuthorizationCompleteResponse(
             status="connected",
             credential=credential_response(credential),
@@ -1007,6 +1125,7 @@ async def create_provider_credential(
     api_key_secret_handle_id = payload.api_key_secret_handle_id
     user_id = user.id if payload.visibility == "user" else None
     api_key_value = payload.api_key.get_secret_value().strip() if payload.api_key else ""
+    managed_secret_id = None
     if auth_method == "api_key" and payload.api_key is not None and not api_key_value:
         raise InvalidLLMProviderCredentialAuthError("OpenAI API key is required")
     if auth_method == "api_key" and api_key_value:
@@ -1120,6 +1239,24 @@ async def create_provider_credential(
     if auth_method == "api_key" and api_key_value:
         await activate_managed_secret(session, managed_secret_id)
     await auto_add_openrouter_pricing_for_credential(session, credential)
+    logger.info(
+        "Created LLM provider credential.",
+        extra={
+            **credential_log_extra(
+                organization_id=organization_id,
+                workspace_id=credential.workspace_id,
+                user_id=user.id,
+                credential_id=credential.id,
+                provider=credential.provider,
+                auth_method=credential.auth_method,
+                visibility=credential.visibility,
+            ),
+            "secret_handle_id": (
+                str(api_key_secret_handle_id) if api_key_secret_handle_id else None
+            ),
+            "managed_secret_id": str(managed_secret_id) if managed_secret_id else None,
+        },
+    )
     return credential_response(credential)
 
 
@@ -1239,6 +1376,22 @@ async def update_provider_credential(
             ) from exc
         raise
     await session.refresh(credential)
+    logger.info(
+        "Updated LLM provider credential.",
+        extra={
+            **credential_log_extra(
+                organization_id=organization_id,
+                workspace_id=credential.workspace_id,
+                user_id=user.id,
+                credential_id=credential.id,
+                provider=credential.provider,
+                auth_method=credential.auth_method,
+                visibility=credential.visibility,
+            ),
+            "llm_credential_updated_fields": sorted(payload.model_fields_set),
+            "llm_credential_is_active": credential.is_active,
+        },
+    )
     return credential_response(credential)
 
 
@@ -1272,3 +1425,18 @@ async def delete_provider_credential(
     await session.flush()
     await delete_managed_secret_handles(session, managed_secret_ids)
     await queue_managed_secret_cleanup(session, managed_secret_ids)
+    logger.info(
+        "Deleted LLM provider credential.",
+        extra={
+            **credential_log_extra(
+                organization_id=organization_id,
+                workspace_id=credential.workspace_id,
+                user_id=user.id,
+                credential_id=credential.id,
+                provider=credential.provider,
+                auth_method=credential.auth_method,
+                visibility=credential.visibility,
+            ),
+            "managed_secret_count": len(managed_secret_ids),
+        },
+    )

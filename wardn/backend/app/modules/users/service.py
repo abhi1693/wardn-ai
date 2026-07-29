@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -42,6 +43,8 @@ from app.modules.users.schemas import (
     UserCreate,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def normalize_email(email: str) -> str:
     return email.strip().casefold()
@@ -49,6 +52,20 @@ def normalize_email(email: str) -> str:
 
 def unique_uuid_strings(values: list[uuid.UUID]) -> list[str]:
     return sorted({str(value) for value in values})
+
+
+def user_log_extra(
+    user_id: uuid.UUID | None,
+    *,
+    is_superuser: bool | None = None,
+    auth_method: str | None = None,
+) -> dict[str, object]:
+    extra: dict[str, object] = {"user_id": str(user_id) if user_id else None}
+    if is_superuser is not None:
+        extra["user_is_superuser"] = is_superuser
+    if auth_method is not None:
+        extra["auth_method"] = auth_method
+    return extra
 
 
 async def validate_api_token_scope(
@@ -121,6 +138,14 @@ async def create_user(
         if is_constraint_violation(exc, {"uq_users_email", "uq_users_email_lower"}):
             raise DuplicateUserError("email already exists") from exc
         raise
+    logger.info(
+        "Created user.",
+        extra=user_log_extra(
+            user.id,
+            is_superuser=user.is_superuser,
+            auth_method="local",
+        ),
+    )
     return user
 
 
@@ -129,6 +154,7 @@ async def bootstrap_superuser(session: AsyncSession, payload: UserCreate) -> Use
         raise BootstrapUserExistsError("bootstrap user already exists")
     user = await create_user(session, payload, is_superuser=True)
     await session.refresh(user)
+    logger.info("Bootstrapped superuser.", extra=user_log_extra(user.id, is_superuser=True))
     return user
 
 
@@ -161,6 +187,16 @@ async def create_user_api_token(
     )
     session.add(record)
     await session.flush()
+    logger.info(
+        "Created user API token.",
+        extra={
+            **user_log_extra(user.id),
+            "api_token_id": str(record.id),
+            "api_token_organization_scope_count": len(record.organization_ids or []),
+            "api_token_workspace_scope_count": len(record.workspace_ids or []),
+            "api_token_has_expiry": record.expires_at is not None,
+        },
+    )
     return record, token
 
 
@@ -206,6 +242,15 @@ async def update_user_api_token(
             token.workspace_ids = workspace_ids
 
     await session.flush()
+    logger.info(
+        "Updated user API token.",
+        extra={
+            **user_log_extra(user.id),
+            "api_token_id": str(token.id),
+            "api_token_updated_fields": sorted(payload.model_fields_set),
+            "api_token_is_active": token.is_active,
+        },
+    )
     return token
 
 
@@ -217,6 +262,10 @@ async def delete_user_api_token(
     deleted = await repository.delete_user_api_token(session, user_id, token_id)
     if not deleted:
         raise UserAPITokenNotFoundError("API token not found")
+    logger.info(
+        "Deleted user API token.",
+        extra={**user_log_extra(user_id), "api_token_id": str(token_id)},
+    )
 
 
 async def authenticate_local_user(session: AsyncSession, payload: LoginRequest) -> User:
@@ -233,6 +282,7 @@ async def authenticate_local_user(session: AsyncSession, payload: LoginRequest) 
 
     user.last_login_at = datetime.now(UTC)
     await session.flush()
+    logger.info("Authenticated local user.", extra=user_log_extra(user.id, auth_method="local"))
     return user
 
 
@@ -260,6 +310,14 @@ async def authenticate_oidc_identity(
         )
         session.add(user)
         await session.flush()
+        logger.info(
+            "Created OIDC user.",
+            extra=user_log_extra(
+                user.id,
+                is_superuser=user.is_superuser,
+                auth_method="oidc",
+            ),
+        )
         return user
 
     if not user.is_active:
@@ -273,6 +331,14 @@ async def authenticate_oidc_identity(
         user.is_superuser = True
     user.last_login_at = datetime.now(UTC)
     await session.flush()
+    logger.info(
+        "Authenticated OIDC user.",
+        extra=user_log_extra(
+            user.id,
+            is_superuser=user.is_superuser,
+            auth_method="oidc",
+        ),
+    )
     return user
 
 

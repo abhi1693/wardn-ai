@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +32,8 @@ from app.modules.organizations.schemas import (
     WorkspaceUpdate,
 )
 from app.modules.users.models import User
+
+logger = logging.getLogger(__name__)
 
 ORG_ADMIN_ROLES = {"owner", "admin"}
 WORKSPACE_ADMIN_ROLES = {"owner", "admin"}
@@ -93,6 +96,19 @@ def workspace_response(
         createdAt=workspace.created_at,
         updatedAt=workspace.updated_at,
     )
+
+
+def organization_log_extra(
+    *,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, str | None]:
+    return {
+        "organization_id": str(organization_id) if organization_id else None,
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "user_id": str(user_id) if user_id else None,
+    }
 
 
 async def list_organizations(
@@ -176,6 +192,13 @@ async def create_organization(
     session.add(membership)
     await session.flush()
     await session.refresh(organization)
+    logger.info(
+        "Created organization.",
+        extra=organization_log_extra(
+            organization_id=organization.id,
+            user_id=user.id,
+        ),
+    )
     return organization_response(organization, role="owner")
 
 
@@ -202,6 +225,16 @@ async def update_organization(
     organization.status = payload.status
     await session.flush()
     await session.refresh(organization)
+    logger.info(
+        "Updated organization.",
+        extra={
+            **organization_log_extra(
+                organization_id=organization.id,
+                user_id=user.id,
+            ),
+            "organization_status": organization.status,
+        },
+    )
     return organization_response(
         organization,
         role=organization_role_for_user(user, membership),
@@ -375,6 +408,14 @@ async def create_workspace(
     session.add(membership)
     await session.flush()
     await session.refresh(workspace)
+    logger.info(
+        "Created workspace.",
+        extra=organization_log_extra(
+            organization_id=organization_id,
+            workspace_id=workspace.id,
+            user_id=user.id,
+        ),
+    )
     return workspace_response(
         workspace,
         role=workspace_role_for_user(user, organization_membership, membership),
@@ -417,6 +458,17 @@ async def update_workspace(
     workspace.status = payload.status
     await session.flush()
     await session.refresh(workspace)
+    logger.info(
+        "Updated workspace.",
+        extra={
+            **organization_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace.id,
+                user_id=user.id,
+            ),
+            "workspace_status": workspace.status,
+        },
+    )
     return workspace_response(
         workspace,
         role=workspace_role_for_user(user, organization_membership, workspace_membership),

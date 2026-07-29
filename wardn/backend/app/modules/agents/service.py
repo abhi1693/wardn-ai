@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -173,6 +174,8 @@ from app.modules.organizations.service import (
 )
 from app.modules.users.models import User
 
+logger = logging.getLogger(__name__)
+
 AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
 QUICK_START_AGENT_NAME = "Workspace Assistant"
@@ -181,6 +184,24 @@ QUICK_START_AGENT_INSTRUCTIONS = (
     "You are a workspace assistant. Use available tools when they help answer accurately. "
     "Ask before destructive actions."
 )
+
+
+def agent_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    scope: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "agent_id": str(agent_id) if agent_id else None,
+        "user_id": str(user_id) if user_id else None,
+        "agent_scope": scope,
+    }
+
 
 def normalize_name(value: str) -> str:
     return " ".join(value.strip().split())
@@ -379,6 +400,22 @@ async def create_agent(
             raise DuplicateAgentError("agent name already exists") from exc
         raise
     await session.refresh(agent)
+    logger.info(
+        "Created agent.",
+        extra={
+            **agent_log_extra(
+                organization_id=organization_id,
+                workspace_id=agent.workspace_id,
+                agent_id=agent.id,
+                user_id=user.id,
+                scope=agent.scope,
+            ),
+            "llm_provider_credential_id": (
+                str(agent.provider_credential_id) if agent.provider_credential_id else None
+            ),
+            "agent_model_name": agent.model_name,
+        },
+    )
     return agent_response(agent, server_count=0, tool_count=0)
 
 
@@ -1068,6 +1105,24 @@ async def update_agent(
             raise DuplicateAgentError("agent name already exists") from exc
         raise
     await session.refresh(agent)
+    logger.info(
+        "Updated agent.",
+        extra={
+            **agent_log_extra(
+                organization_id=organization_id,
+                workspace_id=agent.workspace_id,
+                agent_id=agent.id,
+                user_id=user.id,
+                scope=agent.scope,
+            ),
+            "agent_updated_fields": sorted(payload.model_fields_set),
+            "agent_is_active": agent.is_active,
+            "llm_provider_credential_id": (
+                str(agent.provider_credential_id) if agent.provider_credential_id else None
+            ),
+            "agent_model_name": agent.model_name,
+        },
+    )
     return agent_response(
         agent,
         server_count=await repository.count_agent_servers(session, agent.id),
@@ -1100,6 +1155,16 @@ async def delete_agent(
     )
     agent.is_active = False
     await session.flush()
+    logger.info(
+        "Deleted agent.",
+        extra=agent_log_extra(
+            organization_id=organization_id,
+            workspace_id=agent.workspace_id,
+            agent_id=agent.id,
+            user_id=user.id,
+            scope=agent.scope,
+        ),
+    )
 
 
 async def list_agent_tools(
@@ -1232,6 +1297,26 @@ async def replace_agent_tools(
         session,
         agent_id=agent.id,
         server_assignments=server_assignments,
+    )
+    logger.info(
+        "Replaced agent tool assignments.",
+        extra={
+            **agent_log_extra(
+                organization_id=organization_id,
+                workspace_id=agent.workspace_id,
+                agent_id=agent.id,
+                user_id=user.id,
+                scope=agent.scope,
+            ),
+            "agent_server_assignment_count": len(server_assignments),
+            "agent_tool_assignment_count": sum(
+                len(selected_tools)
+                for _installation, _wildcard, selected_tools in server_assignments
+            ),
+            "agent_wildcard_server_assignment_count": sum(
+                1 for _installation, wildcard, _selected_tools in server_assignments if wildcard
+            ),
+        },
     )
     return AgentToolListResponse(
         tools=[

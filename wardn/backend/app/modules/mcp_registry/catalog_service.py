@@ -318,6 +318,21 @@ async def create_catalog_source(
         raise
     await session.refresh(source)
     await activate_managed_secret(session, managed_secret_id)
+    logger.info(
+        "Created MCP catalog source.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(source.id),
+            "mcp_catalog_source_name": source.name,
+            "mcp_catalog_provider": source.provider,
+            "mcp_catalog_sync_mode": source.sync_mode,
+            "mcp_catalog_enabled": source.is_enabled,
+            "mcp_catalog_auth_secret_handle_id": (
+                str(source.auth_secret_handle_id) if source.auth_secret_handle_id else None
+            ),
+            "user_id": str(user.id),
+        },
+    )
     return catalog_source_response(source)
 
 
@@ -423,6 +438,25 @@ async def update_catalog_source(
         await delete_managed_secret_handles(session, replaced_managed_secret_ids)
         await queue_managed_secret_cleanup(session, replaced_managed_secret_ids)
         await activate_managed_secret(session, managed_secret_id)
+    logger.info(
+        "Updated MCP catalog source.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(source.id),
+            "mcp_catalog_source_name": source.name,
+            "mcp_catalog_provider": source.provider,
+            "mcp_catalog_sync_mode": source.sync_mode,
+            "mcp_catalog_enabled": source.is_enabled,
+            "mcp_catalog_updated_fields": sorted(values.keys()),
+            "mcp_catalog_auth_secret_handle_id": (
+                str(source.auth_secret_handle_id) if source.auth_secret_handle_id else None
+            ),
+            "mcp_catalog_replaced_managed_secret_count": (
+                len(replaced_managed_secret_ids) if managed_secret_id is not None else 0
+            ),
+            "user_id": str(user.id),
+        },
+    )
     return catalog_source_response(source)
 
 
@@ -475,6 +509,18 @@ async def delete_catalog_source(
     await session.flush()
     await delete_managed_secret_handles(session, managed_secret_ids)
     await queue_managed_secret_cleanup(session, managed_secret_ids)
+    logger.info(
+        "Deleted MCP catalog source.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(source.id),
+            "mcp_catalog_source_name": source.name,
+            "mcp_catalog_provider": source.provider,
+            "mcp_catalog_soft_deleted_version_count": len(servers),
+            "mcp_catalog_affected_server_count": len(server_names),
+            "managed_secret_count": len(managed_secret_ids),
+        },
+    )
 
 
 def registry_source_type(provider: str) -> str:
@@ -598,6 +644,16 @@ async def create_catalog_source_token_handle(
             metadata={"provider": "mcp_catalog", "catalogSourceName": name},
         ),
         managed_secret_id=managed_secret_id,
+    )
+    logger.info(
+        "Created MCP catalog source token handle.",
+        extra={
+            "organization_id": str(organization_id),
+            "mcp_catalog_source_id": str(owner_id),
+            "secret_store_id": str(secret_store_id),
+            "secret_handle_id": str(handle.id),
+            "managed_secret_id": str(managed_secret_id) if managed_secret_id else None,
+        },
     )
     return CatalogSourceTokenHandle(
         handle_id=handle.id,
@@ -872,6 +928,18 @@ async def create_server_version(
                 setattr(existing, key, value)
             await session.flush()
             await session.refresh(existing)
+            logger.info(
+                "Reactivated MCP server version.",
+                extra={
+                    "organization_id": str(organization_id) if organization_id else None,
+                    "mcp_server_name": existing.name,
+                    "mcp_server_version": existing.version,
+                    "mcp_server_version_id": str(existing.id),
+                    "mcp_catalog_source_id": (
+                        str(existing.catalog_source_id) if existing.catalog_source_id else None
+                    ),
+                },
+            )
             return server_response(existing)
         raise DuplicateMCPServerVersionError("server version already exists")
 
@@ -905,6 +973,19 @@ async def create_server_version(
             raise DuplicateMCPServerVersionError("server version already exists") from exc
         raise
     await session.refresh(server)
+    logger.info(
+        "Created MCP server version.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_server_version_id": str(server.id),
+            "mcp_server_is_latest": server.is_latest,
+            "mcp_catalog_source_id": (
+                str(server.catalog_source_id) if server.catalog_source_id else None
+            ),
+        },
+    )
     return server_response(server)
 
 
@@ -943,6 +1024,20 @@ async def update_server_version(
 
     await session.flush()
     await session.refresh(server)
+    logger.info(
+        "Updated MCP server version.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_server_version_id": str(server.id),
+            "mcp_server_was_deleted": was_deleted,
+            "mcp_server_is_latest": server.is_latest,
+            "mcp_catalog_source_id": (
+                str(server.catalog_source_id) if server.catalog_source_id else None
+            ),
+        },
+    )
     return server_response(server)
 
 
@@ -986,6 +1081,16 @@ async def delete_server_version(
             replacement.is_latest = True
 
     await session.flush()
+    logger.info(
+        "Deleted MCP server version.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_server_version_id": str(server.id),
+            "mcp_server_was_latest": was_latest,
+        },
+    )
 
 
 async def sync_supported_servers(
@@ -1192,4 +1297,13 @@ async def set_default_server_version(
     server.is_latest = True
     await session.flush()
     await session.refresh(server)
+    logger.info(
+        "Set default MCP server version.",
+        extra={
+            "organization_id": str(organization_id) if organization_id else None,
+            "mcp_server_name": server.name,
+            "mcp_server_version": server.version,
+            "mcp_server_version_id": str(server.id),
+        },
+    )
     return server_response(server)

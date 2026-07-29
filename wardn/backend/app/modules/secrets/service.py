@@ -51,6 +51,48 @@ SECRET_HANDLE_IN_USE_CONSTRAINTS = frozenset(
 )
 
 
+def secret_store_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+    store_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, str | None]:
+    return {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "secret_store_id": str(store_id) if store_id else None,
+        "secret_store_provider": provider,
+        "user_id": str(user_id) if user_id else None,
+    }
+
+
+def secret_handle_log_extra(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+    store_id: uuid.UUID | None = None,
+    handle_id: uuid.UUID | None = None,
+    managed_secret_id: uuid.UUID | None = None,
+    purpose: str | None = None,
+    owner_type: str | None = None,
+    owner_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, str | None]:
+    return {
+        "organization_id": str(organization_id),
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "secret_store_id": str(store_id) if store_id else None,
+        "secret_handle_id": str(handle_id) if handle_id else None,
+        "managed_secret_id": str(managed_secret_id) if managed_secret_id else None,
+        "secret_purpose": purpose,
+        "secret_owner_type": owner_type,
+        "secret_owner_id": str(owner_id) if owner_id else None,
+        "user_id": str(user_id) if user_id else None,
+    }
+
+
 async def flush_secret_deletion(
     session: AsyncSession,
     *,
@@ -279,6 +321,16 @@ async def create_secret_store(
             raise DuplicateSecretStoreError("secret store already exists") from exc
         raise
     await session.refresh(store)
+    logger.info(
+        "Created secret store.",
+        extra=secret_store_log_extra(
+            organization_id=organization_id,
+            workspace_id=store.workspace_id,
+            store_id=store.id,
+            provider=store.provider,
+            user_id=user.id,
+        ),
+    )
     return store_response(store)
 
 
@@ -344,6 +396,19 @@ async def update_secret_store(
             raise DuplicateSecretStoreError("secret store already exists") from exc
         raise
     await session.refresh(store)
+    logger.info(
+        "Updated secret store.",
+        extra={
+            **secret_store_log_extra(
+                organization_id=organization_id,
+                workspace_id=store.workspace_id,
+                store_id=store.id,
+                provider=store.provider,
+                user_id=user.id,
+            ),
+            "secret_store_updated_fields": sorted(payload.model_fields_set),
+        },
+    )
     return store_response(store)
 
 
@@ -365,6 +430,16 @@ async def delete_secret_store(
     await flush_secret_deletion(
         session,
         in_use_message="secret store contains a handle or managed secret that is still in use",
+    )
+    logger.info(
+        "Deleted secret store.",
+        extra=secret_store_log_extra(
+            organization_id=organization_id,
+            workspace_id=store.workspace_id,
+            store_id=store.id,
+            provider=store.provider,
+            user_id=user.id,
+        ),
     )
 
 
@@ -388,6 +463,19 @@ async def validate_secret_store(
         result = await validate_connection(store)
     else:
         result = await provider.validate_store(store)
+    logger.info(
+        "Validated secret store.",
+        extra={
+            **secret_store_log_extra(
+                organization_id=organization_id,
+                workspace_id=store.workspace_id,
+                store_id=store.id,
+                provider=store.provider,
+                user_id=user.id,
+            ),
+            "secret_validation_ok": result.ok,
+        },
+    )
     return SecretValidationResponse(ok=result.ok, message=result.message)
 
 
@@ -547,6 +635,18 @@ async def create_secret_handle(
             ) from exc
         raise
     await session.refresh(handle)
+    logger.info(
+        "Created secret handle.",
+        extra=secret_handle_log_extra(
+            organization_id=organization_id,
+            workspace_id=handle.workspace_id,
+            store_id=handle.store_id,
+            handle_id=handle.id,
+            managed_secret_id=managed_secret_id,
+            purpose=handle.purpose,
+            user_id=user.id,
+        ),
+    )
     return handle_response(handle)
 
 
@@ -606,6 +706,21 @@ async def update_secret_handle(
             ) from exc
         raise
     await session.refresh(handle)
+    logger.info(
+        "Updated secret handle.",
+        extra={
+            **secret_handle_log_extra(
+                organization_id=organization_id,
+                workspace_id=handle.workspace_id,
+                store_id=handle.store_id,
+                handle_id=handle.id,
+                managed_secret_id=handle.managed_secret_id,
+                purpose=handle.purpose,
+                user_id=user.id,
+            ),
+            "secret_handle_updated_fields": sorted(payload.model_fields_set),
+        },
+    )
     return handle_response(handle)
 
 
@@ -630,6 +745,18 @@ async def delete_secret_handle(
         session,
         in_use_message="secret handle is used by an LLM provider credential",
     )
+    logger.info(
+        "Deleted secret handle.",
+        extra=secret_handle_log_extra(
+            organization_id=organization_id,
+            workspace_id=handle.workspace_id,
+            store_id=handle.store_id,
+            handle_id=handle.id,
+            managed_secret_id=handle.managed_secret_id,
+            purpose=handle.purpose,
+            user_id=user.id,
+        ),
+    )
 
 
 async def validate_secret_handle(
@@ -653,6 +780,21 @@ async def validate_secret_handle(
         handle.store_id,
     )
     result = await get_secret_provider(store.provider).validate_handle(store, handle)
+    logger.info(
+        "Validated secret handle.",
+        extra={
+            **secret_handle_log_extra(
+                organization_id=organization_id,
+                workspace_id=handle.workspace_id,
+                store_id=handle.store_id,
+                handle_id=handle.id,
+                managed_secret_id=handle.managed_secret_id,
+                purpose=handle.purpose,
+                user_id=user.id,
+            ),
+            "secret_validation_ok": result.ok,
+        },
+    )
     return SecretValidationResponse(ok=result.ok, message=result.message)
 
 
@@ -678,7 +820,7 @@ async def resolve_secret(
         handle.workspace_id,
         handle.store_id,
     )
-    return await get_secret_provider(store.provider).resolve(
+    resolved = await get_secret_provider(store.provider).resolve(
         store,
         handle,
         SecretResolutionContext(
@@ -689,6 +831,18 @@ async def resolve_secret(
             purpose=handle.purpose,
         ),
     )
+    logger.debug(
+        "Resolved secret handle.",
+        extra=secret_handle_log_extra(
+            organization_id=organization_id,
+            workspace_id=handle.workspace_id or workspace_id,
+            store_id=handle.store_id,
+            handle_id=handle.id,
+            managed_secret_id=handle.managed_secret_id,
+            purpose=handle.purpose,
+        ),
+    )
+    return resolved
 
 
 async def write_secret_values(
@@ -718,6 +872,21 @@ async def write_secret_values(
         raise InvalidSecretHandleError("secret values are required")
     if (owner_type is None) != (owner_id is None):
         raise ValueError("owner_type and owner_id must be provided together")
+    logger.info(
+        "Writing secret values.",
+        extra={
+            **secret_handle_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                store_id=store.id,
+                purpose=purpose,
+                owner_type=owner_type,
+                owner_id=owner_id,
+                user_id=user.id,
+            ),
+            "secret_value_count": len(sanitized_values),
+        },
+    )
 
     managed_secret_id = None
     if owner_type is not None and owner_id is not None:
@@ -752,6 +921,22 @@ async def write_secret_values(
             ),
         )
     except BaseException:
+        logger.warning(
+            "Secret value write failed.",
+            extra={
+                **secret_handle_log_extra(
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    store_id=store.id,
+                    managed_secret_id=managed_secret_id,
+                    purpose=purpose,
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    user_id=user.id,
+                ),
+                "secret_value_count": len(sanitized_values),
+            },
+        )
         if managed_secret_id is not None:
             try:
                 await queue_managed_secret_cleanup_independently(managed_secret_id)
@@ -762,6 +947,22 @@ async def write_secret_values(
                     managed_secret_id,
                 )
         raise
+    logger.info(
+        "Wrote secret values.",
+        extra={
+            **secret_handle_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                store_id=store.id,
+                managed_secret_id=managed_secret_id,
+                purpose=purpose,
+                owner_type=owner_type,
+                owner_id=owner_id,
+                user_id=user.id,
+            ),
+            "secret_value_count": len(sanitized_values),
+        },
+    )
     return SecretWriteResult(
         version=result.version,
         managed_secret_id=managed_secret_id,
