@@ -1,3 +1,4 @@
+import json
 import shlex
 from pathlib import Path
 from typing import Any
@@ -20,15 +21,19 @@ from app.modules.mcp_runtime.providers.kubernetes_naming import (
     safe_kubernetes_name,
 )
 from app.modules.mcp_runtime.providers.kubernetes_types import (
+    KUBERNETES_DNS_LABEL_PATTERN,
     KUBERNETES_GATEWAY_CONTAINER_NAME,
     KUBERNETES_GATEWAY_PORT_NAME,
     KUBERNETES_LABEL_APP_NAME,
     KUBERNETES_LABEL_PART_OF,
     KUBERNETES_MCP_SERVER_CONTAINER_NAME,
+    KUBERNETES_METADATA_KEY_NAME_PATTERN,
     KUBERNETES_NPM_PACKAGE_MOUNT_PATH,
     KUBERNETES_NPM_PACKAGE_VOLUME_NAME,
     KUBERNETES_RUNTIME_FILE_MOUNT_PATH,
     KUBERNETES_RUNTIME_FILE_VOLUME_NAME,
+    KUBERNETES_RUNTIME_TMP_MOUNT_PATH,
+    KUBERNETES_RUNTIME_TMP_VOLUME_NAME,
     KUBERNETES_SUPERGATEWAY_HEALTH_PATH,
     KUBERNETES_SUPERGATEWAY_MCP_PATH,
     WARDN_LABEL_INSTALLATION_ID,
@@ -44,6 +49,37 @@ from app.modules.mcp_runtime.providers.kubernetes_types import (
     KubernetesRuntimeManifest,
     KubernetesRuntimeNames,
 )
+
+POD_SECURITY_RESTRICTED_LABELS = {
+    "pod-security.kubernetes.io/enforce": "restricted",
+    "pod-security.kubernetes.io/audit": "restricted",
+    "pod-security.kubernetes.io/warn": "restricted",
+}
+KUBERNETES_NAMESPACE_NAME_LABEL = "kubernetes.io/metadata.name"
+KUBE_SYSTEM_NAMESPACE_NAME = "kube-system"
+KUBE_DNS_SELECTOR = {"k8s-app": "kube-dns"}
+RUNTIME_PUBLIC_EGRESS_EXCEPTIONS = [
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.0.0.0/24",
+    "192.0.2.0/24",
+    "192.168.0.0/16",
+    "198.18.0.0/15",
+    "198.51.100.0/24",
+    "203.0.113.0/24",
+    "224.0.0.0/4",
+    "240.0.0.0/4",
+]
+RUNTIME_SANDBOX_ENVIRONMENT = {
+    "HOME": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-home",
+    "XDG_CACHE_HOME": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache",
+    "UV_CACHE_DIR": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache/uv",
+    "NPM_CONFIG_CACHE": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache/npm",
+}
 
 
 def runtime_labels(
@@ -70,6 +106,72 @@ def runtime_labels(
     if workspace_id:
         labels[WARDN_LABEL_WORKSPACE_ID] = str(workspace_id)
     return labels
+
+def validate_label_selector_key(key: str, *, field_name: str) -> None:
+    if not key or len(key) > 253:
+        raise KubernetesMetadataError(f"{field_name} key must be 1-253 characters")
+    if "/" in key:
+        prefix, name = key.split("/", 1)
+        if not prefix or not name or len(prefix) > 253:
+            raise KubernetesMetadataError(f"{field_name} key has invalid DNS prefix")
+        if any(
+            len(part) > 63 or KUBERNETES_DNS_LABEL_PATTERN.fullmatch(part) is None
+            for part in prefix.split(".")
+        ):
+            raise KubernetesMetadataError(f"{field_name} key has invalid DNS prefix")
+    else:
+        name = key
+
+    if len(name) > 63 or KUBERNETES_METADATA_KEY_NAME_PATTERN.fullmatch(name) is None:
+        raise KubernetesMetadataError(f"{field_name} key has invalid name")
+
+def parse_label_selector_json(
+    raw_value: str | dict[str, str],
+    *,
+    field_name: str,
+) -> dict[str, str]:
+    if isinstance(raw_value, dict):
+        raw_selector = raw_value
+    else:
+        if not raw_value.strip():
+            return {}
+        try:
+            raw_selector = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            raise KubernetesMetadataError(f"{field_name} must be valid JSON") from exc
+
+    if not isinstance(raw_selector, dict):
+        raise KubernetesMetadataError(f"{field_name} must be a JSON object")
+
+    selector: dict[str, str] = {}
+    for key, value in raw_selector.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise KubernetesMetadataError(f"{field_name} keys and values must be strings")
+        validate_label_selector_key(key, field_name=field_name)
+        if len(value) > 63 or (
+            value and KUBERNETES_METADATA_KEY_NAME_PATTERN.fullmatch(value) is None
+        ):
+            raise KubernetesMetadataError(f"{field_name} value is not a valid label")
+        selector[key] = value
+    return selector
+
+def control_plane_pod_selector(settings=None) -> dict[str, str]:
+    runtime_settings = settings or get_settings()
+    return parse_label_selector_json(
+        runtime_settings.mcp_runtime_kubernetes_control_plane_pod_selector_json,
+        field_name="Kubernetes runtime control-plane pod selector",
+    )
+
+def public_egress_ports(settings=None) -> list[int]:
+    runtime_settings = settings or get_settings()
+    ports = []
+    for port in runtime_settings.mcp_runtime_kubernetes_public_egress_ports:
+        port_int = int(port)
+        if port_int < 1 or port_int > 65_535:
+            raise KubernetesMetadataError("Kubernetes runtime public egress ports are invalid")
+        if port_int not in ports:
+            ports.append(port_int)
+    return ports
 
 def runtime_secret_data(
     installation: MCPServerInstallation,
@@ -243,11 +345,30 @@ def npm_package_volume(client_module: Any | None = None) -> Any:
         empty_dir={},
     )
 
+def runtime_tmp_volume_mount(client_module: Any | None = None) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1VolumeMount(
+        name=KUBERNETES_RUNTIME_TMP_VOLUME_NAME,
+        mount_path=KUBERNETES_RUNTIME_TMP_MOUNT_PATH,
+    )
+
+def runtime_tmp_volume(settings=None, client_module: Any | None = None) -> Any:
+    runtime_settings = settings or get_settings()
+    client = kubernetes_client_module(client_module)
+    size_limit = runtime_settings.mcp_runtime_kubernetes_tmp_size_limit.strip() or None
+    return client.V1Volume(
+        name=KUBERNETES_RUNTIME_TMP_VOLUME_NAME,
+        empty_dir=client.V1EmptyDirVolumeSource(size_limit=size_limit),
+    )
+
 def npm_package_init_container(
     *,
     installation: MCPServerInstallation,
     image: str,
     resources: Any | None = None,
+    env: list[Any] | None = None,
+    security_context: Any | None = None,
+    extra_volume_mounts: list[Any] | None = None,
     client_module: Any | None = None,
 ) -> Any:
     client = kubernetes_client_module(client_module)
@@ -256,8 +377,10 @@ def npm_package_init_container(
         image=image,
         command=["sh", "-lc"],
         args=[npm_package_install_command(installation.runtime_config or {})],
+        env=env or None,
         resources=resources,
-        volume_mounts=[npm_package_volume_mount(client)],
+        security_context=security_context,
+        volume_mounts=[npm_package_volume_mount(client), *(extra_volume_mounts or [])],
     )
 
 def runtime_file_volume_mount(client_module: Any | None = None) -> Any:
@@ -586,6 +709,7 @@ def build_namespace_manifest(
     client = kubernetes_client_module(client_module)
     namespace_labels = {
         KUBERNETES_LABEL_PART_OF: "wardn",
+        **POD_SECURITY_RESTRICTED_LABELS,
         **labels,
     }
     metadata_labels = custom_labels or {}
@@ -709,6 +833,51 @@ def runtime_container_resources(settings=None, client_module: Any | None = None)
         },
     )
 
+def runtime_pod_security_context(settings=None, client_module: Any | None = None) -> Any | None:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_sandbox_enabled:
+        return None
+    client = kubernetes_client_module(client_module)
+    run_as_user = runtime_settings.mcp_runtime_kubernetes_run_as_user
+    run_as_group = runtime_settings.mcp_runtime_kubernetes_run_as_group
+    return client.V1PodSecurityContext(
+        run_as_non_root=True,
+        run_as_user=run_as_user,
+        run_as_group=run_as_group,
+        fs_group=run_as_group,
+        fs_group_change_policy="OnRootMismatch",
+        seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+    )
+
+def runtime_container_security_context(
+    settings=None,
+    client_module: Any | None = None,
+) -> Any | None:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_sandbox_enabled:
+        return None
+    client = kubernetes_client_module(client_module)
+    return client.V1SecurityContext(
+        allow_privilege_escalation=False,
+        capabilities=client.V1Capabilities(drop=["ALL"]),
+        privileged=False,
+        proc_mount="Default",
+        read_only_root_filesystem=(
+            runtime_settings.mcp_runtime_kubernetes_read_only_root_filesystem
+        ),
+        run_as_non_root=True,
+        run_as_user=runtime_settings.mcp_runtime_kubernetes_run_as_user,
+        run_as_group=runtime_settings.mcp_runtime_kubernetes_run_as_group,
+        seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
+    )
+
+def runtime_sandbox_env_vars(client_module: Any | None = None) -> list[Any]:
+    client = kubernetes_client_module(client_module)
+    return [
+        client.V1EnvVar(name=name, value=value)
+        for name, value in sorted(RUNTIME_SANDBOX_ENVIRONMENT.items())
+    ]
+
 def build_pod_template_manifest(
     *,
     names: KubernetesRuntimeNames,
@@ -729,6 +898,12 @@ def build_pod_template_manifest(
     runtime_settings = settings or get_settings()
     client = kubernetes_client_module(client_module)
     resources = runtime_container_resources(runtime_settings, client_module=client)
+    pod_security_context = runtime_pod_security_context(runtime_settings, client_module=client)
+    container_security_context = runtime_container_security_context(
+        runtime_settings,
+        client_module=client,
+    )
+    sandbox_env_vars = runtime_sandbox_env_vars(client)
     image_pull_secrets = [
         client.V1LocalObjectReference(name=name)
         for name in (image_pull_secret_names or [])
@@ -736,6 +911,8 @@ def build_pod_template_manifest(
     for init_container in init_containers or []:
         if getattr(init_container, "resources", None) is None:
             init_container.resources = resources
+        if getattr(init_container, "security_context", None) is None:
+            init_container.security_context = container_security_context
     return client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(
             name=names.pod_name,
@@ -744,9 +921,17 @@ def build_pod_template_manifest(
         ),
         spec=client.V1PodSpec(
             automount_service_account_token=False,
+            enable_service_links=False,
+            host_ipc=False,
+            host_network=False,
+            host_pid=False,
+            security_context=pod_security_context,
             image_pull_secrets=image_pull_secrets or None,
             init_containers=init_containers or None,
             restart_policy="Always",
+            runtime_class_name=(
+                runtime_settings.mcp_runtime_kubernetes_runtime_class_name.strip() or None
+            ),
             volumes=volumes or None,
             containers=[
                 client.V1Container(
@@ -760,6 +945,7 @@ def build_pod_template_manifest(
                         )
                     ],
                     env=[
+                        *sandbox_env_vars,
                         *secret_env_vars(
                             names=names,
                             keys=secret_keys,
@@ -767,6 +953,7 @@ def build_pod_template_manifest(
                         ),
                     ],
                     resources=resources,
+                    security_context=container_security_context,
                     volume_mounts=volume_mounts or None,
                     **(
                         gateway_container_probes(runtime_settings, client_module=client)
@@ -839,6 +1026,220 @@ def build_service_manifest(
             ],
         ),
     )
+
+def runtime_network_policy_names(names: KubernetesRuntimeNames) -> tuple[str, str, str, str]:
+    return (
+        safe_kubernetes_name(f"{names.pod_name}-default-deny"),
+        safe_kubernetes_name(f"{names.pod_name}-allow-wardn-ingress"),
+        safe_kubernetes_name(f"{names.pod_name}-allow-dns-egress"),
+        safe_kubernetes_name(f"{names.pod_name}-allow-public-egress"),
+    )
+
+def label_selector(labels: dict[str, str] | None, client_module: Any | None = None) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1LabelSelector(match_labels=labels or {})
+
+def namespace_name_selector(namespace: str, *, client_module: Any | None = None) -> Any:
+    namespace_name = namespace.strip()
+    if KUBERNETES_DNS_LABEL_PATTERN.fullmatch(namespace_name) is None:
+        raise KubernetesMetadataError(
+            "Kubernetes runtime control-plane namespace must be a valid namespace name"
+        )
+    return label_selector(
+        {KUBERNETES_NAMESPACE_NAME_LABEL: namespace_name},
+        client_module=client_module,
+    )
+
+def build_default_deny_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    client_module: Any | None = None,
+) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1NetworkPolicy(
+        metadata=client.V1ObjectMeta(
+            name=policy_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=label_selector({}, client),
+            policy_types=["Ingress", "Egress"],
+            ingress=[],
+            egress=[],
+        ),
+    )
+
+def build_runtime_ingress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    gateway_port: int,
+    settings=None,
+    client_module: Any | None = None,
+) -> Any:
+    runtime_settings = settings or get_settings()
+    client = kubernetes_client_module(client_module)
+    source_pod_selector = control_plane_pod_selector(runtime_settings)
+    return client.V1NetworkPolicy(
+        metadata=client.V1ObjectMeta(
+            name=policy_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=label_selector(service_selector(labels), client),
+            policy_types=["Ingress"],
+            ingress=[
+                client.V1NetworkPolicyIngressRule(
+                    _from=[
+                        client.V1NetworkPolicyPeer(
+                            namespace_selector=namespace_name_selector(
+                                runtime_settings.mcp_runtime_kubernetes_control_plane_namespace,
+                                client_module=client,
+                            ),
+                            pod_selector=(
+                                label_selector(source_pod_selector, client)
+                                if source_pod_selector
+                                else None
+                            ),
+                        )
+                    ],
+                    ports=[
+                        client.V1NetworkPolicyPort(
+                            protocol="TCP",
+                            port=gateway_port,
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+
+def build_dns_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    client_module: Any | None = None,
+) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1NetworkPolicy(
+        metadata=client.V1ObjectMeta(
+            name=policy_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=label_selector(service_selector(labels), client),
+            policy_types=["Egress"],
+            egress=[
+                client.V1NetworkPolicyEgressRule(
+                    to=[
+                        client.V1NetworkPolicyPeer(
+                            namespace_selector=namespace_name_selector(
+                                KUBE_SYSTEM_NAMESPACE_NAME,
+                                client_module=client,
+                            ),
+                            pod_selector=label_selector(KUBE_DNS_SELECTOR, client),
+                        )
+                    ],
+                    ports=[
+                        client.V1NetworkPolicyPort(protocol="UDP", port=53),
+                        client.V1NetworkPolicyPort(protocol="TCP", port=53),
+                    ],
+                )
+            ],
+        ),
+    )
+
+def build_public_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    settings=None,
+    client_module: Any | None = None,
+) -> Any:
+    runtime_settings = settings or get_settings()
+    client = kubernetes_client_module(client_module)
+    return client.V1NetworkPolicy(
+        metadata=client.V1ObjectMeta(
+            name=policy_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=label_selector(service_selector(labels), client),
+            policy_types=["Egress"],
+            egress=[
+                client.V1NetworkPolicyEgressRule(
+                    to=[
+                        client.V1NetworkPolicyPeer(
+                            ip_block=client.V1IPBlock(
+                                cidr="0.0.0.0/0",
+                                _except=RUNTIME_PUBLIC_EGRESS_EXCEPTIONS,
+                            )
+                        )
+                    ],
+                    ports=[
+                        client.V1NetworkPolicyPort(protocol="TCP", port=port)
+                        for port in public_egress_ports(runtime_settings)
+                    ],
+                )
+            ],
+        ),
+    )
+
+def build_network_policy_manifests(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    gateway_port: int,
+    settings=None,
+    client_module: Any | None = None,
+) -> list[Any]:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_network_policy_enabled:
+        return []
+    policy_names = runtime_network_policy_names(names)
+    client = kubernetes_client_module(client_module)
+    policies = [
+        build_default_deny_network_policy(
+            names=names,
+            labels=labels,
+            policy_name=policy_names[0],
+            client_module=client,
+        ),
+        build_runtime_ingress_network_policy(
+            names=names,
+            labels=labels,
+            policy_name=policy_names[1],
+            gateway_port=gateway_port,
+            settings=runtime_settings,
+            client_module=client,
+        ),
+        build_dns_egress_network_policy(
+            names=names,
+            labels=labels,
+            policy_name=policy_names[2],
+            client_module=client,
+        ),
+    ]
+    if runtime_settings.mcp_runtime_kubernetes_allow_public_egress:
+        policies.append(
+            build_public_egress_network_policy(
+                names=names,
+                labels=labels,
+                policy_name=policy_names[3],
+                settings=runtime_settings,
+                client_module=client,
+            )
+        )
+    return policies
 
 def build_ingress_manifest(
     *,
@@ -938,8 +1339,8 @@ def build_runtime_manifests(
     container_image = ""
     container_args: list[str] = []
     health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
-    package_volumes = []
-    package_volume_mounts = []
+    package_volumes = [runtime_tmp_volume(runtime_settings, client_module=client)]
+    package_volume_mounts = [runtime_tmp_volume_mount(client)]
     init_containers = []
     if file_mounts:
         package_volumes.append(
@@ -975,6 +1376,12 @@ def build_runtime_manifests(
                         runtime_settings,
                         client_module=client,
                     ),
+                    env=runtime_sandbox_env_vars(client),
+                    security_context=runtime_container_security_context(
+                        runtime_settings,
+                        client_module=client,
+                    ),
+                    extra_volume_mounts=[runtime_tmp_volume_mount(client)],
                     client_module=client,
                 )
             )
@@ -1024,6 +1431,13 @@ def build_runtime_manifests(
             names=names,
             labels=labels,
             gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            client_module=client,
+        ),
+        network_policies=build_network_policy_manifests(
+            names=names,
+            labels=labels,
+            gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            settings=runtime_settings,
             client_module=client,
         ),
         ingress=build_ingress_manifest(

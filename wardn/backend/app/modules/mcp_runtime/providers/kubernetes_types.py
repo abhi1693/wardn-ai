@@ -23,6 +23,8 @@ KUBERNETES_NPM_PACKAGE_VOLUME_NAME = "npm-package"
 KUBERNETES_NPM_PACKAGE_MOUNT_PATH = "/opt/wardn/npm-package"
 KUBERNETES_RUNTIME_FILE_VOLUME_NAME = "runtime-files"
 KUBERNETES_RUNTIME_FILE_MOUNT_PATH = "/opt/wardn/runtime-files"
+KUBERNETES_RUNTIME_TMP_VOLUME_NAME = "runtime-tmp"
+KUBERNETES_RUNTIME_TMP_MOUNT_PATH = "/tmp"
 KUBERNETES_API_CONNECT_TIMEOUT_SECONDS = 5
 KUBERNETES_API_READ_TIMEOUT_SECONDS = 10
 KUBERNETES_METADATA_KEY_NAME_PATTERN = re.compile(
@@ -96,6 +98,7 @@ class KubernetesRuntimeManifest:
     pod: Any
     deployment: Any
     service: Any
+    network_policies: list[Any]
     ingress: Any | None = None
     health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
 

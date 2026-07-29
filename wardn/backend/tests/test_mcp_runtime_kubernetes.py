@@ -33,6 +33,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     runtime_installation_identity,
     runtime_labels,
     runtime_namespace_name,
+    runtime_network_policy_names,
     runtime_object_base_name,
     runtime_object_identity,
     runtime_object_names,
@@ -70,6 +71,19 @@ class FakeSettings:
     mcp_runtime_kubernetes_memory_request = "256Mi"
     mcp_runtime_kubernetes_memory_limit = "1Gi"
     mcp_runtime_kubernetes_service_port = 8000
+    mcp_runtime_kubernetes_sandbox_enabled = True
+    mcp_runtime_kubernetes_runtime_class_name = ""
+    mcp_runtime_kubernetes_run_as_user = 1000
+    mcp_runtime_kubernetes_run_as_group = 1000
+    mcp_runtime_kubernetes_read_only_root_filesystem = True
+    mcp_runtime_kubernetes_tmp_size_limit = "512Mi"
+    mcp_runtime_kubernetes_network_policy_enabled = True
+    mcp_runtime_kubernetes_allow_public_egress = True
+    mcp_runtime_kubernetes_public_egress_ports = [80, 443]
+    mcp_runtime_kubernetes_control_plane_namespace = "wardn"
+    mcp_runtime_kubernetes_control_plane_pod_selector_json = (
+        '{"app.kubernetes.io/part-of":"wardn-ai"}'
+    )
     mcp_runtime_kubernetes_image_pull_secret_name = ""
     mcp_runtime_kubernetes_namespace_labels_json = "{}"
     mcp_runtime_kubernetes_namespace_annotations_json = "{}"
@@ -126,10 +140,12 @@ class FakeKubernetesModel:
 
 
 class FakeKubernetesClient:
+    V1Capabilities = FakeKubernetesModel
     V1Container = FakeKubernetesModel
     V1ContainerPort = FakeKubernetesModel
     V1Deployment = FakeKubernetesModel
     V1DeploymentSpec = FakeKubernetesModel
+    V1EmptyDirVolumeSource = FakeKubernetesModel
     V1EnvVar = FakeKubernetesModel
     V1EnvVarSource = FakeKubernetesModel
     V1HTTPIngressRuleValue = FakeKubernetesModel
@@ -143,16 +159,26 @@ class FakeKubernetesClient:
     V1IngressServiceBackend = FakeKubernetesModel
     V1IngressSpec = FakeKubernetesModel
     V1IngressTLS = FakeKubernetesModel
+    V1IPBlock = FakeKubernetesModel
     V1Namespace = FakeKubernetesModel
+    V1NetworkPolicy = FakeKubernetesModel
+    V1NetworkPolicyEgressRule = FakeKubernetesModel
+    V1NetworkPolicyIngressRule = FakeKubernetesModel
+    V1NetworkPolicyPeer = FakeKubernetesModel
+    V1NetworkPolicyPort = FakeKubernetesModel
+    V1NetworkPolicySpec = FakeKubernetesModel
     V1ObjectMeta = FakeKubernetesModel
     V1Pod = FakeKubernetesModel
+    V1PodSecurityContext = FakeKubernetesModel
     V1PodSpec = FakeKubernetesModel
     V1PodTemplateSpec = FakeKubernetesModel
     V1Probe = FakeKubernetesModel
     V1ResourceRequirements = FakeKubernetesModel
+    V1SeccompProfile = FakeKubernetesModel
     V1Secret = FakeKubernetesModel
     V1SecretKeySelector = FakeKubernetesModel
     V1SecretVolumeSource = FakeKubernetesModel
+    V1SecurityContext = FakeKubernetesModel
     V1Service = FakeKubernetesModel
     V1ServiceBackendPort = FakeKubernetesModel
     V1ServicePort = FakeKubernetesModel
@@ -234,6 +260,15 @@ class FakeCoreV1Api:
 
     def delete_namespaced_ingress(self, *, name, namespace):
         self._call("delete_namespaced_ingress", name, namespace)
+
+    def create_namespaced_network_policy(self, *, namespace, body):
+        self._call("create_namespaced_network_policy", body.metadata.name, namespace)
+
+    def replace_namespaced_network_policy(self, *, name, namespace, body):
+        self._call("replace_namespaced_network_policy", name, namespace)
+
+    def delete_namespaced_network_policy(self, *, name, namespace):
+        self._call("delete_namespaced_network_policy", name, namespace)
 
 
 class FakeClientSet:
@@ -602,6 +637,183 @@ def test_runtime_manifest_does_not_create_ingress_by_default(tmp_path, monkeypat
     assert manifest.ingress is None
 
 
+def test_runtime_manifest_hardens_runtime_pod_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "npm",
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "weather-mcp", "version": "1.0.0"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert manifest.namespace.metadata.labels["pod-security.kubernetes.io/enforce"] == "restricted"
+    assert manifest.pod.spec.automount_service_account_token is False
+    assert manifest.pod.spec.enable_service_links is False
+    assert manifest.pod.spec.host_ipc is False
+    assert manifest.pod.spec.host_network is False
+    assert manifest.pod.spec.host_pid is False
+    assert manifest.pod.spec.runtime_class_name is None
+    assert manifest.pod.spec.security_context.run_as_non_root is True
+    assert manifest.pod.spec.security_context.run_as_user == 1000
+    assert manifest.pod.spec.security_context.run_as_group == 1000
+    assert manifest.pod.spec.security_context.fs_group == 1000
+    assert manifest.pod.spec.security_context.fs_group_change_policy == "OnRootMismatch"
+    assert manifest.pod.spec.security_context.seccomp_profile.type == "RuntimeDefault"
+
+    container = manifest.pod.spec.containers[0]
+    assert container.security_context.allow_privilege_escalation is False
+    assert container.security_context.privileged is False
+    assert container.security_context.read_only_root_filesystem is True
+    assert container.security_context.capabilities.drop == ["ALL"]
+    assert container.security_context.seccomp_profile.type == "RuntimeDefault"
+    assert {mount.mount_path for mount in container.volume_mounts} >= {
+        "/tmp",
+        "/opt/wardn/npm-package",
+    }
+    assert {volume.name for volume in manifest.pod.spec.volumes} >= {
+        "runtime-tmp",
+        "npm-package",
+    }
+    assert {env.name: env.value for env in container.env if getattr(env, "value", None)} == {
+        "HOME": "/tmp/wardn-home",
+        "NPM_CONFIG_CACHE": "/tmp/wardn-cache/npm",
+        "UV_CACHE_DIR": "/tmp/wardn-cache/uv",
+        "XDG_CACHE_HOME": "/tmp/wardn-cache",
+    }
+
+    init_container = manifest.pod.spec.init_containers[0]
+    assert init_container.security_context.allow_privilege_escalation is False
+    assert init_container.security_context.capabilities.drop == ["ALL"]
+    assert {mount.mount_path for mount in init_container.volume_mounts} == {
+        "/opt/wardn/npm-package",
+        "/tmp",
+    }
+
+
+def test_runtime_manifest_generates_strict_network_policies(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert [policy.spec.policy_types for policy in manifest.network_policies] == [
+        ["Ingress", "Egress"],
+        ["Ingress"],
+        ["Egress"],
+        ["Egress"],
+    ]
+    default_deny, ingress, dns_egress, public_egress = manifest.network_policies
+    assert default_deny.spec.ingress == []
+    assert default_deny.spec.egress == []
+
+    ingress_rule = ingress.spec.ingress[0]
+    assert ingress.spec.pod_selector.match_labels[WARDN_LABEL_RUNTIME_ID].startswith("runtime-")
+    assert ingress_rule._from[0].namespace_selector.match_labels == {
+        "kubernetes.io/metadata.name": "wardn"
+    }
+    assert ingress_rule._from[0].pod_selector.match_labels == {
+        "app.kubernetes.io/part-of": "wardn-ai"
+    }
+    assert ingress_rule.ports[0].protocol == "TCP"
+    assert ingress_rule.ports[0].port == 8000
+
+    dns_rule = dns_egress.spec.egress[0]
+    assert dns_rule.to[0].namespace_selector.match_labels == {
+        "kubernetes.io/metadata.name": "kube-system"
+    }
+    assert dns_rule.to[0].pod_selector.match_labels == {"k8s-app": "kube-dns"}
+    assert {(port.protocol, port.port) for port in dns_rule.ports} == {
+        ("UDP", 53),
+        ("TCP", 53),
+    }
+
+    public_rule = public_egress.spec.egress[0]
+    assert public_rule.to[0].ip_block.cidr == "0.0.0.0/0"
+    assert "10.0.0.0/8" in public_rule.to[0].ip_block._except
+    assert "192.168.0.0/16" in public_rule.to[0].ip_block._except
+    assert [(port.protocol, port.port) for port in public_rule.ports] == [
+        ("TCP", 80),
+        ("TCP", 443),
+    ]
+
+
 def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
     tmp_path,
     monkeypatch,
@@ -825,6 +1037,7 @@ def test_kubernetes_runtime_manifest_keeps_secret_values_only_in_secret(
     assert secret_value not in repr(manifest.namespace)
     assert secret_value not in repr(manifest.pod)
     assert secret_value not in repr(manifest.service)
+    assert secret_value not in repr(manifest.network_policies)
 
 
 def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
@@ -879,7 +1092,13 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
     container = manifest.pod.spec.containers[0]
     env_by_name = {env.name: env for env in container.env}
 
-    assert set(env_by_name) == {"WEATHER_TOKEN"}
+    assert set(env_by_name) == {
+        "HOME",
+        "NPM_CONFIG_CACHE",
+        "UV_CACHE_DIR",
+        "WEATHER_TOKEN",
+        "XDG_CACHE_HOME",
+    }
     assert manifest.secret.string_data == {"WEATHER_TOKEN": "secret"}
     assert container.args == [
         "--stdio",
@@ -893,10 +1112,13 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
         "--healthEndpoint",
         "/healthz",
     ]
-    for env in env_by_name.values():
-        assert getattr(env, "value", None) is None
-        assert env.value_from.secret_key_ref.name == manifest.names.secret_name
-        assert env.value_from.secret_key_ref.key == env.name
+    assert env_by_name["HOME"].value == "/tmp/wardn-home"
+    assert env_by_name["NPM_CONFIG_CACHE"].value == "/tmp/wardn-cache/npm"
+    assert env_by_name["UV_CACHE_DIR"].value == "/tmp/wardn-cache/uv"
+    assert env_by_name["XDG_CACHE_HOME"].value == "/tmp/wardn-cache"
+    assert getattr(env_by_name["WEATHER_TOKEN"], "value", None) is None
+    assert env_by_name["WEATHER_TOKEN"].value_from.secret_key_ref.name == manifest.names.secret_name
+    assert env_by_name["WEATHER_TOKEN"].value_from.secret_key_ref.key == "WEATHER_TOKEN"
 
 
 def test_kubernetes_runtime_manifest_adds_gateway_health_probes(
@@ -1140,10 +1362,14 @@ def test_kubernetes_runtime_manifest_installs_npm_package_in_init_container(
         "cpu": "1",
         "memory": "1Gi",
     }
-    assert manifest.pod.spec.volumes[0].name == "npm-package"
-    assert manifest.pod.spec.containers[0].volume_mounts[0].mount_path == (
-        "/opt/wardn/npm-package"
-    )
+    assert {volume.name for volume in manifest.pod.spec.volumes} >= {
+        "npm-package",
+        "runtime-tmp",
+    }
+    assert {mount.mount_path for mount in manifest.pod.spec.containers[0].volume_mounts} >= {
+        "/opt/wardn/npm-package",
+        "/tmp",
+    }
     init_container = manifest.pod.spec.init_containers[0]
     assert init_container.name == "install-npm-package"
     assert init_container.image == "registry.example/supergateway:test"
@@ -1226,7 +1452,13 @@ def test_kubernetes_runtime_manifest_runs_oci_image_directly(
         "-endpoint-path",
         "/mcp",
     ]
-    assert [env.name for env in container.env] == ["GRAFANA_URL"]
+    assert {env.name for env in container.env} == {
+        "GRAFANA_URL",
+        "HOME",
+        "NPM_CONFIG_CACHE",
+        "UV_CACHE_DIR",
+        "XDG_CACHE_HOME",
+    }
     assert manifest.pod.spec.init_containers is None
     assert manifest.health_path is None
     assert not hasattr(container, "readiness_probe")
@@ -1401,19 +1633,31 @@ def test_kubernetes_runtime_manifest_mounts_runtime_files(
         "-endpoint-path",
         "/mcp",
     ]
-    assert [env.name for env in container.env] == ["GRAFANA_URL"]
+    assert {env.name for env in container.env} == {
+        "GRAFANA_URL",
+        "HOME",
+        "NPM_CONFIG_CACHE",
+        "UV_CACHE_DIR",
+        "XDG_CACHE_HOME",
+    }
     assert manifest.secret.string_data == {
         "GRAFANA_URL": "https://grafana.example.com",
         "runtime-file-grafana-cli-tls-ca-file": "ca",
     }
     assert manifest.secret_env_keys == ["GRAFANA_URL"]
-    volume = manifest.pod.spec.volumes[0]
+    volume = next(
+        volume for volume in manifest.pod.spec.volumes if volume.name == "runtime-files"
+    )
     assert volume.name == "runtime-files"
     assert volume.secret.secret_name == manifest.names.secret_name
     assert volume.secret.items[0].key == "runtime-file-grafana-cli-tls-ca-file"
     assert volume.secret.items[0].path == "GRAFANA_CLI_TLS_CA_FILE"
-    assert container.volume_mounts[0].mount_path == "/opt/wardn/runtime-files"
-    assert container.volume_mounts[0].read_only is True
+    mount = next(
+        mount
+        for mount in container.volume_mounts
+        if mount.mount_path == "/opt/wardn/runtime-files"
+    )
+    assert mount.read_only is True
 
 
 def test_kubernetes_runtime_manifest_preserves_oci_http_port_args(
@@ -2208,8 +2452,13 @@ def test_kubernetes_reconciler_creates_runtime_objects(tmp_path, monkeypatch) ->
         f"http://{manifest.names.service_name}.{manifest.names.namespace}"
         ".svc.cluster.local:8000/mcp"
     )
+    network_policy_calls = [
+        ("create_namespaced_network_policy", policy.metadata.name, manifest.names.namespace)
+        for policy in manifest.network_policies
+    ]
     assert core_v1.calls == [
         ("create_namespace", manifest.names.namespace, ""),
+        *network_policy_calls,
         ("create_namespaced_secret", manifest.names.secret_name, manifest.names.namespace),
         ("create_namespaced_deployment", manifest.names.pod_name, manifest.names.namespace),
         ("create_namespaced_service", manifest.names.service_name, manifest.names.namespace),
@@ -2272,8 +2521,13 @@ def test_kubernetes_reconciler_creates_ingress_when_enabled(tmp_path, monkeypatc
     result = reconciler.reconcile(manifest)
 
     assert result.endpoint_url == "https://io-github-example-weather-prod.mcp.example.com/mcp"
+    network_policy_calls = [
+        ("create_namespaced_network_policy", policy.metadata.name, manifest.names.namespace)
+        for policy in manifest.network_policies
+    ]
     assert core_v1.calls == [
         ("create_namespace", manifest.names.namespace, ""),
+        *network_policy_calls,
         ("create_namespaced_secret", manifest.names.secret_name, manifest.names.namespace),
         ("create_namespaced_deployment", manifest.names.pod_name, manifest.names.namespace),
         ("create_namespaced_service", manifest.names.service_name, manifest.names.namespace),
@@ -2331,6 +2585,7 @@ def test_kubernetes_reconciler_replaces_secret_and_service_on_conflict(
     core_v1 = FakeCoreV1Api()
     core_v1.conflicts = {
         "create_namespace",
+        "create_namespaced_network_policy",
         "create_namespaced_secret",
         "create_namespaced_deployment",
         "create_namespaced_service",
@@ -2343,6 +2598,12 @@ def test_kubernetes_reconciler_replaces_secret_and_service_on_conflict(
 
     reconciler.reconcile(manifest)
 
+    for policy in manifest.network_policies:
+        assert (
+            "replace_namespaced_network_policy",
+            policy.metadata.name,
+            manifest.names.namespace,
+        ) in core_v1.calls
     assert (
         "replace_namespaced_secret",
         manifest.names.secret_name,
@@ -3071,8 +3332,13 @@ def test_kubernetes_provider_stop_runtime_can_delete_session_resources(monkeypat
 
     provider.stop_runtime(runtime_session, delete_resources=True)
 
+    network_policy_calls = [
+        ("delete_namespaced_network_policy", policy_name, names.namespace)
+        for policy_name in runtime_network_policy_names(names)
+    ]
     assert core_v1.calls == [
         ("delete_namespaced_ingress", names.ingress_name, names.namespace),
+        *network_policy_calls,
         ("delete_namespaced_service", names.service_name, names.namespace),
         ("delete_namespaced_deployment", names.pod_name, names.namespace),
         ("delete_namespaced_secret", names.secret_name, names.namespace),

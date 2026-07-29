@@ -108,6 +108,28 @@ class Settings(BaseSettings):
     mcp_runtime_kubernetes_memory_request: str = "256Mi"
     mcp_runtime_kubernetes_memory_limit: str = "1Gi"
     mcp_runtime_kubernetes_service_port: int = Field(default=8000, ge=1, le=65_535)
+    mcp_runtime_kubernetes_sandbox_enabled: bool = True
+    mcp_runtime_kubernetes_runtime_class_name: str = Field(
+        default="",
+        max_length=63,
+        pattern=r"^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+    )
+    mcp_runtime_kubernetes_run_as_user: int = Field(default=1000, ge=1, le=2_147_483_647)
+    mcp_runtime_kubernetes_run_as_group: int = Field(default=1000, ge=1, le=2_147_483_647)
+    mcp_runtime_kubernetes_read_only_root_filesystem: bool = True
+    mcp_runtime_kubernetes_tmp_size_limit: str = Field(default="512Mi", max_length=32)
+    mcp_runtime_kubernetes_network_policy_enabled: bool = True
+    mcp_runtime_kubernetes_allow_public_egress: bool = True
+    mcp_runtime_kubernetes_public_egress_ports: list[int] = [80, 443]
+    mcp_runtime_kubernetes_control_plane_namespace: str = Field(
+        default="wardn",
+        min_length=1,
+        max_length=63,
+    )
+    mcp_runtime_kubernetes_control_plane_pod_selector_json: str = Field(
+        default='{"app.kubernetes.io/part-of":"wardn-ai"}',
+        max_length=8192,
+    )
     mcp_runtime_kubernetes_image_pull_secret_name: str = ""
     mcp_runtime_kubernetes_namespace_labels_json: str = "{}"
     mcp_runtime_kubernetes_namespace_annotations_json: str = "{}"
@@ -201,6 +223,26 @@ class Settings(BaseSettings):
     def validate_outbound_http_allowed_ports(cls, value: list[int]) -> list[int]:
         if not value or any(port < 1 or port > 65535 for port in value):
             raise ValueError("outbound HTTP allowed ports must be between 1 and 65535")
+        return value
+
+    @field_validator("mcp_runtime_kubernetes_public_egress_ports", mode="before")
+    @classmethod
+    def parse_mcp_runtime_kubernetes_public_egress_ports(
+        cls,
+        value: str | list[int],
+    ) -> list[int]:
+        if isinstance(value, str):
+            return [int(port.strip()) for port in value.split(",") if port.strip()]
+        return value
+
+    @field_validator("mcp_runtime_kubernetes_public_egress_ports")
+    @classmethod
+    def validate_mcp_runtime_kubernetes_public_egress_ports(
+        cls,
+        value: list[int],
+    ) -> list[int]:
+        if not value or any(port < 1 or port > 65535 for port in value):
+            raise ValueError("MCP runtime public egress ports must be between 1 and 65535")
         return value
 
     @field_validator("outbound_http_private_host_allowlist", mode="before")

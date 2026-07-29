@@ -7,6 +7,9 @@ from app.modules.mcp_runtime.providers.kubernetes_client import (
     get_gateway_health,
     runtime_service_endpoint_url,
 )
+from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
+    runtime_network_policy_names,
+)
 from app.modules.mcp_runtime.providers.kubernetes_naming import runtime_ingress_endpoint_url
 from app.modules.mcp_runtime.providers.kubernetes_types import (
     KUBERNETES_API_CONNECT_TIMEOUT_SECONDS,
@@ -41,6 +44,7 @@ class KubernetesRuntimeReconciler:
 
     def reconcile(self, manifest: KubernetesRuntimeManifest) -> KubernetesReconcileResult:
         self.create_namespace(manifest)
+        self.create_or_replace_network_policies(manifest)
         self.create_or_replace_secret(manifest)
         self.create_or_replace_deployment(manifest)
         self.create_or_replace_service(manifest)
@@ -66,6 +70,40 @@ class KubernetesRuntimeReconciler:
             raise KubernetesReconcileError(
                 f"Kubernetes namespace reconcile failed: {self._api_error_detail(exc)}"
             ) from exc
+
+    def create_or_replace_network_policies(self, manifest: KubernetesRuntimeManifest) -> None:
+        for network_policy in manifest.network_policies:
+            self.create_or_replace_network_policy(manifest, network_policy)
+
+    def create_or_replace_network_policy(
+        self,
+        manifest: KubernetesRuntimeManifest,
+        network_policy: Any,
+    ) -> None:
+        policy_name = network_policy.metadata.name
+        try:
+            self._call_api(
+                self.networking_v1.create_namespaced_network_policy,
+                namespace=manifest.names.namespace,
+                body=network_policy,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 409):
+                raise KubernetesReconcileError(
+                    f"Kubernetes network policy reconcile failed: {self._api_error_detail(exc)}"
+                ) from exc
+            try:
+                self._call_api(
+                    self.networking_v1.replace_namespaced_network_policy,
+                    name=policy_name,
+                    namespace=manifest.names.namespace,
+                    body=network_policy,
+                )
+            except self.api_exception_class as replace_exc:
+                raise KubernetesReconcileError(
+                    "Kubernetes network policy replace failed: "
+                    f"{self._api_error_detail(replace_exc)}"
+                ) from replace_exc
 
     def create_or_replace_secret(self, manifest: KubernetesRuntimeManifest) -> None:
         try:
@@ -176,6 +214,7 @@ class KubernetesRuntimeReconciler:
             self.scale_deployment(names, replicas=0)
             return
         self.delete_ingress(names)
+        self.delete_network_policies(names)
         self.delete_service(names)
         self.delete_deployment(names)
         self.delete_secret(names)
@@ -191,6 +230,23 @@ class KubernetesRuntimeReconciler:
             if not self._is_status(exc, 404):
                 raise KubernetesReconcileError(
                     f"Kubernetes ingress delete failed: {self._api_error_detail(exc)}"
+                ) from exc
+
+    def delete_network_policies(self, names: KubernetesRuntimeNames) -> None:
+        for policy_name in runtime_network_policy_names(names):
+            self.delete_network_policy(names, policy_name)
+
+    def delete_network_policy(self, names: KubernetesRuntimeNames, policy_name: str) -> None:
+        try:
+            self._call_api(
+                self.networking_v1.delete_namespaced_network_policy,
+                name=policy_name,
+                namespace=names.namespace,
+            )
+        except self.api_exception_class as exc:
+            if not self._is_status(exc, 404):
+                raise KubernetesReconcileError(
+                    f"Kubernetes network policy delete failed: {self._api_error_detail(exc)}"
                 ) from exc
 
     def delete_service(self, names: KubernetesRuntimeNames) -> None:
