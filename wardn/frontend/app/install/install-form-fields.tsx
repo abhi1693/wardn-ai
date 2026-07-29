@@ -41,7 +41,7 @@ export function ServerPickerCard({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               alt=""
-              className="size-full object-cover"
+              className="size-full object-contain"
               loading="lazy"
               referrerPolicy="no-referrer"
               src={iconUrl}
@@ -193,4 +193,3 @@ export function InstallFieldControl({
     </div>
   );
 }
-

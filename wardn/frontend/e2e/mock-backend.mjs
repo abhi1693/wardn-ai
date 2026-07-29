@@ -67,6 +67,11 @@ const googleSearchConsoleServer = {
   title: "Google Search Console",
   description: "Inspect Google Search Console properties and performance data.",
   version: "1.0.0",
+  icons: [
+    {
+      src: "https://skills.sh/badge/google-search-console.svg",
+    },
+  ],
   packages: [
     {
       registryType: "npm",

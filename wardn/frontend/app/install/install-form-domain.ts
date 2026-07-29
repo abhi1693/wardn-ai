@@ -315,8 +315,10 @@ export function serverCategory(entry: MCPRegistryServerResponse) {
 }
 
 export function serverIconUrl(entry: MCPRegistryServerResponse) {
-  const icon = entry.server.icons?.find((item) => isRecord(item) && stringValue(item.url));
-  return isRecord(icon) ? stringValue(icon.url) : "";
+  const icon = entry.server.icons?.find(
+    (item) => isRecord(item) && (stringValue(item.src) || stringValue(item.url))
+  );
+  return isRecord(icon) ? stringValue(icon.src) || stringValue(icon.url) : "";
 }
 
 export function installTargetKind(target: InstallTarget): InstallTargetKind {

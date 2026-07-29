@@ -45,6 +45,9 @@ test.describe("MCP install runtime selection", () => {
     await page.goto(`/org/${organizationId}/workspace/${workspaceId}/install/new`);
 
     await expect(page.getByRole("heading", { name: "Add MCP server" })).toBeVisible();
+    const badgeIcon = page.locator('img[src="https://skills.sh/badge/google-search-console.svg"]');
+    await expect(badgeIcon).toBeVisible();
+    await expect(badgeIcon).toHaveClass(/object-contain/);
 
     const serverListRequest = (await backendRequests(request)).find(
       (entry) =>
