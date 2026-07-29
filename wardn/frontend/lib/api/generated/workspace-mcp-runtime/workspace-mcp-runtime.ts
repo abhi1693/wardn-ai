@@ -6,6 +6,7 @@
  */
 import type {
   MCPRuntimeEventListResponse,
+  MCPRuntimeInstallationControlResponse,
   MCPRuntimeSessionHealthResponse,
   MCPRuntimeSessionListResponse,
   MCPRuntimeSessionRead,
@@ -15,6 +16,141 @@ import type {
 } from '../model';
 
 import { apiRequest } from '../../client';
+
+export const getWorkspaceMcpRuntimeGetInstallationStateUrl = (organizationId: string,
+    workspaceId: string,
+    installationId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/installations/${installationId}`
+}
+
+/**
+ * @summary Get Workspace Mcp Runtime Installation State
+ */
+export const workspaceMcpRuntimeGetInstallationState = async (organizationId: string,
+    workspaceId: string,
+    installationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<MCPRuntimeInstallationControlResponse> => {
+
+  return apiRequest<MCPRuntimeInstallationControlResponse>(getWorkspaceMcpRuntimeGetInstallationStateUrl(organizationId,workspaceId,installationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export const getWorkspaceMcpRuntimeRedeployInstallationUrl = (organizationId: string,
+    workspaceId: string,
+    installationId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/installations/${installationId}/redeploy`
+}
+
+/**
+ * @summary Redeploy Workspace Mcp Runtime Installation
+ */
+export const workspaceMcpRuntimeRedeployInstallation = async (organizationId: string,
+    workspaceId: string,
+    installationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<MCPRuntimeInstallationControlResponse> => {
+
+  return apiRequest<MCPRuntimeInstallationControlResponse>(getWorkspaceMcpRuntimeRedeployInstallationUrl(organizationId,workspaceId,installationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+export const getWorkspaceMcpRuntimeRestartInstallationUrl = (organizationId: string,
+    workspaceId: string,
+    installationId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/installations/${installationId}/restart`
+}
+
+/**
+ * @summary Restart Workspace Mcp Runtime Installation
+ */
+export const workspaceMcpRuntimeRestartInstallation = async (organizationId: string,
+    workspaceId: string,
+    installationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<MCPRuntimeInstallationControlResponse> => {
+
+  return apiRequest<MCPRuntimeInstallationControlResponse>(getWorkspaceMcpRuntimeRestartInstallationUrl(organizationId,workspaceId,installationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+export const getWorkspaceMcpRuntimeStartInstallationUrl = (organizationId: string,
+    workspaceId: string,
+    installationId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/installations/${installationId}/start`
+}
+
+/**
+ * @summary Start Workspace Mcp Runtime Installation
+ */
+export const workspaceMcpRuntimeStartInstallation = async (organizationId: string,
+    workspaceId: string,
+    installationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<MCPRuntimeInstallationControlResponse> => {
+
+  return apiRequest<MCPRuntimeInstallationControlResponse>(getWorkspaceMcpRuntimeStartInstallationUrl(organizationId,workspaceId,installationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+export const getWorkspaceMcpRuntimeStopInstallationUrl = (organizationId: string,
+    workspaceId: string,
+    installationId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/runtime/installations/${installationId}/stop`
+}
+
+/**
+ * @summary Stop Workspace Mcp Runtime Installation
+ */
+export const workspaceMcpRuntimeStopInstallation = async (organizationId: string,
+    workspaceId: string,
+    installationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<MCPRuntimeInstallationControlResponse> => {
+
+  return apiRequest<MCPRuntimeInstallationControlResponse>(getWorkspaceMcpRuntimeStopInstallationUrl(organizationId,workspaceId,installationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
 
 export const getWorkspaceMcpRuntimeListSessionsUrl = (organizationId: string,
     workspaceId: string,

@@ -43,6 +43,18 @@ class MCPRuntimeSessionHealthResponse(APIModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class MCPRuntimeInstallationControlResponse(APIModel):
+    installation_id: UUID
+    action: str
+    runtime_session: MCPRuntimeSessionRead | None = None
+    health: MCPRuntimeSessionHealthResponse | None = None
+    active: bool
+    can_start: bool
+    can_stop: bool
+    can_restart: bool
+    can_redeploy: bool
+
+
 class MCPRuntimeEventRead(APIModel):
     id: UUID
     runtime_session_id: UUID

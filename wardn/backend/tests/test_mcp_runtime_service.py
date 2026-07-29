@@ -218,6 +218,208 @@ def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
     return installation, server
 
 
+@pytest.mark.asyncio
+async def test_start_installation_runtime_warms_installed_server(monkeypatch) -> None:
+    installation, _ = installed_server()
+    session = FakeSession()
+    manager = FakeRuntimeManager()
+
+    async def get_installation_by_id(seen_session, installation_id, workspace_id=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert workspace_id is None
+        return installation
+
+    async def get_active_runtime_session(seen_session, installation_id, *, now=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        return None
+
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "get_installation_by_id",
+        get_installation_by_id,
+    )
+    monkeypatch.setattr(
+        repository,
+        "get_active_runtime_session",
+        get_active_runtime_session,
+    )
+
+    response = await service.start_installation_runtime(
+        session,
+        installation.id,
+        manager=manager,
+    )
+
+    assert response.action == "start"
+    assert response.active is True
+    assert response.can_stop is True
+    assert response.runtime_session is not None
+    assert response.runtime_session.installation_id == installation.id
+    assert response.runtime_session.status == "idle"
+    assert len(manager.warmed_sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_stop_installation_runtime_stops_active_session(monkeypatch) -> None:
+    installation, _ = installed_server()
+    runtime_session = MCPRuntimeSession(
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider="local",
+        runtime_kind="package",
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    session = FakeSession()
+    manager = FakeRuntimeManager()
+
+    async def get_installation_by_id(seen_session, installation_id, workspace_id=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert workspace_id is None
+        return installation
+
+    async def get_active_runtime_session(seen_session, installation_id, *, now=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        return runtime_session
+
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "get_installation_by_id",
+        get_installation_by_id,
+    )
+    monkeypatch.setattr(
+        repository,
+        "get_active_runtime_session",
+        get_active_runtime_session,
+    )
+
+    response = await service.stop_installation_runtime(
+        session,
+        installation.id,
+        manager=manager,
+    )
+
+    assert response.action == "stop"
+    assert response.active is False
+    assert response.can_start is True
+    assert response.can_stop is False
+    assert response.runtime_session is not None
+    assert response.runtime_session.status == "stopped"
+    assert manager.stopped_sessions == [runtime_session]
+    assert manager.delete_resources_values == [False]
+
+
+@pytest.mark.asyncio
+async def test_redeploy_installation_runtime_deletes_latest_runtime(monkeypatch) -> None:
+    installation, _ = installed_server()
+    latest_runtime_session = MCPRuntimeSession(
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider="local",
+        runtime_kind="package",
+        config_fingerprint="runtime-fingerprint",
+        status="failed",
+        pod_name="stale-runtime",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        failure_count=1,
+        last_error="failed",
+    )
+    latest_runtime_session.id = uuid.uuid4()
+    started_runtime_session = MCPRuntimeSession(
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider="local",
+        runtime_kind="package",
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="fresh-runtime",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    started_runtime_session.id = uuid.uuid4()
+    session = FakeSession()
+    manager = FakeRuntimeManager()
+
+    async def get_installation_by_id(seen_session, installation_id, workspace_id=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert workspace_id is None
+        return installation
+
+    async def get_active_runtime_session(seen_session, installation_id, *, now=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        return None
+
+    async def list_runtime_sessions_for_installation(seen_session, installation_id, *, limit=100):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert limit == 1
+        return [latest_runtime_session]
+
+    async def start_installation_runtime(
+        seen_session,
+        installation_id,
+        *,
+        workspace_id=None,
+        manager=None,
+        wait_ready=True,
+    ):
+        assert seen_session is session
+        assert installation_id == installation.id
+        return service.runtime_installation_control_response(
+            installation_id=installation_id,
+            action="start",
+            runtime_session=started_runtime_session,
+        )
+
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "get_installation_by_id",
+        get_installation_by_id,
+    )
+    monkeypatch.setattr(
+        repository,
+        "get_active_runtime_session",
+        get_active_runtime_session,
+    )
+    monkeypatch.setattr(
+        repository,
+        "list_runtime_sessions_for_installation",
+        list_runtime_sessions_for_installation,
+    )
+    monkeypatch.setattr(service, "start_installation_runtime", start_installation_runtime)
+
+    response = await service.redeploy_installation_runtime(
+        session,
+        installation.id,
+        manager=manager,
+    )
+
+    assert response.action == "redeploy"
+    assert response.runtime_session is not None
+    assert response.runtime_session.id == started_runtime_session.id
+    assert latest_runtime_session.status == "stopped"
+    assert manager.stopped_sessions == [latest_runtime_session]
+    assert manager.delete_resources_values == [True]
+
+
 def added_one(session: FakeSession, model_type):
     return next(item for item in session.added if isinstance(item, model_type))
 

@@ -109,6 +109,23 @@ def test_settings_normalize_release_tag_version() -> None:
     assert settings.app_version == "1.2.3"
 
 
+def test_settings_default_mcp_runtime_gateway_image_uses_app_version() -> None:
+    settings = make_settings(app_version="1.2.3")
+
+    assert (
+        settings.mcp_runtime_kubernetes_gateway_image
+        == "ghcr.io/abhi1693/wardn-ai-mcp-runtime:1.2.3"
+    )
+    assert (
+        settings.mcp_runtime_kubernetes_gateway_uvx_image
+        == settings.mcp_runtime_kubernetes_gateway_image
+    )
+    assert (
+        settings.mcp_runtime_kubernetes_gateway_deno_image
+        == settings.mcp_runtime_kubernetes_gateway_image
+    )
+
+
 def test_settings_reject_invalid_outbound_http_port() -> None:
     with pytest.raises(ValidationError, match="between 1 and 65535"):
         make_settings(outbound_http_allowed_ports="0,443")

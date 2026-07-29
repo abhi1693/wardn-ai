@@ -132,6 +132,26 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/installations/{installation_id}"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/installations/{installation_id}/redeploy"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/installations/{installation_id}/restart"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/installations/{installation_id}/start"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/mcp/runtime/installations/{installation_id}/stop"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/mcp/runtime/sessions"
         ),
         (

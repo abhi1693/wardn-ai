@@ -259,15 +259,23 @@ def supergateway_container_args(
         KUBERNETES_SUPERGATEWAY_HEALTH_PATH,
     ]
 
+def runtime_gateway_image_override(runtime_config: dict[str, Any]) -> str:
+    for source in (runtime_config, runtime_config.get("package")):
+        if not isinstance(source, dict):
+            continue
+        for field_name in ("gatewayImage", "kubernetesGatewayImage"):
+            image = str(source.get(field_name) or "").strip()
+            if image:
+                return image
+    return ""
+
+
 def supergateway_image(installation: MCPServerInstallation, *, settings=None) -> str:
     runtime_settings = settings or get_settings()
     runtime_config = installation.runtime_config or {}
-    package_registry_type = registry_type(runtime_config)
-    command_name = Path(package_runtime(installation).command).name
-    if package_registry_type in {"uvx", "pypi"} or command_name == "uvx":
-        return runtime_settings.mcp_runtime_kubernetes_gateway_uvx_image
-    if package_registry_type == "deno" or command_name == "deno":
-        return runtime_settings.mcp_runtime_kubernetes_gateway_deno_image
+    override_image = runtime_gateway_image_override(runtime_config)
+    if override_image:
+        return override_image
     return runtime_settings.mcp_runtime_kubernetes_gateway_image
 
 def normalized_runtime_package_version(value: Any) -> str:

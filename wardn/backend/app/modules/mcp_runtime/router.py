@@ -13,6 +13,7 @@ from app.db.session import get_db_session
 from app.modules.mcp_runtime import service
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
+    MCPRuntimeInstallationControlResponse,
     MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
     MCPRuntimeSessionRead,
@@ -60,6 +61,111 @@ async def list_workspace_mcp_runtime_sessions(
         workspace_id=workspace_id,
         status=status,
         limit=limit,
+    )
+
+
+@workspace_router.get(
+    "/installations/{installation_id}",
+    response_model=MCPRuntimeInstallationControlResponse,
+    operation_id="workspace_mcp_runtime_get_installation_state",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def get_workspace_mcp_runtime_installation_state(
+    organization_id: UUID,
+    workspace_id: UUID,
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeInstallationControlResponse:
+    await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
+    return await service.get_installation_runtime_state(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_router.post(
+    "/installations/{installation_id}/start",
+    response_model=MCPRuntimeInstallationControlResponse,
+    operation_id="workspace_mcp_runtime_start_installation",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def start_workspace_mcp_runtime_installation(
+    organization_id: UUID,
+    workspace_id: UUID,
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeInstallationControlResponse:
+    await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
+    return await service.start_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_router.post(
+    "/installations/{installation_id}/stop",
+    response_model=MCPRuntimeInstallationControlResponse,
+    operation_id="workspace_mcp_runtime_stop_installation",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def stop_workspace_mcp_runtime_installation(
+    organization_id: UUID,
+    workspace_id: UUID,
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeInstallationControlResponse:
+    await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
+    return await service.stop_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_router.post(
+    "/installations/{installation_id}/restart",
+    response_model=MCPRuntimeInstallationControlResponse,
+    operation_id="workspace_mcp_runtime_restart_installation",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def restart_workspace_mcp_runtime_installation(
+    organization_id: UUID,
+    workspace_id: UUID,
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeInstallationControlResponse:
+    await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
+    return await service.restart_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_router.post(
+    "/installations/{installation_id}/redeploy",
+    response_model=MCPRuntimeInstallationControlResponse,
+    operation_id="workspace_mcp_runtime_redeploy_installation",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+async def redeploy_workspace_mcp_runtime_installation(
+    organization_id: UUID,
+    workspace_id: UUID,
+    installation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPRuntimeInstallationControlResponse:
+    await require_workspace_admin_or_404(session, current_user, organization_id, workspace_id)
+    return await service.redeploy_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
     )
 
 

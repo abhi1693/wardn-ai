@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.modules.mcp_registry import repository as mcp_registry_repository
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_runtime import repository
 from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
@@ -22,9 +23,11 @@ from app.modules.mcp_runtime.manager import (
     get_runtime_manager,
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession, MCPToolInvocation
+from app.modules.mcp_runtime.provider import RuntimeHealth
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
+    MCPRuntimeInstallationControlResponse,
     MCPRuntimeServerError,
     MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
@@ -119,6 +122,22 @@ def runtime_server_error_read(runtime_session: MCPRuntimeSession) -> MCPRuntimeS
         lastError=runtime_session.last_error,
         lastErrorAt=runtime_session.updated_at,
         failureCount=runtime_session.failure_count,
+    )
+
+
+def runtime_session_health_response(
+    runtime_session: MCPRuntimeSession,
+    health: RuntimeHealth,
+) -> MCPRuntimeSessionHealthResponse:
+    return MCPRuntimeSessionHealthResponse(
+        runtimeSessionId=runtime_session.id,
+        runtimeProvider=runtime_session.runtime_provider,
+        runtimeKind=runtime_session.runtime_kind,
+        status=health.status,
+        healthy=health.healthy,
+        ready=health.ready,
+        message=health.message,
+        details=health.details or {},
     )
 
 
@@ -1286,16 +1305,173 @@ async def get_runtime_session_health(
     manager = manager or get_runtime_manager()
     await session.commit()
     health = await run_in_threadpool(manager.health_runtime, runtime_session)
-    return MCPRuntimeSessionHealthResponse(
-        runtimeSessionId=runtime_session.id,
-        runtimeProvider=runtime_session.runtime_provider,
-        runtimeKind=runtime_session.runtime_kind,
-        status=health.status,
-        healthy=health.healthy,
-        ready=health.ready,
-        message=health.message,
-        details=health.details or {},
+    return runtime_session_health_response(runtime_session, health)
+
+
+def runtime_installation_control_response(
+    *,
+    installation_id: UUID,
+    action: str,
+    runtime_session: MCPRuntimeSession | None,
+    health: RuntimeHealth | None = None,
+) -> MCPRuntimeInstallationControlResponse:
+    active = (
+        runtime_session is not None
+        and runtime_session.status in repository.ACTIVE_RUNTIME_STATUSES
     )
+    has_session = runtime_session is not None
+    return MCPRuntimeInstallationControlResponse(
+        installationId=installation_id,
+        action=action,
+        runtimeSession=runtime_session_read(runtime_session) if runtime_session else None,
+        health=(
+            runtime_session_health_response(runtime_session, health)
+            if runtime_session is not None and health is not None
+            else None
+        ),
+        active=active,
+        canStart=not active,
+        canStop=active,
+        canRestart=has_session,
+        canRedeploy=True,
+    )
+
+
+async def get_runtime_installation_or_404(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+) -> MCPServerInstallation:
+    installation = await mcp_registry_repository.get_installation_by_id(
+        session,
+        installation_id,
+        workspace_id,
+    )
+    if installation is None:
+        raise MCPRuntimeSessionNotFoundError("server configuration is not installed")
+    return installation
+
+
+async def latest_runtime_session_for_installation(
+    session: AsyncSession,
+    installation_id: UUID,
+) -> MCPRuntimeSession | None:
+    sessions = await repository.list_runtime_sessions_for_installation(
+        session,
+        installation_id,
+        limit=1,
+    )
+    return sessions[0] if sessions else None
+
+
+async def get_installation_runtime_state(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+) -> MCPRuntimeInstallationControlResponse:
+    manager = manager or get_runtime_manager()
+    await get_runtime_installation_or_404(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+    runtime_session = await latest_runtime_session_for_installation(session, installation_id)
+    health: RuntimeHealth | None = None
+    if runtime_session is not None:
+        await session.commit()
+        health = await run_in_threadpool(manager.health_runtime, runtime_session)
+    return runtime_installation_control_response(
+        installation_id=installation_id,
+        action="state",
+        runtime_session=runtime_session,
+        health=health,
+    )
+
+
+async def start_installation_runtime(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+    wait_ready: bool = True,
+) -> MCPRuntimeInstallationControlResponse:
+    installation = await get_runtime_installation_or_404(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+    logger.info(
+        "Starting MCP runtime for installation.",
+        extra={
+            "mcp_installation_id": str(installation.id),
+            "workspace_id": str(installation.workspace_id) if installation.workspace_id else None,
+            "mcp_server_name": installation.server_name,
+            "mcp_server_version": installation.installed_version,
+        },
+    )
+    runtime_session = await warm_runtime_session(
+        session,
+        installation,
+        manager=manager,
+        wait_ready=wait_ready,
+    )
+    return runtime_installation_control_response(
+        installation_id=installation_id,
+        action="start",
+        runtime_session=runtime_session,
+    )
+
+
+async def stop_runtime_session_object(
+    session: AsyncSession,
+    runtime_session: MCPRuntimeSession,
+    *,
+    manager: MCPRuntimeManager,
+    action: str,
+    reason: str,
+    delete_resources: bool = False,
+) -> MCPRuntimeSession:
+    now = datetime.now(UTC)
+    should_stop_provider = (
+        runtime_session.status in repository.ACTIVE_RUNTIME_STATUSES or delete_resources
+    )
+    if should_stop_provider:
+        await session.commit()
+        await run_in_threadpool(
+            manager.stop_runtime,
+            runtime_session,
+            delete_resources=delete_resources,
+        )
+        runtime_session.status = "stopped"
+        runtime_session.stopped_at = now
+        runtime_session.expires_at = now
+        runtime_session.last_error = ""
+        add_runtime_event(
+            session,
+            runtime_session,
+            RUNTIME_EVENT_SESSION_STOPPED,
+            message="Runtime session stopped.",
+            metadata={
+                "reason": reason,
+                "action": action,
+                "deleteResources": delete_resources,
+            },
+            now=now,
+        )
+        await session.flush()
+        logger.info(
+            "Stopped MCP runtime session.",
+            extra={
+                **runtime_session_log_extra(runtime_session),
+                "mcp_runtime_control_action": action,
+                "mcp_runtime_delete_resources": delete_resources,
+            },
+        )
+    return runtime_session
 
 
 async def stop_runtime_session(
@@ -1314,24 +1490,106 @@ async def stop_runtime_session(
     if runtime_session is None:
         raise MCPRuntimeSessionNotFoundError("runtime session not found")
 
-    now = datetime.now(UTC)
     if runtime_session.status in repository.ACTIVE_RUNTIME_STATUSES:
-        await session.commit()
-        await run_in_threadpool(manager.stop_runtime, runtime_session)
-        runtime_session.status = "stopped"
-        runtime_session.stopped_at = now
-        runtime_session.expires_at = now
-        runtime_session.last_error = ""
-        add_runtime_event(
+        await stop_runtime_session_object(
             session,
             runtime_session,
-            RUNTIME_EVENT_SESSION_STOPPED,
-            message="Runtime session stopped.",
-            metadata={"reason": "manual"},
-            now=now,
+            manager=manager,
+            action="stop",
+            reason="manual",
         )
-        await session.flush()
     return runtime_session_read(runtime_session)
+
+
+async def stop_installation_runtime(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+    action: str = "stop",
+    delete_resources: bool = False,
+) -> MCPRuntimeInstallationControlResponse:
+    manager = manager or get_runtime_manager()
+    await get_runtime_installation_or_404(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+    )
+    runtime_session = await repository.get_active_runtime_session(session, installation_id)
+    if runtime_session is None:
+        runtime_session = await latest_runtime_session_for_installation(session, installation_id)
+
+    if runtime_session is not None:
+        await stop_runtime_session_object(
+            session,
+            runtime_session,
+            manager=manager,
+            action=action,
+            reason="manual",
+            delete_resources=delete_resources,
+        )
+
+    return runtime_installation_control_response(
+        installation_id=installation_id,
+        action=action,
+        runtime_session=runtime_session,
+    )
+
+
+async def restart_installation_runtime(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+    wait_ready: bool = True,
+) -> MCPRuntimeInstallationControlResponse:
+    manager = manager or get_runtime_manager()
+    await stop_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+        manager=manager,
+        action="restart",
+    )
+    response = await start_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+        manager=manager,
+        wait_ready=wait_ready,
+    )
+    response.action = "restart"
+    return response
+
+
+async def redeploy_installation_runtime(
+    session: AsyncSession,
+    installation_id: UUID,
+    *,
+    workspace_id: UUID | None = None,
+    manager: MCPRuntimeManager | None = None,
+    wait_ready: bool = True,
+) -> MCPRuntimeInstallationControlResponse:
+    manager = manager or get_runtime_manager()
+    await stop_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+        manager=manager,
+        action="redeploy",
+        delete_resources=True,
+    )
+    response = await start_installation_runtime(
+        session,
+        installation_id,
+        workspace_id=workspace_id,
+        manager=manager,
+        wait_ready=wait_ready,
+    )
+    response.action = "redeploy"
+    return response
 
 
 async def list_runtime_events(

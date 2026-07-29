@@ -33,7 +33,10 @@ from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
 )
 from app.modules.mcp_runtime.providers.kubernetes_naming import runtime_object_names_for_session
 from app.modules.mcp_runtime.providers.kubernetes_reconciler import KubernetesRuntimeReconciler
-from app.modules.mcp_runtime.providers.kubernetes_types import KubernetesRuntimeManifest
+from app.modules.mcp_runtime.providers.kubernetes_types import (
+    KubernetesReconcileError,
+    KubernetesRuntimeManifest,
+)
 
 
 def runtime_mcp_outbound_policy(
@@ -51,6 +54,21 @@ def runtime_mcp_outbound_policy(
         allowed_ports=frozenset({service_port}),
         private_host_allowlist=frozenset({service_host}),
     )
+
+
+def deployment_condition_message(deployment: Any) -> str:
+    status = getattr(deployment, "status", None)
+    if status is None:
+        return ""
+    for condition in getattr(status, "conditions", None) or []:
+        condition_status = str(getattr(condition, "status", "") or "")
+        if condition_status != "False":
+            continue
+        reason = str(getattr(condition, "reason", "") or "")
+        message = str(getattr(condition, "message", "") or "")
+        if reason or message:
+            return ": ".join(part for part in (reason, message) if part)
+    return str(getattr(status, "message", "") or "")
 
 
 class KubernetesRuntimeProvider:
@@ -90,9 +108,7 @@ class KubernetesRuntimeProvider:
             "workloadRuntime": workload_runtime,
             "objectIdentity": "runtime_config_fingerprint",
             "runtimeImage": runtime_image,
-            "gatewayBaseImage": settings.mcp_runtime_kubernetes_gateway_image,
-            "gatewayUvxImage": settings.mcp_runtime_kubernetes_gateway_uvx_image,
-            "gatewayDenoImage": settings.mcp_runtime_kubernetes_gateway_deno_image,
+            "gatewayImage": settings.mcp_runtime_kubernetes_gateway_image,
             "servicePort": settings.mcp_runtime_kubernetes_service_port,
             "namespacePrefix": settings.mcp_runtime_kubernetes_namespace_prefix,
             "namespaceLabels": settings.mcp_runtime_kubernetes_namespace_labels_json,
@@ -263,11 +279,56 @@ class KubernetesRuntimeProvider:
                 ready=False,
                 message=f"Runtime session is {runtime_session.status}.",
             )
+        names = runtime_object_names_for_session(runtime_session, prefer_stored_names=True)
+        try:
+            deployment = self._new_reconciler().read_deployment(names)
+        except KubernetesReconcileError as exc:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_NOT_READY,
+                healthy=False,
+                ready=False,
+                message=str(exc),
+                details={
+                    "namespace": names.namespace,
+                    "deploymentName": names.pod_name,
+                },
+            )
+
+        spec = getattr(deployment, "spec", None)
+        status = getattr(deployment, "status", None)
+        desired = int(getattr(spec, "replicas", 1) or 1)
+        ready = int(
+            getattr(status, "ready_replicas", 0)
+            or getattr(status, "available_replicas", 0)
+            or 0
+        )
+        available = int(getattr(status, "available_replicas", 0) or 0)
+        updated = int(getattr(status, "updated_replicas", 0) or 0)
+        details = {
+            "namespace": names.namespace,
+            "deploymentName": names.pod_name,
+            "desiredReplicas": desired,
+            "readyReplicas": ready,
+            "availableReplicas": available,
+            "updatedReplicas": updated,
+        }
+        if ready >= desired:
+            return RuntimeHealth(
+                status=RUNTIME_HEALTH_READY,
+                healthy=True,
+                ready=True,
+                message="Kubernetes runtime deployment is ready.",
+                details=details,
+            )
+
+        condition_message = deployment_condition_message(deployment)
         return RuntimeHealth(
             status=RUNTIME_HEALTH_NOT_READY,
             healthy=False,
             ready=False,
-            message="Kubernetes runtime health polling is not wired into this endpoint yet.",
+            message=condition_message
+            or f"Kubernetes runtime deployment is not ready; ready={ready}, desired={desired}.",
+            details=details,
         )
 
     def _new_reconciler(self) -> KubernetesRuntimeReconciler:

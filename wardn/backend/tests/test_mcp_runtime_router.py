@@ -11,6 +11,7 @@ from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
+    MCPRuntimeInstallationControlResponse,
     MCPRuntimeSessionHealthResponse,
     MCPRuntimeSessionListResponse,
     MCPRuntimeSessionRead,
@@ -131,6 +132,28 @@ def runtime_summary_response() -> MCPRuntimeSummaryResponse:
     )
 
 
+def runtime_installation_control_response(
+    installation_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
+    action: str = "state",
+    status: str = "idle",
+) -> MCPRuntimeInstallationControlResponse:
+    runtime_session = runtime_session_read(workspace_id=workspace_id, status=status)
+    runtime_session.installation_id = installation_id
+    active = status in {"pending", "starting", "running", "idle"}
+    return MCPRuntimeInstallationControlResponse(
+        installationId=installation_id,
+        action=action,
+        runtimeSession=runtime_session,
+        active=active,
+        canStart=not active,
+        canStop=active,
+        canRestart=True,
+        canRedeploy=True,
+    )
+
+
 def runtime_client(*, authenticated: bool = False) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db_session] = fake_session
@@ -190,6 +213,135 @@ def test_get_runtime_summary_route(monkeypatch) -> None:
     assert response.json()["toolCalls"]["recentFailureRate"] == 0.5
     assert seen["session"] is not None
     assert seen["workspace_id"] == TEST_WORKSPACE_ID
+
+
+def test_get_runtime_installation_state_route(monkeypatch) -> None:
+    seen = {}
+    installation_id = uuid.uuid4()
+
+    async def get_installation_runtime_state(session, seen_installation_id, *, workspace_id=None):
+        seen["session"] = session
+        seen["installation_id"] = seen_installation_id
+        seen["workspace_id"] = workspace_id
+        return runtime_installation_control_response(
+            seen_installation_id,
+            workspace_id=workspace_id,
+        )
+
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "get_installation_runtime_state",
+        get_installation_runtime_state,
+    )
+
+    response = runtime_client(authenticated=True).get(
+        workspace_runtime_path(f"/installations/{installation_id}")
+    )
+
+    assert response.status_code == 200
+    assert response.json()["installationId"] == str(installation_id)
+    assert response.json()["runtimeSession"]["status"] == "idle"
+    assert response.json()["canStop"] is True
+    assert seen["installation_id"] == installation_id
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
+    assert seen["session"] is not None
+
+
+def test_start_runtime_installation_route_requires_admin(monkeypatch) -> None:
+    seen = {}
+    installation_id = uuid.uuid4()
+
+    async def require_workspace_admin(
+        session,
+        current_user,
+        seen_organization_id,
+        seen_workspace_id,
+    ):
+        seen["admin_check"] = (seen_organization_id, seen_workspace_id)
+
+    async def start_installation_runtime(session, seen_installation_id, *, workspace_id=None):
+        seen["session"] = session
+        seen["installation_id"] = seen_installation_id
+        seen["workspace_id"] = workspace_id
+        return runtime_installation_control_response(
+            seen_installation_id,
+            workspace_id=workspace_id,
+            action="start",
+        )
+
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_admin_or_404",
+        require_workspace_admin,
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "start_installation_runtime",
+        start_installation_runtime,
+    )
+
+    response = runtime_client(authenticated=True).post(
+        workspace_runtime_path(f"/installations/{installation_id}/start")
+    )
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "start"
+    assert response.json()["active"] is True
+    assert seen["admin_check"] == (TEST_ORGANIZATION_ID, TEST_WORKSPACE_ID)
+    assert seen["installation_id"] == installation_id
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
+    assert seen["session"].committed is False
+
+
+def test_redeploy_runtime_installation_route_requires_admin(monkeypatch) -> None:
+    seen = {}
+    installation_id = uuid.uuid4()
+
+    async def require_workspace_admin(
+        session,
+        current_user,
+        seen_organization_id,
+        seen_workspace_id,
+    ):
+        seen["admin_check"] = (seen_organization_id, seen_workspace_id)
+
+    async def redeploy_installation_runtime(session, seen_installation_id, *, workspace_id=None):
+        seen["session"] = session
+        seen["installation_id"] = seen_installation_id
+        seen["workspace_id"] = workspace_id
+        return runtime_installation_control_response(
+            seen_installation_id,
+            workspace_id=workspace_id,
+            action="redeploy",
+        )
+
+    monkeypatch.setattr(
+        runtime_router,
+        "require_workspace_admin_or_404",
+        require_workspace_admin,
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "redeploy_installation_runtime",
+        redeploy_installation_runtime,
+    )
+
+    response = runtime_client(authenticated=True).post(
+        workspace_runtime_path(f"/installations/{installation_id}/redeploy")
+    )
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "redeploy"
+    assert response.json()["runtimeSession"]["installationId"] == str(installation_id)
+    assert seen["admin_check"] == (TEST_ORGANIZATION_ID, TEST_WORKSPACE_ID)
+    assert seen["installation_id"] == installation_id
+    assert seen["workspace_id"] == TEST_WORKSPACE_ID
+    assert seen["session"].committed is False
 
 
 def test_get_runtime_session_route_returns_404(monkeypatch) -> None:

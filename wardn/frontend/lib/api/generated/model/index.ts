@@ -128,6 +128,7 @@ export * from './mCPRepositoryMetadataRepository';
 export * from './mCPRuntimeEventListResponse';
 export * from './mCPRuntimeEventRead';
 export * from './mCPRuntimeEventReadMetadata';
+export * from './mCPRuntimeInstallationControlResponse';
 export * from './mCPRuntimeServerError';
 export * from './mCPRuntimeSessionHealthResponse';
 export * from './mCPRuntimeSessionHealthResponseDetails';

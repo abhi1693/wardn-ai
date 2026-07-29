@@ -64,8 +64,8 @@ class FakeSettings:
     mcp_runtime_kubernetes_context = "local"
     mcp_runtime_kubernetes_namespace_prefix = "wardn"
     mcp_runtime_kubernetes_gateway_image = "registry.example/supergateway:test"
-    mcp_runtime_kubernetes_gateway_uvx_image = "registry.example/supergateway:uvx"
-    mcp_runtime_kubernetes_gateway_deno_image = "registry.example/supergateway:deno"
+    mcp_runtime_kubernetes_gateway_uvx_image = "registry.example/supergateway:test"
+    mcp_runtime_kubernetes_gateway_deno_image = "registry.example/supergateway:test"
     mcp_runtime_kubernetes_cpu_request = "100m"
     mcp_runtime_kubernetes_cpu_limit = "1"
     mcp_runtime_kubernetes_memory_request = "256Mi"
@@ -1291,7 +1291,7 @@ def test_kubernetes_runtime_manifest_rewrites_uvx_host_paths(
     )
 
     assert supergateway_stdio_arg(manifest) == "uvx mcp-grafana"
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
 def test_kubernetes_runtime_manifest_installs_npm_package_in_init_container(
@@ -1774,7 +1774,7 @@ def test_kubernetes_runtime_manifest_rewrites_pypi_host_paths_to_uvx(
     assert supergateway_stdio_arg(manifest) == (
         "uvx --from openstackmcp-server python -m openstackmcp_server --stdio"
     )
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
 def test_kubernetes_runtime_manifest_uses_declared_pypi_python_module(
@@ -1846,7 +1846,68 @@ def test_kubernetes_runtime_manifest_uses_declared_pypi_python_module(
     assert supergateway_stdio_arg(manifest) == (
         "uvx --from github-mcp-server==2.5.7 python -m github_mcp"
     )
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
+
+
+def test_kubernetes_runtime_manifest_uses_package_gateway_image_override(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/custom",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "example_mcp"],
+            "cwd": str(tmp_path),
+            "package": {
+                "identifier": "example-mcp",
+                "version": "1.0.0",
+                "gatewayImage": "registry.example/custom-gateway:1.0.0",
+            },
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert manifest.pod.spec.containers[0].image == "registry.example/custom-gateway:1.0.0"
 
 
 def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(
@@ -1918,7 +1979,7 @@ def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(
     assert supergateway_stdio_arg(manifest) == (
         "uvx --from mcp-google-search-console==2.0.2 mcp-google-search-console"
     )
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
 def test_kubernetes_runtime_manifest_adds_pypi_runtime_dependencies(
@@ -1992,10 +2053,10 @@ def test_kubernetes_runtime_manifest_adds_pypi_runtime_dependencies(
         "uvx --from mcp-google-search-console==2.0.2 --with 'mcp<2' "
         "mcp-google-search-console"
     )
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:uvx"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
-def test_kubernetes_runtime_manifest_uses_deno_gateway_image(
+def test_kubernetes_runtime_manifest_uses_managed_gateway_image_for_deno(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -2046,7 +2107,7 @@ def test_kubernetes_runtime_manifest_uses_deno_gateway_image(
     )
 
     assert "deno run -A jsr:@example/mcp-server" in supergateway_stdio_arg(manifest)
-    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:deno"
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
 def test_kubernetes_runtime_manifest_service_selects_pod_labels(
@@ -3359,7 +3420,7 @@ def test_kubernetes_provider_execution_fails_at_reconciliation_boundary() -> Non
         provider.list_tools(installation)
 
 
-def test_kubernetes_provider_health_reports_not_ready_for_active_session() -> None:
+def test_kubernetes_provider_health_reports_ready_deployment() -> None:
     runtime_session = MCPRuntimeSession(
         installation_id=uuid.uuid4(),
         server_name="io.github.example/weather",
@@ -3368,19 +3429,58 @@ def test_kubernetes_provider_health_reports_not_ready_for_active_session() -> No
         runtime_kind=RUNTIME_KIND_PACKAGE,
         config_fingerprint="runtime-fingerprint",
         status="idle",
-        pod_name="",
+        pod_name="weather-runtime",
         namespace="wardn-runtimes",
         endpoint_url="",
         failure_count=0,
         last_error="",
     )
+    runtime_session.id = uuid.uuid4()
+    core_v1 = FakeCoreV1Api()
+    core_v1.deployments.append(fake_deployment(replicas=1, ready_replicas=1))
 
-    health = KubernetesRuntimeProvider().health(runtime_session)
+    health = KubernetesRuntimeProvider(client_factory=FakeClientFactory(core_v1)).health(
+        runtime_session
+    )
+
+    assert health.status == "ready"
+    assert health.healthy is True
+    assert health.ready is True
+    assert health.details == {
+        "namespace": "wardn-runtimes",
+        "deploymentName": "weather-runtime",
+        "desiredReplicas": 1,
+        "readyReplicas": 1,
+        "availableReplicas": 0,
+        "updatedReplicas": 0,
+    }
+
+
+def test_kubernetes_provider_health_reports_not_ready_deployment() -> None:
+    runtime_session = MCPRuntimeSession(
+        installation_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        server_version="1.0.0",
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="weather-runtime",
+        namespace="wardn-runtimes",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    core_v1 = FakeCoreV1Api()
+    core_v1.deployments.append(fake_deployment(replicas=1, ready_replicas=0))
+
+    health = KubernetesRuntimeProvider(client_factory=FakeClientFactory(core_v1)).health(
+        runtime_session
+    )
 
     assert health.status == "not_ready"
     assert health.healthy is False
     assert health.ready is False
-    assert (
-        health.message
-        == "Kubernetes runtime health polling is not wired into this endpoint yet."
-    )
+    assert health.message == "Kubernetes runtime deployment is not ready; ready=0, desired=1."
+    assert health.details["deploymentName"] == "weather-runtime"

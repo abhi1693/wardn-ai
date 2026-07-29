@@ -5,23 +5,36 @@ import { ApiError, apiRawFetch } from "@/lib/api/client";
 import {
   CheckCircle2,
   CircleHelp,
+  CircleStop,
+  Loader2,
   Play,
+  RefreshCw,
+  RotateCcw,
   Search,
   Terminal,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FeedbackMessages } from "@/app/mcp/mcp-list-ui";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type {
+  MCPRuntimeInstallationControlResponse,
   MCPServerInstallationRead,
   MCPServerInstallationToolValidationResponse,
   MCPServerToolRead,
 } from "@/lib/api/generated/model";
+import {
+  workspaceMcpRuntimeGetInstallationState,
+  workspaceMcpRuntimeRedeployInstallation,
+  workspaceMcpRuntimeRestartInstallation,
+  workspaceMcpRuntimeStartInstallation,
+  workspaceMcpRuntimeStopInstallation,
+} from "@/lib/api/generated/workspace-mcp-runtime/workspace-mcp-runtime";
 import {
   workspaceMcpRegistryListInstalledServerTools,
   workspaceMcpRegistryValidateInstalledServerTool,
@@ -40,10 +53,34 @@ type ToolInputProperty = {
 
 type ValidationArgumentValue = string | boolean;
 
+type RuntimeAction = "start" | "stop" | "restart" | "redeploy";
+
 type ArgumentFieldError = {
   field: string;
   message: string;
 };
+
+function runtimeStatusLabel(status: string | undefined) {
+  if (!status) {
+    return "Not started";
+  }
+  return status.replace(/_/g, " ");
+}
+
+function runtimeStatusBadgeVariant(
+  status: string | undefined
+): "success" | "secondary" | "destructive" | "outline" {
+  if (status === "idle" || status === "running" || status === "ready") {
+    return "success";
+  }
+  if (status === "failed" || status === "not_ready") {
+    return "destructive";
+  }
+  if (status === "stopped" || status === "expired") {
+    return "secondary";
+  }
+  return "outline";
+}
 
 type GatewayRpcResponse = {
   result?: {
@@ -380,9 +417,14 @@ export function ValidateInstallClient({
   const [argumentValues, setArgumentValues] = useState<Record<string, ValidationArgumentValue>>({});
   const [argumentError, setArgumentError] = useState<ArgumentFieldError | null>(null);
   const [result, setResult] = useState<MCPServerInstallationToolValidationResponse | null>(null);
+  const [runtimeState, setRuntimeState] =
+    useState<MCPRuntimeInstallationControlResponse | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isLoadingTools, setIsLoadingTools] = useState(true);
+  const [isLoadingRuntime, setIsLoadingRuntime] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
+  const [runtimeAction, setRuntimeAction] = useState<RuntimeAction | null>(null);
 
   const selectedTool = useMemo(
     () => tools.find((tool) => tool.toolName === selectedToolName) ?? null,
@@ -411,49 +453,121 @@ export function ValidateInstallClient({
     setResult(null);
   }
 
+  const fetchRuntimeState = useCallback(
+    () =>
+      workspaceMcpRuntimeGetInstallationState(
+        organizationId,
+        workspaceId,
+        installation.id
+      ),
+    [installation.id, organizationId, workspaceId]
+  );
+
+  const applyLoadedTools = useCallback((nextTools: MCPServerToolRead[]) => {
+    setTools(nextTools);
+    if (nextTools.length > 0) {
+      const firstTool = nextTools[0];
+      setSelectedToolName(firstTool.toolName);
+      setArgumentValues(initialArgumentValuesForSchema(firstTool.inputSchema));
+    } else {
+      setSelectedToolName("");
+      setArgumentValues({});
+    }
+    setArgumentError(null);
+    setResult(null);
+  }, []);
+
+  const fetchTools = useCallback(async () => {
+    try {
+      const data = await workspaceMcpRegistryListInstalledServerTools(
+        organizationId,
+        workspaceId,
+        installation.id
+      );
+      const sortedTools = [...data.tools].sort((left, right) =>
+        left.toolName.localeCompare(right.toolName)
+      );
+      return sortedTools;
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 404) {
+        try {
+          const fallbackTools = await loadToolsFromGateway(
+            installation,
+            organizationId,
+            workspaceId
+          );
+          const sortedFallbackTools = fallbackTools.sort((left, right) =>
+            left.toolName.localeCompare(right.toolName)
+          );
+          return sortedFallbackTools;
+        } catch (fallbackError) {
+          caught = fallbackError;
+        }
+      }
+      throw caught;
+    }
+  }, [installation, organizationId, workspaceId]);
+
+  const loadRuntimeState = useCallback(async () => {
+    try {
+      const data = await fetchRuntimeState();
+      setRuntimeState(data);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Runtime state could not be loaded.");
+    } finally {
+      setIsLoadingRuntime(false);
+    }
+  }, [fetchRuntimeState]);
+
+  const loadTools = useCallback(async () => {
+    try {
+      applyLoadedTools(await fetchTools());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Tools could not be loaded.");
+    } finally {
+      setIsLoadingTools(false);
+    }
+  }, [applyLoadedTools, fetchTools]);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function loadTools() {
-      setIsLoadingTools(true);
-      setError("");
+    async function loadInitialRuntimeState() {
       try {
-        const data = await workspaceMcpRegistryListInstalledServerTools(
-          organizationId,
-          workspaceId,
-          installation.id
-        );
-        const sortedTools = [...data.tools].sort((left, right) =>
-          left.toolName.localeCompare(right.toolName)
-        );
+        const data = await fetchRuntimeState();
         if (!cancelled) {
-          setTools(sortedTools);
-          if (sortedTools.length > 0) {
-            selectTool(sortedTools[0]);
-          }
+          setRuntimeState(data);
         }
       } catch (caught) {
-        if (caught instanceof ApiError && caught.status === 404) {
-          try {
-            const fallbackTools = await loadToolsFromGateway(
-              installation,
-              organizationId,
-              workspaceId
-            );
-            const sortedFallbackTools = fallbackTools.sort((left, right) =>
-              left.toolName.localeCompare(right.toolName)
-            );
-            if (!cancelled) {
-              setTools(sortedFallbackTools);
-              if (sortedFallbackTools.length > 0) {
-                selectTool(sortedFallbackTools[0]);
-              }
-            }
-            return;
-          } catch (fallbackError) {
-            caught = fallbackError;
-          }
+        if (!cancelled) {
+          setError(
+            caught instanceof Error ? caught.message : "Runtime state could not be loaded."
+          );
         }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRuntime(false);
+        }
+      }
+    }
+
+    void loadInitialRuntimeState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchRuntimeState]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialTools() {
+      try {
+        const nextTools = await fetchTools();
+        if (!cancelled) {
+          applyLoadedTools(nextTools);
+        }
+      } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Tools could not be loaded.");
         }
@@ -464,12 +578,57 @@ export function ValidateInstallClient({
       }
     }
 
-    void loadTools();
+    void loadInitialTools();
 
     return () => {
       cancelled = true;
     };
-  }, [installation, organizationId, workspaceId]);
+  }, [applyLoadedTools, fetchTools]);
+
+  const runtimeSession = runtimeState?.runtimeSession ?? null;
+  const runtimeBusy = isLoadingRuntime || runtimeAction !== null;
+  const runtimeActionLabels: Record<RuntimeAction, string> = {
+    start: "started",
+    stop: "stopped",
+    restart: "restarted",
+    redeploy: "redeployed",
+  };
+
+  async function runRuntimeAction(action: RuntimeAction) {
+    const actions = {
+      start: workspaceMcpRuntimeStartInstallation,
+      stop: workspaceMcpRuntimeStopInstallation,
+      restart: workspaceMcpRuntimeRestartInstallation,
+      redeploy: workspaceMcpRuntimeRedeployInstallation,
+    };
+
+    setRuntimeAction(action);
+    setError("");
+    setNotice("");
+    setResult(null);
+    try {
+      const data = await actions[action](organizationId, workspaceId, installation.id);
+      setRuntimeState(data);
+      setNotice(`Runtime ${runtimeActionLabels[action]}.`);
+      if (action === "stop") {
+        setTools([]);
+        setSelectedToolName("");
+        setArgumentValues({});
+        setArgumentError(null);
+      } else {
+        await loadTools();
+      }
+      await loadRuntimeState();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : `Runtime could not be ${runtimeActionLabels[action]}.`
+      );
+    } finally {
+      setRuntimeAction(null);
+    }
+  }
 
   async function validateTool() {
     const toolName = selectedToolName.trim();
@@ -511,6 +670,26 @@ export function ValidateInstallClient({
       setIsValidating(false);
     }
   }
+
+  const runtimeStatus = runtimeSession?.status;
+  const runtimeHealth = runtimeState?.health ?? null;
+  const runtimeDisplayStatus = runtimeHealth?.status || runtimeStatus;
+  const healthDetails = runtimeHealth?.details ?? {};
+  const desiredReplicas =
+    typeof healthDetails.desiredReplicas === "number" ? healthDetails.desiredReplicas : null;
+  const readyReplicas =
+    typeof healthDetails.readyReplicas === "number" ? healthDetails.readyReplicas : null;
+  const runtimeDetails = [
+    runtimeSession?.namespace ? `Namespace ${runtimeSession.namespace}` : "",
+    runtimeSession?.podName ? `Pod ${runtimeSession.podName}` : "",
+    desiredReplicas !== null && readyReplicas !== null
+      ? `Ready ${readyReplicas}/${desiredReplicas}`
+      : "",
+  ].filter(Boolean);
+  const canStartRuntime = Boolean(runtimeState?.canStart) && !runtimeBusy;
+  const canStopRuntime = Boolean(runtimeState?.canStop) && !runtimeBusy;
+  const canRestartRuntime = Boolean(runtimeState?.canRestart) && !runtimeBusy;
+  const canRedeployRuntime = Boolean(runtimeState?.canRedeploy) && !runtimeBusy;
 
   return (
     <div className="space-y-6">
@@ -556,7 +735,105 @@ export function ValidateInstallClient({
         </Card>
       </div>
 
-      <FeedbackMessages error={error} />
+      <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
+        <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+              Runtime
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant={
+                  isLoadingRuntime
+                    ? "outline"
+                    : runtimeStatusBadgeVariant(runtimeDisplayStatus)
+                }
+              >
+                {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
+              </Badge>
+              {runtimeSession?.runtimeProvider ? (
+                <span className="text-sm text-[var(--on-surface-variant)]">
+                  {runtimeSession.runtimeProvider}
+                </span>
+              ) : null}
+            </div>
+            {runtimeDetails.length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--on-surface-variant)]">
+                {runtimeDetails.map((detail) => (
+                  <span className="break-all" key={detail}>
+                    {detail}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {runtimeHealth?.message ? (
+              <p className="max-w-3xl text-xs leading-5 text-[var(--on-surface-variant)]">
+                {runtimeHealth.message}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={!canStartRuntime}
+              onClick={() => void runRuntimeAction("start")}
+              title="Start runtime"
+              type="button"
+              variant="outline"
+            >
+              {runtimeAction === "start" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Play className="size-4" />
+              )}
+              Start
+            </Button>
+            <Button
+              disabled={!canStopRuntime}
+              onClick={() => void runRuntimeAction("stop")}
+              title="Stop runtime"
+              type="button"
+              variant="destructive"
+            >
+              {runtimeAction === "stop" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <CircleStop className="size-4" />
+              )}
+              Stop
+            </Button>
+            <Button
+              disabled={!canRestartRuntime}
+              onClick={() => void runRuntimeAction("restart")}
+              title="Restart runtime"
+              type="button"
+              variant="secondary"
+            >
+              {runtimeAction === "restart" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+              Restart
+            </Button>
+            <Button
+              disabled={!canRedeployRuntime}
+              onClick={() => void runRuntimeAction("redeploy")}
+              title="Redeploy runtime"
+              type="button"
+              variant="secondary"
+            >
+              {runtimeAction === "redeploy" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCcw className="size-4" />
+              )}
+              Redeploy
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <FeedbackMessages error={error} notice={notice} />
 
       <div className="grid grid-cols-12 items-start gap-6">
         <Card className="col-span-12 max-h-[600px] overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none lg:col-span-3">

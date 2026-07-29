@@ -9,6 +9,7 @@ APP_PACKAGE_NAME = "wardn-api"
 DEVELOPMENT_API_TOKEN_SECRET = "dev-token-secret-change-me"
 DEVELOPMENT_SESSION_SECRET = "dev-session-secret-change-me"
 MINIMUM_PRODUCTION_SECRET_LENGTH = 32
+MCP_RUNTIME_GATEWAY_IMAGE_REPOSITORY = "ghcr.io/abhi1693/wardn-ai-mcp-runtime"
 
 
 def package_version() -> str:
@@ -100,9 +101,9 @@ class Settings(BaseSettings):
     mcp_runtime_kubernetes_allow_kubeconfig: bool = True
     mcp_runtime_kubernetes_kubeconfig_path: str = ""
     mcp_runtime_kubernetes_context: str = ""
-    mcp_runtime_kubernetes_gateway_image: str = "supercorp/supergateway"
-    mcp_runtime_kubernetes_gateway_uvx_image: str = "supercorp/supergateway:uvx"
-    mcp_runtime_kubernetes_gateway_deno_image: str = "supercorp/supergateway:deno"
+    mcp_runtime_kubernetes_gateway_image: str = ""
+    mcp_runtime_kubernetes_gateway_uvx_image: str = ""
+    mcp_runtime_kubernetes_gateway_deno_image: str = ""
     mcp_runtime_kubernetes_cpu_request: str = "100m"
     mcp_runtime_kubernetes_cpu_limit: str = "1"
     mcp_runtime_kubernetes_memory_request: str = "256Mi"
@@ -261,6 +262,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_isolated_mcp_runtime_outside_local(self) -> "Settings":
+        default_gateway_image = (
+            f"{MCP_RUNTIME_GATEWAY_IMAGE_REPOSITORY}:{self.app_version.removeprefix('v')}"
+        )
+        if not self.mcp_runtime_kubernetes_gateway_image.strip():
+            self.mcp_runtime_kubernetes_gateway_image = default_gateway_image
+        if not self.mcp_runtime_kubernetes_gateway_uvx_image.strip():
+            self.mcp_runtime_kubernetes_gateway_uvx_image = (
+                self.mcp_runtime_kubernetes_gateway_image
+            )
+        if not self.mcp_runtime_kubernetes_gateway_deno_image.strip():
+            self.mcp_runtime_kubernetes_gateway_deno_image = (
+                self.mcp_runtime_kubernetes_gateway_image
+            )
         environment = self.environment
         runtime_provider = self.mcp_runtime_provider
         if environment != "local" and runtime_provider in {"auto", "local"}:
