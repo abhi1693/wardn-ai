@@ -2125,6 +2125,69 @@ async def test_refresh_tool_schemas_uses_runtime_manager(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_refresh_tool_schemas_queues_hub_tool_inventory_proposal(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            return [
+                {
+                    "name": "get_forecast",
+                    "description": "Get weather forecast",
+                    "inputSchema": {"type": "object"},
+                }
+            ]
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        seen["session"] = args[0]
+        seen["installation"] = kwargs["installation"]
+        seen["server"] = kwargs["server"]
+        seen["tools"] = kwargs["tools"]
+        return True
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas(
+        session,
+        "io.github.example/weather",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.tool_count == 1
+    assert seen["session"] is session
+    assert seen["installation"] is installation
+    assert seen["server"] is server
+    assert seen["tools"][0]["name"] == "get_forecast"
+
+
+@pytest.mark.asyncio
 async def test_refresh_tool_schemas_falls_back_to_tracked_discovery(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",

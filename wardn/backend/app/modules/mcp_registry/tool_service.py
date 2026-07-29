@@ -8,6 +8,7 @@ from app.modules.mcp_gateway import repository as gateway_repository
 from app.modules.mcp_gateway.client import MCPGatewayUnsupportedMethodError
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
+from app.modules.mcp_registry.hub_tool_proposals import queue_mcp_hub_tool_inventory_proposal
 from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
 from app.modules.mcp_runtime.service import has_secret_handle_refs, list_tools_with_tracking
 
@@ -79,6 +80,12 @@ async def refresh_tool_schemas_for_installation(
     except MCPGatewayUnsupportedMethodError:
         tools = []
     tool_count = await tool_repository.upsert_tool_schemas(
+        session,
+        installation=installation,
+        server=server,
+        tools=tools,
+    )
+    queue_mcp_hub_tool_inventory_proposal(
         session,
         installation=installation,
         server=server,

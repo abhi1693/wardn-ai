@@ -461,3 +461,51 @@ class MCPServerToolSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class MCPHubToolInventoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "mcp_hub_tool_inventory_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "hub_version_id",
+            "inventory_hash",
+            name="uq_mcp_hub_tool_inventory_proposals_version_hash",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'submitted', 'failed', 'skipped')",
+            name="ck_mcp_hub_tool_inventory_proposals_status",
+        ),
+        Index(
+            "ix_mcp_hub_tool_inventory_proposals_server",
+            "server_name",
+            "server_version",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    installation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mcp_server_installations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    server_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    server_version: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    hub_version_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    inventory_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    submission_id: Mapped[str] = mapped_column(String(36), default="", nullable=False)
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
