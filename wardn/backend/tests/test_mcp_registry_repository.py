@@ -31,8 +31,22 @@ class RecordingSession:
         return ScalarResult(self.values)
 
 
-def server(name: str, version: str) -> MCPServerVersion:
+def server(
+    name: str,
+    version: str,
+    *,
+    quality_score: int | None = None,
+) -> MCPServerVersion:
     now = datetime.now(UTC)
+    server_json = {}
+    if quality_score is not None:
+        server_json = {
+            "_meta": {
+                "dev.wardnai.hub/catalog": {
+                    "qualityScore": quality_score,
+                },
+            },
+        }
     return MCPServerVersion(
         id=uuid4(),
         organization_id=uuid4(),
@@ -49,7 +63,7 @@ def server(name: str, version: str) -> MCPServerVersion:
         packages=[],
         remotes=[],
         icons=[],
-        server_json={},
+        server_json=server_json,
         published_at=now,
         status_changed_at=now,
         created_at=now,
@@ -61,8 +75,8 @@ def server(name: str, version: str) -> MCPServerVersion:
 async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     organization_id = uuid4()
     rows = [
-        server("example/alpha", "1.0.0"),
-        server("example/beta", "1.0.0"),
+        server("example/alpha", "1.0.0", quality_score=95),
+        server("example/beta", "1.0.0", quality_score=84),
         server("example/gamma", "1.0.0"),
     ]
     session = RecordingSession(rows)
@@ -77,18 +91,21 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     )
 
     assert page == rows[:2]
-    assert decode_cursor(next_cursor, fields=3) == (
+    assert decode_cursor(next_cursor, fields=4) == (
+        "-84",
         rows[1].name,
         rows[1].version,
         str(rows[1].id),
     )
     sql = str(session.statements[0].compile(dialect=postgresql.dialect())).upper()
     assert "SEARCH_VECTOR @@ WEBSEARCH_TO_TSQUERY" in sql
-    assert "ORDER BY MCP_SERVER_VERSIONS.NAME ASC" in sql
+    assert "JSONB_EXTRACT_PATH" in sql
+    assert "ORDER BY COALESCE(-COALESCE(" in sql
+    assert "MCP_SERVER_VERSIONS.NAME ASC" in sql
     assert "MCP_SERVER_VERSIONS.ID ASC" in sql
     assert " OFFSET " not in sql
 
-    cursor = encode_cursor(rows[0].name, rows[0].version, str(rows[0].id))
+    cursor = encode_cursor("-95", rows[0].name, rows[0].version, str(rows[0].id))
     session = RecordingSession([])
     await repository.list_servers(
         session,
@@ -98,14 +115,15 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
         organization_id=organization_id,
     )
     sql = str(session.statements[0].compile(dialect=postgresql.dialect())).upper()
-    assert "(MCP_SERVER_VERSIONS.NAME, MCP_SERVER_VERSIONS.VERSION, " in sql
+    assert "(COALESCE(-COALESCE(" in sql
+    assert "MCP_SERVER_VERSIONS.NAME, MCP_SERVER_VERSIONS.VERSION, " in sql
     assert ") > (" in sql
     assert " OFFSET " not in sql
 
 
 @pytest.mark.asyncio
 async def test_list_servers_rejects_invalid_keyset_uuid() -> None:
-    cursor = encode_cursor("example/weather", "1.0.0", "not-a-uuid")
+    cursor = encode_cursor("-42", "example/weather", "1.0.0", "not-a-uuid")
 
     with pytest.raises(InvalidCursorError):
         await repository.list_servers(

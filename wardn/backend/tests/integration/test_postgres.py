@@ -181,6 +181,10 @@ async def test_catalog_full_text_search_keyset_and_normalized_source_lookup(
             session.add(source)
             await session.flush()
             now = datetime.now(UTC)
+            quality_scores = {
+                "example/forecast": 42,
+                "example/weather": 95,
+            }
             for name in ("example/forecast", "example/weather"):
                 session.add(
                     MCPServerVersion(
@@ -203,6 +207,11 @@ async def test_catalog_full_text_search_keyset_and_normalized_source_lookup(
                             "name": name,
                             "description": "Accurate weather forecasts and alerts",
                             "version": "1.0.0",
+                            "_meta": {
+                                "dev.wardnai.hub/catalog": {
+                                    "qualityScore": quality_scores[name],
+                                },
+                            },
                         },
                         published_at=now,
                         status_changed_at=now,
@@ -233,9 +242,9 @@ async def test_catalog_full_text_search_keyset_and_normalized_source_lookup(
             source_id=source_id,
         )
 
-    assert [row.name for row in first_page] == ["example/forecast"]
+    assert [row.name for row in first_page] == ["example/weather"]
     assert next_cursor
-    assert [row.name for row in second_page] == ["example/weather"]
+    assert [row.name for row in second_page] == ["example/forecast"]
     assert final_cursor == ""
     assert {row.name for row in sourced} == {"example/forecast", "example/weather"}
 

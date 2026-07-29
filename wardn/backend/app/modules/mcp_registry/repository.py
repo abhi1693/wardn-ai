@@ -1,8 +1,22 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import Select, and_, func, literal_column, or_, select, tuple_, update
+from sqlalchemy import (
+    Numeric,
+    Select,
+    and_,
+    case,
+    cast,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -16,6 +30,8 @@ from app.modules.mcp_registry.models import (
 from app.modules.organizations.models import Workspace
 
 SYNC_QUERY_BATCH_SIZE = 500
+NULL_QUALITY_SCORE_RANK = Decimal("1000000000")
+QUALITY_SCORE_METADATA_KEYS = ("dev.wardnai.hub/catalog", "ai.wardn.hub")
 
 
 def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
@@ -23,6 +39,63 @@ def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
     if not include_deleted:
         statement = statement.where(MCPServerVersion.status != "deleted")
     return statement
+
+
+def _json_number_score(*path: str):
+    raw_json = func.jsonb_extract_path(MCPServerVersion.server_json, *path)
+    raw_text = func.jsonb_extract_path_text(MCPServerVersion.server_json, *path)
+    return case(
+        (func.jsonb_typeof(raw_json) == "number", cast(raw_text, Numeric)),
+        else_=None,
+    )
+
+
+def _quality_score_rank_expression():
+    score = func.coalesce(
+        _json_number_score("qualityScore"),
+        *[
+            _json_number_score("_meta", metadata_key, "qualityScore")
+            for metadata_key in QUALITY_SCORE_METADATA_KEYS
+        ],
+    )
+    return func.coalesce(-score, literal(NULL_QUALITY_SCORE_RANK))
+
+
+def _decimal_cursor_value(value: Decimal) -> str:
+    return format(value, "f")
+
+
+def _quality_score_value(server_json: dict[str, Any]) -> Decimal | None:
+    def numeric(value: Any) -> Decimal | None:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        try:
+            decimal_value = Decimal(str(value))
+        except InvalidOperation:
+            return None
+        return decimal_value if decimal_value.is_finite() else None
+
+    direct_score = numeric(server_json.get("qualityScore"))
+    if direct_score is not None:
+        return direct_score
+
+    metadata = server_json.get("_meta")
+    if not isinstance(metadata, dict):
+        return None
+    for metadata_key in QUALITY_SCORE_METADATA_KEYS:
+        metadata_record = metadata.get(metadata_key)
+        if isinstance(metadata_record, dict):
+            score = numeric(metadata_record.get("qualityScore"))
+            if score is not None:
+                return score
+    return None
+
+
+def _quality_score_rank_value(server_json: dict[str, Any]) -> str:
+    score = _quality_score_value(server_json)
+    if score is None:
+        return _decimal_cursor_value(NULL_QUALITY_SCORE_RANK)
+    return _decimal_cursor_value(-score)
 
 
 async def get_server_version(
@@ -93,25 +166,34 @@ async def list_servers(
     else:
         statement = statement.where(MCPServerVersion.version == version)
 
+    quality_score_rank = _quality_score_rank_expression()
     statement = statement.order_by(
+        quality_score_rank.asc(),
         MCPServerVersion.name.asc(),
         MCPServerVersion.version.asc(),
         MCPServerVersion.id.asc(),
     )
-    cursor_values = decode_cursor(cursor, fields=3)
+    cursor_values = decode_cursor(cursor, fields=4)
     if cursor_values is not None:
-        after_name, after_version, after_id_value = cursor_values
+        after_quality_score_rank_value, after_name, after_version, after_id_value = cursor_values
+        try:
+            after_quality_score_rank = Decimal(after_quality_score_rank_value)
+        except InvalidOperation as exc:
+            raise InvalidCursorError("invalid cursor") from exc
+        if not after_quality_score_rank.is_finite():
+            raise InvalidCursorError("invalid cursor")
         try:
             after_id = uuid.UUID(after_id_value)
         except ValueError as exc:
             raise InvalidCursorError("invalid cursor") from exc
         statement = statement.where(
             tuple_(
+                quality_score_rank,
                 MCPServerVersion.name,
                 MCPServerVersion.version,
                 MCPServerVersion.id,
             )
-            > tuple_(after_name, after_version, after_id)
+            > tuple_(after_quality_score_rank, after_name, after_version, after_id)
         )
     result = await session.execute(statement.limit(limit + 1))
     rows = list(result.scalars().all())
@@ -119,7 +201,12 @@ async def list_servers(
     next_cursor = ""
     if len(rows) > limit and page:
         last = page[-1]
-        next_cursor = encode_cursor(last.name, last.version, str(last.id))
+        next_cursor = encode_cursor(
+            _quality_score_rank_value(last.server_json),
+            last.name,
+            last.version,
+            str(last.id),
+        )
     return page, next_cursor
 
 
