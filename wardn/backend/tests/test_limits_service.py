@@ -71,6 +71,20 @@ def test_quota_lock_id_is_stable_and_scope_specific() -> None:
     assert service.quota_lock_id(first) != service.quota_lock_id(different)
 
 
+@pytest.mark.parametrize(
+    "limit_key",
+    [
+        service.MCP_RUNTIME_PUBLIC_EGRESS_PER_WORKSPACE,
+        service.MCP_RUNTIME_PRIVATE_EGRESS_PER_WORKSPACE,
+        service.MCP_RUNTIME_KUBERNETES_API_EGRESS_PER_WORKSPACE,
+        service.MCP_RUNTIME_NETWORK_ISOLATION_DISABLE_PER_WORKSPACE,
+        service.MCP_RUNTIME_CUSTOM_EGRESS_RULES_PER_INSTALLATION,
+    ],
+)
+def test_runtime_policy_limit_keys_are_supported(limit_key: str) -> None:
+    assert service.normalize_limit_key(limit_key) == limit_key
+
+
 @pytest.mark.asyncio
 async def test_lock_quota_capacity_acquires_unique_locks_in_sorted_order() -> None:
     organization_id = uuid.uuid4()

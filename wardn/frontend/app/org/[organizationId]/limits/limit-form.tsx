@@ -34,6 +34,7 @@ import { limitsUpsert } from "@/lib/api/generated/limits/limits";
 import {
   displayLimitKey,
   knownLimitKeys,
+  limitValueHelp,
   type LimitScopeType,
   scopeLabel,
 } from "./limit-display";
@@ -70,6 +71,7 @@ export function LimitForm({
   const listPath = `/org/${organizationId}/limits`;
   const selectedKey = initialLimit?.limitKey ?? limitKey;
   const selectedScopeType = isEdit ? (initialLimit.scopeType as LimitScopeType) : scopeType;
+  const valueHelp = limitValueHelp(selectedKey);
   const organizationName = organizations[0]?.name ?? "Current organization";
   const parsedValue = Number(value);
   const canSave =
@@ -209,6 +211,9 @@ export function LimitForm({
                   type="number"
                   value={value}
                 />
+                {valueHelp ? (
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{valueHelp}</p>
+                ) : null}
               </div>
 
               {error ? (

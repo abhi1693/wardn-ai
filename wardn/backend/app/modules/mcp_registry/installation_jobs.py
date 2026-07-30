@@ -182,10 +182,22 @@ async def enqueue_server_installation(
         config_values,
         existing_installation=installation,
     )
+    network_policy_config = service.merged_install_network_policy_config(
+        installation,
+        payload.network_policy,
+    )
+    if service.install_target_uses_runtime_network_policy(server, payload, config_values):
+        await service.require_install_network_policy_limits(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            network_policy_config=network_policy_config,
+        )
     desired_state = MCPServerInstallRequest(
         version=server.version,
         configName=payload.config_name,
         configValues=config_values,
+        networkPolicy=network_policy_config,
         installTarget=payload.install_target,
     ).model_dump(mode="json", by_alias=True)
     response = await enqueue_operation_job(
@@ -245,10 +257,19 @@ async def enqueue_installed_server_updates(
             config_values = service.install_config_values_from_secret_references(
                 installation.secret_references
             )
+            network_policy_config = service.installation_network_policy_config(installation)
+            if install_target == "package":
+                await service.require_install_network_policy_limits(
+                    session,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    network_policy_config=network_policy_config,
+                )
             desired_state = MCPServerInstallRequest(
                 version=latest.version,
                 configName=installation.config_name,
                 configValues=config_values,
+                networkPolicy=network_policy_config,
                 installTarget=install_target,
             ).model_dump(mode="json", by_alias=True)
             targets.append({"serverName": server_name, "desiredState": desired_state})

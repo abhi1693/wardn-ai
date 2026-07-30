@@ -4,6 +4,7 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { MCPRuntimeNetworkPolicyConfig } from './mCPRuntimeNetworkPolicyConfig';
 import type { MCPServerInstallRequestConfigValues } from './mCPServerInstallRequestConfigValues';
 
 export interface MCPServerInstallRequest {
@@ -15,6 +16,7 @@ export interface MCPServerInstallRequest {
   configSecretStoreId?: string | null;
   configValues?: MCPServerInstallRequestConfigValues;
   installTarget?: string | null;
+  networkPolicy?: MCPRuntimeNetworkPolicyConfig | null;
   /**
      * @minLength 1
      * @maxLength 255

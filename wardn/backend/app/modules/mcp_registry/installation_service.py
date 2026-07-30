@@ -16,6 +16,7 @@ from app.modules.mcp_registry.config_service import (
     externalize_install_config_secrets,
     install_config_values_from_secret_references,
     merged_install_config_values,
+    parse_install_target_value,
     persist_install_secret_references,
     public_configured_values,
     resolve_install_config_values,
@@ -61,6 +62,15 @@ from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
+RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
+DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG = {
+    "isolationEnabled": True,
+    "publicEgress": True,
+    "privateEgress": False,
+    "privateEgressPorts": [80, 443],
+    "inClusterKubernetesApi": False,
+    "customEgress": [],
+}
 
 
 def installation_service_log_extra(
@@ -82,6 +92,94 @@ def installation_service_log_extra(
         "mcp_install_type": install_type,
         "mcp_install_target": install_target,
     }
+
+
+def installation_network_policy_config(
+    installation: MCPServerInstallation | None,
+) -> dict | None:
+    if installation is None:
+        return None
+    runtime_config = installation.runtime_config or {}
+    network_policy = runtime_config.get(RUNTIME_NETWORK_POLICY_CONFIG_KEY)
+    if isinstance(network_policy, dict):
+        return network_policy
+    return None
+
+
+def merged_install_network_policy_config(
+    existing: MCPServerInstallation | None,
+    requested,
+) -> dict | None:
+    if requested is not None:
+        return requested.model_dump(mode="json", by_alias=True)
+    return installation_network_policy_config(existing)
+
+
+def effective_runtime_network_policy_config(config: dict | None) -> dict:
+    if not isinstance(config, dict):
+        return dict(DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG)
+    return {**DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG, **config}
+
+
+def runtime_network_policy_custom_egress_count(config: dict) -> int:
+    custom_egress = config.get("customEgress")
+    return len(custom_egress) if isinstance(custom_egress, list) else 0
+
+
+def install_target_uses_runtime_network_policy(
+    server: MCPServerVersion,
+    payload: MCPServerInstallRequest,
+    config_values: dict,
+) -> bool:
+    target_kind, _ = parse_install_target_value(
+        server,
+        payload.install_target,
+        config_values,
+    )
+    return target_kind == "package"
+
+
+async def require_install_network_policy_limits(
+    session,
+    *,
+    organization_id: uuid.UUID | None,
+    workspace_id: uuid.UUID,
+    network_policy_config: dict | None,
+) -> None:
+    config = effective_runtime_network_policy_config(network_policy_config)
+    scope_chain: list[tuple[str, uuid.UUID | None]] = [("workspace", workspace_id)]
+    if organization_id is not None:
+        scope_chain.append(("organization", organization_id))
+
+    async def require_capability(limit_key: str, requested: int = 1) -> None:
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limit_key,
+            scope_chain=scope_chain,
+            current_count=0,
+            requested=requested,
+        )
+
+    if not bool(config.get("isolationEnabled")):
+        await require_capability(
+            limits_service.MCP_RUNTIME_NETWORK_ISOLATION_DISABLE_PER_WORKSPACE
+        )
+        return
+    if bool(config.get("publicEgress")):
+        await require_capability(limits_service.MCP_RUNTIME_PUBLIC_EGRESS_PER_WORKSPACE)
+    if bool(config.get("privateEgress")):
+        await require_capability(limits_service.MCP_RUNTIME_PRIVATE_EGRESS_PER_WORKSPACE)
+    if bool(config.get("inClusterKubernetesApi")):
+        await require_capability(
+            limits_service.MCP_RUNTIME_KUBERNETES_API_EGRESS_PER_WORKSPACE
+        )
+
+    custom_egress_count = runtime_network_policy_custom_egress_count(config)
+    if custom_egress_count > 0:
+        await require_capability(
+            limits_service.MCP_RUNTIME_CUSTOM_EGRESS_RULES_PER_INSTALLATION,
+            requested=custom_egress_count,
+        )
 
 
 async def installation_response(
@@ -399,6 +497,17 @@ async def install_server_version(
         workspace_id,
     )
     config_values = merged_install_config_values(installation, payload.config_values)
+    network_policy_config = merged_install_network_policy_config(
+        installation,
+        payload.network_policy,
+    )
+    if install_target_uses_runtime_network_policy(server, payload, config_values):
+        await require_install_network_policy_limits(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            network_policy_config=network_policy_config,
+        )
     is_new_installation = installation is None
     logger.info(
         "Starting MCP server installation.",
@@ -450,6 +559,7 @@ async def install_server_version(
         server,
         config_values=resolved_config_values,
         install_target=payload.install_target,
+        network_policy=network_policy_config,
         config_name=payload.config_name,
         workspace_id=str(workspace_id),
     )
@@ -708,6 +818,14 @@ async def update_installed_servers(
             config_values = install_config_values_from_secret_references(
                 installation.secret_references
             )
+            network_policy_config = installation_network_policy_config(installation)
+            if install_target == "package":
+                await require_install_network_policy_limits(
+                    session,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    network_policy_config=network_policy_config,
+                )
             resolved_config_values, handle_refs = await resolve_install_config_values(
                 session,
                 organization_id,
@@ -719,6 +837,7 @@ async def update_installed_servers(
                 latest,
                 config_values=resolved_config_values,
                 install_target=install_target,
+                network_policy=network_policy_config,
                 config_name=installation.config_name,
                 workspace_id=str(workspace_id),
             )

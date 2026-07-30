@@ -142,6 +142,7 @@ def install_server_runtime(
     *,
     config_values: ConfigValues | None = None,
     install_target: str | None = None,
+    network_policy: dict[str, Any] | None = None,
     install_root: Path | None = None,
     config_name: str = "default",
     workspace_id: str | None = None,
@@ -197,6 +198,8 @@ def install_server_runtime(
             install_path,
         )
         runtime_config["installPath"] = str(install_path)
+        if network_policy is not None:
+            runtime_config["networkPolicy"] = network_policy
         write_runtime_manifest(install_path, runtime_config)
         write_secret_manifest(install_path, secret_config)
         shutil.rmtree(backup_path, ignore_errors=True)

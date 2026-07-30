@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 KUBERNETES_LABEL_APP_NAME = "app.kubernetes.io/name"
@@ -99,6 +99,7 @@ class KubernetesRuntimeManifest:
     deployment: Any
     service: Any
     network_policies: list[Any]
+    network_policy_cleanup_names: list[str] = field(default_factory=list)
     ingress: Any | None = None
     health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
 

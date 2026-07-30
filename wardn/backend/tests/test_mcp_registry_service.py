@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.pagination import InvalidCursorError
+from app.modules.limits.exceptions import LimitExceededError
 from app.modules.mcp_gateway.client import MCPGatewayUnsupportedMethodError
 from app.modules.mcp_registry import (
     catalog_service,
@@ -1070,6 +1071,185 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
         "LOG_LEVEL": "debug",
         "READ_ONLY": "true",
     }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_passes_network_policy_config(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={"environment": {"WEATHER_TOKEN": "old-token"}},
+        runtime_config={
+            "kind": "remote",
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": True,
+            },
+        },
+    )
+    seen = {}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    def install_runtime(server, **kwargs):
+        seen["network_policy"] = kwargs["network_policy"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    session = FakeSession()
+
+    await service.install_server_version(
+        session,
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            version="latest",
+            networkPolicy={
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "privateEgress": True,
+                "privateEgressPorts": [443, 443],
+                "customEgress": [
+                    {"label": "rancher", "cidr": "192.168.3.3", "ports": [443]},
+                ],
+            },
+        ),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["network_policy"] == {
+        "isolationEnabled": True,
+        "publicEgress": False,
+        "privateEgress": True,
+        "privateEgressPorts": [443],
+        "inClusterKubernetesApi": False,
+        "customEgress": [
+            {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_rejects_policy_blocked_by_limit(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={},
+        runtime_config={"kind": "package"},
+    )
+    seen = {"limit_keys": []}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    async def require_limit_available(*args, **kwargs):
+        seen["limit_keys"].append(kwargs["limit_key"])
+        if kwargs["limit_key"] == service.limits_service.MCP_RUNTIME_PRIVATE_EGRESS_PER_WORKSPACE:
+            raise LimitExceededError("mcp_runtime_private_egress.per_workspace limit exceeded")
+
+    def install_runtime(*args, **kwargs):
+        raise AssertionError("runtime install should not run when policy limit blocks the request")
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        service.limits_service,
+        "require_limit_available",
+        require_limit_available,
+    )
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+
+    with pytest.raises(LimitExceededError):
+        await service.install_server_version(
+            FakeSession(),
+            "io.github.example/weather",
+            MCPServerInstallRequest(
+                version="latest",
+                installTarget="package",
+                networkPolicy={
+                    "publicEgress": False,
+                    "privateEgress": True,
+                },
+            ),
+            workspace_id=WORKSPACE_ID,
+        )
+
+    assert seen["limit_keys"] == [
+        service.limits_service.MCP_RUNTIME_PRIVATE_EGRESS_PER_WORKSPACE,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_only_requires_disable_limit_when_isolation_is_off(
+    monkeypatch,
+) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={},
+        runtime_config={"kind": "package"},
+    )
+    seen = {"limit_keys": []}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    async def require_limit_available(*args, **kwargs):
+        seen["limit_keys"].append(kwargs["limit_key"])
+
+    def install_runtime(*args, **kwargs):
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        service.limits_service,
+        "require_limit_available",
+        require_limit_available,
+    )
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+
+    await service.install_server_version(
+        FakeSession(),
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            version="latest",
+            installTarget="package",
+            networkPolicy={
+                "isolationEnabled": False,
+                "publicEgress": True,
+                "privateEgress": True,
+                "customEgress": [
+                    {"label": "rancher", "cidr": "192.168.3.3", "ports": [443]},
+                ],
+            },
+        ),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["limit_keys"] == [
+        service.limits_service.MCP_RUNTIME_NETWORK_ISOLATION_DISABLE_PER_WORKSPACE,
+    ]
 
 
 @pytest.mark.asyncio

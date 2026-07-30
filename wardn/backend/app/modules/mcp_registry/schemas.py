@@ -1,3 +1,4 @@
+import ipaddress
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -37,6 +38,48 @@ class MCPFileConfigValue(APIModel):
 
 
 MCPConfigValue = str | MCPFileConfigValue | MCPSecretHandleConfigValue
+
+
+class MCPRuntimeNetworkPolicyCustomEgress(APIModel):
+    label: str = Field(default="", max_length=120)
+    cidr: str = Field(min_length=1, max_length=64)
+    ports: list[int] = Field(default_factory=lambda: [443], min_length=1, max_length=16)
+
+    @field_validator("cidr")
+    @classmethod
+    def validate_cidr(cls, value: str) -> str:
+        try:
+            return str(ipaddress.ip_network(value.strip(), strict=False))
+        except ValueError as exc:
+            raise ValueError("cidr must be a valid IP network") from exc
+
+    @field_validator("ports")
+    @classmethod
+    def validate_ports(cls, value: list[int]) -> list[int]:
+        ports: list[int] = []
+        for port in value:
+            if port < 1 or port > 65_535:
+                raise ValueError("ports must be between 1 and 65535")
+            if port not in ports:
+                ports.append(port)
+        return ports
+
+
+class MCPRuntimeNetworkPolicyConfig(APIModel):
+    isolation_enabled: bool = True
+    public_egress: bool = True
+    private_egress: bool = False
+    private_egress_ports: list[int] = Field(default_factory=lambda: [80, 443], min_length=1)
+    in_cluster_kubernetes_api: bool = False
+    custom_egress: list[MCPRuntimeNetworkPolicyCustomEgress] = Field(
+        default_factory=list,
+        max_length=20,
+    )
+
+    @field_validator("private_egress_ports")
+    @classmethod
+    def validate_private_egress_ports(cls, value: list[int]) -> list[int]:
+        return MCPRuntimeNetworkPolicyCustomEgress.validate_ports(value)
 
 
 class MCPServerDocument(APIModel):
@@ -141,6 +184,7 @@ class MCPServerInstallRequest(APIModel):
     config_name: str = Field(default="default", min_length=1, max_length=100)
     config_values: dict[str, MCPConfigValue] = Field(default_factory=dict)
     config_secret_store_id: UUID | None = None
+    network_policy: MCPRuntimeNetworkPolicyConfig | None = None
     install_target: MCPServerInstallTarget | None = Field(
         default=None,
         max_length=50,

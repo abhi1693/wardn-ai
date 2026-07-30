@@ -216,6 +216,9 @@ async def test_enqueue_installation_allows_externalized_file_content(monkeypatch
     async def require_capacity(*args, **kwargs):
         return None
 
+    async def require_network_policy_limits(*args, **kwargs):
+        return None
+
     async def externalize(*args, **kwargs):
         return {
             "K8S_AIOPS_CONFIG": {
@@ -240,6 +243,11 @@ async def test_enqueue_installation_allows_externalized_file_content(monkeypatch
     )
     monkeypatch.setattr(installation_jobs.repository, "get_installation", get_installation)
     monkeypatch.setattr(installation_jobs, "require_new_installation_capacity", require_capacity)
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "require_install_network_policy_limits",
+        require_network_policy_limits,
+    )
     monkeypatch.setattr(
         installation_jobs.service,
         "externalize_install_config_secrets",
@@ -278,6 +286,89 @@ async def test_enqueue_installation_allows_externalized_file_content(monkeypatch
         "contentBase64": "",
         "path": "",
     }
+
+
+@pytest.mark.asyncio
+async def test_enqueue_installation_includes_network_policy(monkeypatch) -> None:
+    server = server_version()
+    user = User(id=uuid.uuid4(), email="admin@example.com")
+    seen: dict[str, object] = {}
+
+    async def get_server(*args, **kwargs):
+        return server
+
+    async def no_existing_job(*args, **kwargs):
+        return None
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def require_capacity(*args, **kwargs):
+        return None
+
+    async def require_network_policy_limits(*args, **kwargs):
+        seen["network_policy_limits"] = kwargs
+        return None
+
+    async def externalize(*args, **kwargs):
+        return {}
+
+    async def enqueue(*args, **kwargs):
+        seen["job"] = kwargs
+        return "queued-job"
+
+    monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
+    monkeypatch.setattr(
+        installation_jobs.job_repository,
+        "get_active_job_by_deduplication_key",
+        no_existing_job,
+    )
+    monkeypatch.setattr(installation_jobs.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_jobs, "require_new_installation_capacity", require_capacity)
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "require_install_network_policy_limits",
+        require_network_policy_limits,
+    )
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "externalize_install_config_secrets",
+        externalize,
+    )
+    monkeypatch.setattr(installation_jobs, "enqueue_operation_job", enqueue)
+
+    result = await installation_jobs.enqueue_server_installation(
+        object(),
+        organization_id=ORGANIZATION_ID,
+        workspace_id=WORKSPACE_ID,
+        user=user,
+        server_name=server.name,
+        payload=MCPServerInstallRequest(
+            version="latest",
+            installTarget="package",
+            networkPolicy={
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "customEgress": [
+                    {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]}
+                ],
+            },
+        ),
+    )
+
+    assert result == "queued-job"
+    desired_state = seen["job"]["request_payload"]["desiredState"]
+    assert desired_state["networkPolicy"] == {
+        "isolationEnabled": True,
+        "publicEgress": False,
+        "privateEgress": False,
+        "privateEgressPorts": [80, 443],
+        "inClusterKubernetesApi": False,
+        "customEgress": [
+            {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
+        ],
+    }
+    assert seen["network_policy_limits"]["network_policy_config"] == desired_state["networkPolicy"]
 
 
 @pytest.mark.asyncio
@@ -403,12 +494,20 @@ async def test_bulk_update_records_exact_versions_and_secret_handles(monkeypatch
         seen.update(kwargs)
         return "queued-job"
 
+    async def require_network_policy_limits(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(
         installation_jobs.repository,
         "list_installations_for_server",
         list_installations,
     )
     monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "require_install_network_policy_limits",
+        require_network_policy_limits,
+    )
     monkeypatch.setattr(installation_jobs, "enqueue_operation_job", enqueue)
 
     result = await installation_jobs.enqueue_installed_server_updates(

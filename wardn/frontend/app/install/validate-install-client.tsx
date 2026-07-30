@@ -91,6 +91,34 @@ function runtimeStatusBadgeVariant(
   return "outline";
 }
 
+function runtimePolicyDetails(installation: MCPServerInstallationRead) {
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  const rawPolicy = runtimeConfig.networkPolicy;
+  if (!isRecord(rawPolicy)) {
+    return ["Network isolation default", "Public egress default"];
+  }
+  if (rawPolicy.isolationEnabled === false) {
+    return ["Network isolation off"];
+  }
+  const details = ["Network isolation on"];
+  if (rawPolicy.publicEgress !== false) {
+    details.push("Public egress");
+  }
+  if (rawPolicy.privateEgress === true) {
+    details.push("Private egress");
+  }
+  if (rawPolicy.inClusterKubernetesApi === true) {
+    details.push("Kubernetes API");
+  }
+  const customEgressCount = Array.isArray(rawPolicy.customEgress)
+    ? rawPolicy.customEgress.length
+    : 0;
+  if (customEgressCount > 0) {
+    details.push(`${customEgressCount} custom CIDR${customEgressCount === 1 ? "" : "s"}`);
+  }
+  return details;
+}
+
 type GatewayRpcResponse = {
   result?: {
     structuredContent?: {
@@ -715,6 +743,7 @@ export function ValidateInstallClient({
       ? `Ready ${readyReplicas}/${desiredReplicas}`
       : "",
   ].filter(Boolean);
+  const policyDetails = runtimePolicyDetails(installation);
   const canStartRuntime = Boolean(runtimeState?.canStart) && !runtimeBusy;
   const canStopRuntime = Boolean(runtimeState?.canStop) && !runtimeBusy;
   const canRestartRuntime = Boolean(runtimeState?.canRestart) && !runtimeBusy;
@@ -795,6 +824,13 @@ export function ValidateInstallClient({
                 ))}
               </div>
             ) : null}
+            <div className="flex flex-wrap gap-1.5">
+              {policyDetails.map((detail) => (
+                <Badge key={detail} variant="outline">
+                  {detail}
+                </Badge>
+              ))}
+            </div>
             {runtimeHealth?.message ? (
               <p className="max-w-3xl text-xs leading-5 text-[var(--on-surface-variant)]">
                 {runtimeHealth.message}

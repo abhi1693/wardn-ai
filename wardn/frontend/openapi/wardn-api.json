@@ -3760,6 +3760,78 @@
         "title": "MCPRuntimeInstallationControlResponse",
         "type": "object"
       },
+      "MCPRuntimeNetworkPolicyConfig": {
+        "properties": {
+          "customEgress": {
+            "items": {
+              "$ref": "#/components/schemas/MCPRuntimeNetworkPolicyCustomEgress"
+            },
+            "maxItems": 20,
+            "title": "Customegress",
+            "type": "array"
+          },
+          "inClusterKubernetesApi": {
+            "default": false,
+            "title": "Inclusterkubernetesapi",
+            "type": "boolean"
+          },
+          "isolationEnabled": {
+            "default": true,
+            "title": "Isolationenabled",
+            "type": "boolean"
+          },
+          "privateEgress": {
+            "default": false,
+            "title": "Privateegress",
+            "type": "boolean"
+          },
+          "privateEgressPorts": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Privateegressports",
+            "type": "array"
+          },
+          "publicEgress": {
+            "default": true,
+            "title": "Publicegress",
+            "type": "boolean"
+          }
+        },
+        "title": "MCPRuntimeNetworkPolicyConfig",
+        "type": "object"
+      },
+      "MCPRuntimeNetworkPolicyCustomEgress": {
+        "properties": {
+          "cidr": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Cidr",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Ports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cidr"
+        ],
+        "title": "MCPRuntimeNetworkPolicyCustomEgress",
+        "type": "object"
+      },
       "MCPRuntimeServerError": {
         "properties": {
           "failureCount": {
@@ -4405,6 +4477,16 @@
               }
             ],
             "title": "Installtarget"
+          },
+          "networkPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPRuntimeNetworkPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "version": {
             "default": "latest",

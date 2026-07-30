@@ -824,6 +824,118 @@ def test_runtime_manifest_generates_strict_network_policies(tmp_path, monkeypatc
     ]
 
 
+def test_runtime_manifest_honors_install_network_policy_controls(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "privateEgress": True,
+                "privateEgressPorts": [443],
+                "inClusterKubernetesApi": True,
+                "customEgress": [
+                    {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
+                    {"label": "vault", "cidr": "10.43.12.20/32", "ports": [8200]},
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    policy_names = {policy.metadata.name for policy in manifest.network_policies}
+    assert any(name.endswith("-default-deny") for name in policy_names)
+    assert any(name.endswith("-allow-wardn-ingress") for name in policy_names)
+    assert any(name.endswith("-allow-dns-egress") for name in policy_names)
+    assert not any(name.endswith("-allow-public-egress") for name in policy_names)
+    assert any(name.endswith("-allow-private-egress") for name in policy_names)
+    assert any(name.endswith("-allow-kubernetes-api-egress") for name in policy_names)
+    assert any(name.endswith("-allow-custom-egress") for name in policy_names)
+    assert manifest.network_policy_cleanup_names == list(
+        runtime_network_policy_names(manifest.names)
+    )
+
+    private_policy = next(
+        policy
+        for policy in manifest.network_policies
+        if policy.metadata.name.endswith("-allow-private-egress")
+    )
+    assert {rule.to[0].ip_block.cidr for rule in private_policy.spec.egress} == {
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    }
+    assert {(port.protocol, port.port) for port in private_policy.spec.egress[0].ports} == {
+        ("TCP", 443)
+    }
+
+    kubernetes_api_policy = next(
+        policy
+        for policy in manifest.network_policies
+        if policy.metadata.name.endswith("-allow-kubernetes-api-egress")
+    )
+    assert kubernetes_api_policy.spec.egress[0].to[0].ip_block.cidr == "10.43.0.1/32"
+    assert [(port.protocol, port.port) for port in kubernetes_api_policy.spec.egress[0].ports] == [
+        ("TCP", 443)
+    ]
+
+    custom_policy = next(
+        policy
+        for policy in manifest.network_policies
+        if policy.metadata.name.endswith("-allow-custom-egress")
+    )
+    assert [rule.to[0].ip_block.cidr for rule in custom_policy.spec.egress] == [
+        "192.168.3.3/32",
+        "10.43.12.20/32",
+    ]
+    assert [[port.port for port in rule.ports] for rule in custom_policy.spec.egress] == [
+        [443],
+        [8200],
+    ]
+
+
 def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
     tmp_path,
     monkeypatch,
@@ -2675,6 +2787,80 @@ def test_kubernetes_reconciler_creates_runtime_objects(tmp_path, monkeypatch) ->
         ("create_namespaced_deployment", manifest.names.pod_name, manifest.names.namespace),
         ("create_namespaced_service", manifest.names.service_name, manifest.names.namespace),
     ]
+
+
+def test_kubernetes_reconciler_deletes_undesired_explicit_network_policies(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "privateEgress": False,
+                "inClusterKubernetesApi": False,
+                "customEgress": [],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    core_v1 = FakeCoreV1Api()
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=core_v1,
+        api_exception_class=FakeApiException,
+        settings=FakeSettings(),
+    )
+
+    reconciler.reconcile(manifest)
+
+    desired_policy_names = {policy.metadata.name for policy in manifest.network_policies}
+    cleanup_policy_names = set(runtime_network_policy_names(manifest.names)) - desired_policy_names
+    delete_calls = {
+        name
+        for action, name, namespace in core_v1.calls
+        if action == "delete_namespaced_network_policy"
+        and namespace == manifest.names.namespace
+    }
+    assert cleanup_policy_names == delete_calls
 
 
 def test_kubernetes_reconciler_creates_ingress_when_enabled(tmp_path, monkeypatch) -> None:

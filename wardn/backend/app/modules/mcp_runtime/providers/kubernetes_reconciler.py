@@ -145,8 +145,14 @@ class KubernetesRuntimeReconciler:
         )
 
     def create_or_replace_network_policies(self, manifest: KubernetesRuntimeManifest) -> None:
+        desired_names = {
+            network_policy.metadata.name for network_policy in manifest.network_policies
+        }
         for network_policy in manifest.network_policies:
             self.create_or_replace_network_policy(manifest, network_policy)
+        for policy_name in manifest.network_policy_cleanup_names:
+            if policy_name not in desired_names:
+                self.delete_network_policy(manifest.names, policy_name)
 
     def create_or_replace_network_policy(
         self,

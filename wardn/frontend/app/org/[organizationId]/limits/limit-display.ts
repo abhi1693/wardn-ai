@@ -85,6 +85,36 @@ export const knownLimitKeys: Array<{
     defaultScope: "workspace",
   },
   {
+    value: "mcp_runtime_public_egress.per_workspace",
+    label: "MCP runtime public egress",
+    scopes: ["workspace", "organization"],
+    defaultScope: "workspace",
+  },
+  {
+    value: "mcp_runtime_private_egress.per_workspace",
+    label: "MCP runtime private egress",
+    scopes: ["workspace", "organization"],
+    defaultScope: "workspace",
+  },
+  {
+    value: "mcp_runtime_kubernetes_api_egress.per_workspace",
+    label: "MCP runtime Kubernetes API egress",
+    scopes: ["workspace", "organization"],
+    defaultScope: "workspace",
+  },
+  {
+    value: "mcp_runtime_network_isolation_disable.per_workspace",
+    label: "MCP runtime isolation disablement",
+    scopes: ["workspace", "organization"],
+    defaultScope: "workspace",
+  },
+  {
+    value: "mcp_runtime_custom_egress_rules.per_installation",
+    label: "MCP runtime custom egress CIDRs per install",
+    scopes: ["workspace", "organization"],
+    defaultScope: "workspace",
+  },
+  {
     value: "secret_stores.per_organization",
     label: "Secret stores per organization",
     scopes: ["organization"],
@@ -130,6 +160,16 @@ export const knownLimitKeys: Array<{
 
 export function displayLimitKey(value: string) {
   return knownLimitKeys.find((entry) => entry.value === value)?.label ?? value;
+}
+
+export function limitValueHelp(value: string) {
+  if (value === "mcp_runtime_custom_egress_rules.per_installation") {
+    return "Maximum custom CIDR rules allowed on one package runtime install. Set 0 to block custom egress.";
+  }
+  if (value.startsWith("mcp_runtime_")) {
+    return "Capability limit: set 0 to block this policy option, or 1 to allow it.";
+  }
+  return "";
 }
 
 export function formatDate(value: string) {
