@@ -471,6 +471,25 @@ def pypi_runtime_dependency_args(runtime_config: dict[str, Any]) -> list[str]:
     return args
 
 
+def trim_overlapping_process_args(base_args: list[str], extra_args: list[str]) -> list[str]:
+    remaining = list(extra_args)
+    max_overlap = min(len(base_args), len(remaining))
+    while max_overlap:
+        overlap = next(
+            (
+                size
+                for size in range(max_overlap, 0, -1)
+                if base_args[-size:] == remaining[:size]
+            ),
+            0,
+        )
+        if not overlap:
+            break
+        remaining = remaining[overlap:]
+        max_overlap = min(len(base_args), len(remaining))
+    return remaining
+
+
 def pypi_transport_process_args(
     runtime_config: dict[str, Any],
     *,
@@ -484,6 +503,7 @@ def pypi_transport_process_args(
     )
     dependency_args = pypi_runtime_dependency_args(runtime_config)
     transport_command_name = Path(transport_command).name
+    configured_args = trim_overlapping_process_args(transport_args, configured_args)
     if transport_command_name == "uvx" and transport_args:
         return ["--from", package_spec, *dependency_args, *transport_args, *configured_args]
     if transport_command_name not in {"", "python", "python3"}:
