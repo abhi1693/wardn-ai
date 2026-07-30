@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -718,6 +719,63 @@ def test_install_server_runtime_materializes_file_package_arguments(
         "runtime-files",
         "GRAFANA_CLI_TLS_CA_FILE",
     ).read_text(encoding="utf-8") == ca_content
+
+
+def test_install_server_runtime_materializes_explicit_file_config_values(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_content = "apiVersion: v1\nclusters: []\n"
+    server = server_version(
+        packages=[
+            {
+                "registryType": "oci",
+                "identifier": "docker.io/example/mcp:1.0.0",
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+                "environmentVariables": [
+                    {
+                        "name": "CONFIG_PATH",
+                        "format": "string",
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.oci.shutil.which",
+        lambda name: "/bin/docker",
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.oci.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={
+            "CONFIG_PATH": {
+                "type": "file",
+                "filename": "config.yaml",
+                "content": config_content,
+            },
+        },
+        install_root=tmp_path / "installs",
+    )
+
+    local_path = install.secret_config["files"]["CONFIG_PATH"]["path"]
+    mount_path = install.secret_config["files"]["CONFIG_PATH"]["mountPath"]
+    assert install.secret_config["environment"]["CONFIG_PATH"] == local_path
+    assert mount_path == "/opt/wardn/runtime-files/CONFIG_PATH"
+    assert install.runtime_config["fileMounts"] == [
+        {
+            "name": "CONFIG_PATH",
+            "key": "CONFIG_PATH",
+            "path": local_path,
+            "mountPath": mount_path,
+        }
+    ]
+    assert Path(local_path).read_text(encoding="utf-8") == config_content
 
 
 def test_install_server_runtime_uses_explicit_package_target_when_remote_exists(

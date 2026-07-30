@@ -2073,6 +2073,58 @@ async def test_validate_installation_tool_reports_text_only_invalid_input(monkey
 
 
 @pytest.mark.asyncio
+async def test_validate_installation_tool_reports_json_text_error(monkeypatch) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    installation.id = uuid4()
+    server = server_version("1.0.0", is_latest=True)
+
+    async def get_installation_by_id(*args, **kwargs):
+        return installation
+
+    async def get_server_version(*args, **kwargs):
+        return server
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "error": "Could not load config file.",
+                            "hint": "Upload the required config file.",
+                        }
+                    ),
+                }
+            ],
+            "isError": False,
+        }
+
+    monkeypatch.setattr(service.repository, "get_installation_by_id", get_installation_by_id)
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(
+        installation_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+
+    response = await service.validate_installation_tool(
+        FakeSession(),
+        installation.id,
+        MCPServerInstallationToolValidationRequest(toolName="status_check"),
+    )
+
+    assert response.status == "failed"
+    assert response.is_error is True
+    assert response.error == "Could not load config file."
+
+
+@pytest.mark.asyncio
 async def test_uninstall_server_rejects_missing_installation(monkeypatch) -> None:
     async def get_installation(*args, **kwargs):
         return None

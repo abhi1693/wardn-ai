@@ -296,6 +296,11 @@ def file_config_definition(definition: dict[str, Any]) -> bool:
     name = str(definition.get("name") or "").strip().lower()
     return flag.endswith("-file") or flag.endswith("_file") or name.endswith("_file")
 
+
+def file_config_value(value: Any) -> bool:
+    return config_value_mapping(value).get("type") == "file"
+
+
 def config_file_name(name: str) -> str:
     return safe_path_component(name).replace(".", "_")
 
@@ -343,9 +348,11 @@ def materialize_config_files(
     file_dir = install_path / RUNTIME_FILE_DIR_NAME
     for definition in definitions:
         name = definition.get("name")
-        if not isinstance(name, str) or not name or not file_config_definition(definition):
+        if not isinstance(name, str) or not name:
             continue
         raw_value = config_values.get(name)
+        if not file_config_definition(definition) and not file_config_value(raw_value):
+            continue
         if not config_value_present(raw_value):
             continue
         file_dir.mkdir(parents=True, exist_ok=True)

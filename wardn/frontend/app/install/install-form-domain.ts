@@ -408,8 +408,12 @@ export function installFields(entry: MCPRegistryServerResponse, target: InstallT
   return [...connectionFields, ...runtimeFields].filter((field) => field.name);
 }
 
+export function defaultInstallValue(field: InstallField): InstallValue {
+  return field.format === "file" ? "" : field.defaultValue;
+}
+
 export function defaultInstallValues(fields: InstallField[]): Record<string, InstallValue> {
-  return Object.fromEntries(fields.map((field) => [field.name, field.defaultValue]));
+  return Object.fromEntries(fields.map((field) => [field.name, defaultInstallValue(field)]));
 }
 
 export function mergeInstallValues(
@@ -417,7 +421,7 @@ export function mergeInstallValues(
   currentValues: Record<string, InstallValue>,
 ): Record<string, InstallValue> {
   return Object.fromEntries(
-    fields.map((field) => [field.name, currentValues[field.name] ?? field.defaultValue])
+    fields.map((field) => [field.name, currentValues[field.name] ?? defaultInstallValue(field)])
   );
 }
 

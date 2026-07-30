@@ -1,6 +1,7 @@
 """MCP installation, tool-discovery, and validation application services."""
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -192,6 +193,13 @@ def validation_error_from_result(result: dict | None) -> str:
         return text
 
     normalized = text.strip().casefold()
+    if normalized.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            return payload["error"]
     if normalized.startswith(("invalid input", "invalid request", "error:")):
         return text
     return ""
