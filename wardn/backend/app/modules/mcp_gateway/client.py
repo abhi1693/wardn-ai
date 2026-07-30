@@ -6,7 +6,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from http.client import RemoteDisconnected
+from http.client import IncompleteRead, RemoteDisconnected
 from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -130,7 +130,7 @@ def send_remote_request(
         raise MCPGatewayUpstreamError(
             f"upstream MCP server returned HTTP {exc.code}: {detail or exc.reason}"
         ) from exc
-    except (TimeoutError, URLError, RemoteDisconnected) as exc:
+    except (TimeoutError, URLError, RemoteDisconnected, IncompleteRead, OSError) as exc:
         raise MCPGatewayUpstreamError(f"upstream MCP server is not reachable: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise MCPGatewayUpstreamError("upstream MCP server returned invalid JSON-RPC") from exc

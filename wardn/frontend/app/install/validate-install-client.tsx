@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FeedbackMessages } from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/ui/badge";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -59,6 +60,14 @@ type ArgumentFieldError = {
   field: string;
   message: string;
 };
+
+type RefreshOptions = {
+  reportError?: boolean;
+};
+
+function caughtMessage(caught: unknown, fallback: string) {
+  return caught instanceof Error && caught.message ? caught.message : fallback;
+}
 
 function runtimeStatusLabel(status: string | undefined) {
   if (!status) {
@@ -421,6 +430,7 @@ export function ValidateInstallClient({
     useState<MCPRuntimeInstallationControlResponse | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshNotice, setRefreshNotice] = useState("");
   const [isLoadingTools, setIsLoadingTools] = useState(true);
   const [isLoadingRuntime, setIsLoadingRuntime] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
@@ -508,22 +518,32 @@ export function ValidateInstallClient({
     }
   }, [installation, organizationId, workspaceId]);
 
-  const loadRuntimeState = useCallback(async () => {
+  const loadRuntimeState = useCallback(async (options: RefreshOptions = {}) => {
+    const { reportError = true } = options;
     try {
       const data = await fetchRuntimeState();
       setRuntimeState(data);
+      return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Runtime state could not be loaded.");
+      if (reportError) {
+        setError(caughtMessage(caught, "Runtime state could not be loaded."));
+      }
+      return false;
     } finally {
       setIsLoadingRuntime(false);
     }
   }, [fetchRuntimeState]);
 
-  const loadTools = useCallback(async () => {
+  const loadTools = useCallback(async (options: RefreshOptions = {}) => {
+    const { reportError = true } = options;
     try {
       applyLoadedTools(await fetchTools());
+      return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Tools could not be loaded.");
+      if (reportError) {
+        setError(caughtMessage(caught, "Tools could not be loaded."));
+      }
+      return false;
     } finally {
       setIsLoadingTools(false);
     }
@@ -605,6 +625,7 @@ export function ValidateInstallClient({
     setRuntimeAction(action);
     setError("");
     setNotice("");
+    setRefreshNotice("");
     setResult(null);
     try {
       const data = await actions[action](organizationId, workspaceId, installation.id);
@@ -616,14 +637,22 @@ export function ValidateInstallClient({
         setArgumentValues({});
         setArgumentError(null);
       } else {
-        await loadTools();
+        const toolsRefreshed = await loadTools({ reportError: false });
+        if (!toolsRefreshed) {
+          setRefreshNotice(
+            "Runtime control succeeded, but tools are still not ready to refresh. Try again in a few seconds."
+          );
+        }
       }
-      await loadRuntimeState();
+      const runtimeRefreshed = await loadRuntimeState({ reportError: false });
+      if (!runtimeRefreshed) {
+        setRefreshNotice(
+          "Runtime control succeeded, but the latest runtime state could not refresh. Try again in a few seconds."
+        );
+      }
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : `Runtime could not be ${runtimeActionLabels[action]}.`
+        caughtMessage(caught, `Runtime could not be ${runtimeActionLabels[action]}.`)
       );
     } finally {
       setRuntimeAction(null);
@@ -834,6 +863,11 @@ export function ValidateInstallClient({
       </Card>
 
       <FeedbackMessages error={error} notice={notice} />
+      {refreshNotice ? (
+        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="info">
+          {refreshNotice}
+        </AsyncFeedback>
+      ) : null}
 
       <div className="grid grid-cols-12 items-start gap-6">
         <Card className="col-span-12 max-h-[600px] overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none lg:col-span-3">

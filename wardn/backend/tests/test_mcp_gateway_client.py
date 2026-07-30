@@ -1,5 +1,5 @@
 import sys
-from http.client import RemoteDisconnected
+from http.client import IncompleteRead, RemoteDisconnected
 from threading import Event
 
 import pytest
@@ -342,6 +342,34 @@ def test_send_remote_request_maps_remote_disconnect_to_gateway_error(monkeypatch
     monkeypatch.setattr(
         "app.modules.mcp_gateway.client.open_outbound_request",
         disconnect,
+    )
+
+    with pytest.raises(MCPGatewayUpstreamError, match="not reachable"):
+        send_remote_request(
+            "https://example.com/mcp",
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        )
+
+
+def test_send_remote_request_maps_incomplete_read_to_gateway_error(monkeypatch) -> None:
+    class IncompleteReadResponse:
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            raise IncompleteRead(b"")
+
+    def incomplete_read(*args, **kwargs):
+        return IncompleteReadResponse()
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.client.open_outbound_request",
+        incomplete_read,
     )
 
     with pytest.raises(MCPGatewayUpstreamError, match="not reachable"):
