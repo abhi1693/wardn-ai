@@ -458,16 +458,23 @@ def secret_references_from_runtime_secret_config(
     if not secret_config:
         return {}
     references = deepcopy(secret_config)
+    file_config_keys = set()
+    files = references.get("files")
+    if isinstance(files, dict):
+        file_config_keys = {
+            str(key)
+            for key, detail in files.items()
+            if isinstance(detail, dict) and detail.get("content") is not None
+        }
     for namespace in ("headers", "environment", "packageArguments"):
         namespace_values = references.get(namespace)
         if not isinstance(namespace_values, dict):
             continue
         for key in list(namespace_values):
-            if key in handle_refs:
+            if key in handle_refs and str(key) not in file_config_keys:
                 namespace_values[key] = secret_handle_ref(handle_refs[key])
             elif namespace == "headers" and f"headers.{key}" in handle_refs:
                 namespace_values[key] = secret_handle_ref(handle_refs[f"headers.{key}"])
-    files = references.get("files")
     if isinstance(files, dict):
         for key, detail in files.items():
             if key in handle_refs and isinstance(detail, dict):

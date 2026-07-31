@@ -1306,6 +1306,62 @@ async def test_install_server_version_preserves_existing_file_config_values(monk
     }
 
 
+def test_secret_references_preserve_file_runtime_paths() -> None:
+    handle_id = uuid4()
+    runtime_path = "/tmp/wardn/mcp/weather/1.0.0/runtime-files/K8S_AIOPS_CONFIG"
+    mount_path = "/opt/wardn/runtime-files/K8S_AIOPS_CONFIG"
+
+    references = config_service.secret_references_from_runtime_secret_config(
+        {
+            "environment": {
+                "K8S_AIOPS_CONFIG": runtime_path,
+                "KUBECONFIG": runtime_path,
+            },
+            "files": {
+                "K8S_AIOPS_CONFIG": {
+                    "key": "K8S_AIOPS_CONFIG",
+                    "filename": "config.yaml",
+                    "content": "apiVersion: v1\nclusters: []\n",
+                    "path": runtime_path,
+                    "mountPath": mount_path,
+                }
+            },
+        },
+        {"K8S_AIOPS_CONFIG": handle_id},
+    )
+
+    assert references["environment"] == {
+        "K8S_AIOPS_CONFIG": runtime_path,
+        "KUBECONFIG": runtime_path,
+    }
+    assert references["files"]["K8S_AIOPS_CONFIG"]["content"] == {
+        "type": "secret_handle",
+        "secretHandleId": str(handle_id),
+    }
+
+
+def test_secret_references_still_externalize_non_file_environment_values() -> None:
+    handle_id = uuid4()
+
+    references = config_service.secret_references_from_runtime_secret_config(
+        {
+            "environment": {
+                "WEATHER_TOKEN": "raw-token",
+                "WEATHER_URL": "https://weather.example.com",
+            }
+        },
+        {"WEATHER_TOKEN": handle_id},
+    )
+
+    assert references["environment"] == {
+        "WEATHER_TOKEN": {
+            "type": "secret_handle",
+            "secretHandleId": str(handle_id),
+        },
+        "WEATHER_URL": "https://weather.example.com",
+    }
+
+
 @pytest.mark.asyncio
 async def test_install_server_version_writes_raw_secrets_to_backend(monkeypatch) -> None:
     store_id = uuid4()
