@@ -72,7 +72,7 @@ const modeOptions: Array<{
   {
     value: "allow",
     label: "Allow",
-    description: "Record an explicit allow policy for audit and future default-deny modes.",
+    description: "Allow matching tools; active allow policies block unmatched tools.",
   },
 ];
 

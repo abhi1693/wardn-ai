@@ -418,7 +418,11 @@ async def delete_guardrail_policy(
     await repository.delete_policy(session, policy)
 
 
-def decision_for_policies(policies: list[GuardrailPolicy]) -> GuardrailDecision:
+def decision_for_policies(
+    policies: list[GuardrailPolicy],
+    *,
+    has_active_allow_policy: bool = False,
+) -> GuardrailDecision:
     matched_policy_ids = tuple(policy.id for policy in policies)
     for mode in (GUARDRAIL_MODE_DENY, GUARDRAIL_MODE_REQUIRE_CONFIRMATION):
         policy = next((item for item in policies if item.mode == mode), None)
@@ -445,6 +449,15 @@ def decision_for_policies(policies: list[GuardrailPolicy]) -> GuardrailDecision:
             message=f"Tool call allowed by guardrail policy: {allow_policy.name}",
             matched_policy_ids=matched_policy_ids,
         )
+    if has_active_allow_policy:
+        return GuardrailDecision(
+            mode=GUARDRAIL_MODE_DENY,
+            message=(
+                "Tool call blocked because it did not match any active allow "
+                "guardrail policy."
+            ),
+            matched_policy_ids=matched_policy_ids,
+        )
     return GuardrailDecision(
         mode=GUARDRAIL_MODE_ALLOW,
         message="No guardrail policy matched.",
@@ -461,9 +474,15 @@ async def evaluate_tool_call_guardrails(
         organization_id=context.organization_id,
         workspace_id=context.workspace_id,
     )
+    has_active_allow_policy = any(
+        policy.mode == GUARDRAIL_MODE_ALLOW for policy in candidate_policies
+    )
     policies = [
         policy
         for policy in candidate_policies
         if policy_matches_context(policy, context)
     ]
-    return decision_for_policies(policies)
+    return decision_for_policies(
+        policies,
+        has_active_allow_policy=has_active_allow_policy,
+    )

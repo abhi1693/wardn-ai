@@ -113,6 +113,15 @@ def test_guardrail_decision_requires_confirmation_when_no_deny() -> None:
     assert decision.policy_name == "Confirm prod"
 
 
+def test_guardrail_decision_blocks_unmatched_tool_when_allow_policy_exists() -> None:
+    decision = service.decision_for_policies([], has_active_allow_policy=True)
+
+    assert decision.mode == "deny"
+    assert decision.policy_id is None
+    assert "did not match any active allow guardrail policy" in decision.message
+    assert decision.matched_policy_ids == ()
+
+
 @pytest.mark.asyncio
 async def test_create_guardrail_policy_accepts_rule_group_conditions(monkeypatch) -> None:
     async def require_guardrail_scope_admin(*args, **kwargs):
@@ -237,6 +246,62 @@ def test_guardrail_policy_rejects_agent_and_server_rule_fields() -> None:
                     "rules": [{"field": field, "operator": "equals", "value": str(uuid4())}],
                 }
             )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_guardrails_denies_unmatched_tool_when_allow_policy_exists(
+    monkeypatch,
+) -> None:
+    allowed_tool_schema_id = uuid4()
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    allow_policy = GuardrailPolicy(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Read Only Tools",
+        description="",
+        mode="allow",
+        priority=100,
+        conditions={
+            "operator": "any",
+            "rules": [
+                {
+                    "field": "tool_schema_id",
+                    "operator": "equals",
+                    "value": str(allowed_tool_schema_id),
+                }
+            ],
+        },
+        is_active=True,
+        created_at=datetime(2026, 7, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+
+    async def list_matching_policies(*args, **kwargs):
+        return [allow_policy]
+
+    monkeypatch.setattr(repository, "list_matching_policies", list_matching_policies)
+
+    decision = await service.evaluate_tool_call_guardrails(
+        FakeSession(),
+        service.GuardrailEvaluationContext(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user_id=uuid4(),
+            agent_id=uuid4(),
+            conversation_id=None,
+            agent_run_id=None,
+            installation_id=uuid4(),
+            tool_schema_id=uuid4(),
+            server_name="io.github.AIops-tools/k8s-aiops",
+            tool_name="create_namespace",
+            arguments={"name": "test-ns"},
+        ),
+    )
+
+    assert decision.mode == "deny"
+    assert "did not match any active allow guardrail policy" in decision.message
 
 
 @pytest.mark.asyncio
