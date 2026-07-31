@@ -3,10 +3,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.core.pagination import CursorPageMetadata
 from app.core.schemas import APIModel
+from app.modules.agents.skills import normalize_agent_skill_ids
 
 AgentScope = Literal["organization", "workspace"]
 
@@ -19,6 +20,12 @@ class AgentCreate(APIModel):
     workspace_id: uuid.UUID | None = None
     provider_credential_id: uuid.UUID | None = None
     model_name: str = Field(default="", max_length=255)
+    skill_ids: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[str]) -> list[str]:
+        return normalize_agent_skill_ids(value)
 
     @model_validator(mode="after")
     def validate_scope(self) -> "AgentCreate":
@@ -37,7 +44,13 @@ class AgentUpdate(APIModel):
     workspace_id: uuid.UUID | None = None
     provider_credential_id: uuid.UUID | None = None
     model_name: str | None = Field(default=None, max_length=255)
+    skill_ids: list[str] | None = Field(default=None, max_length=8)
     is_active: bool | None = None
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else normalize_agent_skill_ids(value)
 
 
 class AgentRead(APIModel):
@@ -53,6 +66,7 @@ class AgentRead(APIModel):
     instructions: str
     scope: AgentScope
     model_name: str
+    skill_ids: list[str] = Field(default_factory=list)
     is_active: bool
     server_count: int
     tool_count: int

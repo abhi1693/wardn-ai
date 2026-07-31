@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import threading
 import uuid
 from collections.abc import AsyncGenerator
@@ -31,6 +32,7 @@ from app.modules.users.models import User
 
 AGENT_TOOL_BLOCKED_PREFIX = "Tool blocked by guardrail:"
 AGENT_TOOL_CONFIRMATION_PREFIX = "Tool requires confirmation:"
+AGENT_TOOL_TARGET_SAFETY_PREFIX = "Tool blocked by target safety:"
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
 
 async def _execute_agent_tool_call(
@@ -131,6 +133,16 @@ async def _execute_agent_tool_call(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} unsupported guardrail decision",
             )
+    target_safety_message = ambiguous_mutating_tool_target_message(
+        tools,
+        tool,
+        request_meta=request_meta,
+    )
+    if target_safety_message:
+        return tool_execution_result(
+            tool.tool_schema.tool_name,
+            f"{AGENT_TOOL_TARGET_SAFETY_PREFIX} {target_safety_message}",
+        )
     try:
         result = await call_tool_with_isolated_tracking(
             session,
@@ -192,7 +204,9 @@ def progress_activity_event(
 
 def tool_activity_status_for_output(tool_name: str, output: str) -> tuple[str, str | None]:
     failed_prefix = f"Tool {tool_name} failed:"
-    if output.startswith(AGENT_TOOL_BLOCKED_PREFIX):
+    if output.startswith(AGENT_TOOL_BLOCKED_PREFIX) or output.startswith(
+        AGENT_TOOL_TARGET_SAFETY_PREFIX
+    ):
         return "blocked", output
     if output.startswith(AGENT_TOOL_CONFIRMATION_PREFIX):
         return "requires_confirmation", output
@@ -247,6 +261,103 @@ def progress_number(value: Any) -> float | int | None:
     return None
 
 
+def ambiguous_mutating_tool_target_message(
+    tools: dict[str, AgentRuntimeTool],
+    selected_tool: AgentRuntimeTool,
+    *,
+    request_meta: dict[str, Any] | None = None,
+) -> str:
+    if tool_read_only_hint(selected_tool):
+        return ""
+    target_group = [
+        tool
+        for tool in tools.values()
+        if tool.tool_schema.server_name == selected_tool.tool_schema.server_name
+        and tool.tool_schema.tool_name == selected_tool.tool_schema.tool_name
+    ]
+    if len({tool.installation.id for tool in target_group}) <= 1:
+        return ""
+    requested_text = normalized_target_text((request_meta or {}).get("userMessage"))
+    if requested_text:
+        requested_targets = [
+            tool for tool in target_group if target_matches_user_text(tool, requested_text)
+        ]
+        if requested_targets and selected_tool.installation.id not in {
+            tool.installation.id for tool in requested_targets
+        }:
+            return (
+                f"the latest user request appears to reference "
+                f"{target_labels(requested_targets)}, but the selected target was "
+                f"{target_label(selected_tool)}. The tool was not executed. Run read-only "
+                f"discovery across the configured targets and choose the matching target before "
+                f"running this write-capable tool."
+            )
+        if requested_targets:
+            return ""
+    if not default_like_config_name(selected_tool.installation.config_name):
+        return ""
+    targets = ", ".join(
+        sorted(
+            {
+                target_label(tool)
+                for tool in target_group
+            }
+        )
+    )
+    return (
+        f"{selected_tool.tool_schema.tool_name} is available from multiple configured MCP "
+        f"targets: {targets}. The selected target was the generic default target, so the tool was "
+        f"not executed. Use read-only discovery first or select the exact configured target before "
+        f"running this write-capable tool."
+    )
+
+
+def tool_read_only_hint(tool: AgentRuntimeTool) -> bool:
+    annotations = tool.tool_schema.annotations
+    return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
+
+
+def target_label(tool: AgentRuntimeTool) -> str:
+    return (
+        f"{tool.installation.config_name} "
+        f"({tool.tool_schema.server_name}, installation {tool.installation.id})"
+    )
+
+
+def target_labels(tools: list[AgentRuntimeTool]) -> str:
+    return ", ".join(sorted({target_label(tool) for tool in tools}))
+
+
+def normalized_target_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+def target_matches_user_text(tool: AgentRuntimeTool, normalized_user_text: str) -> bool:
+    user_tokens = set(normalized_user_text.split())
+    for raw_value, min_token_length in (
+        (tool.installation.config_name, 2),
+        (tool.tool_schema.server_name, 3),
+        (tool.server.name, 3),
+    ):
+        normalized = normalized_target_text(raw_value)
+        if not normalized:
+            continue
+        if normalized in normalized_user_text:
+            return True
+        target_tokens = [
+            token for token in normalized.split() if len(token) >= min_token_length
+        ]
+        if len(set(target_tokens) & user_tokens) >= 2:
+            return True
+    return False
+
+
+def default_like_config_name(value: str) -> bool:
+    return normalized_target_text(value) in {"", "default"}
+
+
 async def execute_agent_tool_call_with_progress(
     tools: dict[str, AgentRuntimeTool],
     tool_call: AgentToolCall,
@@ -260,6 +371,7 @@ async def execute_agent_tool_call_with_progress(
     agent: Agent | None = None,
     conversation: WorkspaceConversation | None = None,
     agent_run: AgentRun | None = None,
+    request_meta: dict[str, Any] | None = None,
 ) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
     progress_token = f"agent-tool:{tool_call.call_id}"
     cancel_event = threading.Event()
@@ -280,7 +392,7 @@ async def execute_agent_tool_call_with_progress(
             agent=agent,
             conversation=conversation,
             agent_run=agent_run,
-            request_meta={"progressToken": progress_token},
+            request_meta={**(request_meta or {}), "progressToken": progress_token},
             cancel_event=cancel_event,
             cancel_reason="App chat stream was cancelled.",
             progress_callback=progress_callback,

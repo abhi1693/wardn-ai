@@ -14,5 +14,6 @@ export interface AgentUpdate {
   name?: string | null;
   providerCredentialId?: string | null;
   scope?: AgentUpdateScope;
+  skillIds?: string[] | null;
   workspaceId?: string | null;
 }

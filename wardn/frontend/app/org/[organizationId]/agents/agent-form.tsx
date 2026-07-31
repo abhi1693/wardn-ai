@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, Loader2, Server } from "lucide-react";
+import { Bot, Check, ExternalLink, Loader2, Server, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -40,6 +40,7 @@ type AgentPayload = {
   workspaceId: string;
   providerCredentialId?: string | null;
   modelName: string;
+  skillIds: string[];
   isActive?: boolean;
 };
 
@@ -66,6 +67,10 @@ type AvailableToolGroup = {
 };
 
 type ServerBindingMode = "none" | "server" | "tools";
+
+const FIND_SKILLS_SKILL_ID = "abhi1693/wardn-hub/find-skills";
+const FIND_SKILLS_SKILL_URL =
+  "https://hub.wardnai.dev/skills/abhi1693/wardn-hub/find-skills";
 
 function providerLabel(credential: LlmCredentialRead) {
   if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
@@ -114,6 +119,9 @@ export function AgentForm({
     initialProviderCredentialId === agent?.providerCredentialId ? agent?.modelName ?? "" : ""
   );
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
+  const [findSkillsEnabled, setFindSkillsEnabled] = useState(
+    agent?.skillIds?.includes(FIND_SKILLS_SKILL_ID) ?? false
+  );
   const [selectedServerTools, setSelectedServerTools] = useState<Record<string, string[]>>(
     Object.fromEntries(
       assignedServerAssignments.map((assignment) => [
@@ -304,6 +312,7 @@ export function AgentForm({
       workspaceId: fixedWorkspaceId,
       providerCredentialId: effectiveProviderCredentialId,
       modelName: modelName.trim(),
+      skillIds: findSkillsEnabled ? [FIND_SKILLS_SKILL_ID] : [],
       ...(isEditing ? { isActive } : {}),
     };
 
@@ -461,6 +470,39 @@ export function AgentForm({
                 Active
               </label>
             ) : null}
+
+            <div className="space-y-3">
+              <Label>Skills</Label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-md border border-[var(--outline-variant)] px-3 py-3 text-sm">
+                <input
+                  checked={findSkillsEnabled}
+                  className="mt-1 size-4 accent-primary"
+                  onChange={(event) => setFindSkillsEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <span className="flex min-w-0 flex-1 items-start gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[var(--surface-container)] text-primary">
+                    <Sparkles className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">Wardn Hub skill discovery</span>
+                    <span className="mt-1 block text-xs leading-5 text-[var(--on-surface-variant)]">
+                      Install {FIND_SKILLS_SKILL_ID} so this agent can search and fetch audited
+                      public registry skills during chat.
+                    </span>
+                    <a
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      href={FIND_SKILLS_SKILL_URL}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open skill
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </span>
+                </span>
+              </label>
+            </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">

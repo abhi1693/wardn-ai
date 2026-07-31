@@ -258,6 +258,14 @@
             "title": "Scope",
             "type": "string"
           },
+          "skillIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Skillids",
+            "type": "array"
+          },
           "workspaceId": {
             "anyOf": [
               {
@@ -370,6 +378,13 @@
           "serverCount": {
             "title": "Servercount",
             "type": "integer"
+          },
+          "skillIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skillids",
+            "type": "array"
           },
           "toolCount": {
             "title": "Toolcount",
@@ -991,6 +1006,21 @@
               }
             ],
             "title": "Scope"
+          },
+          "skillIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skillids"
           },
           "workspaceId": {
             "anyOf": [

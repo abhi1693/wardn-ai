@@ -3,9 +3,10 @@ import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import httpx
 import pytest
 
-from app.modules.agents import chat_orchestrator, provider_clients, service
+from app.modules.agents import chat_orchestrator, provider_clients, service, skills, tool_execution
 from app.modules.agents.exceptions import (
     DuplicateAgentError,
     InvalidAgentScopeError,
@@ -1119,6 +1120,364 @@ def test_codex_compat_headers_use_current_default_version() -> None:
     assert service.CODEX_COMPAT_USER_AGENT.startswith("codex_cli_rs/0.144.0 ")
 
 
+def test_response_function_tools_include_configured_mcp_target() -> None:
+    workspace_id = uuid4()
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/kubernetes",
+        config_name="rancher-qa-omsllc",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Kubernetes",
+        server_json={},
+        is_latest=True,
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name="create_namespace",
+        title="Create namespace",
+        description="Create a Kubernetes namespace.",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    runtime_tool = service.AgentRuntimeTool(
+        wire_name="wardn_test",
+        assignment_id=uuid4(),
+        tool_schema=tool_schema,
+        installation=installation,
+        server=server,
+    )
+
+    description = provider_clients.response_function_tools({"wardn_test": runtime_tool})[0][
+        "description"
+    ]
+
+    assert "Configured MCP target: rancher-qa-omsllc" in description
+    assert f"MCP installation ID: {installation.id}" in description
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_tool_blocks_ambiguous_duplicate_mutating_target(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    server_name = "io.github.example/kubernetes"
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=server_name,
+        version="1.0.0",
+        description="Kubernetes",
+        server_json={},
+        is_latest=True,
+        status="active",
+    )
+
+    def runtime_tool(wire_name: str, config_name: str) -> service.AgentRuntimeTool:
+        installation = MCPServerInstallation(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            server_name=server_name,
+            config_name=config_name,
+            installed_version="1.0.0",
+            status="enabled",
+        )
+        tool_schema = MCPServerToolSchema(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            installation_id=installation.id,
+            server_name=server_name,
+            server_version="1.0.0",
+            tool_name="create_namespace",
+            title="Create namespace",
+            description="Create a Kubernetes namespace.",
+            input_schema={"type": "object"},
+            annotations={},
+            is_active=True,
+        )
+        return service.AgentRuntimeTool(
+            wire_name=wire_name,
+            assignment_id=uuid4(),
+            tool_schema=tool_schema,
+            installation=installation,
+            server=server,
+        )
+
+    tools = {
+        "default": runtime_tool("default", "default"),
+        "rancher": runtime_tool("rancher", "rancher-qa-omsllc"),
+    }
+
+    calls = []
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        calls.append(kwargs["tool_name"])
+        return {"content": [{"type": "text", "text": "created"}]}
+
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    result = await tool_execution._execute_agent_tool_call(
+        FakeSession(),
+        tools,
+        service.AgentToolCall(
+            name="default",
+            call_id="call_1",
+            arguments={"name": "test-ns"},
+        ),
+        request_meta={"userMessage": "create a namespace in rancher-qa"},
+    )
+
+    assert result.status == "blocked"
+    assert result.error is not None
+    assert result.output.startswith(service.AGENT_TOOL_TARGET_SAFETY_PREFIX)
+    assert "default" in result.output
+    assert "rancher-qa-omsllc" in result.output
+    assert calls == []
+
+    result = await tool_execution._execute_agent_tool_call(
+        FakeSession(),
+        tools,
+        service.AgentToolCall(
+            name="rancher",
+            call_id="call_2",
+            arguments={"name": "test-ns"},
+        ),
+        request_meta={"userMessage": "create a namespace in rancher-qa"},
+    )
+
+    assert result.status == "completed"
+    assert result.output == "created"
+    assert calls == ["create_namespace"]
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_tool_allows_duplicate_read_only_targets(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    server_name = "io.github.example/kubernetes"
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=server_name,
+        version="1.0.0",
+        description="Kubernetes",
+        server_json={},
+        is_latest=True,
+        status="active",
+    )
+    calls = []
+
+    def runtime_tool(wire_name: str, config_name: str) -> service.AgentRuntimeTool:
+        installation = MCPServerInstallation(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            server_name=server_name,
+            config_name=config_name,
+            installed_version="1.0.0",
+            status="enabled",
+        )
+        tool_schema = MCPServerToolSchema(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            installation_id=installation.id,
+            server_name=server_name,
+            server_version="1.0.0",
+            tool_name="cluster_info",
+            title="Cluster info",
+            description="Read Kubernetes cluster information.",
+            input_schema={"type": "object"},
+            annotations={"readOnlyHint": True},
+            is_active=True,
+        )
+        return service.AgentRuntimeTool(
+            wire_name=wire_name,
+            assignment_id=uuid4(),
+            tool_schema=tool_schema,
+            installation=installation,
+            server=server,
+        )
+
+    tools = {
+        "default": runtime_tool("default", "default"),
+        "rancher": runtime_tool("rancher", "rancher-qa-omsllc"),
+    }
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        calls.append(kwargs["tool_name"])
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    result = await tool_execution._execute_agent_tool_call(
+        FakeSession(),
+        tools,
+        service.AgentToolCall(name="default", call_id="call_1", arguments={}),
+    )
+
+    assert result.status == "completed"
+    assert result.output == "ok"
+    assert calls == ["cluster_info"]
+
+
+def test_agent_skill_function_tools_are_available_when_find_skills_is_installed() -> None:
+    assert skills.agent_skill_function_tools([]) == []
+
+    function_tools = skills.agent_skill_function_tools([skills.WARDN_FIND_SKILLS_ID])
+
+    assert [tool["name"] for tool in function_tools] == [
+        skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+        skills.WARDN_GET_SKILL_TOOL_NAME,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_skill_tool_searches_wardn_hub(monkeypatch) -> None:
+    class FakeHubClient:
+        requests: list[tuple[str, dict | None]] = []
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.options = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url, params=None):
+            self.requests.append((url, params))
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": skills.WARDN_FIND_SKILLS_ID,
+                            "name": "find-skills",
+                            "description": "Discover skills.",
+                            "url": skills.WARDN_FIND_SKILLS_URL,
+                            "isOfficial": False,
+                            "installs": 7,
+                            "auditStatus": "pass",
+                            "auditScore": 100,
+                            "auditRank": "S",
+                        }
+                    ]
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    monkeypatch.setattr(skills.httpx, "AsyncClient", FakeHubClient)
+
+    output = await skills.execute_agent_skill_tool_call(
+        skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+        {"query": "kubernetes", "limit": 99},
+    )
+    payload = json.loads(output)
+
+    assert FakeHubClient.requests == [
+        (
+            "https://hub.wardnai.dev/api/v1/skills/search",
+            {"q": "kubernetes", "limit": skills.WARDN_SKILL_SEARCH_MAX_RESULTS},
+        )
+    ]
+    assert payload["results"][0]["id"] == skills.WARDN_FIND_SKILLS_ID
+    assert payload["results"][0]["auditStatus"] == "pass"
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_skill_tool_fetches_audited_bundle(monkeypatch) -> None:
+    class FakeHubClient:
+        requests: list[tuple[str, dict | None]] = []
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.options = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url, params=None):
+            self.requests.append((url, params))
+            if url.endswith(f"/audit/{skills.WARDN_FIND_SKILLS_ID}"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": skills.WARDN_FIND_SKILLS_ID,
+                        "contentHash": "a" * 64,
+                        "audit": {
+                            "status": "pass",
+                            "riskLevel": "low",
+                            "score": 100,
+                            "rank": "S",
+                            "summary": "No known threat patterns.",
+                            "scoreDeductions": [],
+                            "findings": [],
+                        },
+                    },
+                    request=httpx.Request("GET", url),
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "id": skills.WARDN_FIND_SKILLS_ID,
+                    "source": "abhi1693/wardn-hub",
+                    "sourceUrl": "https://github.com/abhi1693/wardn-hub",
+                    "hash": "a" * 64,
+                    "sourceEntrypoint": "SKILL.md",
+                    "bundleFormatVersion": 2,
+                    "resolutionStatus": "complete",
+                    "resolutionIssues": [],
+                    "files": [
+                        {
+                            "path": "SKILL.md",
+                            "contents": "# Find Skills\n\nUse public registry search.",
+                        },
+                        {"path": "LICENSE", "contents": "Apache-2.0"},
+                    ],
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    monkeypatch.setattr(skills.httpx, "AsyncClient", FakeHubClient)
+
+    output = await skills.execute_agent_skill_tool_call(
+        skills.WARDN_GET_SKILL_TOOL_NAME,
+        {"skillId": skills.WARDN_FIND_SKILLS_ID},
+    )
+    payload = json.loads(output)
+
+    assert FakeHubClient.requests == [
+        (f"https://hub.wardnai.dev/api/v1/skills/audit/{skills.WARDN_FIND_SKILLS_ID}", None),
+        (
+            f"https://hub.wardnai.dev/api/v1/skills/{skills.WARDN_FIND_SKILLS_ID}",
+            {"include_bundle": "true", "content_hash": "a" * 64},
+        ),
+    ]
+    assert payload["audit"]["status"] == "pass"
+    assert payload["files"][0]["path"] == "SKILL.md"
+    assert payload["skillMarkdown"].startswith("# Find Skills")
+
+
 @pytest.mark.asyncio
 async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monkeypatch) -> None:
     agent_id = uuid4()
@@ -1546,6 +1905,7 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
             instructions="Use tools carefully.",
             providerCredentialId=credential.id,
             modelName="gpt-4o-mini",
+            skillIds=[skills.WARDN_FIND_SKILLS_URL, skills.WARDN_FIND_SKILLS_ID],
         ),
     )
 
@@ -1554,6 +1914,8 @@ async def test_create_agent_with_provider_credential(monkeypatch) -> None:
     assert agent.name == "SRE Agent"
     assert agent.provider_credential_id == credential.id
     assert agent.scope == "organization"
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
     assert response.tool_count == 0
 
 

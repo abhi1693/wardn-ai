@@ -79,6 +79,7 @@ def agent_response(agent: Agent, *, server_count: int, tool_count: int) -> Agent
         instructions=agent.instructions,
         scope=agent.scope,
         modelName=agent.model_name,
+        skillIds=agent.skill_ids or [],
         isActive=agent.is_active,
         serverCount=server_count,
         toolCount=tool_count,

@@ -84,6 +84,7 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     model_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    skill_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
 

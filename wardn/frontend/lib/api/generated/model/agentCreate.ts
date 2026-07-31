@@ -23,5 +23,7 @@ export interface AgentCreate {
   name: string;
   providerCredentialId?: string | null;
   scope?: AgentCreateScope;
+  /** @maxItems 8 */
+  skillIds?: string[];
   workspaceId?: string | null;
 }

@@ -40,6 +40,12 @@ from app.modules.agents.provider_clients import (
     websocket_error_message,
 )
 from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
+from app.modules.agents.skills import (
+    agent_skill_function_tools,
+    agent_skill_tool_display_name,
+    execute_agent_skill_tool_call,
+    is_agent_skill_tool_enabled,
+)
 from app.modules.agents.tool_execution import (
     execute_agent_tool_call_with_progress,
     tool_execution_result,
@@ -480,7 +486,11 @@ async def stream_chatgpt_codex_response_text(
         ) as websocket:
             previous_response_id = None
             input_items = chatgpt_codex_messages(messages)
-            function_tools = response_function_tools(tools)
+            function_tools = response_function_tools(tools) + agent_skill_function_tools(
+                agent.skill_ids or []
+            )
+            latest_user = latest_user_message(messages)
+            latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
 
             for _round_index in range(AGENT_CHAT_MAX_TOOL_ROUNDS):
                 body = chatgpt_codex_request_body(
@@ -570,6 +580,28 @@ async def stream_chatgpt_codex_response_text(
 
                 input_items = []
                 for tool_call in tool_calls:
+                    if is_agent_skill_tool_enabled(agent.skill_ids or [], tool_call.name):
+                        skill_execution: AgentToolExecutionResult | None = None
+                        async for event in execute_agent_skill_tool_call_stream(tool_call):
+                            if isinstance(event, AgentToolExecutionResult):
+                                skill_execution = event
+                            else:
+                                yield event
+                        if skill_execution is None:
+                            tool_name = agent_skill_tool_display_name(tool_call.name)
+                            skill_execution = tool_execution_result(
+                                tool_name,
+                                f"Tool {tool_name} failed: no tool result was returned",
+                            )
+                        input_items.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": tool_call.call_id,
+                                "output": skill_execution.output,
+                            }
+                        )
+                        continue
+
                     tool = tools.get(tool_call.name)
                     tool_name = (
                         tool.tool_schema.tool_name
@@ -596,6 +628,7 @@ async def stream_chatgpt_codex_response_text(
                         agent=agent,
                         conversation=conversation,
                         agent_run=agent_run,
+                        request_meta={"userMessage": latest_user_text},
                     ):
                         if isinstance(update, AgentChatToolActivityEvent):
                             yield update
@@ -639,6 +672,32 @@ async def stream_chatgpt_codex_response_text(
         raise AgentChatProviderError(f"LLM provider websocket failed: {exc}") from exc
     except TimeoutError as exc:
         raise AgentChatProviderError("LLM provider websocket timed out") from exc
+
+
+async def execute_agent_skill_tool_call_stream(
+    tool_call: AgentToolCall,
+) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
+    tool_name = agent_skill_tool_display_name(tool_call.name)
+    activity_id = f"tool-{tool_call.call_id}"
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status="running",
+        arguments=tool_call.arguments,
+    )
+    try:
+        output = await execute_agent_skill_tool_call(tool_call.name, tool_call.arguments)
+        execution = tool_execution_result(tool_name, output)
+    except Exception as exc:
+        execution = tool_execution_result(tool_name, f"Tool {tool_name} failed: {exc}")
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status=execution.status,
+        error=execution.error,
+        result=execution.result,
+    )
+    yield execution
 
 
 def message_requests_denied_mcp_tool(

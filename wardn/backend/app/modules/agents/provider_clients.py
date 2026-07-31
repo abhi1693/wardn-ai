@@ -135,6 +135,8 @@ def tool_description(tool: AgentRuntimeTool) -> str:
     return (
         f"{description}\n\n"
         f"Wardn MCP server: {tool.tool_schema.server_name}\n"
+        f"Configured MCP target: {tool.installation.config_name}\n"
+        f"MCP installation ID: {tool.installation.id}\n"
         f"MCP tool name: {tool.tool_schema.tool_name}\n"
         f"Workspace ID: {tool.installation.workspace_id}"
     )

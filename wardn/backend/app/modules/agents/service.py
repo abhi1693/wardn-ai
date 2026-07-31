@@ -135,11 +135,15 @@ from app.modules.agents.schemas import (
     AgentToolListResponse,
     AgentUpdate,
 )
+from app.modules.agents.skills import normalize_agent_skill_ids
 from app.modules.agents.tool_execution import (
     AGENT_TOOL_BLOCKED_PREFIX as AGENT_TOOL_BLOCKED_PREFIX,
 )
 from app.modules.agents.tool_execution import (
     AGENT_TOOL_CONFIRMATION_PREFIX as AGENT_TOOL_CONFIRMATION_PREFIX,
+)
+from app.modules.agents.tool_execution import (
+    AGENT_TOOL_TARGET_SAFETY_PREFIX as AGENT_TOOL_TARGET_SAFETY_PREFIX,
 )
 from app.modules.agents.tool_execution import (
     execute_agent_tool_call as execute_agent_tool_call,
@@ -401,6 +405,7 @@ async def create_agent(
         instructions=payload.instructions.strip(),
         scope=payload.scope,
         model_name=model_name,
+        skill_ids=normalize_agent_skill_ids(payload.skill_ids),
         is_active=True,
     )
     session.add(agent)
@@ -652,6 +657,7 @@ async def quick_start_workspace_agent(
             instructions=QUICK_START_AGENT_INSTRUCTIONS,
             scope="workspace",
             model_name=model_name,
+            skill_ids=[],
             is_active=True,
         )
         session.add(agent)
@@ -1179,6 +1185,8 @@ async def update_agent(
             provider_credential,
             agent.model_name,
         )
+    if "skill_ids" in payload.model_fields_set:
+        agent.skill_ids = normalize_agent_skill_ids(payload.skill_ids)
     if payload.is_active is not None:
         agent.is_active = payload.is_active
 
