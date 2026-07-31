@@ -4,6 +4,7 @@ import re
 import threading
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,7 @@ AGENT_TOOL_BLOCKED_PREFIX = "Tool blocked by guardrail:"
 AGENT_TOOL_CONFIRMATION_PREFIX = "Tool requires confirmation:"
 AGENT_TOOL_TARGET_SAFETY_PREFIX = "Tool blocked by target safety:"
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
+AGENT_TOOL_PROGRESS_HEARTBEAT_SECONDS = 15.0
 
 async def _execute_agent_tool_call(
     session: AsyncSession,
@@ -491,17 +493,33 @@ async def execute_agent_tool_call_with_progress(
     try:
         while not task.done():
             progress_task = asyncio.create_task(progress_queue.get())
+            heartbeat_task = asyncio.create_task(
+                asyncio.sleep(max(AGENT_TOOL_PROGRESS_HEARTBEAT_SECONDS, 0.001))
+            )
             done, pending = await asyncio.wait(
-                {task, progress_task},
+                {task, progress_task, heartbeat_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            for pending_task in pending:
+            pending_helpers = pending - {task}
+            for pending_task in pending_helpers:
                 pending_task.cancel()
+            for pending_task in pending_helpers:
+                with suppress(asyncio.CancelledError):
+                    await pending_task
             if progress_task in done:
                 yield progress_activity_event(
                     activity_id=activity_id,
                     tool_name=tool_name,
                     params=progress_task.result(),
+                )
+            if heartbeat_task in done and not task.done():
+                yield progress_activity_event(
+                    activity_id=activity_id,
+                    tool_name=tool_name,
+                    params={
+                        "message": "Waiting for runtime result.",
+                        "progressToken": progress_token,
+                    },
                 )
     except asyncio.CancelledError:
         cancel_event.set()

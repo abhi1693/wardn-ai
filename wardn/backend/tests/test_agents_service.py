@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -2196,6 +2197,54 @@ async def test_execute_agent_dynamic_run_tool_stream_dispatches_resolved_target(
     assert events[-1].status == "completed"
     assert calls[0]["tool_name"] == "namespace_list"
     assert calls[0]["arguments"] == {}
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_tool_call_with_progress_heartbeats_during_slow_runtime(
+    monkeypatch,
+) -> None:
+    namespace_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        description="[READ] List Kubernetes namespaces.",
+    )
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        await asyncio.sleep(0.03)
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+    monkeypatch.setattr(tool_execution, "AGENT_TOOL_PROGRESS_HEARTBEAT_SECONDS", 0.005)
+
+    events = [
+        event
+        async for event in tool_execution.execute_agent_tool_call_with_progress(
+            {namespace_tool.wire_name: namespace_tool},
+            service.AgentToolCall(
+                name=namespace_tool.wire_name,
+                call_id="call_1",
+                arguments={},
+            ),
+            session_factory=fake_session_factory(FakeSession()),
+            activity_id="tool-call-1",
+            tool_name="namespace_list",
+        )
+    ]
+
+    heartbeat = next(
+        event
+        for event in events
+        if isinstance(event, service.AgentChatToolActivityEvent)
+        and event.message == "Waiting for runtime result."
+    )
+    assert heartbeat.progress_token == "agent-tool:call_1"
+    assert isinstance(events[-1], service.AgentToolExecutionResult)
+    assert events[-1].status == "completed"
 
 
 @pytest.mark.asyncio
