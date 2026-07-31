@@ -186,7 +186,7 @@ def remote_mcp_policy_destinations(server: MCPServerVersion) -> list[dict[str, s
             port = 80 if scheme == "http" else 443
         if port < 1 or port > 65_535:
             continue
-        destination = {
+        destination: dict[str, str | int] = {
             "label": str(remote.get("name") or remote.get("type") or f"remote-{index + 1}")[:120],
             "host": parsed.hostname.rstrip(".").lower(),
             "port": port,
