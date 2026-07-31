@@ -894,6 +894,191 @@ async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
     assert "deny all" in events[1].text
 
 
+@pytest.mark.asyncio
+async def test_stream_agent_chat_preflight_block_uses_cached_tools_before_refresh(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        trigger_type="chat",
+        status="running",
+    )
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent.id,
+        installation_id=uuid4(),
+    )
+    installation = MCPServerInstallation(
+        id=assignment.installation_id,
+        workspace_id=workspace_id,
+        server_name="io.github.AIops-tools/k8s-aiops",
+        config_name="rancher-qa-omsllc",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Kubernetes tools",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name="api_resources",
+        title="API resources",
+        description="Inspect Kubernetes API resources",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    steps: list[dict] = []
+    finished: list[dict] = []
+
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def create_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def finish_agent_run(*args, **kwargs):
+        finished.append(kwargs)
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return [(assignment, tool_schema, installation, server)]
+
+    async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
+        runtime_tools = args[1]
+        tool = next(iter(runtime_tools.values()))
+        return service.AgentRuntimeToolGuardrailFilter(
+            allowed_tools={},
+            denied_tools={
+                tool.wire_name: (
+                    tool,
+                    GuardrailDecision(
+                        mode="deny",
+                        policy_name="default deny",
+                        message=(
+                            "Tool call blocked because it did not match any active allow "
+                            "guardrail policy."
+                        ),
+                    ),
+                )
+            },
+        )
+
+    async def refresh_wildcard_agent_server_tools(*args, **kwargs):
+        raise AssertionError("blocked preflight must not refresh MCP runtimes")
+
+    async def run_agent_chat(*args, **kwargs):
+        raise AssertionError("blocked preflight must not call the model")
+        yield service.AgentChatTextEvent(text="unreachable")
+
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_wildcard_agent_server_tools",
+        refresh_wildcard_agent_server_tools,
+    )
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[
+                        {
+                            "type": "text",
+                            "text": "create an ns in rancher-qa omsllc with the name test-ns",
+                        }
+                    ],
+                )
+            ]
+        ),
+        workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    assert any(chunk.get("type") == "data-tool-activity" for chunk in chunks)
+    assert any(
+        chunk.get("type") == "text-delta"
+        and "blocked by guardrail policy" in chunk.get("delta", "")
+        for chunk in chunks
+    )
+    assert [step["step_type"] for step in steps] == [
+        "model_input",
+        "tool_result",
+        "model_output",
+    ]
+    assert finished == [{"status": "succeeded", "error": ""}]
+
+
 def test_sanitize_run_payload_redacts_sensitive_keys_and_truncates_long_text() -> None:
     payload = {
         "apiKey": "secret-value",

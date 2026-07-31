@@ -287,9 +287,11 @@ class FakeCoreV1Api:
 class FakeCustomObjectsApi:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str, str, str, str]] = []
+        self.bodies: list[tuple[str, str, dict]] = []
         self.conflicts: set[str] = set()
         self.errors: dict[object, FakeApiException] = {}
         self.missing_resources: set[tuple[str, str, str]] = set()
+        self.objects: dict[tuple[str, str, str, str, str], dict] = {}
 
     def _call(
         self,
@@ -327,6 +329,30 @@ class FakeCustomObjectsApi:
             name=body["metadata"]["name"],
             namespace=namespace,
         )
+        self.bodies.append(("create_namespaced_custom_object", body["metadata"]["name"], body))
+        self.objects[(group, version, plural, body["metadata"]["name"], namespace)] = body
+
+    def get_namespaced_custom_object(
+        self,
+        *,
+        group,
+        version,
+        namespace,
+        plural,
+        name,
+    ):
+        self._call(
+            "get_namespaced_custom_object",
+            group=group,
+            version=version,
+            plural=plural,
+            name=name,
+            namespace=namespace,
+        )
+        key = (group, version, plural, name, namespace)
+        if key not in self.objects:
+            raise FakeApiException(404, "NotFound")
+        return self.objects[key]
 
     def replace_namespaced_custom_object(
         self,
@@ -346,6 +372,8 @@ class FakeCustomObjectsApi:
             name=name,
             namespace=namespace,
         )
+        self.bodies.append(("replace_namespaced_custom_object", name, body))
+        self.objects[(group, version, plural, name, namespace)] = body
 
     def delete_namespaced_custom_object(
         self,
@@ -2989,6 +3017,106 @@ def test_kubernetes_reconciler_creates_custom_cni_network_policies(
         )
         for policy in manifest.custom_network_policies
     ]
+
+
+def test_kubernetes_reconciler_replaces_custom_cni_policy_with_resource_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "inClusterKubernetesApi": True,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    custom_objects = FakeCustomObjectsApi()
+    custom_objects.conflicts = {"create_namespaced_custom_object"}
+    for policy in manifest.custom_network_policies:
+        custom_objects.objects[
+            (
+                policy.ref.group,
+                policy.ref.version,
+                policy.ref.plural,
+                policy.ref.name,
+                manifest.names.namespace,
+            )
+        ] = {"metadata": {"name": policy.ref.name, "resourceVersion": f"rv-{policy.ref.name}"}}
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=FakeCoreV1Api(),
+        custom_objects=custom_objects,
+        api_exception_class=FakeApiException,
+        settings=FakeSettings(),
+    )
+
+    reconciler.reconcile(manifest)
+
+    expected_custom_object_calls = []
+    for policy in manifest.custom_network_policies:
+        expected_custom_object_calls.extend(
+            [
+                ("create_namespaced_custom_object", policy.ref.name),
+                ("get_namespaced_custom_object", policy.ref.name),
+                ("replace_namespaced_custom_object", policy.ref.name),
+            ]
+        )
+    assert [
+        (method, name)
+        for method, _group, _version, _plural, name, _namespace in custom_objects.calls
+        if method.endswith("_namespaced_custom_object")
+    ] == expected_custom_object_calls
+    replaced_bodies = [
+        (name, body)
+        for method, name, body in custom_objects.bodies
+        if method == "replace_namespaced_custom_object"
+    ]
+    assert replaced_bodies
+    assert {
+        body["metadata"].get("resourceVersion")
+        for _name, body in replaced_bodies
+    } == {f"rv-{name}" for name, _body in replaced_bodies}
 
 
 def test_kubernetes_reconciler_skips_custom_cni_policy_when_crd_is_absent(

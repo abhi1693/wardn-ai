@@ -1042,6 +1042,26 @@ async def stream_agent_chat(
     )
     if conversation is not None:
         await persist_chat_turn_user_message(session, conversation, payload, agent_run)
+    runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+    tools = agent_runtime_tools(runtime_rows)
+    guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
+        session,
+        tools,
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
+    latest_message = latest_user_message(payload.messages)
+    if message_requests_denied_mcp_tool(latest_message, guardrail_filter):
+        stream = preflight_blocked_tool_stream(guardrail_filter)
+        return persisted_agent_chat_stream(
+            conversation,
+            stream,
+            agent_run,
+            session_factory=session_factory,
+        )
+
     tool_refresh_failures = await refresh_wildcard_agent_server_tools(session, agent.id)
     if tool_refresh_failures:
         await record_agent_tool_refresh_failures(
@@ -1075,7 +1095,6 @@ async def stream_agent_chat(
         workspace_id=workspace_id,
         agent=agent,
     )
-    latest_message = latest_user_message(payload.messages)
     if message_requests_denied_mcp_tool(latest_message, guardrail_filter):
         stream = preflight_blocked_tool_stream(guardrail_filter)
     else:

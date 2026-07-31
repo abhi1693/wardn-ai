@@ -46,6 +46,24 @@ def kubernetes_runtime_log_extra(
     }
 
 
+def custom_network_policy_replace_body(
+    custom_policy: KubernetesCustomNetworkPolicy,
+    existing_policy: Any,
+) -> dict[str, Any]:
+    body = dict(custom_policy.body)
+    metadata = dict(body.get("metadata") or {})
+    resource_version = ""
+    if isinstance(existing_policy, dict):
+        existing_metadata = existing_policy.get("metadata")
+        if isinstance(existing_metadata, dict):
+            value = existing_metadata.get("resourceVersion")
+            resource_version = value if isinstance(value, str) else ""
+    if resource_version:
+        metadata["resourceVersion"] = resource_version
+        body["metadata"] = metadata
+    return body
+
+
 class KubernetesRuntimeReconciler:
     def __init__(
         self,
@@ -249,6 +267,20 @@ class KubernetesRuntimeReconciler:
                     f"{self._api_error_detail(exc)}"
                 ) from exc
             try:
+                existing_policy = self._call_api(
+                    self.custom_objects.get_namespaced_custom_object,
+                    group=policy_ref.group,
+                    version=policy_ref.version,
+                    namespace=manifest.names.namespace,
+                    plural=policy_ref.plural,
+                    name=policy_ref.name,
+                )
+            except self.api_exception_class as read_exc:
+                raise KubernetesReconcileError(
+                    f"Kubernetes {policy_ref.kind} read failed before replace: "
+                    f"{self._api_error_detail(read_exc)}"
+                ) from read_exc
+            try:
                 self._call_api(
                     self.custom_objects.replace_namespaced_custom_object,
                     group=policy_ref.group,
@@ -256,7 +288,7 @@ class KubernetesRuntimeReconciler:
                     namespace=manifest.names.namespace,
                     plural=policy_ref.plural,
                     name=policy_ref.name,
-                    body=custom_policy.body,
+                    body=custom_network_policy_replace_body(custom_policy, existing_policy),
                 )
             except self.api_exception_class as replace_exc:
                 if self._is_status(replace_exc, 404):
