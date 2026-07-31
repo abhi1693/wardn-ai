@@ -1881,6 +1881,10 @@ def test_execute_agent_search_tools_returns_enabled_skills_as_dynamic_results() 
         skills.WARDN_GET_SKILL_TOOL_NAME,
     ]
     assert payload["tools"][0]["toolType"] == "skill"
+    assert payload["tools"][0]["skill"]["skillId"] == skills.WARDN_FIND_SKILLS_ID
+    assert payload["tools"][0]["skill"]["installed"] is True
+    assert payload["tools"][0]["skill"]["temporary"] is False
+    assert payload["tools"][0]["skill"]["permissions"][-1]["key"] == "advisory_only"
     assert payload["totalReachable"] == 2
     assert payload["ranking"]["executable"][0]["toolType"] == "skill"
 
@@ -3839,6 +3843,8 @@ async def test_quick_start_workspace_agent_creates_default_agent(monkeypatch) ->
     assert agent.workspace_id == workspace_id
     assert agent.provider_credential_id == workspace_credential.id
     assert agent.model_name == "gpt-4o-mini"
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
     assert response.agent.tool_count == 4
     assert response.agent.server_count == 1
     assert response.agent.id == agent.id
@@ -3931,12 +3937,206 @@ async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) ->
     )
 
     assert response.agent.id == agent.id
+    assert response.agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
     assert response.agent.provider_credential_id == credential.id
     assert response.agent.model_name == "gpt-4o-mini"
     assert isinstance(session.added[0], WorkspaceConversation)
     assert response.conversation.agent_id == agent.id
     assert response.messages == []
     assert sync_calls == [agent.id]
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_skills_returns_find_skills_status_and_recommendations(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[skills.WARDN_FIND_SKILLS_ID],
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/rancher-kubernetes",
+        config_name="rancher-qa",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={"provider": "kubernetes"},
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def list_agents(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return [(agent, 0, 0)], ""
+
+    async def list_installations(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return [installation]
+
+    async def fetch_wardn_hub_skill_audit(*args, **kwargs):
+        return {
+            "audit": {
+                "status": "pass",
+                "riskLevel": "low",
+                "score": 100,
+                "rank": "S",
+                "summary": "No known threat patterns.",
+            }
+        }
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.repository, "list_agents", list_agents)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service, "fetch_wardn_hub_skill_audit", fetch_wardn_hub_skill_audit)
+
+    response = await service.list_workspace_skills(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+    )
+
+    find_skills = response.skills[0]
+    assert find_skills.id == skills.WARDN_FIND_SKILLS_ID
+    assert find_skills.installed is True
+    assert find_skills.temporary is False
+    assert find_skills.audit_status == "pass"
+    assert find_skills.health_status == "healthy"
+    assert find_skills.enabled_agent_ids == [agent.id]
+    assert find_skills.permissions[-1].key == "advisory_only"
+    assert response.recommendations[0].id == "kubernetes-ops"
+    assert response.recommendations[0].connection_names == [
+        "io.github.example/rancher-kubernetes (rancher-qa)"
+    ]
+    assert {workflow.id for workflow in response.guided_workflows} >= {
+        "kubernetes-ops",
+        "email-triage",
+        "gsc-checks",
+        "github-reviews",
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_workspace_skills_returns_temporary_guidance(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def search_wardn_hub_skills(arguments):
+        assert arguments == {"query": "github review", "limit": 3}
+        return {
+            "query": "github review",
+            "count": 1,
+            "results": [
+                {
+                    "id": "owner/repo/github-review",
+                    "name": "github-review",
+                    "description": "Review PRs safely.",
+                    "url": "https://hub.wardnai.dev/skills/owner/repo/github-review",
+                    "source": "owner/repo",
+                    "sourceOwner": "owner",
+                    "sourceName": "repo",
+                    "isOfficial": False,
+                    "installs": 5,
+                    "auditStatus": "pass",
+                    "auditScore": 98,
+                    "auditRank": "A",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service, "search_wardn_hub_skills", search_wardn_hub_skills)
+
+    response = await service.search_workspace_skills(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        query="github review",
+        limit=3,
+    )
+
+    result = response.results[0]
+    assert result.id == "owner/repo/github-review"
+    assert result.temporary is True
+    assert result.installed is False
+    assert result.permissions[-1].key == "advisory_only"
+
+
+@pytest.mark.asyncio
+async def test_install_find_skills_for_agent_enables_agent_skill(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        description="Default assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[],
+        is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+
+    async def get_agent(*args, **kwargs):
+        assert kwargs["agent_id"] == agent.id
+        assert kwargs["workspace_id"] == workspace_id
+        return agent
+
+    async def require_agent_scope_permission(*args, **kwargs):
+        assert kwargs["scope"] == "workspace"
+        assert kwargs["workspace_id"] == workspace_id
+        return workspace_id
+
+    async def count_agent_servers(*args, **kwargs):
+        return 2
+
+    async def count_agent_tools(*args, **kwargs):
+        return 7
+
+    monkeypatch.setattr(service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(
+        service,
+        "require_agent_scope_permission",
+        require_agent_scope_permission,
+    )
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    session = FakeSession()
+    response = await service.install_find_skills_for_agent(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+    )
+
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.server_count == 2
+    assert response.tool_count == 7
 
 
 @pytest.mark.asyncio

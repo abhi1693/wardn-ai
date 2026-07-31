@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any
 
+from app.modules.agents.skills import skill_tool_capability_metadata
 from app.modules.agents.tool_execution import tool_execution_result
 from app.modules.agents.types import (
     FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
@@ -117,7 +118,8 @@ def agent_dynamic_function_tools(
             "name": AGENT_SEARCH_TOOLS_TOOL_NAME,
             "description": (
                 "Diagnose tool capability for this agent. Searches reachable Wardn tools, "
-                "installed workspace MCP tools, and policy-denied assigned MCP tools. The "
+                "installed workspace MCP tools, policy-denied assigned MCP tools, and enabled "
+                "Wardn Hub skill guidance capabilities. The "
                 "response explains whether each relevant match is executable, installed but "
                 "not assigned, or assigned but blocked by policy. Only returned tools with "
                 "capabilityStatus=allowed can be passed to run_tool. Search by capability, "
@@ -151,12 +153,14 @@ def agent_dynamic_function_tools(
             "type": "function",
             "name": AGENT_RUN_TOOL_TOOL_NAME,
             "description": (
-                "Execute one MCP tool available to this agent. Use the exact toolName returned "
+                "Execute one MCP tool or read-only Wardn skill capability available to this "
+                "agent. Use the exact toolName returned "
                 f"by {AGENT_SEARCH_TOOLS_TOOL_NAME}; put the target tool arguments in tool_args. "
                 "Do not copy configuredTarget into tool_args; Wardn uses configuredTarget to "
                 "route to the configured MCP installation. "
                 "The target tool is resolved server-side and evaluated by guardrail policies "
-                "again immediately before execution."
+                "again immediately before execution. Wardn skill results are advisory and do "
+                "not bypass MCP access rules."
             ),
             "parameters": {
                 "type": "object",
@@ -781,6 +785,7 @@ def skill_tool_search_result(
         "toolSchemaId": tool_name,
         "readOnly": True,
         "params": summarize_input_schema(tool.get("parameters")),
+        "skill": skill_tool_capability_metadata(tool_name),
     }
 
 

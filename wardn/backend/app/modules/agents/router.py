@@ -17,6 +17,8 @@ from app.modules.agents.schemas import (
     AgentRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
+    AgentSkillCatalogResponse,
+    AgentSkillSearchResponse,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
     AgentToolAssignmentUpdate,
@@ -31,12 +33,15 @@ from app.modules.agents.service import (
     get_agent,
     get_workspace_agent_run,
     get_workspace_conversation,
+    install_find_skills_for_agent,
     list_agent_tools,
     list_agents,
     list_available_agent_tools,
     list_workspace_agent_runs,
+    list_workspace_skills,
     quick_start_workspace_agent,
     replace_agent_tools,
+    search_workspace_skills,
     stream_agent_chat,
     update_agent,
 )
@@ -51,6 +56,11 @@ workspace_router = APIRouter(
 workspace_runs_router = APIRouter(
     prefix="/organizations/{organization_id}/workspaces/{workspace_id}/agent-runs",
     tags=["workspace-agent-runs"],
+)
+
+workspace_skills_router = APIRouter(
+    prefix="/organizations/{organization_id}/workspaces/{workspace_id}/skills",
+    tags=["workspace-skills"],
 )
 
 
@@ -218,6 +228,78 @@ async def get_workspace_agent_run_route(
         organization_id,
         workspace_id,
         agent_run_id,
+    )
+
+
+@workspace_skills_router.get(
+    "",
+    response_model=AgentSkillCatalogResponse,
+    operation_id="workspace_skills_list",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def list_workspace_skills_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentSkillCatalogResponse:
+    return await list_workspace_skills(session, current_user, organization_id, workspace_id)
+
+
+@workspace_skills_router.get(
+    "/search",
+    response_model=AgentSkillSearchResponse,
+    operation_id="workspace_skills_search",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def search_workspace_skills_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[str, Query(min_length=3, max_length=120)],
+    limit: Annotated[int, Query(ge=1, le=8)] = 8,
+) -> AgentSkillSearchResponse:
+    return await search_workspace_skills(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        query=query,
+        limit=limit,
+    )
+
+
+@workspace_skills_router.post(
+    "/find-skills/agents/{agent_id}/install",
+    response_model=AgentRead,
+    operation_id="workspace_skills_install_find_skills_for_agent",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def install_find_skills_for_agent_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentRead:
+    return await install_find_skills_for_agent(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_id,
     )
 
 

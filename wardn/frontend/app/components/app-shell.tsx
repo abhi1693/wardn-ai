@@ -8,6 +8,7 @@ import {
   Replace,
   Settings,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -86,6 +87,12 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: PlugZap,
     },
     {
+      label: "Skills",
+      href: `${workspaceBasePath}/skills`,
+      activeKey: "workspace-skills",
+      icon: Sparkles,
+    },
+    {
       label: "Access",
       href: `${workspaceBasePath}/guardrails`,
       activeKey: "workspace-guardrails",
@@ -126,6 +133,7 @@ type AppShellProps = {
     | "workspace-dashboard"
     | "workspace-chat"
     | "workspace-runs"
+    | "workspace-skills"
     | "workspace-observability"
     | "catalog"
     | "llm-credentials"
@@ -164,6 +172,7 @@ export function AppShell({
     active === "workspace-dashboard" ||
     active === "workspace-chat" ||
     active === "workspace-runs" ||
+    active === "workspace-skills" ||
     active === "install" ||
     active === "runtime" ||
     active === "workspace-observability" ||

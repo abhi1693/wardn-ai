@@ -61,6 +61,7 @@ from app.modules.agents.skills import (
     agent_skill_tool_display_name,
     execute_agent_skill_tool_call,
     is_agent_skill_tool_enabled,
+    skill_tool_capability_metadata,
 )
 from app.modules.agents.tool_execution import (
     execute_agent_tool_call_with_progress,
@@ -986,6 +987,7 @@ async def execute_agent_skill_tool_call_stream(
         tool_name=tool_name,
         status="running",
         arguments=tool_call.arguments,
+        details={"skill": skill_tool_capability_metadata(tool_call.name)},
     )
     try:
         output = await execute_agent_skill_tool_call(tool_call.name, tool_call.arguments)
@@ -998,6 +1000,10 @@ async def execute_agent_skill_tool_call_stream(
         status=execution.status,
         error=execution.error,
         result=execution.result,
+        details={
+            **(execution.details or {}),
+            "skill": skill_tool_capability_metadata(tool_call.name),
+        },
     )
     yield execution
 
@@ -1160,6 +1166,7 @@ async def execute_agent_dynamic_tool_call_stream(
                     "displayName": skill_tool_name,
                     "serverName": "wardn-hub-skills",
                     "configuredTarget": "wardn-hub",
+                    "skill": skill_tool_capability_metadata(target_name),
                 }
             },
         )

@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -164,11 +166,32 @@ from app.modules.agents.schemas import (
     AgentRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
+    AgentSkillAgentRead,
+    AgentSkillCatalogResponse,
+    AgentSkillPermissionRead,
+    AgentSkillRead,
+    AgentSkillRecommendationRead,
+    AgentSkillSearchResponse,
+    AgentSkillSearchResultRead,
+    AgentSkillWorkflowRead,
     AgentToolAssignmentUpdate,
     AgentToolListResponse,
     AgentUpdate,
 )
-from app.modules.agents.skills import normalize_agent_skill_ids
+from app.modules.agents.skills import (
+    WARDN_FIND_SKILLS_DESCRIPTION,
+    WARDN_FIND_SKILLS_ID,
+    WARDN_FIND_SKILLS_NAME,
+    WARDN_FIND_SKILLS_SOURCE,
+    WARDN_FIND_SKILLS_SOURCE_URL,
+    WARDN_FIND_SKILLS_URL,
+    fetch_wardn_hub_skill_audit,
+    find_skills_permission_summaries,
+    normalize_agent_skill_ids,
+    rejecting_audit_summary,
+    search_wardn_hub_skills,
+    skill_audit_summary,
+)
 from app.modules.agents.tool_execution import (
     AGENT_TOOL_BLOCKED_PREFIX as AGENT_TOOL_BLOCKED_PREFIX,
 )
@@ -234,8 +257,85 @@ QUICK_START_AGENT_NAME = "Workspace Assistant"
 QUICK_START_AGENT_DESCRIPTION = "Default assistant for workspace chat."
 QUICK_START_AGENT_INSTRUCTIONS = (
     "You are a workspace assistant. Use available tools when they help answer accurately. "
-    "Ask before destructive actions."
+    "When no obvious workflow exists, search Wardn Hub skills for audited guidance, then use "
+    "workspace tools through Wardn's tool search and execution flow. Ask before destructive "
+    "actions."
 )
+GUIDED_SKILL_WORKFLOWS = [
+    {
+        "id": "kubernetes-ops",
+        "title": "Kubernetes ops",
+        "description": (
+            "Use cluster-aware runbooks for namespaces, workloads, ingress, and policy checks."
+        ),
+        "query": "kubernetes ops",
+        "required_connection_hints": ["kubernetes", "rancher", "cilium", "calico"],
+    },
+    {
+        "id": "email-triage",
+        "title": "Email triage",
+        "description": (
+            "Find urgent mail, summarize threads, and prepare responses with mailbox tools."
+        ),
+        "query": "email triage",
+        "required_connection_hints": ["gmail", "mail"],
+    },
+    {
+        "id": "gsc-checks",
+        "title": "GSC checks",
+        "description": (
+            "Review indexing, sitemap, performance, and ownership status with GSC tools."
+        ),
+        "query": "search console",
+        "required_connection_hints": ["gsc", "search console"],
+    },
+    {
+        "id": "github-reviews",
+        "title": "GitHub reviews",
+        "description": (
+            "Build a review queue, inspect PR context, and keep review actions read-only "
+            "by default."
+        ),
+        "query": "github review",
+        "required_connection_hints": ["github", "pull request", "repo"],
+    },
+]
+SKILL_RECOMMENDATION_RULES = [
+    {
+        "id": "kubernetes-ops",
+        "title": "Kubernetes ops skills",
+        "description": (
+            "Recommended because this workspace has Kubernetes or Rancher-style connections."
+        ),
+        "query": "kubernetes ops",
+        "keywords": ("kubernetes", "k8s", "rancher", "cilium", "calico"),
+        "workflow_ids": ["kubernetes-ops"],
+    },
+    {
+        "id": "email-triage",
+        "title": "Email triage skills",
+        "description": "Recommended because this workspace has mailbox connections.",
+        "query": "email triage",
+        "keywords": ("gmail", "mail", "email", "inbox"),
+        "workflow_ids": ["email-triage"],
+    },
+    {
+        "id": "gsc-checks",
+        "title": "Google Search Console skills",
+        "description": "Recommended because this workspace has search console or SEO connections.",
+        "query": "search console",
+        "keywords": ("google-search-console", "search console", "gsc", "seo"),
+        "workflow_ids": ["gsc-checks"],
+    },
+    {
+        "id": "github-reviews",
+        "title": "GitHub review skills",
+        "description": "Recommended because this workspace has repository or PR connections.",
+        "query": "github review",
+        "keywords": ("github", "gitlab", "pull request", "repo"),
+        "workflow_ids": ["github-reviews"],
+    },
+]
 
 
 @dataclass(frozen=True)
@@ -666,6 +766,256 @@ async def sync_quick_start_agent_tools(
     )
 
 
+def skill_permission_reads() -> list[AgentSkillPermissionRead]:
+    return [
+        AgentSkillPermissionRead(**permission)
+        for permission in find_skills_permission_summaries()
+    ]
+
+
+def agent_skill_agent_read(agent: Agent) -> AgentSkillAgentRead:
+    return AgentSkillAgentRead(
+        id=agent.id,
+        name=agent.name,
+        enabled_skill_ids=normalize_agent_skill_ids(agent.skill_ids or []),
+    )
+
+
+async def find_skills_audit_metadata() -> dict[str, Any]:
+    try:
+        payload = await asyncio.wait_for(
+            fetch_wardn_hub_skill_audit(WARDN_FIND_SKILLS_ID),
+            timeout=5.0,
+        )
+    except Exception as exc:
+        return {
+            "audit_status": "unknown",
+            "audit_score": None,
+            "audit_rank": None,
+            "audit_summary": "",
+            "health_status": "unhealthy",
+            "health_detail": f"Wardn Hub audit check failed: {exc}",
+        }
+
+    audit = skill_audit_summary(payload.get("audit"))
+    if not audit:
+        return {
+            "audit_status": "unknown",
+            "audit_score": None,
+            "audit_rank": None,
+            "audit_summary": "",
+            "health_status": "unknown",
+            "health_detail": "Wardn Hub did not return an audit summary.",
+        }
+
+    audit_status = str(audit.get("status") or "unknown")
+    health_status = "unhealthy" if rejecting_audit_summary(audit) else "healthy"
+    health_detail = str(audit.get("summary") or "")
+    return {
+        "audit_status": audit_status,
+        "audit_score": audit.get("score"),
+        "audit_rank": audit.get("rank"),
+        "audit_summary": health_detail,
+        "health_status": health_status,
+        "health_detail": health_detail or f"Wardn Hub audit status is {audit_status}.",
+    }
+
+
+def find_skills_read(
+    *,
+    agents: list[Agent],
+    audit_metadata: dict[str, Any],
+) -> AgentSkillRead:
+    enabled_agents = [
+        agent
+        for agent in agents
+        if WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(agent.skill_ids or [])
+    ]
+    return AgentSkillRead(
+        id=WARDN_FIND_SKILLS_ID,
+        name=WARDN_FIND_SKILLS_NAME,
+        description=WARDN_FIND_SKILLS_DESCRIPTION,
+        url=WARDN_FIND_SKILLS_URL,
+        source=WARDN_FIND_SKILLS_SOURCE,
+        source_url=WARDN_FIND_SKILLS_SOURCE_URL,
+        source_owner="abhi1693",
+        source_name="wardn-hub",
+        audit_status=str(audit_metadata.get("audit_status") or "unknown"),
+        audit_score=audit_metadata.get("audit_score"),
+        audit_rank=audit_metadata.get("audit_rank"),
+        audit_summary=str(audit_metadata.get("audit_summary") or ""),
+        permissions=skill_permission_reads(),
+        installed=bool(enabled_agents),
+        temporary=False,
+        enabled_agent_ids=[agent.id for agent in enabled_agents],
+        enabled_agent_names=[agent.name for agent in enabled_agents],
+        health_status=audit_metadata.get("health_status") or "unknown",
+        health_detail=str(audit_metadata.get("health_detail") or ""),
+    )
+
+
+def installation_connection_name(installation: MCPServerInstallation) -> str:
+    return f"{installation.server_name} ({installation.config_name})"
+
+
+def installed_connection_text(installation: MCPServerInstallation) -> str:
+    parts = [
+        installation.server_name,
+        installation.config_name,
+        installation.installed_version,
+    ]
+    config = installation.runtime_config if isinstance(installation.runtime_config, dict) else {}
+    for value in config.values():
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, dict):
+            parts.extend(str(item) for item in value.values() if isinstance(item, str))
+    return " ".join(parts).casefold()
+
+
+def workspace_skill_recommendations(
+    installations: list[MCPServerInstallation],
+) -> list[AgentSkillRecommendationRead]:
+    recommendations: list[AgentSkillRecommendationRead] = []
+    for rule in SKILL_RECOMMENDATION_RULES:
+        keywords = rule["keywords"]
+        matched = [
+            installation
+            for installation in installations
+            if installation.status == "enabled"
+            and any(keyword in installed_connection_text(installation) for keyword in keywords)
+        ]
+        if not matched:
+            continue
+        connection_names = [
+            installation_connection_name(installation) for installation in matched
+        ]
+        recommendations.append(
+            AgentSkillRecommendationRead(
+                id=rule["id"],
+                title=rule["title"],
+                description=rule["description"],
+                query=rule["query"],
+                connection_ids=[installation.id for installation in matched],
+                connection_names=connection_names,
+                workflow_ids=list(rule["workflow_ids"]),
+            )
+        )
+    return recommendations
+
+
+def workspace_guided_skill_workflows() -> list[AgentSkillWorkflowRead]:
+    return [AgentSkillWorkflowRead(**workflow) for workflow in GUIDED_SKILL_WORKFLOWS]
+
+
+async def list_workspace_skills(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> AgentSkillCatalogResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    rows, _next_cursor = await repository.list_agents(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        user_id=user.id,
+        is_superuser=user.is_superuser,
+        include_inactive=False,
+        limit=100,
+    )
+    agents = [agent for agent, _server_count, _tool_count in rows]
+    installations = await mcp_registry_repository.list_installations(
+        session,
+        workspace_id=workspace_id,
+    )
+    audit_metadata = await find_skills_audit_metadata()
+    return AgentSkillCatalogResponse(
+        skills=[find_skills_read(agents=agents, audit_metadata=audit_metadata)],
+        agents=[agent_skill_agent_read(agent) for agent in agents],
+        recommendations=workspace_skill_recommendations(installations),
+        guided_workflows=workspace_guided_skill_workflows(),
+    )
+
+
+def skill_search_result_read(item: dict[str, Any]) -> AgentSkillSearchResultRead:
+    return AgentSkillSearchResultRead(
+        id=str(item.get("id") or ""),
+        name=str(item.get("name") or ""),
+        description=str(item.get("description") or ""),
+        url=str(item.get("url") or ""),
+        source=str(item.get("source") or ""),
+        source_owner=str(item.get("sourceOwner") or ""),
+        source_name=str(item.get("sourceName") or ""),
+        is_official=bool(item.get("isOfficial")),
+        installs=int(item.get("installs") or 0),
+        audit_status=item.get("auditStatus"),
+        audit_score=item.get("auditScore"),
+        audit_rank=item.get("auditRank"),
+        installed=item.get("id") == WARDN_FIND_SKILLS_ID,
+        temporary=item.get("id") != WARDN_FIND_SKILLS_ID,
+        permissions=skill_permission_reads(),
+    )
+
+
+async def search_workspace_skills(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    query: str,
+    limit: int,
+) -> AgentSkillSearchResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    try:
+        payload = await search_wardn_hub_skills({"query": query, "limit": limit})
+    except ValueError as exc:
+        raise InvalidAgentScopeError(str(exc)) from exc
+    return AgentSkillSearchResponse(
+        query=str(payload.get("query") or query),
+        count=int(payload.get("count") or 0),
+        results=[
+            skill_search_result_read(item)
+            for item in payload.get("results", [])
+            if isinstance(item, dict)
+        ],
+    )
+
+
+async def install_find_skills_for_agent(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+) -> AgentRead:
+    agent = await repository.get_agent(
+        session,
+        organization_id=organization_id,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        include_inactive=True,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+    await require_agent_scope_permission(
+        session,
+        user,
+        organization_id,
+        scope="workspace",
+        workspace_id=workspace_id,
+    )
+    skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
+    if WARDN_FIND_SKILLS_ID not in skill_ids:
+        agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
+        await session.flush()
+        await session.refresh(agent)
+    server_count = await repository.count_agent_servers(session, agent.id)
+    tool_count = await repository.count_agent_tools(session, agent.id)
+    return agent_response(agent, server_count=server_count, tool_count=tool_count)
+
+
 async def quick_start_workspace_agent(
     session: AsyncSession,
     user: User,
@@ -701,7 +1051,7 @@ async def quick_start_workspace_agent(
             instructions=QUICK_START_AGENT_INSTRUCTIONS,
             scope="workspace",
             model_name=model_name,
-            skill_ids=[],
+            skill_ids=[WARDN_FIND_SKILLS_ID],
             is_active=True,
         )
         session.add(agent)
@@ -729,6 +1079,10 @@ async def quick_start_workspace_agent(
             changed = True
         if not agent.is_active:
             agent.is_active = True
+            changed = True
+        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
+        if WARDN_FIND_SKILLS_ID not in skill_ids:
+            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
             changed = True
         if changed:
             await session.flush()

@@ -252,6 +252,89 @@ class AgentAvailableToolListResponse(APIModel):
     tools: list[AgentAvailableToolRead]
 
 
+class AgentSkillAgentRead(APIModel):
+    id: uuid.UUID
+    name: str
+    enabled_skill_ids: list[str] = Field(default_factory=list)
+
+
+class AgentSkillPermissionRead(APIModel):
+    key: str
+    label: str
+    description: str
+
+
+class AgentSkillRead(APIModel):
+    id: str
+    name: str
+    description: str
+    url: str
+    source: str
+    source_url: str | None = None
+    source_owner: str = ""
+    source_name: str = ""
+    audit_status: str = "unknown"
+    audit_score: int | None = None
+    audit_rank: str | None = None
+    audit_summary: str = ""
+    permissions: list[AgentSkillPermissionRead] = Field(default_factory=list)
+    installed: bool
+    temporary: bool
+    enabled_agent_ids: list[uuid.UUID] = Field(default_factory=list)
+    enabled_agent_names: list[str] = Field(default_factory=list)
+    health_status: Literal["healthy", "unhealthy", "unknown"] = "unknown"
+    health_detail: str = ""
+
+
+class AgentSkillSearchResultRead(APIModel):
+    id: str
+    name: str
+    description: str
+    url: str
+    source: str
+    source_owner: str = ""
+    source_name: str = ""
+    is_official: bool = False
+    installs: int = 0
+    audit_status: str | None = None
+    audit_score: int | None = None
+    audit_rank: str | None = None
+    installed: bool = False
+    temporary: bool = True
+    permissions: list[AgentSkillPermissionRead] = Field(default_factory=list)
+
+
+class AgentSkillSearchResponse(APIModel):
+    query: str
+    count: int
+    results: list[AgentSkillSearchResultRead] = Field(default_factory=list)
+
+
+class AgentSkillRecommendationRead(APIModel):
+    id: str
+    title: str
+    description: str
+    query: str
+    connection_ids: list[uuid.UUID] = Field(default_factory=list)
+    connection_names: list[str] = Field(default_factory=list)
+    workflow_ids: list[str] = Field(default_factory=list)
+
+
+class AgentSkillWorkflowRead(APIModel):
+    id: str
+    title: str
+    description: str
+    query: str
+    required_connection_hints: list[str] = Field(default_factory=list)
+
+
+class AgentSkillCatalogResponse(APIModel):
+    skills: list[AgentSkillRead] = Field(default_factory=list)
+    agents: list[AgentSkillAgentRead] = Field(default_factory=list)
+    recommendations: list[AgentSkillRecommendationRead] = Field(default_factory=list)
+    guided_workflows: list[AgentSkillWorkflowRead] = Field(default_factory=list)
+
+
 class AgentCapabilityDiagnosisSummary(APIModel):
     installed: int
     assigned: int

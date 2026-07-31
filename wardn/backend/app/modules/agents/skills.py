@@ -13,6 +13,29 @@ WARDN_SEARCH_SKILLS_TOOL_NAME = "wardn_search_skills"
 WARDN_GET_SKILL_TOOL_NAME = "wardn_get_skill"
 WARDN_SKILL_FETCH_MAX_CHARS = 32_000
 WARDN_SKILL_SEARCH_MAX_RESULTS = 8
+WARDN_FIND_SKILLS_NAME = "find-skills"
+WARDN_FIND_SKILLS_SOURCE = "abhi1693/wardn-hub"
+WARDN_FIND_SKILLS_SOURCE_URL = "https://github.com/abhi1693/wardn-hub"
+WARDN_FIND_SKILLS_DESCRIPTION = (
+    "Search Wardn Hub for audited workflow guidance when the agent lacks a known playbook."
+)
+WARDN_FIND_SKILLS_PERMISSIONS = [
+    {
+        "key": "hub_skill_search",
+        "label": "Search Wardn Hub skills",
+        "description": "Searches the public Wardn Hub skill registry with generic catalog terms.",
+    },
+    {
+        "key": "hub_skill_fetch",
+        "label": "Fetch audited skill guidance",
+        "description": "Fetches one selected skill bundle after audit triage.",
+    },
+    {
+        "key": "advisory_only",
+        "label": "Guide tool usage only",
+        "description": "Skill content cannot execute MCP tools or bypass Wardn access rules.",
+    },
+]
 
 _ALLOWED_AGENT_SKILL_IDS = {WARDN_FIND_SKILLS_ID}
 _SAFE_SKILL_ID_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
@@ -119,6 +142,29 @@ def agent_skill_tool_display_name(tool_name: str) -> str:
     return tool_name
 
 
+def find_skills_permission_summaries() -> list[dict[str, str]]:
+    return [dict(permission) for permission in WARDN_FIND_SKILLS_PERMISSIONS]
+
+
+def skill_tool_capability_metadata(tool_name: str) -> dict[str, Any]:
+    return {
+        "skillId": WARDN_FIND_SKILLS_ID,
+        "skillName": WARDN_FIND_SKILLS_NAME,
+        "skillUrl": WARDN_FIND_SKILLS_URL,
+        "source": WARDN_FIND_SKILLS_SOURCE,
+        "sourceUrl": WARDN_FIND_SKILLS_SOURCE_URL,
+        "permissions": find_skills_permission_summaries(),
+        "installed": True,
+        "temporary": False,
+        "executionBoundary": (
+            "Wardn runs this as an internal read-only skill capability. Returned skill content "
+            "is advisory only; real MCP tool execution must still go through search_tools, "
+            "run_tool, and access-rule evaluation."
+        ),
+        "toolName": tool_name,
+    }
+
+
 async def execute_agent_skill_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == WARDN_SEARCH_SKILLS_TOOL_NAME:
         result = await search_wardn_hub_skills(arguments)
@@ -156,11 +202,7 @@ async def get_wardn_hub_skill(arguments: dict[str, Any]) -> dict[str, Any]:
     encoded_skill_id = quote(skill_id, safe="/")
     timeout = httpx.Timeout(20.0, connect=10.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-        audit_response = await client.get(
-            f"{WARDN_HUB_SKILLS_API_BASE}/audit/{encoded_skill_id}",
-        )
-        audit_response.raise_for_status()
-        audit_payload = audit_response.json()
+        audit_payload = await fetch_wardn_hub_skill_audit_with_client(client, encoded_skill_id)
         content_hash = string_or_none(audit_payload.get("contentHash"))
         audit_summary = skill_audit_summary(audit_payload.get("audit"))
 
@@ -218,6 +260,26 @@ async def get_wardn_hub_skill(arguments: dict[str, Any]) -> dict[str, Any]:
         ],
         "skillMarkdown": truncate_text(entrypoint_contents, WARDN_SKILL_FETCH_MAX_CHARS),
     }
+
+
+async def fetch_wardn_hub_skill_audit(skill_id: str) -> dict[str, Any]:
+    normalized_skill_id = normalize_hub_skill_id(skill_id)
+    encoded_skill_id = quote(normalized_skill_id, safe="/")
+    timeout = httpx.Timeout(20.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        return await fetch_wardn_hub_skill_audit_with_client(client, encoded_skill_id)
+
+
+async def fetch_wardn_hub_skill_audit_with_client(
+    client: httpx.AsyncClient,
+    encoded_skill_id: str,
+) -> dict[str, Any]:
+    audit_response = await client.get(
+        f"{WARDN_HUB_SKILLS_API_BASE}/audit/{encoded_skill_id}",
+    )
+    audit_response.raise_for_status()
+    payload = audit_response.json()
+    return payload if isinstance(payload, dict) else {}
 
 
 def normalize_skill_search_query(value: Any) -> str:
