@@ -35,11 +35,13 @@ class KubernetesClientFactory:
     def load(self) -> KubernetesClientSet:
         loaded_config = self.load_config()
         client_module = self._client_module or importlib.import_module("kubernetes.client")
+        custom_objects_api = getattr(client_module, "CustomObjectsApi", None)
         return KubernetesClientSet(
             core_v1=client_module.CoreV1Api(),
             apps_v1=client_module.AppsV1Api(),
             networking_v1=client_module.NetworkingV1Api(),
             loaded_config=loaded_config,
+            custom_objects=custom_objects_api() if custom_objects_api is not None else None,
         )
 
     def load_config(self) -> str:

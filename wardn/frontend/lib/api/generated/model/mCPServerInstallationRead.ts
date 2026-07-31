@@ -20,6 +20,7 @@ export interface MCPServerInstallationRead {
   latestServer: MCPServerDocument;
   latestVersion: string;
   runtimeConfig: MCPServerInstallationReadRuntimeConfig;
+  runtimeProvider: string;
   server: MCPServerDocument;
   serverName: string;
   status: string;

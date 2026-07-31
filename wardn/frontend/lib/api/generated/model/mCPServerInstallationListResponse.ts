@@ -10,4 +10,5 @@ import type { MCPServerInstallationRead } from './mCPServerInstallationRead';
 export interface MCPServerInstallationListResponse {
   installations: MCPServerInstallationRead[];
   metadata: CursorPageMetadata;
+  packageRuntimeProvider: string;
 }

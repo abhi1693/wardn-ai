@@ -117,6 +117,7 @@ export function InstallFormClient({
   initialServerNextCursor = "",
   initialServers = [],
   organizationId,
+  packageRuntimeProvider,
   secretStores,
   workspaceId,
 }: InstallFormClientProps) {
@@ -219,7 +220,9 @@ export function InstallFormClient({
         .join(" · ")
     : "";
   const selectedServerHubHref = selectedServer ? hubServerHref(selectedServer) : "";
-  const showNetworkPolicyControls = selectedInstallTargetDetails?.kind === "package";
+  const showNetworkPolicyControls =
+    selectedInstallTargetDetails?.kind === "package" &&
+    packageRuntimeProvider.trim().toLowerCase() === "kubernetes";
   const needsSecretBackend =
     selectedFields.some((field) => field.secret || field.format === "file") ||
     customHeaders.some((header) => header.name.trim() || header.value.trim());

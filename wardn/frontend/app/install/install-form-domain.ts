@@ -71,6 +71,7 @@ export type InstallFormClientProps = {
   initialServerNextCursor?: string;
   initialServers?: MCPRegistryServerResponse[];
   organizationId: string;
+  packageRuntimeProvider: string;
   secretStores: SecretStoreRead[];
   workspaceId: string;
 };

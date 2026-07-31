@@ -4510,11 +4510,16 @@
           },
           "metadata": {
             "$ref": "#/components/schemas/CursorPageMetadata"
+          },
+          "packageRuntimeProvider": {
+            "title": "Packageruntimeprovider",
+            "type": "string"
           }
         },
         "required": [
           "installations",
-          "metadata"
+          "metadata",
+          "packageRuntimeProvider"
         ],
         "title": "MCPServerInstallationListResponse",
         "type": "object"
@@ -4577,6 +4582,10 @@
             "title": "Runtimeconfig",
             "type": "object"
           },
+          "runtimeProvider": {
+            "title": "Runtimeprovider",
+            "type": "string"
+          },
           "server": {
             "$ref": "#/components/schemas/MCPServerDocument"
           },
@@ -4613,6 +4622,7 @@
           "updateAvailable",
           "status",
           "installType",
+          "runtimeProvider",
           "installPath",
           "runtimeConfig",
           "installedAt",

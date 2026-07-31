@@ -76,6 +76,7 @@ class KubernetesClientSet:
     apps_v1: Any
     networking_v1: Any
     loaded_config: str
+    custom_objects: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,21 @@ class KubernetesRuntimeNames:
     service_name: str
     secret_name: str
     ingress_name: str
+
+
+@dataclass(frozen=True)
+class KubernetesCustomNetworkPolicyRef:
+    group: str
+    version: str
+    plural: str
+    kind: str
+    name: str
+
+
+@dataclass(frozen=True)
+class KubernetesCustomNetworkPolicy:
+    ref: KubernetesCustomNetworkPolicyRef
+    body: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -99,7 +115,11 @@ class KubernetesRuntimeManifest:
     deployment: Any
     service: Any
     network_policies: list[Any]
+    custom_network_policies: list[KubernetesCustomNetworkPolicy] = field(default_factory=list)
     network_policy_cleanup_names: list[str] = field(default_factory=list)
+    custom_network_policy_cleanup_refs: list[KubernetesCustomNetworkPolicyRef] = field(
+        default_factory=list
+    )
     ingress: Any | None = None
     health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
 

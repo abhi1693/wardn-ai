@@ -6,7 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 from app.modules.mcp_registry import installation_jobs
-from app.modules.mcp_registry.exceptions import MCPServerPackageUnavailableError
+from app.modules.mcp_registry.exceptions import (
+    MCPServerInstallationUnsupportedError,
+    MCPServerPackageUnavailableError,
+)
 from app.modules.mcp_registry.job_worker import MCPJobCleanupError, MCPJobExecutionError
 from app.modules.mcp_registry.models import (
     MCPOperationJob,
@@ -335,6 +338,11 @@ async def test_enqueue_installation_includes_network_policy(monkeypatch) -> None
         "externalize_install_config_secrets",
         externalize,
     )
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "get_runtime_manager",
+        lambda: SimpleNamespace(provider_name=lambda installation: "kubernetes"),
+    )
     monkeypatch.setattr(installation_jobs, "enqueue_operation_job", enqueue)
 
     result = await installation_jobs.enqueue_server_installation(
@@ -372,6 +380,49 @@ async def test_enqueue_installation_includes_network_policy(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_enqueue_installation_rejects_network_policy_without_kubernetes_provider(
+    monkeypatch,
+) -> None:
+    server = server_version()
+    user = User(id=uuid.uuid4(), email="admin@example.com")
+
+    async def get_server(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    async def enqueue(*args, **kwargs):
+        raise AssertionError("unsupported policy should not enqueue a job")
+
+    monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
+    monkeypatch.setattr(installation_jobs.repository, "get_installation", get_installation)
+    monkeypatch.setattr(
+        installation_jobs.service,
+        "get_runtime_manager",
+        lambda: SimpleNamespace(provider_name=lambda installation: "local"),
+    )
+    monkeypatch.setattr(installation_jobs, "enqueue_operation_job", enqueue)
+
+    with pytest.raises(
+        MCPServerInstallationUnsupportedError,
+        match="Kubernetes runtime provider",
+    ):
+        await installation_jobs.enqueue_server_installation(
+            object(),
+            organization_id=ORGANIZATION_ID,
+            workspace_id=WORKSPACE_ID,
+            user=user,
+            server_name=server.name,
+            payload=MCPServerInstallRequest(
+                version="latest",
+                installTarget="package",
+                networkPolicy={"publicEgress": False},
+            ),
+        )
+
+
+@pytest.mark.asyncio
 async def test_enqueue_installation_reuses_retry_before_writing_secret_again(monkeypatch) -> None:
     server = server_version()
     user = User(id=uuid.uuid4(), email="admin@example.com")
@@ -383,6 +434,12 @@ async def test_enqueue_installation_reuses_retry_before_writing_secret_again(mon
     existing.status = "queued"
     existing.cleanup_available_at = None
 
+    async def get_server(*args, **kwargs):
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return None
+
     async def existing_job(*args, **kwargs):
         return existing
 
@@ -392,6 +449,8 @@ async def test_enqueue_installation_reuses_retry_before_writing_secret_again(mon
     async def must_not_externalize(*args, **kwargs):
         raise AssertionError("an idempotent retry must not write the raw secret again")
 
+    monkeypatch.setattr(installation_jobs.repository, "get_server_version", get_server)
+    monkeypatch.setattr(installation_jobs.repository, "get_installation", get_installation)
     monkeypatch.setattr(
         installation_jobs.job_repository,
         "get_active_job_by_deduplication_key",

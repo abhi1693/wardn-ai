@@ -117,6 +117,39 @@ async def enqueue_server_installation(
     payload: MCPServerInstallRequest,
 ) -> MCPOperationJobRead:
     resource_key = workspace_installations_resource_key(workspace_id)
+    server = await repository.get_server_version(
+        session,
+        server_name,
+        payload.version,
+        include_deleted=False,
+        organization_id=organization_id,
+    )
+    if server is None:
+        raise MCPServerNotFoundError("server version not found")
+    installation = await repository.get_installation(
+        session,
+        server_name,
+        payload.config_name,
+        workspace_id,
+    )
+    config_values = service.merged_install_config_values(
+        installation,
+        payload.config_values,
+    )
+    runtime_provider_name = service.install_target_runtime_provider_name(
+        server,
+        payload,
+        config_values,
+        workspace_id=workspace_id,
+    )
+    network_policy_config = service.runtime_network_policy_config_for_provider(
+        network_policy_config=service.merged_install_network_policy_config(
+            installation,
+            payload.network_policy,
+        ),
+        network_policy_requested=payload.network_policy is not None,
+        runtime_provider_name=runtime_provider_name,
+    )
     request_deduplication_key = operation_deduplication_key(
         organization_id=organization_id,
         workspace_id=workspace_id,
@@ -124,6 +157,7 @@ async def enqueue_server_installation(
         resource_key=resource_key,
         request_payload={
             "serverName": server_name,
+            "runtimeProvider": runtime_provider_name,
             "request": payload.model_dump(mode="json", by_alias=True),
         },
     )
@@ -147,31 +181,12 @@ async def enqueue_server_installation(
         events = await job_repository.list_job_events(session, existing_job.id)
         return job_response(existing_job, events)
 
-    server = await repository.get_server_version(
-        session,
-        server_name,
-        payload.version,
-        include_deleted=False,
-        organization_id=organization_id,
-    )
-    if server is None:
-        raise MCPServerNotFoundError("server version not found")
-    installation = await repository.get_installation(
-        session,
-        server_name,
-        payload.config_name,
-        workspace_id,
-    )
     if installation is None:
         await require_new_installation_capacity(
             session,
             organization_id=organization_id,
             workspace_id=workspace_id,
         )
-    config_values = service.merged_install_config_values(
-        installation,
-        payload.config_values,
-    )
     config_values = await service.externalize_install_config_secrets(
         session,
         user,
@@ -182,11 +197,7 @@ async def enqueue_server_installation(
         config_values,
         existing_installation=installation,
     )
-    network_policy_config = service.merged_install_network_policy_config(
-        installation,
-        payload.network_policy,
-    )
-    if service.install_target_uses_runtime_network_policy(server, payload, config_values):
+    if runtime_provider_name == service.RUNTIME_PROVIDER_KUBERNETES:
         await service.require_install_network_policy_limits(
             session,
             organization_id=organization_id,
@@ -257,8 +268,13 @@ async def enqueue_installed_server_updates(
             config_values = service.install_config_values_from_secret_references(
                 installation.secret_references
             )
-            network_policy_config = service.installation_network_policy_config(installation)
-            if install_target == "package":
+            runtime_provider_name = service.installation_runtime_provider_name(installation)
+            network_policy_config = service.runtime_network_policy_config_for_provider(
+                network_policy_config=service.installation_network_policy_config(installation),
+                network_policy_requested=False,
+                runtime_provider_name=runtime_provider_name,
+            )
+            if runtime_provider_name == service.RUNTIME_PROVIDER_KUBERNETES:
                 await service.require_install_network_policy_limits(
                     session,
                     organization_id=organization_id,

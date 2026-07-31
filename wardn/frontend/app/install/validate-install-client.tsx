@@ -92,6 +92,9 @@ function runtimeStatusBadgeVariant(
 }
 
 function runtimePolicyDetails(installation: MCPServerInstallationRead) {
+  if (installation.runtimeProvider !== "kubernetes") {
+    return [];
+  }
   const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
   const rawPolicy = runtimeConfig.networkPolicy;
   if (!isRecord(rawPolicy)) {

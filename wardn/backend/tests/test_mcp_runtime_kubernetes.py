@@ -32,6 +32,9 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     KubernetesRuntimeProvider,
     KubernetesRuntimeReconciler,
     build_runtime_manifests,
+    in_cluster_kubernetes_api_endpoint_ports,
+    in_cluster_kubernetes_api_service_ports,
+    runtime_custom_network_policy_refs,
     runtime_installation_identity,
     runtime_labels,
     runtime_namespace_name,
@@ -281,22 +284,106 @@ class FakeCoreV1Api:
         self._call("delete_namespaced_network_policy", name, namespace)
 
 
+class FakeCustomObjectsApi:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str, str, str, str]] = []
+        self.conflicts: set[str] = set()
+        self.errors: dict[object, FakeApiException] = {}
+        self.missing_resources: set[tuple[str, str, str]] = set()
+
+    def _call(
+        self,
+        method: str,
+        *,
+        group: str,
+        version: str,
+        plural: str,
+        name: str,
+        namespace: str,
+    ) -> None:
+        self.calls.append((method, group, version, plural, name, namespace))
+        error = self.errors.get((method, group, version, plural)) or self.errors.get(method)
+        if error is not None:
+            raise error
+        if (group, version, plural) in self.missing_resources:
+            raise FakeApiException(404, "NotFound")
+        if method in self.conflicts:
+            raise FakeApiException(409, "AlreadyExists")
+
+    def create_namespaced_custom_object(
+        self,
+        *,
+        group,
+        version,
+        namespace,
+        plural,
+        body,
+    ):
+        self._call(
+            "create_namespaced_custom_object",
+            group=group,
+            version=version,
+            plural=plural,
+            name=body["metadata"]["name"],
+            namespace=namespace,
+        )
+
+    def replace_namespaced_custom_object(
+        self,
+        *,
+        group,
+        version,
+        namespace,
+        plural,
+        name,
+        body,
+    ):
+        self._call(
+            "replace_namespaced_custom_object",
+            group=group,
+            version=version,
+            plural=plural,
+            name=name,
+            namespace=namespace,
+        )
+
+    def delete_namespaced_custom_object(
+        self,
+        *,
+        group,
+        version,
+        namespace,
+        plural,
+        name,
+    ):
+        self._call(
+            "delete_namespaced_custom_object",
+            group=group,
+            version=version,
+            plural=plural,
+            name=name,
+            namespace=namespace,
+        )
+
+
 class FakeClientSet:
-    def __init__(self, core_v1) -> None:
+    def __init__(self, core_v1, custom_objects=None) -> None:
         self.core_v1 = core_v1
         self.apps_v1 = core_v1
         self.networking_v1 = core_v1
+        self.custom_objects = custom_objects
         self.loaded_config = "in_cluster"
 
 
 class FakeClientFactory:
-    def __init__(self, core_v1) -> None:
+    def __init__(self, core_v1, custom_objects=None) -> None:
         self.core_v1 = core_v1
+        self.custom_objects = custom_objects
         self.load_count = 0
 
     def load(self):
         self.load_count += 1
-        return FakeClientSet(self.core_v1)
+        return FakeClientSet(self.core_v1, custom_objects=self.custom_objects)
 
     def api_exception_class(self):
         return FakeApiException
@@ -310,10 +397,12 @@ class FakeReconciler:
         api_exception_class,
         apps_v1=None,
         networking_v1=None,
+        custom_objects=None,
     ) -> None:
         self.core_v1 = core_v1
         self.apps_v1 = apps_v1
         self.networking_v1 = networking_v1
+        self.custom_objects = custom_objects
         self.api_exception_class = api_exception_class
         self.reconciled_manifest = None
         self.ready_endpoint_url = ""
@@ -833,6 +922,7 @@ def test_runtime_manifest_honors_install_network_policy_controls(
         lambda command: "/usr/bin/node",
     )
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    monkeypatch.setenv("KUBERNETES_SERVICE_PORT", "9443")
     installation = MCPServerInstallation(
         workspace_id=uuid.uuid4(),
         server_name="io.github.example/weather",
@@ -884,6 +974,8 @@ def test_runtime_manifest_honors_install_network_policy_controls(
         client_module=FakeKubernetesClient,
     )
 
+    assert in_cluster_kubernetes_api_service_ports() == [9443, 443]
+    assert in_cluster_kubernetes_api_endpoint_ports() == [9443, 443, 6443]
     policy_names = {policy.metadata.name for policy in manifest.network_policies}
     assert any(name.endswith("-default-deny") for name in policy_names)
     assert any(name.endswith("-allow-wardn-ingress") for name in policy_names)
@@ -894,6 +986,9 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     assert any(name.endswith("-allow-custom-egress") for name in policy_names)
     assert manifest.network_policy_cleanup_names == list(
         runtime_network_policy_names(manifest.names)
+    )
+    assert manifest.custom_network_policy_cleanup_refs == list(
+        runtime_custom_network_policy_refs(manifest.names)
     )
 
     private_policy = next(
@@ -918,8 +1013,39 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     )
     assert kubernetes_api_policy.spec.egress[0].to[0].ip_block.cidr == "10.43.0.1/32"
     assert [(port.protocol, port.port) for port in kubernetes_api_policy.spec.egress[0].ports] == [
+        ("TCP", 9443),
         ("TCP", 443)
     ]
+    custom_policy_kinds = {policy.ref.kind for policy in manifest.custom_network_policies}
+    assert custom_policy_kinds == {"CiliumNetworkPolicy", "NetworkPolicy"}
+
+    cilium_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.kind == "CiliumNetworkPolicy"
+    )
+    cilium_egress = cilium_policy.body["spec"]["egress"][0]
+    assert cilium_policy.body["spec"]["endpointSelector"]["matchLabels"] == {
+        key: manifest.labels[key]
+        for key in ("app.kubernetes.io/name", "wardn.ai/runtime-id")
+    }
+    assert cilium_egress["toEntities"] == ["kube-apiserver"]
+    assert [port["port"] for port in cilium_egress["toPorts"][0]["ports"]] == [
+        "9443",
+        "443",
+        "6443",
+    ]
+
+    calico_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.group == "projectcalico.org"
+    )
+    assert "wardn.ai/runtime-id" in calico_policy.body["spec"]["selector"]
+    assert calico_policy.body["spec"]["egress"][0]["destination"]["services"] == {
+        "name": "kubernetes",
+        "namespace": "default",
+    }
 
     custom_policy = next(
         policy
@@ -2789,6 +2915,152 @@ def test_kubernetes_reconciler_creates_runtime_objects(tmp_path, monkeypatch) ->
     ]
 
 
+def test_kubernetes_reconciler_creates_custom_cni_network_policies(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "inClusterKubernetesApi": True,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    custom_objects = FakeCustomObjectsApi()
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=FakeCoreV1Api(),
+        custom_objects=custom_objects,
+        api_exception_class=FakeApiException,
+        settings=FakeSettings(),
+    )
+
+    reconciler.reconcile(manifest)
+
+    assert custom_objects.calls == [
+        (
+            "create_namespaced_custom_object",
+            policy.ref.group,
+            policy.ref.version,
+            policy.ref.plural,
+            policy.ref.name,
+            manifest.names.namespace,
+        )
+        for policy in manifest.custom_network_policies
+    ]
+
+
+def test_kubernetes_reconciler_skips_custom_cni_policy_when_crd_is_absent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+                "inClusterKubernetesApi": True,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+    custom_objects = FakeCustomObjectsApi()
+    custom_objects.missing_resources = {
+        (policy.ref.group, policy.ref.version, policy.ref.plural)
+        for policy in manifest.custom_network_policies
+    }
+    reconciler = KubernetesRuntimeReconciler(
+        core_v1=FakeCoreV1Api(),
+        custom_objects=custom_objects,
+        api_exception_class=FakeApiException,
+        settings=FakeSettings(),
+    )
+
+    reconciler.reconcile(manifest)
+
+    assert len(custom_objects.calls) == len(manifest.custom_network_policies)
+
+
 def test_kubernetes_reconciler_deletes_undesired_explicit_network_policies(
     tmp_path,
     monkeypatch,
@@ -2844,8 +3116,10 @@ def test_kubernetes_reconciler_deletes_undesired_explicit_network_policies(
         client_module=FakeKubernetesClient,
     )
     core_v1 = FakeCoreV1Api()
+    custom_objects = FakeCustomObjectsApi()
     reconciler = KubernetesRuntimeReconciler(
         core_v1=core_v1,
+        custom_objects=custom_objects,
         api_exception_class=FakeApiException,
         settings=FakeSettings(),
     )
@@ -2861,6 +3135,17 @@ def test_kubernetes_reconciler_deletes_undesired_explicit_network_policies(
         and namespace == manifest.names.namespace
     }
     assert cleanup_policy_names == delete_calls
+    assert custom_objects.calls == [
+        (
+            "delete_namespaced_custom_object",
+            policy_ref.group,
+            policy_ref.version,
+            policy_ref.plural,
+            policy_ref.name,
+            manifest.names.namespace,
+        )
+        for policy_ref in runtime_custom_network_policy_refs(manifest.names)
+    ]
 
 
 def test_kubernetes_reconciler_creates_ingress_when_enabled(tmp_path, monkeypatch) -> None:
@@ -3394,6 +3679,72 @@ def test_kubernetes_provider_reconciles_and_lists_supergateway_runtime_tools(
         }
     )
     assert runtime_session.endpoint_url == expected_endpoint_url
+
+
+def test_kubernetes_provider_passes_custom_objects_api_to_reconciler(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": [],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+    custom_objects = FakeCustomObjectsApi()
+    seen = {}
+
+    def reconciler_factory(**kwargs):
+        seen.update(kwargs)
+        return FakeReconciler(**kwargs)
+
+    provider = KubernetesRuntimeProvider(
+        client_factory=FakeClientFactory(FakeCoreV1Api(), custom_objects=custom_objects),
+        reconciler_factory=reconciler_factory,
+    )
+
+    provider.ensure_runtime(installation, runtime_session=runtime_session, wait_ready=False)
+
+    assert seen["custom_objects"] is custom_objects
 
 
 def test_kubernetes_provider_reconciles_and_invokes_supergateway_runtime(

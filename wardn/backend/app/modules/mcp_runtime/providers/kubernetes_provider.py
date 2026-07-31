@@ -337,5 +337,6 @@ class KubernetesRuntimeProvider:
             core_v1=client_set.core_v1,
             apps_v1=client_set.apps_v1,
             networking_v1=client_set.networking_v1,
+            custom_objects=getattr(client_set, "custom_objects", None),
             api_exception_class=self._client_factory.api_exception_class(),
         )

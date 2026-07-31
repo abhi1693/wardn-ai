@@ -17,11 +17,15 @@ import { InstallFormClient } from "./install-form-client";
 
 async function getInitialInstallations(context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");
+  const emptyResponse: MCPServerInstallationListResponse = {
+    installations: [],
+    metadata: { count: 0, nextCursor: "" },
+    packageRuntimeProvider: "local",
+  };
   if (!path) {
-    return [];
+    return emptyResponse;
   }
-  const data = await backendJson<MCPServerInstallationListResponse>(path);
-  return data.installations;
+  return backendJson<MCPServerInstallationListResponse>(path);
 }
 
 type EditInstallViewProps = {
@@ -31,10 +35,11 @@ type EditInstallViewProps = {
 
 export async function EditInstallView({ installationId, workspaceContext }: EditInstallViewProps) {
   const organizationId = workspaceContext.selectedOrganization?.id ?? "";
-  const [installations, secretStores] = await Promise.all([
+  const [installationsData, secretStores] = await Promise.all([
     getInitialInstallations(workspaceContext),
     organizationId ? getSecretStores(organizationId) : [],
   ]);
+  const installations = installationsData.installations;
   const installation: MCPServerInstallationRead | undefined = installations.find(
     (item) => item.id === installationId
   );
@@ -55,6 +60,7 @@ export async function EditInstallView({ installationId, workspaceContext }: Edit
         initialInstallation={installation}
         initialInstallations={installations}
         organizationId={organizationId}
+        packageRuntimeProvider={installationsData.packageRuntimeProvider}
         secretStores={secretStores}
         workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
       />

@@ -9,12 +9,15 @@ from app.modules.mcp_runtime.providers.kubernetes_client import (
     runtime_service_endpoint_url,
 )
 from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
+    runtime_custom_network_policy_refs,
     runtime_network_policy_names,
 )
 from app.modules.mcp_runtime.providers.kubernetes_naming import runtime_ingress_endpoint_url
 from app.modules.mcp_runtime.providers.kubernetes_types import (
     KUBERNETES_API_CONNECT_TIMEOUT_SECONDS,
     KUBERNETES_API_READ_TIMEOUT_SECONDS,
+    KubernetesCustomNetworkPolicy,
+    KubernetesCustomNetworkPolicyRef,
     KubernetesReconcileError,
     KubernetesReconcileResult,
     KubernetesRuntimeManifest,
@@ -50,6 +53,7 @@ class KubernetesRuntimeReconciler:
         core_v1: Any,
         apps_v1: Any | None = None,
         networking_v1: Any | None = None,
+        custom_objects: Any | None = None,
         api_exception_class: type[Exception],
         settings=None,
         sleep: Callable[[float], None] = time.sleep,
@@ -58,6 +62,7 @@ class KubernetesRuntimeReconciler:
         self.core_v1 = core_v1
         self.apps_v1 = apps_v1 or core_v1
         self.networking_v1 = networking_v1 or core_v1
+        self.custom_objects = custom_objects
         self.api_exception_class = api_exception_class
         self.settings = settings or get_settings()
         self.sleep = sleep
@@ -69,6 +74,9 @@ class KubernetesRuntimeReconciler:
             extra={
                 **kubernetes_runtime_log_extra(manifest.names),
                 "kubernetes_network_policy_count": len(manifest.network_policies),
+                "kubernetes_custom_network_policy_count": len(
+                    manifest.custom_network_policies
+                ),
                 "kubernetes_ingress_enabled": manifest.ingress is not None,
             },
         )
@@ -153,6 +161,15 @@ class KubernetesRuntimeReconciler:
         for policy_name in manifest.network_policy_cleanup_names:
             if policy_name not in desired_names:
                 self.delete_network_policy(manifest.names, policy_name)
+        desired_custom_policy_refs = {
+            self._custom_policy_ref_key(custom_policy.ref)
+            for custom_policy in manifest.custom_network_policies
+        }
+        for custom_policy in manifest.custom_network_policies:
+            self.create_or_replace_custom_network_policy(manifest, custom_policy)
+        for policy_ref in manifest.custom_network_policy_cleanup_refs:
+            if self._custom_policy_ref_key(policy_ref) not in desired_custom_policy_refs:
+                self.delete_custom_network_policy(manifest.names, policy_ref)
 
     def create_or_replace_network_policy(
         self,
@@ -199,6 +216,72 @@ class KubernetesRuntimeReconciler:
                 manifest.names,
                 resource_kind="NetworkPolicy",
                 resource_name=policy_name,
+                action="create",
+            ),
+        )
+
+    def create_or_replace_custom_network_policy(
+        self,
+        manifest: KubernetesRuntimeManifest,
+        custom_policy: KubernetesCustomNetworkPolicy,
+    ) -> None:
+        if self.custom_objects is None:
+            self._log_custom_network_policy_skipped(manifest.names, custom_policy.ref)
+            return
+
+        policy_ref = custom_policy.ref
+        try:
+            self._call_api(
+                self.custom_objects.create_namespaced_custom_object,
+                group=policy_ref.group,
+                version=policy_ref.version,
+                namespace=manifest.names.namespace,
+                plural=policy_ref.plural,
+                body=custom_policy.body,
+            )
+        except self.api_exception_class as exc:
+            if self._is_status(exc, 404):
+                self._log_custom_network_policy_skipped(manifest.names, policy_ref)
+                return
+            if not self._is_status(exc, 409):
+                raise KubernetesReconcileError(
+                    f"Kubernetes {policy_ref.kind} reconcile failed: "
+                    f"{self._api_error_detail(exc)}"
+                ) from exc
+            try:
+                self._call_api(
+                    self.custom_objects.replace_namespaced_custom_object,
+                    group=policy_ref.group,
+                    version=policy_ref.version,
+                    namespace=manifest.names.namespace,
+                    plural=policy_ref.plural,
+                    name=policy_ref.name,
+                    body=custom_policy.body,
+                )
+            except self.api_exception_class as replace_exc:
+                if self._is_status(replace_exc, 404):
+                    self._log_custom_network_policy_skipped(manifest.names, policy_ref)
+                    return
+                raise KubernetesReconcileError(
+                    f"Kubernetes {policy_ref.kind} replace failed: "
+                    f"{self._api_error_detail(replace_exc)}"
+                ) from replace_exc
+            logger.info(
+                f"Replaced Kubernetes MCP runtime {policy_ref.kind}.",
+                extra=kubernetes_runtime_log_extra(
+                    manifest.names,
+                    resource_kind=policy_ref.kind,
+                    resource_name=policy_ref.name,
+                    action="replace",
+                ),
+            )
+            return
+        logger.info(
+            f"Created Kubernetes MCP runtime {policy_ref.kind}.",
+            extra=kubernetes_runtime_log_extra(
+                manifest.names,
+                resource_kind=policy_ref.kind,
+                resource_name=policy_ref.name,
                 action="create",
             ),
         )
@@ -405,6 +488,7 @@ class KubernetesRuntimeReconciler:
         )
         self.delete_ingress(names)
         self.delete_network_policies(names)
+        self.delete_custom_network_policies(names)
         self.delete_service(names)
         self.delete_deployment(names)
         self.delete_secret(names)
@@ -436,6 +520,10 @@ class KubernetesRuntimeReconciler:
         for policy_name in runtime_network_policy_names(names):
             self.delete_network_policy(names, policy_name)
 
+    def delete_custom_network_policies(self, names: KubernetesRuntimeNames) -> None:
+        for policy_ref in runtime_custom_network_policy_refs(names):
+            self.delete_custom_network_policy(names, policy_ref)
+
     def delete_network_policy(self, names: KubernetesRuntimeNames, policy_name: str) -> None:
         try:
             self._call_api(
@@ -455,6 +543,40 @@ class KubernetesRuntimeReconciler:
                 names,
                 resource_kind="NetworkPolicy",
                 resource_name=policy_name,
+                action="delete",
+            ),
+        )
+
+    def delete_custom_network_policy(
+        self,
+        names: KubernetesRuntimeNames,
+        policy_ref: KubernetesCustomNetworkPolicyRef,
+    ) -> None:
+        if self.custom_objects is None:
+            self._log_custom_network_policy_skipped(names, policy_ref, action="delete")
+            return
+
+        try:
+            self._call_api(
+                self.custom_objects.delete_namespaced_custom_object,
+                group=policy_ref.group,
+                version=policy_ref.version,
+                namespace=names.namespace,
+                plural=policy_ref.plural,
+                name=policy_ref.name,
+            )
+        except self.api_exception_class as exc:
+            if self._is_status(exc, 404):
+                return
+            raise KubernetesReconcileError(
+                f"Kubernetes {policy_ref.kind} delete failed: {self._api_error_detail(exc)}"
+            ) from exc
+        logger.info(
+            f"Deleted Kubernetes MCP runtime {policy_ref.kind}.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind=policy_ref.kind,
+                resource_name=policy_ref.name,
                 action="delete",
             ),
         )
@@ -674,3 +796,31 @@ class KubernetesRuntimeReconciler:
             if "_request_timeout" not in str(exc):
                 raise
             return method(*args, **kwargs)
+
+    def _custom_policy_ref_key(
+        self,
+        policy_ref: KubernetesCustomNetworkPolicyRef,
+    ) -> tuple[str, str, str, str]:
+        return (
+            policy_ref.group,
+            policy_ref.version,
+            policy_ref.plural,
+            policy_ref.name,
+        )
+
+    def _log_custom_network_policy_skipped(
+        self,
+        names: KubernetesRuntimeNames,
+        policy_ref: KubernetesCustomNetworkPolicyRef,
+        *,
+        action: str = "skip",
+    ) -> None:
+        logger.info(
+            f"Skipped Kubernetes MCP runtime {policy_ref.kind}; API is unavailable.",
+            extra=kubernetes_runtime_log_extra(
+                names,
+                resource_kind=policy_ref.kind,
+                resource_name=policy_ref.name,
+                action=action,
+            ),
+        )

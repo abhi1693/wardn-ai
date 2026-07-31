@@ -52,6 +52,8 @@ from app.modules.mcp_runtime.providers.kubernetes_types import (
     WARDN_LABEL_SERVER_VERSION,
     WARDN_LABEL_WORKSPACE_ID,
     WARDN_RUNTIME_APP_NAME,
+    KubernetesCustomNetworkPolicy,
+    KubernetesCustomNetworkPolicyRef,
     KubernetesMetadataError,
     KubernetesReconcileError,
     KubernetesRuntimeManifest,
@@ -90,6 +92,18 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 ]
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
+KUBERNETES_API_SERVICE_NAMESPACE = "default"
+KUBERNETES_API_SERVICE_NAME = "kubernetes"
+KUBERNETES_API_DEFAULT_SERVICE_PORT = 443
+KUBERNETES_API_COMMON_ENDPOINT_PORT = 6443
+CILIUM_NETWORK_POLICY_GROUP = "cilium.io"
+CILIUM_NETWORK_POLICY_VERSION = "v2"
+CILIUM_NETWORK_POLICY_PLURAL = "ciliumnetworkpolicies"
+CILIUM_NETWORK_POLICY_KIND = "CiliumNetworkPolicy"
+CALICO_NETWORK_POLICY_GROUP = "projectcalico.org"
+CALICO_NETWORK_POLICY_VERSION = "v3"
+CALICO_NETWORK_POLICY_PLURAL = "networkpolicies"
+CALICO_NETWORK_POLICY_KIND = "NetworkPolicy"
 RUNTIME_SANDBOX_ENVIRONMENT = {
     "HOME": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-home",
     "XDG_CACHE_HOME": f"{KUBERNETES_RUNTIME_TMP_MOUNT_PATH}/wardn-cache",
@@ -289,6 +303,31 @@ def in_cluster_kubernetes_api_cidr() -> str | None:
         return None
     prefix_length = 32 if address.version == 4 else 128
     return f"{address}/{prefix_length}"
+
+
+def in_cluster_kubernetes_api_service_ports() -> list[int]:
+    ports: list[int] = []
+    for env_name in ("KUBERNETES_SERVICE_PORT_HTTPS", "KUBERNETES_SERVICE_PORT"):
+        raw_port = os.environ.get(env_name, "").strip()
+        if not raw_port:
+            continue
+        try:
+            port = int(raw_port)
+        except ValueError:
+            continue
+        if 1 <= port <= 65_535 and port not in ports:
+            ports.append(port)
+    if KUBERNETES_API_DEFAULT_SERVICE_PORT not in ports:
+        ports.append(KUBERNETES_API_DEFAULT_SERVICE_PORT)
+    return ports
+
+
+def in_cluster_kubernetes_api_endpoint_ports() -> list[int]:
+    ports = in_cluster_kubernetes_api_service_ports()
+    if KUBERNETES_API_COMMON_ENDPOINT_PORT not in ports:
+        ports.append(KUBERNETES_API_COMMON_ENDPOINT_PORT)
+    return ports
+
 
 def runtime_secret_data(
     installation: MCPServerInstallation,
@@ -1207,6 +1246,28 @@ def runtime_network_policy_names(names: KubernetesRuntimeNames) -> tuple[str, ..
         safe_kubernetes_name(f"{names.pod_name}-allow-custom-egress"),
     )
 
+
+def runtime_custom_network_policy_refs(
+    names: KubernetesRuntimeNames,
+) -> tuple[KubernetesCustomNetworkPolicyRef, ...]:
+    return (
+        KubernetesCustomNetworkPolicyRef(
+            group=CILIUM_NETWORK_POLICY_GROUP,
+            version=CILIUM_NETWORK_POLICY_VERSION,
+            plural=CILIUM_NETWORK_POLICY_PLURAL,
+            kind=CILIUM_NETWORK_POLICY_KIND,
+            name=safe_kubernetes_name(f"{names.pod_name}-allow-cilium-kube-api-egress"),
+        ),
+        KubernetesCustomNetworkPolicyRef(
+            group=CALICO_NETWORK_POLICY_GROUP,
+            version=CALICO_NETWORK_POLICY_VERSION,
+            plural=CALICO_NETWORK_POLICY_PLURAL,
+            kind=CALICO_NETWORK_POLICY_KIND,
+            name=safe_kubernetes_name(f"{names.pod_name}-allow-calico-kube-api-egress"),
+        ),
+    )
+
+
 def label_selector(labels: dict[str, str] | None, client_module: Any | None = None) -> Any:
     client = kubernetes_client_module(client_module)
     return client.V1LabelSelector(match_labels=labels or {})
@@ -1437,9 +1498,119 @@ def build_kubernetes_api_egress_network_policy(
         names=names,
         labels=labels,
         policy_name=policy_name,
-        rules=[{"cidr": cidr, "ports": [443]}],
+        rules=[{"cidr": cidr, "ports": in_cluster_kubernetes_api_service_ports()}],
         client_module=client_module,
     )
+
+
+def calico_label_selector(labels: dict[str, str]) -> str:
+    return " && ".join(
+        f"{key} == {json.dumps(value)}"
+        for key, value in sorted(labels.items())
+    )
+
+
+def build_cilium_kubernetes_api_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_ref: KubernetesCustomNetworkPolicyRef,
+) -> KubernetesCustomNetworkPolicy:
+    return KubernetesCustomNetworkPolicy(
+        ref=policy_ref,
+        body={
+            "apiVersion": f"{policy_ref.group}/{policy_ref.version}",
+            "kind": policy_ref.kind,
+            "metadata": {
+                "name": policy_ref.name,
+                "namespace": names.namespace,
+                "labels": labels,
+            },
+            "spec": {
+                "endpointSelector": {
+                    "matchLabels": service_selector(labels),
+                },
+                "egress": [
+                    {
+                        "toEntities": ["kube-apiserver"],
+                        "toPorts": [
+                            {
+                                "ports": [
+                                    {"port": str(port), "protocol": "TCP"}
+                                    for port in in_cluster_kubernetes_api_endpoint_ports()
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+
+
+def build_calico_kubernetes_api_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_ref: KubernetesCustomNetworkPolicyRef,
+) -> KubernetesCustomNetworkPolicy:
+    return KubernetesCustomNetworkPolicy(
+        ref=policy_ref,
+        body={
+            "apiVersion": f"{policy_ref.group}/{policy_ref.version}",
+            "kind": policy_ref.kind,
+            "metadata": {
+                "name": policy_ref.name,
+                "namespace": names.namespace,
+                "labels": labels,
+            },
+            "spec": {
+                "selector": calico_label_selector(service_selector(labels)),
+                "types": ["Egress"],
+                "egress": [
+                    {
+                        "action": "Allow",
+                        "protocol": "TCP",
+                        "destination": {
+                            "services": {
+                                "name": KUBERNETES_API_SERVICE_NAME,
+                                "namespace": KUBERNETES_API_SERVICE_NAMESPACE,
+                            }
+                        },
+                    }
+                ],
+            },
+        },
+    )
+
+
+def build_custom_network_policy_manifests(
+    installation: MCPServerInstallation,
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    settings=None,
+) -> list[KubernetesCustomNetworkPolicy]:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.mcp_runtime_kubernetes_network_policy_enabled:
+        return []
+    policy_config = network_policy_config(installation, settings=runtime_settings)
+    if not policy_config["isolationEnabled"] or not policy_config["inClusterKubernetesApi"]:
+        return []
+
+    cilium_ref, calico_ref = runtime_custom_network_policy_refs(names)
+    return [
+        build_cilium_kubernetes_api_egress_network_policy(
+            names=names,
+            labels=labels,
+            policy_ref=cilium_ref,
+        ),
+        build_calico_kubernetes_api_egress_network_policy(
+            names=names,
+            labels=labels,
+            policy_ref=calico_ref,
+        ),
+    ]
 
 
 def build_custom_egress_network_policy(
@@ -1744,8 +1915,19 @@ def build_runtime_manifests(
             settings=runtime_settings,
             client_module=client,
         ),
+        custom_network_policies=build_custom_network_policy_manifests(
+            installation,
+            names=names,
+            labels=labels,
+            settings=runtime_settings,
+        ),
         network_policy_cleanup_names=(
             list(runtime_network_policy_names(names))
+            if has_explicit_network_policy_config(installation)
+            else []
+        ),
+        custom_network_policy_cleanup_refs=(
+            list(runtime_custom_network_policy_refs(names))
             if has_explicit_network_policy_config(installation)
             else []
         ),

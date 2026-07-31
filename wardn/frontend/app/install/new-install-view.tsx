@@ -17,11 +17,15 @@ import { SERVER_PICKER_PAGE_SIZE } from "./install-form-domain";
 
 async function getInitialInstallations(context: WorkspaceContext) {
   const path = workspaceMcpRegistryPath(context, "/installed-servers");
+  const emptyResponse: MCPServerInstallationListResponse = {
+    installations: [],
+    metadata: { count: 0, nextCursor: "" },
+    packageRuntimeProvider: "local",
+  };
   if (!path) {
-    return [];
+    return emptyResponse;
   }
-  const data = await backendJson<MCPServerInstallationListResponse>(path);
-  return data.installations;
+  return backendJson<MCPServerInstallationListResponse>(path);
 }
 
 async function getInitialServers(context: WorkspaceContext) {
@@ -66,12 +70,13 @@ type NewInstallViewProps = {
 export async function NewInstallView({ searchParams, workspaceContext }: NewInstallViewProps) {
   const { serverName = "", version = "latest" } = searchParams;
   const organizationId = workspaceContext.selectedOrganization?.id ?? "";
-  const [installations, serverList, selectedServer, secretStores] = await Promise.all([
+  const [installationsData, serverList, selectedServer, secretStores] = await Promise.all([
     getInitialInstallations(workspaceContext),
     getInitialServers(workspaceContext),
     getServer(workspaceContext, serverName, version),
     organizationId ? getSecretStores(organizationId) : [],
   ]);
+  const installations = installationsData.installations;
 
   return (
     <AppShell
@@ -87,6 +92,7 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
         initialServerNextCursor={serverList.metadata.nextCursor ?? ""}
         initialServers={selectedServer ? [selectedServer, ...serverList.servers] : serverList.servers}
         organizationId={organizationId}
+        packageRuntimeProvider={installationsData.packageRuntimeProvider}
         secretStores={secretStores}
         workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
       />

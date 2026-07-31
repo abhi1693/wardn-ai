@@ -206,6 +206,7 @@ class MCPServerInstallationRead(APIModel):
     update_available: bool
     status: str
     install_type: str
+    runtime_provider: str
     install_path: str
     runtime_config: dict[str, Any]
     configured_values: dict[str, str] = Field(default_factory=dict)
@@ -219,6 +220,7 @@ class MCPServerInstallationRead(APIModel):
 class MCPServerInstallationListResponse(APIModel):
     installations: list[MCPServerInstallationRead]
     metadata: CursorPageMetadata
+    package_runtime_provider: str
 
 
 class MCPOperationJobEventRead(APIModel):

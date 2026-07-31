@@ -26,6 +26,7 @@ from app.modules.mcp_registry.config_service import (
 from app.modules.mcp_registry.exceptions import (
     MCPServerInstallationFailedError,
     MCPServerInstallationNotFoundError,
+    MCPServerInstallationUnsupportedError,
     MCPServerNotFoundError,
 )
 from app.modules.mcp_registry.installer import (
@@ -57,7 +58,11 @@ from app.modules.mcp_registry.tool_service import (
     seed_tool_schemas_from_registry_metadata,
 )
 from app.modules.mcp_runtime import repository as runtime_repository
-from app.modules.mcp_runtime.manager import MCPRuntimeManager, get_runtime_manager
+from app.modules.mcp_runtime.manager import (
+    RUNTIME_PROVIDER_KUBERNETES,
+    MCPRuntimeManager,
+    get_runtime_manager,
+)
 from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
 from app.modules.users.models import User
 
@@ -121,9 +126,71 @@ def effective_runtime_network_policy_config(config: dict | None) -> dict:
     return {**DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG, **config}
 
 
+def runtime_provider_probe(
+    *,
+    install_type: str = "package",
+    runtime_config: dict | None = None,
+    workspace_id: uuid.UUID | None = None,
+    server_name: str = "",
+    version: str = "",
+) -> MCPServerInstallation:
+    return MCPServerInstallation(
+        workspace_id=workspace_id or uuid.uuid4(),
+        server_name=server_name or "io.github.wardn/runtime-probe",
+        config_name="default",
+        installed_version=version or "probe",
+        status="enabled",
+        install_type=install_type,
+        runtime_config=runtime_config or {"kind": install_type},
+    )
+
+
+def installation_runtime_provider_name(
+    installation: MCPServerInstallation,
+    *,
+    manager: MCPRuntimeManager | None = None,
+) -> str:
+    return (manager or get_runtime_manager()).provider_name(installation)
+
+
+def package_runtime_provider_name(
+    *,
+    manager: MCPRuntimeManager | None = None,
+) -> str:
+    return installation_runtime_provider_name(
+        runtime_provider_probe(),
+        manager=manager,
+    )
+
+
 def runtime_network_policy_custom_egress_count(config: dict) -> int:
     custom_egress = config.get("customEgress")
     return len(custom_egress) if isinstance(custom_egress, list) else 0
+
+
+def install_target_runtime_provider_name(
+    server: MCPServerVersion,
+    payload: MCPServerInstallRequest,
+    config_values: dict,
+    *,
+    manager: MCPRuntimeManager | None = None,
+    workspace_id: uuid.UUID | None = None,
+) -> str:
+    target_kind, _ = parse_install_target_value(
+        server,
+        payload.install_target,
+        config_values,
+    )
+    return installation_runtime_provider_name(
+        runtime_provider_probe(
+            install_type=target_kind,
+            runtime_config={"kind": target_kind},
+            workspace_id=workspace_id,
+            server_name=server.name,
+            version=server.version,
+        ),
+        manager=manager,
+    )
 
 
 def install_target_uses_runtime_network_policy(
@@ -131,12 +198,25 @@ def install_target_uses_runtime_network_policy(
     payload: MCPServerInstallRequest,
     config_values: dict,
 ) -> bool:
-    target_kind, _ = parse_install_target_value(
-        server,
-        payload.install_target,
-        config_values,
+    return (
+        install_target_runtime_provider_name(server, payload, config_values)
+        == RUNTIME_PROVIDER_KUBERNETES
     )
-    return target_kind == "package"
+
+
+def runtime_network_policy_config_for_provider(
+    *,
+    network_policy_config: dict | None,
+    network_policy_requested: bool,
+    runtime_provider_name: str,
+) -> dict | None:
+    if runtime_provider_name == RUNTIME_PROVIDER_KUBERNETES:
+        return network_policy_config
+    if network_policy_requested:
+        raise MCPServerInstallationUnsupportedError(
+            "Runtime network policies require the Kubernetes runtime provider"
+        )
+    return None
 
 
 async def require_install_network_policy_limits(
@@ -221,6 +301,7 @@ async def installation_response(
         update_available=server_update_available(installation.installed_version, latest.version),
         status=installation.status,
         install_type=installation.install_type,
+        runtime_provider=installation_runtime_provider_name(installation),
         install_path=installation.install_path,
         runtime_config=installation.runtime_config,
         configured_values=public_configured_values(installed, installation),
@@ -256,6 +337,7 @@ async def list_installations(
             for installation, installed, latest in rows
         ],
         metadata=CursorPageMetadata(count=len(rows), next_cursor=next_cursor),
+        package_runtime_provider=package_runtime_provider_name(),
     )
 
 
@@ -501,7 +583,18 @@ async def install_server_version(
         installation,
         payload.network_policy,
     )
-    if install_target_uses_runtime_network_policy(server, payload, config_values):
+    runtime_provider_name = install_target_runtime_provider_name(
+        server,
+        payload,
+        config_values,
+        workspace_id=workspace_id,
+    )
+    network_policy_config = runtime_network_policy_config_for_provider(
+        network_policy_config=network_policy_config,
+        network_policy_requested=payload.network_policy is not None,
+        runtime_provider_name=runtime_provider_name,
+    )
+    if runtime_provider_name == RUNTIME_PROVIDER_KUBERNETES:
         await require_install_network_policy_limits(
             session,
             organization_id=organization_id,
@@ -818,8 +911,13 @@ async def update_installed_servers(
             config_values = install_config_values_from_secret_references(
                 installation.secret_references
             )
-            network_policy_config = installation_network_policy_config(installation)
-            if install_target == "package":
+            runtime_provider_name = installation_runtime_provider_name(installation)
+            network_policy_config = runtime_network_policy_config_for_provider(
+                network_policy_config=installation_network_policy_config(installation),
+                network_policy_requested=False,
+                runtime_provider_name=runtime_provider_name,
+            )
+            if runtime_provider_name == RUNTIME_PROVIDER_KUBERNETES:
                 await require_install_network_policy_limits(
                     session,
                     organization_id=organization_id,
@@ -890,4 +988,5 @@ async def update_installed_servers(
     return MCPServerInstallationListResponse(
         installations=updated,
         metadata=CursorPageMetadata(count=len(updated), next_cursor=""),
+        package_runtime_provider=package_runtime_provider_name(),
     )

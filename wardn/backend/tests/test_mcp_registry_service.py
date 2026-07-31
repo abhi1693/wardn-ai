@@ -763,6 +763,14 @@ def runtime_install(version: str = "1.0.0") -> MCPRuntimeInstall:
     )
 
 
+def patch_runtime_provider(monkeypatch, provider_name: str) -> None:
+    monkeypatch.setattr(
+        installation_service,
+        "get_runtime_manager",
+        lambda: SimpleNamespace(provider_name=lambda installation: provider_name),
+    )
+
+
 @pytest.mark.parametrize(
     ("installed_version", "latest_version", "expected"),
     [
@@ -1049,6 +1057,7 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
     monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
     session = FakeSession()
 
     await service.install_server_version(
@@ -1105,6 +1114,7 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
     monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
     session = FakeSession()
 
     await service.install_server_version(
@@ -1112,6 +1122,7 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
         "io.github.example/weather",
         MCPServerInstallRequest(
             version="latest",
+            installTarget="package",
             networkPolicy={
                 "isolationEnabled": True,
                 "publicEgress": False,
@@ -1135,6 +1146,86 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
             {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_rejects_network_policy_without_kubernetes_provider(
+    monkeypatch,
+) -> None:
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    def install_runtime(*args, **kwargs):
+        raise AssertionError("runtime install should not run for unsupported policy")
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "local")
+
+    with pytest.raises(
+        MCPServerInstallationUnsupportedError,
+        match="Kubernetes runtime provider",
+    ):
+        await service.install_server_version(
+            FakeSession(),
+            "io.github.example/weather",
+            MCPServerInstallRequest(
+                version="latest",
+                installTarget="package",
+                networkPolicy={"publicEgress": False},
+            ),
+            workspace_id=WORKSPACE_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_drops_existing_network_policy_without_kubernetes_provider(
+    monkeypatch,
+) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={},
+        runtime_config={
+            "kind": "package",
+            "networkPolicy": {
+                "isolationEnabled": True,
+                "publicEgress": False,
+            },
+        },
+    )
+    seen: dict[str, object] = {}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    def install_runtime(*args, **kwargs):
+        seen["network_policy"] = kwargs["network_policy"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "local")
+
+    await service.install_server_version(
+        FakeSession(),
+        "io.github.example/weather",
+        MCPServerInstallRequest(version="latest", installTarget="package"),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["network_policy"] is None
 
 
 @pytest.mark.asyncio
@@ -1172,6 +1263,7 @@ async def test_install_server_version_rejects_policy_blocked_by_limit(monkeypatc
         require_limit_available,
     )
     monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
 
     with pytest.raises(LimitExceededError):
         await service.install_server_version(
@@ -1228,6 +1320,7 @@ async def test_install_server_version_only_requires_disable_limit_when_isolation
         require_limit_available,
     )
     monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
 
     await service.install_server_version(
         FakeSession(),
@@ -1872,6 +1965,8 @@ async def test_uninstall_server_deletes_installation(monkeypatch) -> None:
         workspace_id=WORKSPACE_ID,
         installed_version="1.0.0",
         status="enabled",
+        install_type="package",
+        runtime_config={"kind": "package"},
     )
 
     async def get_installation(*args, **kwargs):
@@ -2383,6 +2478,8 @@ async def test_update_installed_servers_moves_selected_servers_to_latest(monkeyp
         workspace_id=WORKSPACE_ID,
         installed_version="1.0.0",
         status="enabled",
+        install_type="package",
+        runtime_config={"kind": "package"},
     )
 
     async def list_installations_for_server(*args, **kwargs):
