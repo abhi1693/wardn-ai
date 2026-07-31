@@ -1,6 +1,9 @@
 name: Container Image
 
 on:
+  push:
+    branches:
+      - master
   release:
     types: [published]
   workflow_dispatch:
@@ -25,10 +28,11 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-backend-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+        type=raw,value=${{ github.sha }}
       labels: |
         org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
         org.opencontainers.image.title=wardn-ai-backend
@@ -46,10 +50,11 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-frontend-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+        type=raw,value=${{ github.sha }}
       labels: |
         org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
         org.opencontainers.image.title=wardn-ai-frontend
@@ -68,10 +73,11 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-worker-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+        type=raw,value=${{ github.sha }}
       labels: |
         org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
         org.opencontainers.image.title=wardn-ai-worker
@@ -91,6 +97,7 @@ jobs:
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+        type=raw,value=${{ github.sha }}
       labels: |
         org.opencontainers.image.source=https://github.com/abhi1693/wardn-ai
         org.opencontainers.image.title=wardn-ai-mcp-runtime
