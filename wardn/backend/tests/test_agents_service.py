@@ -525,6 +525,56 @@ async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
 
 
 @pytest.mark.asyncio
+async def test_persisted_agent_chat_stream_finishes_when_final_persistence_fails(
+    monkeypatch,
+) -> None:
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        created_by_id=uuid4(),
+        title="Chat",
+        is_active=True,
+    )
+
+    async def append_conversation_message(*args, **kwargs):
+        raise RuntimeError("conversation write failed")
+
+    async def provider_stream():
+        yield service.AgentChatTextEvent(text="Final answer")
+
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+
+    chunks = ui_stream_chunks(
+        [
+            chunk
+            async for chunk in service.persisted_agent_chat_stream(
+                conversation,
+                provider_stream(),
+                session_factory=fake_session_factory(FakeSession()),
+            )
+        ]
+    )
+
+    assert chunks[-1] == {"type": "finish", "finishReason": "error"}
+    assert [chunk["type"] for chunk in chunks] == [
+        "start",
+        "text-start",
+        "text-delta",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert chunks[2]["delta"] == "Final answer"
+    assert "conversation write failed" in chunks[3]["delta"]
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypatch) -> None:
     organization_id = uuid4()
     workspace_id = uuid4()
@@ -703,6 +753,7 @@ async def test_run_agent_chat_refreshes_chatgpt_oauth_after_websocket_401(monkey
         workspace_id=uuid4(),
         provider_credential_id=credential.id,
         model_name="gpt-5.5",
+        skill_ids=[skills.WARDN_FIND_SKILLS_ID],
         is_active=True,
     )
     calls: list[str] = []
@@ -1473,11 +1524,18 @@ async def test_run_agent_chat_closes_database_transactions_before_external_strea
     async def record_agent_llm_usage(*args, **kwargs):
         return None
 
-    async def stream_response_text(*args, **kwargs):
+    async def stream_response_events(*args, **kwargs):
         external_transaction_states.append(
             [session.in_transaction for session in session_factory.sessions]
         )
-        yield "ok"
+        yield {"type": "response.output_text.delta", "delta": "ok"}
+        yield {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            },
+        }
 
     monkeypatch.setattr(
         chat_orchestrator,
@@ -1490,7 +1548,7 @@ async def test_run_agent_chat_closes_database_transactions_before_external_strea
         require_agent_llm_budget_available,
     )
     monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
-    monkeypatch.setattr(chat_orchestrator, "stream_response_text", stream_response_text)
+    monkeypatch.setattr(chat_orchestrator, "stream_response_events", stream_response_events)
 
     events = [
         event
@@ -1548,16 +1606,20 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
     async def resolve_credential_secrets(*args, **kwargs):
         return ResolvedLLMCredentialSecrets(api_key="sk-test")
 
-    async def stream_response_text(*args, **kwargs):
-        kwargs["usage_callback"](
-            service.observability_service.LLMTokenUsage(
-                input_tokens=10,
-                output_tokens=5,
-                total_tokens=15,
-                response_model="gpt-4o-mini-2024-07-18",
-            )
-        )
-        yield "ok"
+    async def stream_response_events(*args, **kwargs):
+        yield {"type": "response.output_text.delta", "delta": "ok"}
+        yield {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "model": "gpt-4o-mini-2024-07-18",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        }
 
     async def record_agent_llm_usage(*args, **kwargs):
         recorded.append(kwargs)
@@ -1567,7 +1629,7 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
         "resolve_credential_secrets",
         resolve_credential_secrets,
     )
-    monkeypatch.setattr(chat_orchestrator, "stream_response_text", stream_response_text)
+    monkeypatch.setattr(chat_orchestrator, "stream_response_events", stream_response_events)
     monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
 
     events = [
@@ -1795,6 +1857,31 @@ def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
     assert "route to this MCP installation" in payload["tools"][0]["configuredTargetHint"]
     assert payload["tools"][0]["readOnly"] is True
     assert payload["tools"][0]["params"][0]["name"] == "target"
+    assert payload["tools"][0]["rank"] == 1
+    assert payload["tools"][0]["score"] > 0
+    assert payload["ranking"]["executable"][0]["toolName"] == "wardn_namespace"
+
+
+def test_execute_agent_search_tools_returns_enabled_skills_as_dynamic_results() -> None:
+    result = service.execute_agent_search_tools(
+        service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "wardn hub skills", "limit": 5},
+        ),
+        skill_tools=skills.agent_skill_function_tools([skills.WARDN_FIND_SKILLS_ID]),
+    )
+    payload = json.loads(result.output)
+
+    assert result.status == "completed"
+    assert [tool["toolName"] for tool in payload["tools"]] == [
+        skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+        skills.WARDN_GET_SKILL_TOOL_NAME,
+    ]
+    assert payload["tools"][0]["toolType"] == "skill"
+    assert payload["totalReachable"] == 2
+    assert payload["ranking"]["executable"][0]["toolType"] == "skill"
 
 
 def test_dynamic_tools_report_policy_denied_tools_without_fallback() -> None:
@@ -1939,6 +2026,41 @@ def test_resolve_agent_run_tool_call_requires_exact_name_for_duplicates() -> Non
     assert target_call.arguments == {"namespace": "default"}
 
 
+def test_resolve_agent_run_tool_call_disambiguates_duplicate_by_target_hint() -> None:
+    default_tool = make_agent_runtime_tool(
+        wire_name="wardn_default_namespace",
+        tool_name="namespace_list",
+        config_name="default",
+    )
+    rancher_tool = make_agent_runtime_tool(
+        wire_name="wardn_rancher_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+    )
+
+    resolved = service.resolve_agent_run_tool_call(
+        {
+            default_tool.wire_name: default_tool,
+            rancher_tool.wire_name: rancher_tool,
+        },
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_1",
+            arguments={
+                "tool_name": "namespace_list",
+                "configured_target": "rancher-qa-omsllc",
+                "tool_args": {},
+            },
+        ),
+        request_meta={"userMessage": "list namespaces from rancher-qa omsllc"},
+    )
+
+    assert isinstance(resolved, tuple)
+    tool, target_call = resolved
+    assert tool is rancher_tool
+    assert target_call.name == "wardn_rancher_namespace"
+
+
 def test_resolve_agent_run_tool_call_keeps_required_target_argument() -> None:
     required_target_tool = make_agent_runtime_tool(
         wire_name="wardn_required_target",
@@ -1968,6 +2090,46 @@ def test_resolve_agent_run_tool_call_keeps_required_target_argument() -> None:
     assert isinstance(resolved, tuple)
     _tool, target_call = resolved
     assert target_call.arguments == {"target": "rancher-qa-omsllc"}
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_dynamic_run_tool_stream_dispatches_enabled_skill(
+    monkeypatch,
+) -> None:
+    skill_calls: list[tuple[str, dict]] = []
+
+    async def execute_agent_skill_tool_call(tool_name, arguments):
+        skill_calls.append((tool_name, arguments))
+        return json.dumps({"count": 0})
+
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "execute_agent_skill_tool_call",
+        execute_agent_skill_tool_call,
+    )
+
+    events = [
+        event
+        async for event in chat_orchestrator.execute_agent_dynamic_tool_call_stream(
+            service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+            service.AgentToolCall(
+                name=service.AGENT_RUN_TOOL_TOOL_NAME,
+                call_id="call_1",
+                arguments={
+                    "tool_name": skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+                    "tool_args": {"query": "kubernetes", "limit": 3},
+                },
+            ),
+            skill_ids=[skills.WARDN_FIND_SKILLS_ID],
+        )
+    ]
+
+    assert events[0].tool_name == "Tool selected"
+    assert events[0].details["selection"]["toolType"] == "skill"
+    assert events[-1].status == "completed"
+    assert skill_calls == [
+        (skills.WARDN_SEARCH_SKILLS_TOOL_NAME, {"query": "kubernetes", "limit": 3})
+    ]
 
 
 @pytest.mark.asyncio
@@ -2011,15 +2173,17 @@ async def test_execute_agent_dynamic_run_tool_stream_dispatches_resolved_target(
 
     assert isinstance(events[0], service.AgentChatToolActivityEvent)
     assert events[0].tool_name == "Tool selected"
-    assert events[0].details == {
-        "selection": {
-            "toolName": "namespace_list",
-            "serverName": namespace_tool.server.name,
-            "configuredTarget": "rancher-qa-omsllc",
-            "installationId": str(namespace_tool.installation.id),
-            "toolSchemaId": str(namespace_tool.tool_schema.id),
-        }
+    assert events[0].details is not None
+    selection = events[0].details["selection"]
+    assert selection["selected"] == {
+        "toolName": "namespace_list",
+        "wireName": "wardn_namespace",
+        "serverName": namespace_tool.server.name,
+        "configuredTarget": "rancher-qa-omsllc",
+        "installationId": str(namespace_tool.installation.id),
+        "toolSchemaId": str(namespace_tool.tool_schema.id),
     }
+    assert selection["targetDisambiguation"]["candidateCount"] == 1
     run_event = next(
         event
         for event in events
@@ -2142,6 +2306,136 @@ async def test_stream_chatgpt_codex_exposes_dynamic_tools_instead_of_concrete_mc
     assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_openai_responses_uses_dynamic_tools_and_runs_resolved_target(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.1",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+    runtime_calls: list[dict] = []
+
+    async def stream_response_events(*args, **kwargs):
+        sent_bodies.append(kwargs["body"])
+        if len(sent_bodies) == 1:
+            yield {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "name": service.AGENT_RUN_TOOL_TOOL_NAME,
+                    "call_id": "call_1",
+                    "arguments": json.dumps(
+                        {
+                            "tool_name": "namespace_list",
+                            "configured_target": "rancher-qa-omsllc",
+                            "tool_args": {},
+                        }
+                    ),
+                },
+            }
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_1",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            }
+            return
+        yield {"type": "response.output_text.delta", "delta": "done"}
+        yield {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_2",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        }
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        runtime_calls.append(kwargs)
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(chat_orchestrator, "stream_response_events", stream_response_events)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in chat_orchestrator.stream_openai_responses_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"Authorization": "Bearer sk-test"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "list namespaces in rancher-qa"}],
+                )
+            ],
+            tools={runtime_tool.wire_name: runtime_tool},
+        )
+    ]
+
+    assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+        service.AGENT_RUN_TOOL_TOOL_NAME,
+    ]
+    assert all(tool["name"] != "wardn_namespace" for tool in sent_bodies[0]["tools"])
+    assert sent_bodies[1]["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "namespace data",
+        }
+    ]
+    assert runtime_calls[0]["tool_name"] == "namespace_list"
+    assert [event.text for event in events if isinstance(event, service.AgentChatTextEvent)] == [
+        "done"
     ]
 
 
@@ -2290,7 +2584,7 @@ async def test_stream_chatgpt_codex_refuses_unadvertised_direct_mcp_call(
     ]
     assert completed[0].tool_name == "namespace_list"
     assert completed[0].error is not None
-    assert "direct MCP tool calls are not available" in completed[0].error
+    assert "direct tool calls are not available" in completed[0].error
     assert runtime_calls == []
 
 

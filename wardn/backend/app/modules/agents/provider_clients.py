@@ -377,6 +377,25 @@ async def stream_response_text(
     usage_callback=None,
     reasoning_summary_callback=None,
 ) -> AsyncGenerator[str, None]:
+    async for payload in stream_response_events(url=url, headers=headers, body=body):
+        usage = llm_usage_from_completed_event(payload)
+        if usage is not None and usage_callback is not None:
+            usage_callback(usage)
+        summaries = reasoning_summaries_from_openai_event(payload)
+        if summaries and reasoning_summary_callback is not None:
+            for summary in summaries:
+                reasoning_summary_callback(summary)
+        text = text_delta_from_openai_event(payload)
+        if text:
+            yield text
+
+
+async def stream_response_events(
+    *,
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+) -> AsyncGenerator[dict[str, Any], None]:
     timeout = httpx.Timeout(AGENT_CHAT_TIMEOUT_SECONDS, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
@@ -392,16 +411,7 @@ async def stream_response_text(
                 buffer += chunk
                 payloads, buffer = sse_payloads(buffer)
                 for payload in payloads:
-                    usage = llm_usage_from_completed_event(payload)
-                    if usage is not None and usage_callback is not None:
-                        usage_callback(usage)
-                    summaries = reasoning_summaries_from_openai_event(payload)
-                    if summaries and reasoning_summary_callback is not None:
-                        for summary in summaries:
-                            reasoning_summary_callback(summary)
-                    text = text_delta_from_openai_event(payload)
-                    if text:
-                        yield text
+                    yield payload
 
 
 def websocket_error_message(payload: dict[str, Any]) -> str | None:

@@ -1115,7 +1115,10 @@ async def stream_agent_chat(
     latest_message = latest_user_message(payload.messages)
     denied_matches = denied_mcp_tool_matches(latest_message, guardrail_filter)
     if denied_matches:
-        stream = preflight_blocked_tool_stream(guardrail_filter, denied_matches=denied_matches)
+        stream = stream_with_capability_diagnosis(
+            guardrail_filter,
+            preflight_blocked_tool_stream(guardrail_filter, denied_matches=denied_matches),
+        )
         return persisted_agent_chat_stream(
             conversation,
             stream,

@@ -22,6 +22,26 @@ AGENT_DYNAMIC_TOOL_NAMES = {
 }
 AGENT_SEARCH_TOOLS_DEFAULT_LIMIT = 8
 AGENT_SEARCH_TOOLS_MAX_LIMIT = 20
+TARGET_DISAMBIGUATION_ARG_NAMES = {
+    "account",
+    "account_name",
+    "accountName",
+    "cluster",
+    "cluster_name",
+    "clusterName",
+    "configured_target",
+    "configuredTarget",
+    "repo",
+    "repository",
+    "repository_name",
+    "repositoryName",
+    "site",
+    "site_name",
+    "siteName",
+    "target",
+    "target_hint",
+    "targetHint",
+}
 SEARCH_STOP_WORDS = {
     "a",
     "all",
@@ -83,22 +103,26 @@ def installed_catalog_tools(catalog: AgentToolCatalog) -> dict[str, AgentInstall
     return {}
 
 
-def agent_dynamic_function_tools(catalog: AgentToolCatalog) -> list[dict[str, Any]]:
+def agent_dynamic_function_tools(
+    catalog: AgentToolCatalog,
+    *,
+    skill_tools: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     assigned_tool_count = len(allowed_catalog_tools(catalog)) + len(denied_catalog_tools(catalog))
-    if assigned_tool_count == 0 and not installed_catalog_tools(catalog):
+    if assigned_tool_count == 0 and not installed_catalog_tools(catalog) and not skill_tools:
         return []
     return [
         {
             "type": "function",
             "name": AGENT_SEARCH_TOOLS_TOOL_NAME,
             "description": (
-                "Diagnose MCP tool capability for this agent. Searches installed workspace "
-                "tools and reports whether each match is executable, installed but not "
-                "assigned, or assigned but blocked by policy. Only returned tools with "
-                "capabilityStatus=allowed have exact toolName values that can be passed to "
-                f"{AGENT_RUN_TOOL_TOOL_NAME}. Search by capability and system name, not only "
-                "by the object being inspected; for example 'google search console gsc "
-                "shipyardhq.dev', 'kubernetes namespaces rancher-qa', or 'arxiv papers'."
+                "Diagnose tool capability for this agent. Searches reachable Wardn tools, "
+                "installed workspace MCP tools, and policy-denied assigned MCP tools. The "
+                "response explains whether each relevant match is executable, installed but "
+                "not assigned, or assigned but blocked by policy. Only returned tools with "
+                "capabilityStatus=allowed can be passed to run_tool. Search by capability, "
+                "system, and target; for example 'google search console gsc shipyardhq.dev', "
+                "'kubernetes namespaces rancher-qa', 'github repo issues', or 'arxiv papers'."
             ),
             "parameters": {
                 "type": "object",
@@ -108,7 +132,7 @@ def agent_dynamic_function_tools(catalog: AgentToolCatalog) -> list[dict[str, An
                         "description": (
                             "Keywords for the capability and target, for example "
                             "'google search console gsc', 'kubernetes namespaces "
-                            "rancher-qa', or 'arxiv read paper'."
+                            "rancher-qa', 'github repo issues', or 'arxiv read paper'."
                         ),
                     },
                     "limit": {
@@ -148,6 +172,21 @@ def agent_dynamic_function_tools(catalog: AgentToolCatalog) -> list[dict[str, An
                         "description": "Arguments for the target MCP tool.",
                         "additionalProperties": True,
                     },
+                    "target_hint": {
+                        "type": "string",
+                        "description": (
+                            "Optional configured target, cluster, account, repository, or "
+                            "site hint used only by Wardn to disambiguate identical tool "
+                            "names across targets. This value is not passed to the target tool."
+                        ),
+                    },
+                    "configured_target": {
+                        "type": "string",
+                        "description": (
+                            "Exact configuredTarget returned by search_tools, when known. This "
+                            "value is used only by Wardn for server-side routing."
+                        ),
+                    },
                 },
                 "required": ["tool_name"],
                 "additionalProperties": False,
@@ -163,6 +202,8 @@ def is_agent_dynamic_tool_name(name: str) -> bool:
 def execute_agent_search_tools(
     catalog: AgentToolCatalog,
     tool_call: AgentToolCall,
+    *,
+    skill_tools: list[dict[str, Any]] | None = None,
 ) -> AgentToolExecutionResult:
     query = string_arg(tool_call.arguments, "query").strip()
     if not query:
@@ -185,39 +226,106 @@ def execute_agent_search_tools(
         for key, tool in installed_catalog_tools(catalog).items()
         if tool.tool_schema.id not in assigned_schema_ids
     }
-    matches = search_agent_tools(tools, query=query, limit=limit)
-    blocked_matches = search_agent_tools(denied_tools, query=query, limit=limit)
-    unassigned_matches = search_installed_tools(unassigned_tools, query=query, limit=limit)
+    allowed_rankings = [
+        {
+            "kind": "mcp",
+            "score": score,
+            "sortKey": tool_sort_key(tool),
+            "payload": tool_search_result(
+                tool,
+                capability_status="allowed",
+                rank=rank,
+                score=score,
+            ),
+        }
+        for rank, (score, tool) in enumerate(
+            rank_agent_tools(tools, query=query),
+            start=1,
+        )
+    ]
+    skill_rankings = [
+        {
+            "kind": "skill",
+            "score": score,
+            "sortKey": skill_tool_sort_key(skill_tool),
+            "payload": skill_tool_search_result(
+                skill_tool,
+                rank=rank,
+                score=score,
+            ),
+        }
+        for rank, (score, skill_tool) in enumerate(
+            rank_skill_tools(skill_tools or [], query=query),
+            start=1,
+        )
+    ]
+    executable_rankings = sorted(
+        [*allowed_rankings, *skill_rankings],
+        key=lambda item: (-item["score"], item["kind"], item["sortKey"]),
+    )
+    blocked_rankings = [
+        (
+            score,
+            tool_search_result(
+                tool,
+                capability_status="assigned_blocked_policy",
+                decision=denied_catalog_tools(catalog).get(tool.wire_name, (None, None))[1],
+                rank=rank,
+                score=score,
+            ),
+        )
+        for rank, (score, tool) in enumerate(
+            rank_agent_tools(denied_tools, query=query),
+            start=1,
+        )
+    ]
+    unassigned_rankings = [
+        (
+            score,
+            installed_tool_search_result(
+                tool,
+                rank=rank,
+                score=score,
+            ),
+        )
+        for rank, (score, tool) in enumerate(
+            rank_installed_tools(unassigned_tools, query=query),
+            start=1,
+        )
+    ]
+    executable_matches = executable_rankings[:limit]
+    blocked_matches = blocked_rankings[:limit]
+    unassigned_matches = unassigned_rankings[:limit]
     output = {
         "query": query,
         "totalInstalled": len(installed_catalog_tools(catalog)) or len(assigned_schema_ids),
         "totalAssigned": len(assigned_schema_ids),
         "totalAllowed": len(tools),
+        "totalReachable": len(tools) + len(skill_tools or []),
         "totalBlockedByPolicy": len(denied_tools),
-        "matchCount": len(matches) + len(blocked_matches) + len(unassigned_matches),
-        "tools": [
-            tool_search_result(tool, capability_status="allowed") for tool in matches
-        ],
-        "blockedTools": [
-            tool_search_result(
-                tool,
-                capability_status="assigned_blocked_policy",
-                decision=denied_catalog_tools(catalog).get(tool.wire_name, (None, None))[1],
-            )
-            for tool in blocked_matches
-        ],
-        "unassignedTools": [
-            installed_tool_search_result(tool) for tool in unassigned_matches
-        ],
+        "matchCount": len(executable_matches) + len(blocked_matches) + len(unassigned_matches),
+        "tools": [item["payload"] for item in executable_matches],
+        "blockedTools": [payload for _score, payload in blocked_matches],
+        "unassignedTools": [payload for _score, payload in unassigned_matches],
         "hint": search_hint(
             tools,
             denied_tools=denied_tools,
             unassigned_tools=unassigned_tools,
             query=query,
-            matches=matches,
-            blocked_matches=blocked_matches,
-            unassigned_matches=unassigned_matches,
+            reachable_count=len(tools) + len(skill_tools or []),
+            match_count=len(executable_matches),
+            blocked_match_count=len(blocked_matches),
+            unassigned_match_count=len(unassigned_matches),
         ),
+        "ranking": {
+            "query": query,
+            "executable": [ranking_trace(item["payload"]) for item in executable_matches],
+            "blockedByPolicy": [ranking_trace(payload) for _score, payload in blocked_matches],
+            "unassigned": [ranking_trace(payload) for _score, payload in unassigned_matches],
+            "omittedExecutable": max(len(executable_rankings) - len(executable_matches), 0),
+            "omittedBlockedByPolicy": max(len(blocked_rankings) - len(blocked_matches), 0),
+            "omittedUnassigned": max(len(unassigned_rankings) - len(unassigned_matches), 0),
+        },
     }
     return tool_execution_result(
         AGENT_SEARCH_TOOLS_TOOL_NAME,
@@ -228,7 +336,9 @@ def execute_agent_search_tools(
             "totalInstalled": output["totalInstalled"],
             "totalAssigned": output["totalAssigned"],
             "totalAllowed": output["totalAllowed"],
+            "totalReachable": output["totalReachable"],
             "totalBlockedByPolicy": output["totalBlockedByPolicy"],
+            "ranking": output["ranking"],
         },
     )
 
@@ -236,14 +346,13 @@ def execute_agent_search_tools(
 def resolve_agent_run_tool_call(
     catalog: AgentToolCatalog,
     tool_call: AgentToolCall,
+    *,
+    request_meta: dict[str, Any] | None = None,
 ) -> tuple[AgentRuntimeTool, AgentToolCall] | AgentToolExecutionResult:
     tools = allowed_catalog_tools(catalog)
     denied = denied_catalog_tools(catalog)
     denied_tools = {wire_name: tool for wire_name, (tool, _decision) in denied.items()}
-    target_name = string_arg(tool_call.arguments, "tool_name") or string_arg(
-        tool_call.arguments,
-        "toolName",
-    )
+    target_name = run_tool_target_name(tool_call.arguments)
     target_name = target_name.strip()
     if not target_name:
         return run_tool_error("tool_name is required.", FAILURE_TOOL_NOT_INSTALLED)
@@ -258,10 +367,23 @@ def resolve_agent_run_tool_call(
         if len(candidates) == 1:
             tool = candidates[0]
         elif len(candidates) > 1:
+            tool = disambiguate_tool_candidates(
+                candidates,
+                tool_call,
+                request_meta=request_meta,
+            )
+        if tool is None and len(candidates) > 1:
             return run_tool_error(
                 "tool_name is ambiguous. Use the exact toolName returned by "
                 f"{AGENT_SEARCH_TOOLS_TOOL_NAME}. Candidates: "
-                f"{json.dumps([tool_search_result(candidate) for candidate in candidates])}"
+                f"{json.dumps([tool_search_result(candidate) for candidate in candidates])}",
+                details={
+                    "targetDisambiguation": target_disambiguation_details(
+                        candidates,
+                        tool_call,
+                        request_meta=request_meta,
+                    )
+                },
             )
     if tool is None:
         blocked_tool = denied_tools.get(target_name)
@@ -281,6 +403,22 @@ def resolve_agent_run_tool_call(
                 details=tool_policy_details(blocked, decision),
             )
         if len(blocked_candidates) > 1:
+            blocked = disambiguate_tool_candidates(
+                blocked_candidates,
+                tool_call,
+                request_meta=request_meta,
+            )
+            if blocked is not None:
+                decision = denied.get(blocked.wire_name, (None, None))[1]
+                policy_name = getattr(decision, "policy_name", "") or "workspace policy"
+                return run_tool_error(
+                    (
+                        f"{blocked.tool_schema.tool_name} is assigned to this agent but "
+                        f"blocked by policy: {getattr(decision, 'message', '') or policy_name}"
+                    ),
+                    FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+                    details=tool_policy_details(blocked, decision),
+                )
             candidates_json = json.dumps(
                 [
                     tool_search_result(
@@ -295,6 +433,13 @@ def resolve_agent_run_tool_call(
                 f"toolName returned by {AGENT_SEARCH_TOOLS_TOOL_NAME}. Candidates: "
                 f"{candidates_json}",
                 FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+                details={
+                    "targetDisambiguation": target_disambiguation_details(
+                        blocked_candidates,
+                        tool_call,
+                        request_meta=request_meta,
+                    )
+                },
             )
         installed_candidates = exact_installed_name_matches(
             installed_catalog_tools(catalog),
@@ -329,12 +474,8 @@ def resolve_agent_run_tool_call(
             unavailable_message,
             FAILURE_TOOL_NOT_INSTALLED,
         )
-    raw_tool_args = tool_call.arguments.get("tool_args")
+    raw_tool_args = run_tool_arguments(tool_call.arguments)
     if raw_tool_args is None:
-        raw_tool_args = tool_call.arguments.get("toolArgs", {})
-    if raw_tool_args is None:
-        raw_tool_args = {}
-    if not isinstance(raw_tool_args, dict):
         return run_tool_error("tool_args must be an object.")
     tool_args = normalize_agent_tool_args(tool, raw_tool_args)
     return (
@@ -371,6 +512,19 @@ def normalize_agent_tool_args(
     return tool_args
 
 
+def run_tool_target_name(arguments: dict[str, Any]) -> str:
+    return string_arg(arguments, "tool_name") or string_arg(arguments, "toolName")
+
+
+def run_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
+    raw_tool_args = arguments.get("tool_args")
+    if raw_tool_args is None:
+        raw_tool_args = arguments.get("toolArgs", {})
+    if raw_tool_args is None:
+        raw_tool_args = {}
+    return raw_tool_args if isinstance(raw_tool_args, dict) else None
+
+
 def should_strip_configured_target_arg(
     tool: AgentRuntimeTool,
     tool_args: dict[str, Any],
@@ -398,9 +552,17 @@ def search_agent_tools(
     query: str,
     limit: int,
 ) -> list[AgentRuntimeTool]:
+    return [tool for _score, tool in rank_agent_tools(tools, query=query)[:limit]]
+
+
+def rank_agent_tools(
+    tools: dict[str, AgentRuntimeTool],
+    *,
+    query: str,
+) -> list[tuple[int, AgentRuntimeTool]]:
     terms = query_terms(query)
     if not terms:
-        return sorted(tools.values(), key=tool_sort_key)[:limit]
+        return [(1, tool) for tool in sorted(tools.values(), key=tool_sort_key)]
     scored = [
         (score_tool(tool, terms=terms, query=query), tool)
         for tool in tools.values()
@@ -411,7 +573,7 @@ def search_agent_tools(
         if score > 0
     ]
     matches.sort(key=lambda item: (-item[0], tool_sort_key(item[1])))
-    return [tool for _score, tool in matches[:limit]]
+    return matches
 
 
 def score_agent_tool_match(tool: AgentRuntimeTool, *, query: str) -> int:
@@ -427,24 +589,23 @@ def search_hint(
     denied_tools: dict[str, AgentRuntimeTool] | None = None,
     unassigned_tools: dict[str, AgentInstalledTool] | None = None,
     query: str,
-    matches: list[AgentRuntimeTool],
-    blocked_matches: list[AgentRuntimeTool] | None = None,
-    unassigned_matches: list[AgentInstalledTool] | None = None,
+    reachable_count: int = 0,
+    match_count: int = 0,
+    blocked_match_count: int = 0,
+    unassigned_match_count: int = 0,
 ) -> str | None:
     denied_tools = denied_tools or {}
     unassigned_tools = unassigned_tools or {}
-    blocked_matches = blocked_matches or []
-    unassigned_matches = unassigned_matches or []
-    if not tools and not denied_tools and not unassigned_tools:
+    if not tools and not denied_tools and not unassigned_tools and reachable_count == 0:
         return "No MCP tools are installed in this workspace."
-    if matches:
+    if match_count:
         return None
-    if blocked_matches:
+    if blocked_match_count:
         return (
             "Matching tools are assigned to this agent but blocked by policy. Do not fall "
             "back to another tool family; report the policy block."
         )
-    if unassigned_matches:
+    if unassigned_match_count:
         return (
             "Matching tools are installed but not assigned to this agent. Do not claim the "
             "tool is missing; report that it needs assignment."
@@ -537,8 +698,11 @@ def tool_search_result(
     *,
     capability_status: str = "allowed",
     decision: Any | None = None,
+    rank: int | None = None,
+    score: int | None = None,
 ) -> dict[str, Any]:
     result = {
+        "toolType": "mcp",
         "capabilityStatus": capability_status,
         "canRun": capability_status == "allowed",
         "failureReason": (
@@ -565,6 +729,8 @@ def tool_search_result(
         }
     result.update(
         {
+            "rank": rank,
+            "score": score,
             "toolName": tool.wire_name,
             "mcpToolName": tool.tool_schema.tool_name,
             "title": tool.tool_schema.title or tool.tool_schema.tool_name,
@@ -585,12 +751,53 @@ def tool_search_result(
     return result
 
 
-def installed_tool_search_result(tool: AgentInstalledTool) -> dict[str, Any]:
+def skill_tool_search_result(
+    tool: dict[str, Any],
+    *,
+    rank: int | None = None,
+    score: int | None = None,
+) -> dict[str, Any]:
+    tool_name = str(tool.get("name") or "")
+    description = str(tool.get("description") or "")
     return {
+        "toolType": "skill",
+        "capabilityStatus": "allowed",
+        "canRun": True,
+        "failureReason": None,
+        "reason": "Tool is enabled for this agent and available to run.",
+        "rank": rank,
+        "score": score,
+        "toolName": tool_name,
+        "mcpToolName": "",
+        "title": skill_tool_title(tool_name),
+        "description": truncate_text(description, 700),
+        "serverName": "wardn-hub-skills",
+        "configuredTarget": "wardn-hub",
+        "configuredTargetHint": (
+            "This is a Wardn internal skill tool. Wardn runs it directly; it is not routed "
+            "through an MCP installation."
+        ),
+        "installationId": "",
+        "toolSchemaId": tool_name,
+        "readOnly": True,
+        "params": summarize_input_schema(tool.get("parameters")),
+    }
+
+
+def installed_tool_search_result(
+    tool: AgentInstalledTool,
+    *,
+    rank: int | None = None,
+    score: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "toolType": "mcp",
         "capabilityStatus": "installed_not_assigned",
         "canRun": False,
         "failureReason": FAILURE_TOOL_INSTALLED_NOT_ASSIGNED,
         "reason": "Tool is installed in this workspace but not assigned to this agent.",
+        "rank": rank,
+        "score": score,
         "toolName": "",
         "mcpToolName": tool.tool_schema.tool_name,
         "title": tool.tool_schema.title or tool.tool_schema.tool_name,
@@ -695,6 +902,129 @@ def exact_names(tool: AgentRuntimeTool) -> set[str]:
     return {normalize_search_text(value) for value in values if normalize_search_text(value)}
 
 
+def disambiguate_tool_candidates(
+    candidates: list[AgentRuntimeTool],
+    tool_call: AgentToolCall,
+    *,
+    request_meta: dict[str, Any] | None = None,
+) -> AgentRuntimeTool | None:
+    target_text = target_disambiguation_text(tool_call, request_meta=request_meta)
+    if not target_text:
+        return None
+    scored = [
+        (target_match_score(candidate, target_text), candidate)
+        for candidate in candidates
+    ]
+    scored = [(score, candidate) for score, candidate in scored if score > 0]
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], tool_sort_key(item[1])))
+    best_score = scored[0][0]
+    best = [candidate for score, candidate in scored if score == best_score]
+    if len({candidate.installation.id for candidate in best}) != 1:
+        return None
+    return best[0]
+
+
+def target_disambiguation_details(
+    candidates: list[AgentRuntimeTool],
+    tool_call: AgentToolCall,
+    *,
+    request_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target_text = target_disambiguation_text(tool_call, request_meta=request_meta)
+    return {
+        "targetHint": target_text,
+        "candidateCount": len(candidates),
+        "candidates": [
+            {
+                "toolName": candidate.wire_name,
+                "mcpToolName": candidate.tool_schema.tool_name,
+                "serverName": candidate.server.name,
+                "configuredTarget": candidate.installation.config_name,
+                "installationId": str(candidate.installation.id),
+                "score": target_match_score(candidate, target_text) if target_text else 0,
+            }
+            for candidate in sorted(candidates, key=tool_sort_key)
+        ],
+    }
+
+
+def target_disambiguation_text(
+    tool_call: AgentToolCall,
+    *,
+    request_meta: dict[str, Any] | None = None,
+) -> str:
+    chunks = []
+    for key in TARGET_DISAMBIGUATION_ARG_NAMES:
+        value = tool_call.arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            chunks.append(value)
+    tool_args = run_tool_arguments(tool_call.arguments)
+    if isinstance(tool_args, dict):
+        for key in TARGET_DISAMBIGUATION_ARG_NAMES:
+            value = tool_args.get(key)
+            if isinstance(value, str) and value.strip():
+                chunks.append(value)
+    request_text = (request_meta or {}).get("userMessage")
+    if isinstance(request_text, str) and request_text.strip():
+        chunks.append(request_text)
+    return normalize_search_text(" ".join(chunks))
+
+
+def target_match_score(tool: AgentRuntimeTool, target_text: str) -> int:
+    if not target_text:
+        return 0
+    score = 0
+    for raw_value, exact_weight, token_weight in (
+        (tool.installation.config_name, 100, 15),
+        (tool.tool_schema.server_name, 30, 6),
+        (tool.server.name, 30, 6),
+    ):
+        normalized = normalize_search_text(raw_value)
+        if not normalized:
+            continue
+        if normalized in target_text:
+            score += exact_weight
+        target_tokens = {
+            token
+            for token in normalized.split()
+            if len(token) >= 2 and token not in SEARCH_STOP_WORDS
+        }
+        if target_tokens:
+            score += token_weight * len(target_tokens & set(target_text.split()))
+    return score
+
+
+def selection_trace_details(
+    catalog: AgentToolCatalog,
+    selected_tool: AgentRuntimeTool,
+    tool_call: AgentToolCall,
+    *,
+    request_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target_name = run_tool_target_name(tool_call.arguments)
+    candidates = exact_name_matches(allowed_catalog_tools(catalog), target_name)
+    if not candidates and target_name == selected_tool.wire_name:
+        candidates = [selected_tool]
+    return {
+        "requestedToolName": target_name,
+        "selected": {
+            "toolName": selected_tool.tool_schema.tool_name,
+            "wireName": selected_tool.wire_name,
+            "serverName": selected_tool.server.name,
+            "configuredTarget": selected_tool.installation.config_name,
+            "installationId": str(selected_tool.installation.id),
+            "toolSchemaId": str(selected_tool.tool_schema.id),
+        },
+        "targetDisambiguation": target_disambiguation_details(
+            candidates,
+            tool_call,
+            request_meta=request_meta,
+        ),
+    }
+
+
 def tool_sort_key(tool: AgentRuntimeTool) -> tuple[str, str, str, str]:
     return (
         tool.installation.config_name,
@@ -713,15 +1043,27 @@ def installed_tool_sort_key(tool: AgentInstalledTool) -> tuple[str, str, str, st
     )
 
 
+def skill_tool_sort_key(tool: dict[str, Any]) -> tuple[str, str]:
+    return ("skill", str(tool.get("name") or ""))
+
+
 def search_installed_tools(
     tools: dict[str, AgentInstalledTool],
     *,
     query: str,
     limit: int,
 ) -> list[AgentInstalledTool]:
+    return [tool for _score, tool in rank_installed_tools(tools, query=query)[:limit]]
+
+
+def rank_installed_tools(
+    tools: dict[str, AgentInstalledTool],
+    *,
+    query: str,
+) -> list[tuple[int, AgentInstalledTool]]:
     terms = query_terms(query)
     if not terms:
-        return sorted(tools.values(), key=installed_tool_sort_key)[:limit]
+        return [(1, tool) for tool in sorted(tools.values(), key=installed_tool_sort_key)]
     scored = [
         (score_installed_tool(tool, terms=terms, query=query), tool)
         for tool in tools.values()
@@ -732,7 +1074,28 @@ def search_installed_tools(
         if score > 0
     ]
     matches.sort(key=lambda item: (-item[0], installed_tool_sort_key(item[1])))
-    return [tool for _score, tool in matches[:limit]]
+    return matches
+
+
+def rank_skill_tools(
+    tools: list[dict[str, Any]],
+    *,
+    query: str,
+) -> list[tuple[int, dict[str, Any]]]:
+    terms = query_terms(query)
+    if not terms:
+        return [(1, tool) for tool in sorted(tools, key=skill_tool_sort_key)]
+    scored = [
+        (score_skill_tool(tool, terms=terms, query=query), tool)
+        for tool in tools
+    ]
+    matches = [
+        (score, tool)
+        for score, tool in scored
+        if score > 0
+    ]
+    matches.sort(key=lambda item: (-item[0], skill_tool_sort_key(item[1])))
+    return matches
 
 
 def score_installed_tool(tool: AgentInstalledTool, *, terms: list[str], query: str) -> int:
@@ -756,6 +1119,50 @@ def score_installed_tool(tool: AgentInstalledTool, *, terms: list[str], query: s
             if term_matches_text(term, text):
                 score += weight
     return score
+
+
+def score_skill_tool(tool: dict[str, Any], *, terms: list[str], query: str) -> int:
+    query_text = normalize_search_text(query)
+    fields = [
+        (8, tool.get("name") or ""),
+        (7, skill_tool_title(str(tool.get("name") or ""))),
+        (4, "wardn hub skills"),
+        (2, tool.get("description") or ""),
+        (1, schema_search_text(tool.get("parameters"))),
+    ]
+    score = 0
+    for weight, value in fields:
+        text = normalize_search_text(value)
+        if not text:
+            continue
+        if query_text and query_text in text:
+            score += weight * 4
+        for term in terms:
+            if term_matches_text(term, text):
+                score += weight
+    return score
+
+
+def skill_tool_title(tool_name: str) -> str:
+    if tool_name == "wardn_search_skills":
+        return "Search Wardn Hub skills"
+    if tool_name == "wardn_get_skill":
+        return "Fetch Wardn Hub skill"
+    return tool_name.replace("_", " ").strip().title() or "Wardn skill"
+
+
+def ranking_trace(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rank": result.get("rank"),
+        "score": result.get("score"),
+        "toolType": result.get("toolType"),
+        "toolName": result.get("toolName"),
+        "mcpToolName": result.get("mcpToolName"),
+        "serverName": result.get("serverName"),
+        "configuredTarget": result.get("configuredTarget"),
+        "capabilityStatus": result.get("capabilityStatus"),
+        "failureReason": result.get("failureReason"),
+    }
 
 
 def read_only_hint(tool: AgentRuntimeTool) -> bool:

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncGenerator
@@ -18,8 +19,12 @@ from app.modules.agents.dynamic_tools import (
     execute_agent_search_tools,
     is_agent_dynamic_tool_name,
     resolve_agent_run_tool_call,
+    run_tool_arguments,
+    run_tool_target_name,
     score_agent_tool_match,
     search_agent_tools,
+    selection_trace_details,
+    tool_search_result,
 )
 from app.modules.agents.exceptions import InvalidAgentScopeError
 from app.modules.agents.mappers import (
@@ -44,7 +49,7 @@ from app.modules.agents.provider_clients import (
     reasoning_request_for_model,
     reasoning_summaries_from_openai_event,
     response_id_from_event,
-    stream_response_text,
+    stream_response_events,
     text_delta_from_openai_event,
     text_from_chat_message,
     tool_calls_from_event,
@@ -63,6 +68,7 @@ from app.modules.agents.tool_execution import (
 )
 from app.modules.agents.types import (
     FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+    FAILURE_TOOL_NOT_INSTALLED,
     AgentChatProviderError,
     AgentChatReasoningSummaryEvent,
     AgentChatStreamEvent,
@@ -95,6 +101,7 @@ from app.modules.llm_providers.service import (
 from app.modules.observability import service as observability_service
 from app.modules.users.models import User
 
+logger = logging.getLogger(__name__)
 AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 DENIED_MCP_TOOL_MATCH_LIMIT = 5
 MCP_REQUEST_ACTION_WORDS = {
@@ -321,62 +328,88 @@ async def persisted_agent_chat_stream(
             {"type": "text-delta", "id": text_id, "delta": error_text}
         )
         if agent_run is not None:
-            async with agent_stream_unit_of_work(session_factory) as session:
-                await repository.append_agent_run_step(
-                    session,
-                    agent_run_id=agent_run.id,
-                    step_type="error",
-                    status="failed",
-                    title=exc.__class__.__name__,
-                    payload={"message": str(exc)},
+            try:
+                async with agent_stream_unit_of_work(session_factory) as session:
+                    await repository.append_agent_run_step(
+                        session,
+                        agent_run_id=agent_run.id,
+                        step_type="error",
+                        status="failed",
+                        title=exc.__class__.__name__,
+                        payload={"message": str(exc)},
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to record agent chat stream error.",
+                    extra={"agent_run_id": str(agent_run.id)},
                 )
-    if text_started:
-        yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
-    yield ui_message_sse_chunk(
-        {"type": "finish", "finishReason": "error" if stream_error else "stop"}
-    )
+    text_end_pending = text_started
     content = "".join(chunks).strip()
     parts = list(activity_parts.values()) + list(reasoning_summary_parts.values())
     if content:
         parts.append({"type": "text", "text": content})
-    async with agent_stream_unit_of_work(session_factory) as session:
-        if agent_run is not None and content:
-            await repository.append_agent_run_step(
-                session,
-                agent_run_id=agent_run.id,
-                step_type="model_output",
-                status="failed" if stream_error else "succeeded",
-                title="Assistant response" if stream_error is None else "Assistant error",
-                payload={"content": sanitize_run_payload(content)},
-            )
-        if conversation is not None and parts:
-            await repository.append_conversation_message(
-                session,
-                conversation_id=conversation.id,
-                role="assistant",
-                content=content,
-                parts=parts,
-                agent_run_id=agent_run.id if agent_run else None,
-            )
-        if agent_run is not None:
-            run_status = "failed" if stream_error else "succeeded"
-            run_error = stream_error or ""
-            if paused_for_confirmation and stream_error is None:
-                run_status = "waiting_confirmation"
-                run_error = ""
-            stored_run = await repository.get_agent_run(
-                session,
-                organization_id=agent_run.organization_id,
-                workspace_id=agent_run.workspace_id,
-                agent_run_id=agent_run.id,
-            )
-            if stored_run is not None:
-                await repository.finish_agent_run(
+    try:
+        async with agent_stream_unit_of_work(session_factory) as session:
+            if agent_run is not None and content:
+                await repository.append_agent_run_step(
                     session,
-                    stored_run,
-                    status=run_status,
-                    error=run_error,
+                    agent_run_id=agent_run.id,
+                    step_type="model_output",
+                    status="failed" if stream_error else "succeeded",
+                    title="Assistant response" if stream_error is None else "Assistant error",
+                    payload={"content": sanitize_run_payload(content)},
                 )
+            if conversation is not None and parts:
+                await repository.append_conversation_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=content,
+                    parts=parts,
+                    agent_run_id=agent_run.id if agent_run else None,
+                )
+            if agent_run is not None:
+                run_status = "failed" if stream_error else "succeeded"
+                run_error = stream_error or ""
+                if paused_for_confirmation and stream_error is None:
+                    run_status = "waiting_confirmation"
+                    run_error = ""
+                stored_run = await repository.get_agent_run(
+                    session,
+                    organization_id=agent_run.organization_id,
+                    workspace_id=agent_run.workspace_id,
+                    agent_run_id=agent_run.id,
+                )
+                if stored_run is not None:
+                    await repository.finish_agent_run(
+                        session,
+                        stored_run,
+                        status=run_status,
+                        error=run_error,
+                    )
+    except Exception as exc:
+        stream_error = str(exc)
+        logger.exception(
+            "Failed to finalize agent chat stream.",
+            extra={
+                "agent_run_id": str(agent_run.id) if agent_run else None,
+                "conversation_id": str(conversation.id) if conversation else None,
+            },
+        )
+        error_text = chat_stream_error_text(exc)
+        if not text_started:
+            text_started = True
+            yield ui_message_sse_chunk({"type": "text-start", "id": text_id})
+        chunks.append(error_text)
+        yield ui_message_sse_chunk(
+            {"type": "text-delta", "id": text_id, "delta": error_text}
+        )
+        text_end_pending = True
+    if text_end_pending:
+        yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
+    yield ui_message_sse_chunk(
+        {"type": "finish", "finishReason": "error" if stream_error else "stop"}
+    )
 
 
 async def preflight_blocked_tool_stream(
@@ -404,6 +437,19 @@ async def preflight_blocked_tool_stream(
         error=first_decision.message or message,
         failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
         details={
+            "deniedRelevantTools": [
+                tool_search_result(
+                    match_tool,
+                    capability_status="assigned_blocked_policy",
+                    decision=match_decision,
+                    rank=index,
+                    score=score_agent_tool_match(
+                        match_tool,
+                        query=tool_name,
+                    ),
+                )
+                for index, (match_tool, match_decision) in enumerate(matches, start=1)
+            ],
             "policy": {
                 "mode": first_decision.mode,
                 "policyId": str(first_decision.policy_id) if first_decision.policy_id else None,
@@ -436,85 +482,27 @@ async def run_agent_chat(
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
 
-    body = {
-        "model": agent.model_name,
-        "instructions": agent.instructions,
-        "input": messages,
-        "stream": True,
-    }
-    reasoning_request = reasoning_request_for_model(agent.model_name)
-    if reasoning_request is not None:
-        body["reasoning"] = reasoning_request
     async with agent_stream_unit_of_work(session_factory) as session:
         credential_secrets = await resolve_credential_secrets(session, credential)
 
     if credential.provider == OPENAI_API_KEY_PROVIDER and credential.auth_method == "api_key":
-        call_started_at = datetime.now(UTC)
-        call_usage: observability_service.LLMTokenUsage | None = None
-        async with agent_stream_unit_of_work(session_factory) as session:
-            await require_agent_llm_budget_available(
-                session,
-                agent=agent,
-                user=user,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-            )
-
-        def capture_usage(usage: observability_service.LLMTokenUsage) -> None:
-            nonlocal call_usage
-            call_usage = usage
-
-        reasoning_summaries: list[str] = []
-
-        def capture_reasoning_summary(summary: str) -> None:
-            if summary and summary not in reasoning_summaries:
-                reasoning_summaries.append(summary)
-
-        try:
-            async for text in stream_response_text(
-                url=OPENAI_RESPONSES_URL,
-                headers={
-                    "Authorization": f"Bearer {credential_secrets.api_key}",
-                    "Content-Type": "application/json",
-                },
-                body=body,
-                usage_callback=capture_usage,
-                reasoning_summary_callback=capture_reasoning_summary,
-            ):
-                yield AgentChatTextEvent(text=text)
-            for summary in reasoning_summaries:
-                yield AgentChatReasoningSummaryEvent(summary=summary)
-        except Exception as exc:
-            async with agent_stream_unit_of_work(session_factory) as session:
-                await record_agent_llm_usage(
-                    session,
-                    credential=credential,
-                    agent=agent,
-                    user=user,
-                    organization_id=organization_id,
-                    workspace_id=workspace_id,
-                    agent_run=agent_run,
-                    usage=call_usage,
-                    started_at=call_started_at,
-                    finished_at=datetime.now(UTC),
-                    status="failed",
-                    error=str(exc),
-                )
-            raise
-        async with agent_stream_unit_of_work(session_factory) as session:
-            await record_agent_llm_usage(
-                session,
-                credential=credential,
-                agent=agent,
-                user=user,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                agent_run=agent_run,
-                usage=call_usage,
-                started_at=call_started_at,
-                finished_at=datetime.now(UTC),
-                status="succeeded",
-            )
+        async for event in stream_openai_responses_response_text(
+            agent,
+            credential,
+            session_factory=session_factory,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            conversation=conversation,
+            agent_run=agent_run,
+            headers={
+                "Authorization": f"Bearer {credential_secrets.api_key}",
+                "Content-Type": "application/json",
+            },
+            messages=payload.messages,
+            tools=guardrail_filter,
+        ):
+            yield event
         return
 
     if (
@@ -592,6 +580,169 @@ async def run_agent_chat(
     raise InvalidAgentScopeError("agent credential provider is not supported for chat")
 
 
+def openai_responses_request_body(
+    agent: Agent,
+    *,
+    input_items: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    previous_response_id: str | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": agent.model_name,
+        "instructions": agent.instructions,
+        "input": input_items,
+        "stream": True,
+    }
+    reasoning_request = reasoning_request_for_model(agent.model_name)
+    if reasoning_request is not None:
+        body["reasoning"] = reasoning_request
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+        body["parallel_tool_calls"] = True
+    if previous_response_id:
+        body["previous_response_id"] = previous_response_id
+    return body
+
+
+async def stream_openai_responses_response_text(
+    agent: Agent,
+    credential: LLMProviderCredential,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+    headers: dict[str, str],
+    messages: list[AgentChatMessage],
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    guardrail_filter = agent_guardrail_filter_from_tools(tools)
+    input_items = provider_messages(messages)
+    function_tools = agent_dynamic_function_tools(
+        guardrail_filter,
+        skill_tools=agent_skill_function_tools(agent.skill_ids or []),
+    )
+    latest_user = latest_user_message(messages)
+    latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
+    previous_response_id = None
+
+    for _round_index in range(AGENT_CHAT_MAX_TOOL_ROUNDS):
+        body = openai_responses_request_body(
+            agent,
+            input_items=input_items,
+            tools=function_tools,
+            previous_response_id=previous_response_id,
+        )
+        call_started_at = datetime.now(UTC)
+        call_usage: observability_service.LLMTokenUsage | None = None
+        tool_calls: list[AgentToolCall] = []
+        reasoning_summaries: set[str] = set()
+        async with agent_stream_unit_of_work(session_factory) as session:
+            await require_agent_llm_budget_available(
+                session,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+            )
+
+        try:
+            async for payload in stream_response_events(
+                url=OPENAI_RESPONSES_URL,
+                headers=headers,
+                body=body,
+            ):
+                usage = llm_usage_from_completed_event(payload)
+                if usage is not None:
+                    call_usage = usage
+                for summary in reasoning_summaries_from_openai_event(payload):
+                    if summary in reasoning_summaries:
+                        continue
+                    reasoning_summaries.add(summary)
+                    yield AgentChatReasoningSummaryEvent(summary=summary)
+                text = text_delta_from_openai_event(payload)
+                if text:
+                    yield AgentChatTextEvent(text=text)
+                tool_calls.extend(tool_calls_from_event(payload))
+                response_id = response_id_from_event(payload)
+                if response_id:
+                    previous_response_id = response_id
+        except Exception as exc:
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await record_agent_llm_usage(
+                    session,
+                    credential=credential,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run=agent_run,
+                    usage=call_usage,
+                    started_at=call_started_at,
+                    finished_at=datetime.now(UTC),
+                    status="failed",
+                    error=str(exc),
+                )
+            raise
+
+        async with agent_stream_unit_of_work(session_factory) as session:
+            await record_agent_llm_usage(
+                session,
+                credential=credential,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent_run=agent_run,
+                usage=call_usage,
+                started_at=call_started_at,
+                finished_at=datetime.now(UTC),
+                status="succeeded",
+            )
+
+        if not tool_calls:
+            return
+
+        input_items = []
+        for tool_call in tool_calls:
+            execution: AgentToolExecutionResult | None = None
+            async for event in execute_agent_model_tool_call_stream(
+                guardrail_filter,
+                tool_call,
+                agent=agent,
+                session_factory=session_factory,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                conversation=conversation,
+                agent_run=agent_run,
+                request_meta={"userMessage": latest_user_text},
+            ):
+                if isinstance(event, AgentToolExecutionResult):
+                    execution = event
+                else:
+                    yield event
+            if execution is None:
+                execution = tool_execution_result(
+                    tool_call.name,
+                    f"Tool {tool_call.name} failed: no tool result was returned",
+                )
+            if execution.status == "requires_confirmation":
+                return
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": tool_call.call_id,
+                    "output": execution.output,
+                }
+            )
+
+    yield AgentChatTextEvent(text="\n\nStopped after reaching the tool call limit.")
+
+
 def conversation_id_from_payload(payload: AgentChatRequest) -> uuid.UUID | None:
     if not payload.id:
         return None
@@ -628,7 +779,6 @@ async def stream_chatgpt_codex_response_text(
     tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
     guardrail_filter = agent_guardrail_filter_from_tools(tools)
-    allowed_tools = guardrail_filter.allowed_tools
     try:
         async with websocket_connect(
             CHATGPT_CODEX_RESPONSES_WS_URL,
@@ -642,8 +792,9 @@ async def stream_chatgpt_codex_response_text(
             previous_response_id = None
             input_items = chatgpt_codex_messages(messages)
             function_tools = agent_dynamic_function_tools(
-                guardrail_filter
-            ) + agent_skill_function_tools(agent.skill_ids or [])
+                guardrail_filter,
+                skill_tools=agent_skill_function_tools(agent.skill_ids or []),
+            )
             latest_user = latest_user_message(messages)
             latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
 
@@ -741,111 +892,28 @@ async def stream_chatgpt_codex_response_text(
 
                 input_items = []
                 for tool_call in tool_calls:
-                    if is_agent_skill_tool_enabled(agent.skill_ids or [], tool_call.name):
-                        skill_execution: AgentToolExecutionResult | None = None
-                        async for event in execute_agent_skill_tool_call_stream(tool_call):
-                            if isinstance(event, AgentToolExecutionResult):
-                                skill_execution = event
-                            else:
-                                yield event
-                        if skill_execution is None:
-                            tool_name = agent_skill_tool_display_name(tool_call.name)
-                            skill_execution = tool_execution_result(
-                                tool_name,
-                                f"Tool {tool_name} failed: no tool result was returned",
-                            )
-                        input_items.append(
-                            {
-                                "type": "function_call_output",
-                                "call_id": tool_call.call_id,
-                                "output": skill_execution.output,
-                            }
-                        )
-                        continue
-
-                    if is_agent_dynamic_tool_name(tool_call.name):
-                        execution: AgentToolExecutionResult | None = None
-                        async for event in execute_agent_dynamic_tool_call_stream(
-                            guardrail_filter,
-                            tool_call,
-                            session_factory=session_factory,
-                            user=user,
-                            organization_id=organization_id,
-                            workspace_id=workspace_id,
-                            agent=agent,
-                            conversation=conversation,
-                            agent_run=agent_run,
-                            request_meta={"userMessage": latest_user_text},
-                        ):
-                            if isinstance(event, AgentToolExecutionResult):
-                                execution = event
-                            else:
-                                yield event
-                        if execution is None:
-                            execution = tool_execution_result(
-                                tool_call.name,
-                                f"Tool {tool_call.name} failed: no tool result was returned",
-                            )
-                        if execution.status == "requires_confirmation":
-                            return
-                        input_items.append(
-                            {
-                                "type": "function_call_output",
-                                "call_id": tool_call.call_id,
-                                "output": execution.output,
-                            }
-                        )
-                        continue
-
-                    tool = allowed_tools.get(tool_call.name)
-                    tool_name = tool.tool_schema.tool_name if tool is not None else tool_call.name
-                    activity_id = f"tool-{tool_call.call_id}"
-                    yield AgentChatToolActivityEvent(
-                        id=activity_id,
-                        tool_name=tool_name,
-                        status="running",
-                        arguments=tool_call.arguments,
-                    )
                     execution: AgentToolExecutionResult | None = None
-                    if tool is not None:
-                        execution = tool_execution_result(
-                            tool_name,
-                            f"Tool {tool_name} failed: direct MCP tool calls are not available "
-                            f"in this chat. Use {AGENT_SEARCH_TOOLS_TOOL_NAME} and "
-                            f"{AGENT_RUN_TOOL_TOOL_NAME}.",
-                        )
-                    else:
-                        async for update in execute_agent_tool_call_with_progress(
-                            allowed_tools,
-                            tool_call,
-                            session_factory=session_factory,
-                            activity_id=activity_id,
-                            tool_name=tool_name,
-                            user=user,
-                            organization_id=organization_id,
-                            workspace_id=workspace_id,
-                            agent=agent,
-                            conversation=conversation,
-                            agent_run=agent_run,
-                            request_meta={"userMessage": latest_user_text},
-                        ):
-                            if isinstance(update, AgentChatToolActivityEvent):
-                                yield update
-                            else:
-                                execution = update
+                    async for event in execute_agent_model_tool_call_stream(
+                        guardrail_filter,
+                        tool_call,
+                        agent=agent,
+                        session_factory=session_factory,
+                        user=user,
+                        organization_id=organization_id,
+                        workspace_id=workspace_id,
+                        conversation=conversation,
+                        agent_run=agent_run,
+                        request_meta={"userMessage": latest_user_text},
+                    ):
+                        if isinstance(event, AgentToolExecutionResult):
+                            execution = event
+                        else:
+                            yield event
                     if execution is None:
                         execution = tool_execution_result(
-                            tool_name,
-                            f"Tool {tool_name} failed: no tool result was returned",
+                            tool_call.name,
+                            f"Tool {tool_call.name} failed: no tool result was returned",
                         )
-                    yield AgentChatToolActivityEvent(
-                        id=activity_id,
-                        tool_name=tool_name,
-                        status=execution.status,
-                        error=execution.error,
-                        result=execution.result,
-                        approval=execution.approval,
-                    )
                     if execution.status == "requires_confirmation":
                         return
                     input_items.append(
@@ -899,10 +967,88 @@ async def execute_agent_skill_tool_call_stream(
     yield execution
 
 
+async def execute_agent_model_tool_call_stream(
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+    tool_call: AgentToolCall,
+    *,
+    agent: Agent,
+    session_factory: AgentSessionFactory | None = None,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+    request_meta: dict[str, Any] | None = None,
+) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
+    if is_agent_dynamic_tool_name(tool_call.name):
+        async for event in execute_agent_dynamic_tool_call_stream(
+            guardrail_filter,
+            tool_call,
+            skill_ids=agent.skill_ids or [],
+            session_factory=session_factory,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent=agent,
+            conversation=conversation,
+            agent_run=agent_run,
+            request_meta=request_meta,
+        ):
+            yield event
+        return
+
+    tool = guardrail_filter.allowed_tools.get(tool_call.name)
+    if tool is not None:
+        tool_name = tool.tool_schema.tool_name
+    elif is_agent_skill_tool_enabled(agent.skill_ids or [], tool_call.name):
+        tool_name = agent_skill_tool_display_name(tool_call.name)
+    else:
+        tool_name = tool_call.name
+    activity_id = f"tool-{tool_call.call_id}"
+    execution = tool_execution_result(
+        tool_name,
+        (
+            f"Tool {tool_name} failed: direct tool calls are not available in this chat. "
+            f"Use {AGENT_SEARCH_TOOLS_TOOL_NAME} and {AGENT_RUN_TOOL_TOOL_NAME}."
+        ),
+        failure_reason=FAILURE_TOOL_NOT_INSTALLED,
+        details={
+            "toolSurface": {
+                "receivedToolName": tool_call.name,
+                "visibleTools": [
+                    AGENT_SEARCH_TOOLS_TOOL_NAME,
+                    AGENT_RUN_TOOL_TOOL_NAME,
+                ],
+                "reason": (
+                    "Wardn exposes only dynamic meta-tools to the model and resolves target "
+                    "tools server-side."
+                ),
+            }
+        },
+    )
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status="running",
+        arguments=tool_call.arguments,
+    )
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status=execution.status,
+        error=execution.error,
+        failure_reason=execution.failure_reason,
+        result=execution.result,
+        details=execution.details,
+    )
+    yield execution
+
+
 async def execute_agent_dynamic_tool_call_stream(
     tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
     tool_call: AgentToolCall,
     *,
+    skill_ids: list[str] | None = None,
     session_factory: AgentSessionFactory | None = None,
     user: User | None = None,
     organization_id: uuid.UUID | None = None,
@@ -915,6 +1061,7 @@ async def execute_agent_dynamic_tool_call_stream(
     guardrail_filter = agent_guardrail_filter_from_tools(tools)
     allowed_tools = guardrail_filter.allowed_tools
     activity_id = f"tool-{tool_call.call_id}"
+    skill_tools = agent_skill_function_tools(skill_ids or [])
     if tool_call.name == AGENT_SEARCH_TOOLS_TOOL_NAME:
         yield AgentChatToolActivityEvent(
             id=activity_id,
@@ -922,7 +1069,11 @@ async def execute_agent_dynamic_tool_call_stream(
             status="running",
             arguments=tool_call.arguments,
         )
-        execution = execute_agent_search_tools(guardrail_filter, tool_call)
+        execution = execute_agent_search_tools(
+            guardrail_filter,
+            tool_call,
+            skill_tools=skill_tools,
+        )
         yield AgentChatToolActivityEvent(
             id=activity_id,
             tool_name=AGENT_SEARCH_TOOLS_TOOL_NAME,
@@ -935,7 +1086,63 @@ async def execute_agent_dynamic_tool_call_stream(
         yield execution
         return
 
-    resolved = resolve_agent_run_tool_call(guardrail_filter, tool_call)
+    target_name = run_tool_target_name(tool_call.arguments)
+    if is_agent_skill_tool_enabled(skill_ids or [], target_name):
+        raw_tool_args = run_tool_arguments(tool_call.arguments)
+        if raw_tool_args is None:
+            resolved = tool_execution_result(
+                AGENT_RUN_TOOL_TOOL_NAME,
+                f"Tool {AGENT_RUN_TOOL_TOOL_NAME} failed: tool_args must be an object.",
+                failure_reason=FAILURE_TOOL_NOT_INSTALLED,
+            )
+            yield AgentChatToolActivityEvent(
+                id=activity_id,
+                tool_name=AGENT_RUN_TOOL_TOOL_NAME,
+                status="running",
+                arguments=tool_call.arguments,
+            )
+            yield AgentChatToolActivityEvent(
+                id=activity_id,
+                tool_name=AGENT_RUN_TOOL_TOOL_NAME,
+                status=resolved.status,
+                error=resolved.error,
+                failure_reason=resolved.failure_reason,
+                result=resolved.result,
+                details=resolved.details,
+            )
+            yield resolved
+            return
+        skill_tool_name = agent_skill_tool_display_name(target_name)
+        yield AgentChatToolActivityEvent(
+            id=f"selection-{tool_call.call_id}",
+            tool_name="Tool selected",
+            status="completed",
+            message=f"Selected {skill_tool_name}.",
+            details={
+                "selection": {
+                    "toolType": "skill",
+                    "toolName": target_name,
+                    "displayName": skill_tool_name,
+                    "serverName": "wardn-hub-skills",
+                    "configuredTarget": "wardn-hub",
+                }
+            },
+        )
+        async for event in execute_agent_skill_tool_call_stream(
+            AgentToolCall(
+                name=target_name,
+                call_id=tool_call.call_id,
+                arguments=raw_tool_args,
+            )
+        ):
+            yield event
+        return
+
+    resolved = resolve_agent_run_tool_call(
+        guardrail_filter,
+        tool_call,
+        request_meta=request_meta,
+    )
     if isinstance(resolved, AgentToolExecutionResult):
         yield AgentChatToolActivityEvent(
             id=activity_id,
@@ -963,13 +1170,12 @@ async def execute_agent_dynamic_tool_call_stream(
         status="completed",
         message=f"Selected {tool_name} on {tool.installation.config_name}.",
         details={
-            "selection": {
-                "toolName": tool_name,
-                "serverName": tool.server.name,
-                "configuredTarget": tool.installation.config_name,
-                "installationId": str(tool.installation.id),
-                "toolSchemaId": str(tool.tool_schema.id),
-            }
+            "selection": selection_trace_details(
+                guardrail_filter,
+                tool,
+                tool_call,
+                request_meta=request_meta,
+            )
         },
     )
     yield AgentChatToolActivityEvent(
