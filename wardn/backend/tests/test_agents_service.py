@@ -171,6 +171,66 @@ class FreshSessionFactory:
         return session
 
 
+def make_agent_runtime_tool(
+    *,
+    wire_name: str,
+    tool_name: str,
+    config_name: str = "default",
+    title: str | None = None,
+    description: str = "",
+    input_schema: dict | None = None,
+    annotations: dict | None = None,
+    workspace_id=None,
+    organization_id=None,
+    server_name: str = "io.github.example/tools",
+) -> service.AgentRuntimeTool:
+    workspace_id = workspace_id or uuid4()
+    organization_id = organization_id or uuid4()
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name=server_name,
+        config_name=config_name,
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Example MCP server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name=tool_name,
+        title=title or tool_name,
+        description=description,
+        input_schema=input_schema or {"type": "object", "properties": {}},
+        annotations=annotations or {},
+        is_active=True,
+    )
+    return service.AgentRuntimeTool(
+        wire_name=wire_name,
+        assignment_id=uuid4(),
+        tool_schema=tool_schema,
+        installation=installation,
+        server=server,
+    )
+
+
 def test_provider_messages_keeps_text_user_and_assistant_messages() -> None:
     messages = [
         AgentChatMessage(role="system", parts=[{"type": "text", "text": "ignored"}]),
@@ -1586,6 +1646,427 @@ def test_response_function_tools_include_configured_mcp_target() -> None:
 
     assert "Configured MCP target: rancher-qa-omsllc" in description
     assert f"MCP installation ID: {installation.id}" in description
+
+
+def test_agent_dynamic_function_tools_expose_only_search_and_run() -> None:
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        description="[READ] List namespaces.",
+    )
+
+    function_tools = service.agent_dynamic_function_tools({"wardn_namespace": runtime_tool})
+
+    assert [tool["name"] for tool in function_tools] == [
+        service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+        service.AGENT_RUN_TOOL_TOOL_NAME,
+    ]
+    assert all(tool["name"] != "wardn_namespace" for tool in function_tools)
+    assert service.agent_dynamic_function_tools({}) == []
+
+
+def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
+    namespace_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        title="List namespaces",
+        description="[READ] List Kubernetes namespaces.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Kubernetes target name.",
+                }
+            },
+        },
+        annotations={"readOnlyHint": True},
+    )
+    pod_tool = make_agent_runtime_tool(
+        wire_name="wardn_pods",
+        tool_name="pod_list",
+        config_name="default",
+        title="List pods",
+        description="[READ] List Kubernetes pods.",
+    )
+
+    result = service.execute_agent_search_tools(
+        {
+            namespace_tool.wire_name: namespace_tool,
+            pod_tool.wire_name: pod_tool,
+        },
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "list namespaces omsllc", "limit": 5},
+        ),
+    )
+    payload = json.loads(result.output)
+
+    assert result.status == "completed"
+    assert payload["tools"][0]["toolName"] == "wardn_namespace"
+    assert payload["tools"][0]["mcpToolName"] == "namespace_list"
+    assert payload["tools"][0]["configuredTarget"] == "rancher-qa-omsllc"
+    assert payload["tools"][0]["readOnly"] is True
+    assert payload["tools"][0]["params"][0]["name"] == "target"
+
+
+def test_resolve_agent_run_tool_call_requires_exact_name_for_duplicates() -> None:
+    default_tool = make_agent_runtime_tool(
+        wire_name="wardn_default_namespace",
+        tool_name="namespace_list",
+        config_name="default",
+    )
+    rancher_tool = make_agent_runtime_tool(
+        wire_name="wardn_rancher_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+    )
+    tools = {
+        default_tool.wire_name: default_tool,
+        rancher_tool.wire_name: rancher_tool,
+    }
+
+    ambiguous = service.resolve_agent_run_tool_call(
+        tools,
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_1",
+            arguments={"tool_name": "namespace_list"},
+        ),
+    )
+
+    assert not isinstance(ambiguous, tuple)
+    assert ambiguous.status == "failed"
+    assert "ambiguous" in (ambiguous.error or "")
+
+    resolved = service.resolve_agent_run_tool_call(
+        tools,
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_2",
+            arguments={
+                "tool_name": "wardn_rancher_namespace",
+                "tool_args": {"target": "rancher-qa-omsllc"},
+            },
+        ),
+    )
+
+    assert isinstance(resolved, tuple)
+    tool, target_call = resolved
+    assert tool is rancher_tool
+    assert target_call.name == "wardn_rancher_namespace"
+    assert target_call.call_id == "call_2"
+    assert target_call.arguments == {"target": "rancher-qa-omsllc"}
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_dynamic_run_tool_stream_dispatches_resolved_target(
+    monkeypatch,
+) -> None:
+    namespace_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        description="[READ] List Kubernetes namespaces.",
+    )
+    calls: list[dict] = []
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        calls.append(kwargs)
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in chat_orchestrator.execute_agent_dynamic_tool_call_stream(
+            {namespace_tool.wire_name: namespace_tool},
+            service.AgentToolCall(
+                name=service.AGENT_RUN_TOOL_TOOL_NAME,
+                call_id="call_1",
+                arguments={
+                    "tool_name": "wardn_namespace",
+                    "tool_args": {"target": "rancher-qa-omsllc"},
+                },
+            ),
+            session_factory=fake_session_factory(FakeSession()),
+            request_meta={"userMessage": "list namespaces in rancher-qa omsllc"},
+        )
+    ]
+
+    assert isinstance(events[0], service.AgentChatToolActivityEvent)
+    assert events[0].tool_name == "namespace_list"
+    assert events[0].arguments == {"target": "rancher-qa-omsllc"}
+    assert isinstance(events[-1], service.AgentToolExecutionResult)
+    assert events[-1].status == "completed"
+    assert calls[0]["tool_name"] == "namespace_list"
+    assert calls[0]["arguments"] == {"target": "rancher-qa-omsllc"}
+
+
+@pytest.mark.asyncio
+async def test_stream_chatgpt_codex_exposes_dynamic_tools_instead_of_concrete_mcp(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider=service.OPENAI_CHATGPT_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_metadata={"accountId": "account-1"},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+
+    class FakeWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            sent_bodies.append(json.loads(message))
+
+        def __aiter__(self):
+            self.messages = iter(
+                [
+                    json.dumps(
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": "resp_1",
+                                "usage": {
+                                    "input_tokens": 1,
+                                    "output_tokens": 0,
+                                    "total_tokens": 1,
+                                },
+                            },
+                        }
+                    )
+                ]
+            )
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.messages)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+    def websocket_connect(*args, **kwargs):
+        return FakeWebSocket()
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(chat_orchestrator, "websocket_connect", websocket_connect)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+
+    events = [
+        event
+        async for event in service.stream_chatgpt_codex_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"Authorization": "Bearer token"},
+            messages=[
+                AgentChatMessage(role="user", parts=[{"type": "text", "text": "hello"}])
+            ],
+            tools={runtime_tool.wire_name: runtime_tool},
+        )
+    ]
+
+    assert events == []
+    assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+        service.AGENT_RUN_TOOL_TOOL_NAME,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_chatgpt_codex_refuses_unadvertised_direct_mcp_call(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider=service.OPENAI_CHATGPT_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_metadata={"accountId": "account-1"},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+    runtime_calls: list[dict] = []
+
+    class FakeWebSocket:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            sent_bodies.append(json.loads(message))
+            if len(sent_bodies) == 1:
+                self.messages = [
+                    json.dumps(
+                        {
+                            "type": "response.output_item.done",
+                            "item": {
+                                "type": "function_call",
+                                "name": "wardn_namespace",
+                                "call_id": "call_1",
+                                "arguments": "{}",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": "resp_1",
+                                "usage": {"input_tokens": 1, "output_tokens": 1},
+                            },
+                        }
+                    ),
+                ]
+            else:
+                self.messages = [
+                    json.dumps(
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": "resp_2",
+                                "usage": {"input_tokens": 1, "output_tokens": 0},
+                            },
+                        }
+                    )
+                ]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.messages:
+                raise StopAsyncIteration
+            return self.messages.pop(0)
+
+    def websocket_connect(*args, **kwargs):
+        return FakeWebSocket()
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        runtime_calls.append(kwargs)
+        return {"content": [{"type": "text", "text": "should not run"}]}
+
+    monkeypatch.setattr(chat_orchestrator, "websocket_connect", websocket_connect)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in service.stream_chatgpt_codex_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"Authorization": "Bearer token"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "list namespaces"}],
+                )
+            ],
+            tools={runtime_tool.wire_name: runtime_tool},
+        )
+    ]
+
+    completed = [
+        event
+        for event in events
+        if isinstance(event, service.AgentChatToolActivityEvent)
+        and event.status == "failed"
+    ]
+    assert completed[0].tool_name == "namespace_list"
+    assert completed[0].error is not None
+    assert "direct MCP tool calls are not available" in completed[0].error
+    assert runtime_calls == []
 
 
 @pytest.mark.asyncio

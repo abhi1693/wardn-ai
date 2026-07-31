@@ -11,6 +11,14 @@ from websockets.exceptions import InvalidStatus, WebSocketException
 
 from app.modules.agents import repository
 from app.modules.agents.conversations import AgentSessionFactory, agent_stream_unit_of_work
+from app.modules.agents.dynamic_tools import (
+    AGENT_RUN_TOOL_TOOL_NAME,
+    AGENT_SEARCH_TOOLS_TOOL_NAME,
+    agent_dynamic_function_tools,
+    execute_agent_search_tools,
+    is_agent_dynamic_tool_name,
+    resolve_agent_run_tool_call,
+)
 from app.modules.agents.exceptions import InvalidAgentScopeError
 from app.modules.agents.mappers import (
     sanitize_run_payload,
@@ -33,7 +41,6 @@ from app.modules.agents.provider_clients import (
     provider_messages,
     reasoning_request_for_model,
     reasoning_summaries_from_openai_event,
-    response_function_tools,
     response_id_from_event,
     stream_response_text,
     text_delta_from_openai_event,
@@ -518,7 +525,7 @@ async def stream_chatgpt_codex_response_text(
         ) as websocket:
             previous_response_id = None
             input_items = chatgpt_codex_messages(messages)
-            function_tools = response_function_tools(tools) + agent_skill_function_tools(
+            function_tools = agent_dynamic_function_tools(tools) + agent_skill_function_tools(
                 agent.skill_ids or []
             )
             latest_user = latest_user_message(messages)
@@ -640,12 +647,42 @@ async def stream_chatgpt_codex_response_text(
                         )
                         continue
 
+                    if is_agent_dynamic_tool_name(tool_call.name):
+                        execution: AgentToolExecutionResult | None = None
+                        async for event in execute_agent_dynamic_tool_call_stream(
+                            tools,
+                            tool_call,
+                            session_factory=session_factory,
+                            user=user,
+                            organization_id=organization_id,
+                            workspace_id=workspace_id,
+                            agent=agent,
+                            conversation=conversation,
+                            agent_run=agent_run,
+                            request_meta={"userMessage": latest_user_text},
+                        ):
+                            if isinstance(event, AgentToolExecutionResult):
+                                execution = event
+                            else:
+                                yield event
+                        if execution is None:
+                            execution = tool_execution_result(
+                                tool_call.name,
+                                f"Tool {tool_call.name} failed: no tool result was returned",
+                            )
+                        if execution.status == "requires_confirmation":
+                            return
+                        input_items.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": tool_call.call_id,
+                                "output": execution.output,
+                            }
+                        )
+                        continue
+
                     tool = tools.get(tool_call.name)
-                    tool_name = (
-                        tool.tool_schema.tool_name
-                        if tool is not None
-                        else tool_call.name
-                    )
+                    tool_name = tool.tool_schema.tool_name if tool is not None else tool_call.name
                     activity_id = f"tool-{tool_call.call_id}"
                     yield AgentChatToolActivityEvent(
                         id=activity_id,
@@ -654,24 +691,32 @@ async def stream_chatgpt_codex_response_text(
                         arguments=tool_call.arguments,
                     )
                     execution: AgentToolExecutionResult | None = None
-                    async for update in execute_agent_tool_call_with_progress(
-                        tools,
-                        tool_call,
-                        session_factory=session_factory,
-                        activity_id=activity_id,
-                        tool_name=tool_name,
-                        user=user,
-                        organization_id=organization_id,
-                        workspace_id=workspace_id,
-                        agent=agent,
-                        conversation=conversation,
-                        agent_run=agent_run,
-                        request_meta={"userMessage": latest_user_text},
-                    ):
-                        if isinstance(update, AgentChatToolActivityEvent):
-                            yield update
-                        else:
-                            execution = update
+                    if tool is not None:
+                        execution = tool_execution_result(
+                            tool_name,
+                            f"Tool {tool_name} failed: direct MCP tool calls are not available "
+                            f"in this chat. Use {AGENT_SEARCH_TOOLS_TOOL_NAME} and "
+                            f"{AGENT_RUN_TOOL_TOOL_NAME}.",
+                        )
+                    else:
+                        async for update in execute_agent_tool_call_with_progress(
+                            tools,
+                            tool_call,
+                            session_factory=session_factory,
+                            activity_id=activity_id,
+                            tool_name=tool_name,
+                            user=user,
+                            organization_id=organization_id,
+                            workspace_id=workspace_id,
+                            agent=agent,
+                            conversation=conversation,
+                            agent_run=agent_run,
+                            request_meta={"userMessage": latest_user_text},
+                        ):
+                            if isinstance(update, AgentChatToolActivityEvent):
+                                yield update
+                            else:
+                                execution = update
                     if execution is None:
                         execution = tool_execution_result(
                             tool_name,
@@ -734,6 +779,99 @@ async def execute_agent_skill_tool_call_stream(
         status=execution.status,
         error=execution.error,
         result=execution.result,
+    )
+    yield execution
+
+
+async def execute_agent_dynamic_tool_call_stream(
+    tools: dict[str, AgentRuntimeTool],
+    tool_call: AgentToolCall,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent: Agent | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+    request_meta: dict[str, Any] | None = None,
+) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
+    activity_id = f"tool-{tool_call.call_id}"
+    if tool_call.name == AGENT_SEARCH_TOOLS_TOOL_NAME:
+        yield AgentChatToolActivityEvent(
+            id=activity_id,
+            tool_name=AGENT_SEARCH_TOOLS_TOOL_NAME,
+            status="running",
+            arguments=tool_call.arguments,
+        )
+        execution = execute_agent_search_tools(tools, tool_call)
+        yield AgentChatToolActivityEvent(
+            id=activity_id,
+            tool_name=AGENT_SEARCH_TOOLS_TOOL_NAME,
+            status=execution.status,
+            error=execution.error,
+            result=execution.result,
+        )
+        yield execution
+        return
+
+    resolved = resolve_agent_run_tool_call(tools, tool_call)
+    if isinstance(resolved, AgentToolExecutionResult):
+        yield AgentChatToolActivityEvent(
+            id=activity_id,
+            tool_name=AGENT_RUN_TOOL_TOOL_NAME,
+            status="running",
+            arguments=tool_call.arguments,
+        )
+        yield AgentChatToolActivityEvent(
+            id=activity_id,
+            tool_name=AGENT_RUN_TOOL_TOOL_NAME,
+            status=resolved.status,
+            error=resolved.error,
+            result=resolved.result,
+        )
+        yield resolved
+        return
+
+    tool, target_call = resolved
+    tool_name = tool.tool_schema.tool_name
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status="running",
+        arguments=target_call.arguments,
+    )
+    execution: AgentToolExecutionResult | None = None
+    async for update in execute_agent_tool_call_with_progress(
+        tools,
+        target_call,
+        session_factory=session_factory,
+        activity_id=activity_id,
+        tool_name=tool_name,
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+        conversation=conversation,
+        agent_run=agent_run,
+        request_meta=request_meta,
+    ):
+        if isinstance(update, AgentChatToolActivityEvent):
+            yield update
+        else:
+            execution = update
+    if execution is None:
+        execution = tool_execution_result(
+            tool_name,
+            f"Tool {tool_name} failed: no tool result was returned",
+        )
+    yield AgentChatToolActivityEvent(
+        id=activity_id,
+        tool_name=tool_name,
+        status=execution.status,
+        error=execution.error,
+        result=execution.result,
+        approval=execution.approval,
     )
     yield execution
 

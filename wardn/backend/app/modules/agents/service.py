@@ -56,6 +56,21 @@ from app.modules.agents.chat_orchestrator import (
     ui_message_sse_chunk as ui_message_sse_chunk,
 )
 from app.modules.agents.conversations import AgentSessionFactory
+from app.modules.agents.dynamic_tools import (
+    AGENT_RUN_TOOL_TOOL_NAME as AGENT_RUN_TOOL_TOOL_NAME,
+)
+from app.modules.agents.dynamic_tools import (
+    AGENT_SEARCH_TOOLS_TOOL_NAME as AGENT_SEARCH_TOOLS_TOOL_NAME,
+)
+from app.modules.agents.dynamic_tools import (
+    agent_dynamic_function_tools as agent_dynamic_function_tools,
+)
+from app.modules.agents.dynamic_tools import (
+    execute_agent_search_tools as execute_agent_search_tools,
+)
+from app.modules.agents.dynamic_tools import (
+    resolve_agent_run_tool_call as resolve_agent_run_tool_call,
+)
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
     DuplicateAgentError,
@@ -167,6 +182,7 @@ from app.modules.agents.types import (
     AgentRuntimeToolGuardrailFilter as AgentRuntimeToolGuardrailFilter,
 )
 from app.modules.agents.types import AgentToolCall as AgentToolCall
+from app.modules.agents.types import AgentToolExecutionResult as AgentToolExecutionResult
 from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
