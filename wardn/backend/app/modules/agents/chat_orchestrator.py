@@ -31,6 +31,8 @@ from app.modules.agents.provider_clients import (
     chatgpt_codex_request_body,
     llm_usage_from_completed_event,
     provider_messages,
+    reasoning_request_for_model,
+    reasoning_summaries_from_openai_event,
     response_function_tools,
     response_id_from_event,
     stream_response_text,
@@ -52,6 +54,7 @@ from app.modules.agents.tool_execution import (
 )
 from app.modules.agents.types import (
     AgentChatProviderError,
+    AgentChatReasoningSummaryEvent,
     AgentChatStreamEvent,
     AgentChatTextEvent,
     AgentChatToolActivityEvent,
@@ -139,6 +142,7 @@ async def persisted_agent_chat_stream(
     stream_error: str | None = None
     paused_for_confirmation = False
     activity_parts: dict[str, dict[str, Any]] = {}
+    reasoning_summary_parts: dict[str, dict[str, Any]] = {}
     yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
     try:
         async for event in stream:
@@ -152,6 +156,18 @@ async def persisted_agent_chat_stream(
                 yield ui_message_sse_chunk(
                     {"type": "text-delta", "id": text_id, "delta": event.text}
                 )
+                continue
+            if isinstance(event, AgentChatReasoningSummaryEvent):
+                summary = event.summary.strip()
+                if not summary or summary in reasoning_summary_parts:
+                    continue
+                summary_part = {
+                    "type": "data-reasoning-summary",
+                    "id": f"reasoning-{uuid.uuid4()}",
+                    "data": {"summary": sanitize_run_payload(summary)},
+                }
+                reasoning_summary_parts[summary] = summary_part
+                yield ui_message_sse_chunk(summary_part)
                 continue
             data: dict[str, Any] = {
                 "toolName": event.tool_name,
@@ -221,7 +237,7 @@ async def persisted_agent_chat_stream(
         {"type": "finish", "finishReason": "error" if stream_error else "stop"}
     )
     content = "".join(chunks).strip()
-    parts = list(activity_parts.values())
+    parts = list(activity_parts.values()) + list(reasoning_summary_parts.values())
     if content:
         parts.append({"type": "text", "text": content})
     async with agent_stream_unit_of_work(session_factory) as session:
@@ -305,6 +321,9 @@ async def run_agent_chat(
         "input": messages,
         "stream": True,
     }
+    reasoning_request = reasoning_request_for_model(agent.model_name)
+    if reasoning_request is not None:
+        body["reasoning"] = reasoning_request
     async with agent_stream_unit_of_work(session_factory) as session:
         credential_secrets = await resolve_credential_secrets(session, credential)
 
@@ -324,6 +343,12 @@ async def run_agent_chat(
             nonlocal call_usage
             call_usage = usage
 
+        reasoning_summaries: list[str] = []
+
+        def capture_reasoning_summary(summary: str) -> None:
+            if summary and summary not in reasoning_summaries:
+                reasoning_summaries.append(summary)
+
         try:
             async for text in stream_response_text(
                 url=OPENAI_RESPONSES_URL,
@@ -333,8 +358,11 @@ async def run_agent_chat(
                 },
                 body=body,
                 usage_callback=capture_usage,
+                reasoning_summary_callback=capture_reasoning_summary,
             ):
                 yield AgentChatTextEvent(text=text)
+            for summary in reasoning_summaries:
+                yield AgentChatReasoningSummaryEvent(summary=summary)
         except Exception as exc:
             async with agent_stream_unit_of_work(session_factory) as session:
                 await record_agent_llm_usage(
@@ -502,6 +530,7 @@ async def stream_chatgpt_codex_response_text(
                 call_started_at = datetime.now(UTC)
                 call_usage: observability_service.LLMTokenUsage | None = None
                 tool_calls: list[AgentToolCall] = []
+                reasoning_summaries: set[str] = set()
                 async with agent_stream_unit_of_work(session_factory) as session:
                     await require_agent_llm_budget_available(
                         session,
@@ -533,6 +562,11 @@ async def stream_chatgpt_codex_response_text(
                         usage = llm_usage_from_completed_event(payload)
                         if usage is not None:
                             call_usage = usage
+                        for summary in reasoning_summaries_from_openai_event(payload):
+                            if summary in reasoning_summaries:
+                                continue
+                            reasoning_summaries.add(summary)
+                            yield AgentChatReasoningSummaryEvent(summary=summary)
                         text = text_delta_from_openai_event(payload)
                         if text:
                             yield AgentChatTextEvent(text=text)

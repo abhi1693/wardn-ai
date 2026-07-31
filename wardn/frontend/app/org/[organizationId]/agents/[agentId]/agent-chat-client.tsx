@@ -43,6 +43,8 @@ import {
   MessageAvatar,
   MessageLabel,
   MessageMarkdown,
+  ReasoningSummary,
+  reasoningSummaries,
   ToolActivity,
   toolActivities,
   uiMessages,
@@ -335,8 +337,9 @@ export function AgentChatClient({
               messages.map((message) => {
                 const text = messageText(message.parts);
                 const activities = toolActivities(message.parts);
+                const summaries = reasoningSummaries(message.parts);
                 const isUser = message.role === "user";
-                if (!text && activities.length === 0) {
+                if (!text && activities.length === 0 && summaries.length === 0) {
                   return null;
                 }
                 const agentRunId = agentRunIdFromMessage(message);
@@ -372,12 +375,15 @@ export function AgentChatClient({
                         )}
                       >
                         {!isUser ? (
-                          <ToolActivity
-                            activities={activities}
-                            approvalDecisions={approvalDecisions}
-                            onDecideApproval={decideToolApproval}
-                            traceHref={traceHref}
-                          />
+                          <>
+                            <ToolActivity
+                              activities={activities}
+                              approvalDecisions={approvalDecisions}
+                              onDecideApproval={decideToolApproval}
+                              traceHref={traceHref}
+                            />
+                            <ReasoningSummary summaries={summaries} />
+                          </>
                         ) : null}
                         {text ? <MessageMarkdown role={message.role} text={text} /> : null}
                       </div>

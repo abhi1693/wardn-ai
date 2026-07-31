@@ -324,6 +324,69 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
 
 
 @pytest.mark.asyncio
+async def test_persisted_agent_chat_stream_emits_reasoning_summary_parts(
+    monkeypatch,
+) -> None:
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        created_by_id=uuid4(),
+        title="Chat",
+        is_active=True,
+    )
+    persisted: list[dict] = []
+
+    async def append_conversation_message(*args, **kwargs):
+        persisted.append(kwargs)
+
+    async def provider_stream():
+        yield service.AgentChatReasoningSummaryEvent(
+            summary="Checked the available tool result before answering."
+        )
+        yield service.AgentChatReasoningSummaryEvent(
+            summary="Checked the available tool result before answering."
+        )
+        yield service.AgentChatTextEvent(text="Final answer")
+
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+
+    session = FakeSession()
+    raw_chunks = [
+        chunk
+        async for chunk in service.persisted_agent_chat_stream(
+            conversation,
+            provider_stream(),
+            session_factory=fake_session_factory(session),
+        )
+    ]
+    chunks = ui_stream_chunks(raw_chunks)
+
+    assert [chunk["type"] for chunk in chunks] == [
+        "start",
+        "data-reasoning-summary",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert chunks[1]["data"] == {
+        "summary": "Checked the available tool result before answering."
+    }
+    assert persisted[0]["parts"][0]["type"] == "data-reasoning-summary"
+    assert persisted[0]["parts"][0]["data"] == {
+        "summary": "Checked the available tool result before answering."
+    }
+    assert persisted[0]["parts"][1] == {"type": "text", "text": "Final answer"}
+    assert session.commits == 1
+
+
+@pytest.mark.asyncio
 async def test_persisted_agent_chat_stream_turns_provider_error_into_message(
     monkeypatch,
 ) -> None:
@@ -851,6 +914,42 @@ def test_text_delta_from_openai_event_ignores_function_call_argument_deltas() ->
     )
 
 
+def test_reasoning_summaries_from_openai_event_reads_reasoning_output_items() -> None:
+    assert service.reasoning_summaries_from_openai_event(
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "summary": [
+                    {
+                        "type": "summary_text",
+                        "text": " Checked the tool output before answering. ",
+                    }
+                ],
+            },
+        }
+    ) == ["Checked the tool output before answering."]
+    assert service.reasoning_summaries_from_openai_event(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {"type": "message", "content": []},
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "Compared the namespace target with the request.",
+                            }
+                        ],
+                    },
+                ]
+            },
+        }
+    ) == ["Compared the namespace target with the request."]
+
+
 def test_llm_usage_from_completed_event_parses_response_usage() -> None:
     usage = service.llm_usage_from_completed_event(
         {
@@ -1072,11 +1171,17 @@ def test_chatgpt_codex_request_body_uses_websocket_response_create_shape() -> No
         "tools": [],
         "tool_choice": "auto",
         "parallel_tool_calls": False,
-        "reasoning": None,
+        "reasoning": {"summary": "auto"},
         "store": False,
         "stream": True,
         "include": [],
     }
+
+
+def test_reasoning_request_for_model_only_enables_known_reasoning_models() -> None:
+    assert service.reasoning_request_for_model("gpt-5.6") == {"summary": "auto"}
+    assert service.reasoning_request_for_model("o4-mini") == {"summary": "auto"}
+    assert service.reasoning_request_for_model("gpt-4o-mini") is None
 
 
 def test_tool_calls_from_response_output_item_done() -> None:

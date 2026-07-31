@@ -102,6 +102,12 @@ from app.modules.agents.provider_clients import (
     llm_usage_from_completed_event as llm_usage_from_completed_event,
 )
 from app.modules.agents.provider_clients import (
+    reasoning_request_for_model as reasoning_request_for_model,
+)
+from app.modules.agents.provider_clients import (
+    reasoning_summaries_from_openai_event as reasoning_summaries_from_openai_event,
+)
+from app.modules.agents.provider_clients import (
     sse_payloads as sse_payloads,
 )
 from app.modules.agents.provider_clients import (
@@ -149,6 +155,9 @@ from app.modules.agents.tool_execution import (
     execute_agent_tool_call as execute_agent_tool_call,
 )
 from app.modules.agents.types import AgentChatProviderError as AgentChatProviderError
+from app.modules.agents.types import (
+    AgentChatReasoningSummaryEvent as AgentChatReasoningSummaryEvent,
+)
 from app.modules.agents.types import AgentChatTextEvent as AgentChatTextEvent
 from app.modules.agents.types import (
     AgentChatToolActivityEvent as AgentChatToolActivityEvent,

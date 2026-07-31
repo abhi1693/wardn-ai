@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import {
   Bot,
+  Brain,
   Check,
   CheckCircle2,
   CircleAlert,
@@ -46,6 +47,14 @@ export type ToolActivityPart = MessagePart & {
   data?: ToolActivityData;
   id?: string;
   type: "data-tool-activity";
+};
+export type ReasoningSummaryData = {
+  summary?: string;
+};
+export type ReasoningSummaryPart = MessagePart & {
+  data?: ReasoningSummaryData;
+  id?: string;
+  type: "data-reasoning-summary";
 };
 
 export function isTextPart(part: MessagePart): part is Extract<MessagePart, { type: "text" }> {
@@ -217,6 +226,30 @@ export function MessageMarkdown({ role, text }: { role: MessageRole; text: strin
   );
 }
 
+export function ReasoningSummary({ summaries }: { summaries: ReasoningSummaryPart[] }) {
+  const text = summaries
+    .map((summary) => reasoningSummaryText(summary))
+    .filter(Boolean)
+    .join("\n\n");
+  if (!text) {
+    return null;
+  }
+  return (
+    <details className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-[var(--on-surface-variant)]">
+        <span className="flex min-w-0 items-center gap-2">
+          <Brain className="size-3.5 shrink-0" />
+          <span>Thinking</span>
+        </span>
+        <Badge variant="outline">Reasoning summary</Badge>
+      </summary>
+      <div className="border-t border-[var(--outline-variant)] px-3 py-2 text-xs leading-5 text-[var(--on-surface-variant)]">
+        <MessageMarkdown role="assistant" text={text} />
+      </div>
+    </details>
+  );
+}
+
 export function MessageAvatar({ role }: { role: MessageRole }) {
   if (role === "user") {
     return (
@@ -244,6 +277,30 @@ export function MessageLabel({ role }: { role: MessageRole }) {
 
 export function isToolActivityPart(part: MessagePart): part is ToolActivityPart {
   return part.type === "data-tool-activity";
+}
+
+export function isReasoningSummaryPart(part: MessagePart): part is ReasoningSummaryPart {
+  return part.type === "data-reasoning-summary";
+}
+
+export function reasoningSummaryText(part: ReasoningSummaryPart) {
+  const summary = part.data?.summary;
+  return typeof summary === "string" ? summary.trim() : "";
+}
+
+export function reasoningSummaries(parts: MessagePart[]) {
+  const summaries = new Map<string, ReasoningSummaryPart>();
+  for (const part of parts) {
+    if (!isReasoningSummaryPart(part)) {
+      continue;
+    }
+    const text = reasoningSummaryText(part);
+    if (!text) {
+      continue;
+    }
+    summaries.set(text, part);
+  }
+  return Array.from(summaries.values());
 }
 
 export function toolActivities(parts: MessagePart[]) {

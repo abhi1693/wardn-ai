@@ -53,6 +53,11 @@ class AgentChatTextEvent:
 
 
 @dataclass(frozen=True)
+class AgentChatReasoningSummaryEvent:
+    summary: str
+
+
+@dataclass(frozen=True)
 class AgentChatToolActivityEvent:
     id: str
     tool_name: str
@@ -67,4 +72,6 @@ class AgentChatToolActivityEvent:
     approval: dict[str, Any] | None = None
 
 
-AgentChatStreamEvent = AgentChatTextEvent | AgentChatToolActivityEvent
+AgentChatStreamEvent = (
+    AgentChatTextEvent | AgentChatReasoningSummaryEvent | AgentChatToolActivityEvent
+)

@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.agents.exceptions import InvalidAgentScopeError
 from app.modules.agents.models import Agent
 from app.modules.agents.schemas import AgentChatMessage
-from app.modules.agents.types import AgentChatProviderError, AgentRuntimeTool, AgentToolCall
+from app.modules.agents.types import (
+    AgentChatProviderError,
+    AgentRuntimeTool,
+    AgentToolCall,
+)
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.service import credential_supports_model, read_record
@@ -31,6 +35,7 @@ CODEX_COMPAT_USER_AGENT = (
 )
 AGENT_CHAT_TIMEOUT_SECONDS = 120.0
 CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS = 32_000
+REASONING_SUMMARY_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 
 
 async def validate_provider_credential(
@@ -197,6 +202,49 @@ def response_id_from_event(payload: dict[str, Any]) -> str | None:
     return response_id if isinstance(response_id, str) and response_id else None
 
 
+def model_supports_reasoning_summary(model_name: str) -> bool:
+    normalized = model_name.strip().casefold()
+    return normalized.startswith(REASONING_SUMMARY_MODEL_PREFIXES)
+
+
+def reasoning_request_for_model(model_name: str) -> dict[str, str] | None:
+    if not model_supports_reasoning_summary(model_name):
+        return None
+    return {"summary": "auto"}
+
+
+def reasoning_summary_texts_from_item(item: dict[str, Any]) -> list[str]:
+    if item.get("type") != "reasoning":
+        return []
+    summaries = item.get("summary")
+    if not isinstance(summaries, list):
+        return []
+    texts = []
+    for entry in summaries:
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("text")
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return texts
+
+
+def reasoning_summaries_from_openai_event(payload: dict[str, Any]) -> list[str]:
+    item = read_record(payload.get("item"))
+    summaries = reasoning_summary_texts_from_item(item)
+    if payload.get("type") != "response.completed":
+        return summaries
+
+    response = read_record(payload.get("response"))
+    output = response.get("output")
+    if not isinstance(output, list):
+        return summaries
+    for output_item in output:
+        if isinstance(output_item, dict):
+            summaries.extend(reasoning_summary_texts_from_item(output_item))
+    return summaries
+
+
 def int_token_value(value: Any) -> int:
     if isinstance(value, bool):
         return 0
@@ -263,7 +311,7 @@ def chatgpt_codex_request_body(
         "tools": tools,
         "tool_choice": "auto",
         "parallel_tool_calls": bool(tools),
-        "reasoning": None,
+        "reasoning": reasoning_request_for_model(agent.model_name),
         "store": False,
         "stream": True,
         "include": [],
@@ -327,6 +375,7 @@ async def stream_response_text(
     headers: dict[str, str],
     body: dict[str, Any],
     usage_callback=None,
+    reasoning_summary_callback=None,
 ) -> AsyncGenerator[str, None]:
     timeout = httpx.Timeout(AGENT_CHAT_TIMEOUT_SECONDS, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -346,6 +395,10 @@ async def stream_response_text(
                     usage = llm_usage_from_completed_event(payload)
                     if usage is not None and usage_callback is not None:
                         usage_callback(usage)
+                    summaries = reasoning_summaries_from_openai_event(payload)
+                    if summaries and reasoning_summary_callback is not None:
+                        for summary in summaries:
+                            reasoning_summary_callback(summary)
                     text = text_delta_from_openai_event(payload)
                     if text:
                         yield text
