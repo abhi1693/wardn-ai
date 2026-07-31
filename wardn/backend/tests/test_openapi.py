@@ -116,6 +116,10 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/capability-diagnosis"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}/tool-approvals/{approval_id}"
         ),
             (

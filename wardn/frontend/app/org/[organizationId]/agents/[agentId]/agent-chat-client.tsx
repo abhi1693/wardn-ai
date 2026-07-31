@@ -43,7 +43,6 @@ import {
   MessageAvatar,
   MessageLabel,
   MessageMarkdown,
-  ReasoningSummary,
   reasoningSummaries,
   ToolActivity,
   toolActivities,
@@ -380,9 +379,9 @@ export function AgentChatClient({
                               activities={activities}
                               approvalDecisions={approvalDecisions}
                               onDecideApproval={decideToolApproval}
+                              summaries={summaries}
                               traceHref={traceHref}
                             />
-                            <ReasoningSummary summaries={summaries} />
                           </>
                         ) : null}
                         {text ? <MessageMarkdown role={message.role} text={text} /> : null}

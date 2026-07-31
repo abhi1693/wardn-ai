@@ -56,6 +56,9 @@ from app.modules.agents.chat_orchestrator import (
     stream_chatgpt_codex_response_text as stream_chatgpt_codex_response_text,
 )
 from app.modules.agents.chat_orchestrator import (
+    stream_with_capability_diagnosis as stream_with_capability_diagnosis,
+)
+from app.modules.agents.chat_orchestrator import (
     ui_message_sse_chunk as ui_message_sse_chunk,
 )
 from app.modules.agents.conversations import AgentSessionFactory
@@ -73,6 +76,9 @@ from app.modules.agents.dynamic_tools import (
 )
 from app.modules.agents.dynamic_tools import (
     resolve_agent_run_tool_call as resolve_agent_run_tool_call,
+)
+from app.modules.agents.dynamic_tools import (
+    search_installed_tools,
 )
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
@@ -148,6 +154,9 @@ from app.modules.agents.schemas import (
     AgentAvailableServerRead,
     AgentAvailableToolListResponse,
     AgentAvailableToolRead,
+    AgentCapabilityDiagnosisResponse,
+    AgentCapabilityDiagnosisSummary,
+    AgentCapabilityDiagnosisToolRead,
     AgentChatRequest,
     AgentConversationResponse,
     AgentCreate,
@@ -171,6 +180,12 @@ from app.modules.agents.tool_execution import (
 )
 from app.modules.agents.tool_execution import (
     execute_agent_tool_call as execute_agent_tool_call,
+)
+from app.modules.agents.types import (
+    FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+    FAILURE_TOOL_INSTALLED_NOT_ASSIGNED,
+    FAILURE_TOOL_SELECTED_RUNTIME_FAILED,
+    AgentInstalledTool,
 )
 from app.modules.agents.types import AgentChatProviderError as AgentChatProviderError
 from app.modules.agents.types import (
@@ -201,6 +216,7 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
+from app.modules.mcp_runtime import repository as mcp_runtime_repository
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.observability import service as observability_service
 from app.modules.organizations.service import (
@@ -1012,6 +1028,18 @@ async def record_agent_tool_refresh_failures(
         )
 
 
+def installed_agent_tools(
+    rows: list[tuple[MCPServerToolSchema, MCPServerInstallation]],
+) -> dict[str, AgentInstalledTool]:
+    return {
+        str(tool_schema.id): AgentInstalledTool(
+            tool_schema=tool_schema,
+            installation=installation,
+        )
+        for tool_schema, installation in rows
+    }
+
+
 async def stream_agent_chat(
     session: AsyncSession,
     user: User,
@@ -1070,6 +1098,9 @@ async def stream_agent_chat(
     )
     if conversation is not None:
         await persist_chat_turn_user_message(session, conversation, payload, agent_run)
+    installed_tools = installed_agent_tools(
+        await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
+    )
     runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
     tools = agent_runtime_tools(runtime_rows)
     guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
@@ -1079,6 +1110,7 @@ async def stream_agent_chat(
         organization_id=organization_id,
         workspace_id=workspace_id,
         agent=agent,
+        installed_tools=installed_tools,
     )
     latest_message = latest_user_message(payload.messages)
     denied_matches = denied_mcp_tool_matches(latest_message, guardrail_filter)
@@ -1114,6 +1146,9 @@ async def stream_agent_chat(
                 ],
             },
         )
+    installed_tools = installed_agent_tools(
+        await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
+    )
     runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
     tools = agent_runtime_tools(runtime_rows)
     guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
@@ -1123,6 +1158,7 @@ async def stream_agent_chat(
         organization_id=organization_id,
         workspace_id=workspace_id,
         agent=agent,
+        installed_tools=installed_tools,
     )
     denied_matches = denied_mcp_tool_matches(latest_message, guardrail_filter)
     if denied_matches:
@@ -1132,7 +1168,7 @@ async def stream_agent_chat(
             agent,
             credential,
             AgentChatRequest(id=payload.id, messages=payload.messages),
-            guardrail_filter.allowed_tools,
+            guardrail_filter,
             session_factory=session_factory,
             user=user,
             organization_id=organization_id,
@@ -1140,6 +1176,7 @@ async def stream_agent_chat(
             conversation=conversation,
             agent_run=agent_run,
         )
+    stream = stream_with_capability_diagnosis(guardrail_filter, stream)
     return persisted_agent_chat_stream(
         conversation,
         stream,
@@ -1350,6 +1387,216 @@ async def list_agent_tools(
         servers=server_assignment_responses(
             await repository.list_agent_server_assignments(session, agent_id=agent.id)
         ),
+    )
+
+
+def guardrail_policy_payload(decision) -> dict[str, object]:
+    return {
+        "mode": decision.mode,
+        "policyId": str(decision.policy_id) if decision.policy_id else None,
+        "policyName": decision.policy_name,
+        "message": decision.message,
+        "matchedPolicyIds": [str(policy_id) for policy_id in decision.matched_policy_ids],
+    }
+
+
+def runtime_diagnosis_payload(
+    installation: MCPServerInstallation,
+    runtime_session,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "installationStatus": installation.status,
+        "installError": installation.install_error,
+        "installType": installation.install_type,
+        "runtimeProvider": installation.runtime_config.get("provider", ""),
+    }
+    if runtime_session is None:
+        payload["sessionStatus"] = ""
+        payload["lastError"] = ""
+        return payload
+    payload.update(
+        {
+            "runtimeSessionId": str(runtime_session.id),
+            "sessionStatus": runtime_session.status,
+            "lastError": runtime_session.last_error,
+            "failureCount": runtime_session.failure_count,
+        }
+    )
+    return payload
+
+
+def installation_is_diagnosis_healthy(
+    installation: MCPServerInstallation,
+    runtime_session,
+) -> bool:
+    if installation.status != "enabled" or installation.install_error:
+        return False
+    if runtime_session is None:
+        return True
+    if runtime_session.status in {"failed", "expired"}:
+        return False
+    return not bool(runtime_session.last_error)
+
+
+async def diagnose_agent_capabilities(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    query: str = "",
+) -> AgentCapabilityDiagnosisResponse:
+    agent = await repository.get_agent(
+        session,
+        organization_id=organization_id,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+    await require_agent_scope_permission(
+        session,
+        user,
+        organization_id,
+        scope=agent.scope,
+        workspace_id=agent.workspace_id,
+    )
+
+    installed_rows = await repository.list_workspace_available_tools(
+        session,
+        workspace_id=workspace_id,
+    )
+    installed_tools = installed_agent_tools(installed_rows)
+    runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+    runtime_tools = agent_runtime_tools(runtime_rows)
+    guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
+        session,
+        runtime_tools,
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+        installed_tools=installed_tools,
+    )
+    assigned_tool_ids = {
+        tool_schema.id
+        for _assignment, tool_schema, _installation in await repository.list_agent_tools(
+            session,
+            agent_id=agent.id,
+        )
+    }
+    runtime_resolved_tool_ids = {
+        tool.tool_schema.id
+        for tool in [
+            *guardrail_filter.allowed_tools.values(),
+            *(tool for tool, _decision in guardrail_filter.denied_tools.values()),
+        ]
+    }
+    allowed_tool_ids = {
+        tool.tool_schema.id for tool in guardrail_filter.allowed_tools.values()
+    }
+    denied_by_tool_id = {
+        tool.tool_schema.id: decision
+        for tool, decision in guardrail_filter.denied_tools.values()
+    }
+    runtime_sessions = await mcp_runtime_repository.list_runtime_sessions(
+        session,
+        workspace_id=workspace_id,
+        limit=500,
+    )
+    latest_runtime_by_installation = {}
+    for runtime_session in runtime_sessions:
+        latest_runtime_by_installation.setdefault(runtime_session.installation_id, runtime_session)
+
+    normalized_query = query.strip()
+    tools_for_response = (
+        search_installed_tools(installed_tools, query=normalized_query, limit=100)
+        if normalized_query
+        else sorted(
+            installed_tools.values(),
+            key=lambda tool: (
+                tool.installation.config_name,
+                tool.tool_schema.server_name,
+                tool.tool_schema.tool_name,
+                str(tool.tool_schema.id),
+            ),
+        )
+    )
+
+    responses: list[AgentCapabilityDiagnosisToolRead] = []
+    for installed in tools_for_response:
+        tool_schema = installed.tool_schema
+        installation = installed.installation
+        runtime_session = latest_runtime_by_installation.get(installation.id)
+        assigned = tool_schema.id in assigned_tool_ids
+        allowed = tool_schema.id in allowed_tool_ids
+        policy = denied_by_tool_id.get(tool_schema.id)
+        healthy = installation_is_diagnosis_healthy(installation, runtime_session)
+        runtime_payload = runtime_diagnosis_payload(installation, runtime_session)
+        can_run = assigned and allowed and healthy
+        if not assigned:
+            status_label = "installed_not_assigned"
+            reason_code = FAILURE_TOOL_INSTALLED_NOT_ASSIGNED
+            reason = "Tool is installed in this workspace but is not assigned to this agent."
+        elif policy is not None:
+            status_label = "blocked_by_policy"
+            reason_code = FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY
+            reason = policy.message or "Tool is assigned but blocked by policy."
+        elif tool_schema.id not in runtime_resolved_tool_ids:
+            status_label = "runtime_unavailable"
+            reason_code = FAILURE_TOOL_SELECTED_RUNTIME_FAILED
+            reason = "Tool is assigned, but its installed server version could not be prepared."
+            healthy = False
+        elif not healthy:
+            status_label = "unhealthy"
+            reason_code = FAILURE_TOOL_SELECTED_RUNTIME_FAILED
+            reason = (
+                installation.install_error
+                or str(runtime_payload.get("lastError") or "")
+                or "Runtime is not healthy."
+            )
+        else:
+            status_label = "ready"
+            reason_code = ""
+            reason = "Tool is installed, assigned, allowed, and healthy."
+        responses.append(
+            AgentCapabilityDiagnosisToolRead(
+                toolSchemaId=tool_schema.id,
+                installationId=installation.id,
+                workspaceId=tool_schema.workspace_id or workspace_id,
+                serverName=tool_schema.server_name,
+                configName=installation.config_name,
+                toolName=tool_schema.tool_name,
+                title=tool_schema.title,
+                description=tool_schema.description,
+                installed=True,
+                assigned=assigned,
+                allowed=allowed,
+                healthy=healthy,
+                canRun=can_run,
+                status=status_label,
+                reasonCode=reason_code,
+                reason=reason,
+                policy=guardrail_policy_payload(policy) if policy is not None else None,
+                runtime=runtime_payload,
+            )
+        )
+
+    summary = AgentCapabilityDiagnosisSummary(
+        installed=len(installed_tools),
+        assigned=len(assigned_tool_ids),
+        allowed=len(allowed_tool_ids),
+        blockedByPolicy=len(denied_by_tool_id),
+        healthy=sum(1 for tool in responses if tool.healthy),
+        runnable=sum(1 for tool in responses if tool.can_run),
+    )
+    return AgentCapabilityDiagnosisResponse(
+        agentId=agent.id,
+        workspaceId=workspace_id,
+        query=normalized_query,
+        summary=summary,
+        tools=responses,
     )
 
 

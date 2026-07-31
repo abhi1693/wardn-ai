@@ -1797,6 +1797,99 @@ def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
     assert payload["tools"][0]["params"][0]["name"] == "target"
 
 
+def test_dynamic_tools_report_policy_denied_tools_without_fallback() -> None:
+    allowed_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        title="List namespaces",
+        description="[READ] List Kubernetes namespaces.",
+    )
+    denied_tool = make_agent_runtime_tool(
+        wire_name="wardn_gsc_sites",
+        tool_name="gsc_sites",
+        server_name="io.github.acamolese/google-search-console-mcp",
+        title="List Search Console sites",
+        description="[READ] List Google Search Console sites.",
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={allowed_tool.wire_name: allowed_tool},
+        denied_tools={
+            denied_tool.wire_name: (
+                denied_tool,
+                GuardrailDecision(
+                    mode="deny",
+                    policy_name="workspace guardrail",
+                    message="Tool call blocked by workspace policy.",
+                ),
+            )
+        },
+    )
+
+    search = service.execute_agent_search_tools(
+        guardrail_filter,
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "search console sites", "limit": 5},
+        ),
+    )
+    payload = json.loads(search.output)
+
+    assert payload["tools"] == []
+    assert payload["blockedTools"][0]["mcpToolName"] == "gsc_sites"
+    assert payload["blockedTools"][0]["failureReason"] == "tool_assigned_blocked_policy"
+    assert "Do not fall back" in payload["hint"]
+
+    resolved = service.resolve_agent_run_tool_call(
+        guardrail_filter,
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_2",
+            arguments={"tool_name": "wardn_gsc_sites"},
+        ),
+    )
+
+    assert not isinstance(resolved, tuple)
+    assert resolved.status == "failed"
+    assert resolved.failure_reason == "tool_assigned_blocked_policy"
+    assert "blocked by policy" in (resolved.error or "")
+
+
+def test_dynamic_run_tool_reports_installed_but_unassigned() -> None:
+    installed_runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_gsc_sites",
+        tool_name="gsc_sites",
+        server_name="io.github.acamolese/google-search-console-mcp",
+        title="List Search Console sites",
+        description="[READ] List Google Search Console sites.",
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={},
+        denied_tools={},
+        installed_tools={
+            str(installed_runtime_tool.tool_schema.id): service.AgentInstalledTool(
+                tool_schema=installed_runtime_tool.tool_schema,
+                installation=installed_runtime_tool.installation,
+            )
+        },
+    )
+
+    resolved = service.resolve_agent_run_tool_call(
+        guardrail_filter,
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_1",
+            arguments={"tool_name": "gsc_sites"},
+        ),
+    )
+
+    assert not isinstance(resolved, tuple)
+    assert resolved.status == "failed"
+    assert resolved.failure_reason == "tool_installed_not_assigned"
+    assert "not assigned to this agent" in (resolved.error or "")
+
+
 def test_resolve_agent_run_tool_call_requires_exact_name_for_duplicates() -> None:
     default_tool = make_agent_runtime_tool(
         wire_name="wardn_default_namespace",
@@ -1917,8 +2010,24 @@ async def test_execute_agent_dynamic_run_tool_stream_dispatches_resolved_target(
     ]
 
     assert isinstance(events[0], service.AgentChatToolActivityEvent)
-    assert events[0].tool_name == "namespace_list"
-    assert events[0].arguments == {}
+    assert events[0].tool_name == "Tool selected"
+    assert events[0].details == {
+        "selection": {
+            "toolName": "namespace_list",
+            "serverName": namespace_tool.server.name,
+            "configuredTarget": "rancher-qa-omsllc",
+            "installationId": str(namespace_tool.installation.id),
+            "toolSchemaId": str(namespace_tool.tool_schema.id),
+        }
+    }
+    run_event = next(
+        event
+        for event in events
+        if isinstance(event, service.AgentChatToolActivityEvent)
+        and event.tool_name == "namespace_list"
+        and event.arguments == {}
+    )
+    assert run_event.status == "running"
     assert isinstance(events[-1], service.AgentToolExecutionResult)
     assert events[-1].status == "completed"
     assert calls[0]["tool_name"] == "namespace_list"
@@ -2867,7 +2976,7 @@ async def test_stream_agent_chat_keeps_cached_tools_after_refresh_failure(monkey
         [(assignment, tool_schema, installation, server)]
     ).popitem()[0]
     assert wire_name in seen_filter_tools[0]
-    assert wire_name in seen_provider_tools[0]
+    assert wire_name in seen_provider_tools[0].allowed_tools
     assert steps[1]["step_type"] == "tool_discovery"
     assert steps[1]["status"] == "failed"
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}

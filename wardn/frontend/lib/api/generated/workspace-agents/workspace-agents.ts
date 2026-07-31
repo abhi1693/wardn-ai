@@ -6,6 +6,7 @@
  */
 import type {
   AgentAvailableToolListResponse,
+  AgentCapabilityDiagnosisResponse,
   AgentChatRequest,
   AgentConversationResponse,
   AgentCreate,
@@ -16,6 +17,7 @@ import type {
   AgentToolAssignmentUpdate,
   AgentToolListResponse,
   AgentUpdate,
+  WorkspaceAgentsDiagnoseCapabilitiesParams,
   WorkspaceAgentsListParams
 } from '../model';
 
@@ -236,6 +238,42 @@ export const workspaceAgentsUpdate = async (organizationId: string,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentUpdate)
+  }
+);}
+
+
+export const getWorkspaceAgentsDiagnoseCapabilitiesUrl = (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    params?: WorkspaceAgentsDiagnoseCapabilitiesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/capability-diagnosis?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/capability-diagnosis`
+}
+
+/**
+ * @summary Diagnose Workspace Agent Capabilities Route
+ */
+export const workspaceAgentsDiagnoseCapabilities = async (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    params?: WorkspaceAgentsDiagnoseCapabilitiesParams, options?: Parameters<typeof apiRequest>[1]): Promise<AgentCapabilityDiagnosisResponse> => {
+
+  return apiRequest<AgentCapabilityDiagnosisResponse>(getWorkspaceAgentsDiagnoseCapabilitiesUrl(organizationId,workspaceId,agentId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
   }
 );}
 

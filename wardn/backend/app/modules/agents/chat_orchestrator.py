@@ -62,11 +62,13 @@ from app.modules.agents.tool_execution import (
     tool_execution_result,
 )
 from app.modules.agents.types import (
+    FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
     AgentChatProviderError,
     AgentChatReasoningSummaryEvent,
     AgentChatStreamEvent,
     AgentChatTextEvent,
     AgentChatToolActivityEvent,
+    AgentInstalledTool,
     AgentRuntimeTool,
     AgentRuntimeToolGuardrailFilter,
     AgentToolCall,
@@ -138,6 +140,77 @@ def latest_user_message(messages: list[AgentChatMessage]) -> AgentChatMessage | 
     return next((message for message in reversed(messages) if message.role == "user"), None)
 
 
+def agent_guardrail_filter_from_tools(
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
+) -> AgentRuntimeToolGuardrailFilter:
+    if isinstance(tools, AgentRuntimeToolGuardrailFilter):
+        return tools
+    return AgentRuntimeToolGuardrailFilter(allowed_tools=tools, denied_tools={})
+
+
+def capability_diagnosis_payload(
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+) -> dict[str, Any]:
+    installed_tools = guardrail_filter.installed_tools or {}
+    assigned_schema_ids = {
+        tool.tool_schema.id
+        for tool in [
+            *guardrail_filter.allowed_tools.values(),
+            *(tool for tool, _decision in guardrail_filter.denied_tools.values()),
+        ]
+    }
+    installed_count = len(installed_tools) or len(assigned_schema_ids)
+    assigned_count = len(assigned_schema_ids)
+    allowed_count = len(guardrail_filter.allowed_tools)
+    blocked_count = len(guardrail_filter.denied_tools)
+    unassigned_count = max(installed_count - assigned_count, 0)
+    if blocked_count:
+        status = "blocked_by_policy"
+        reason = (
+            "Some assigned tools are blocked by policy. Matching denied tools are reported "
+            "instead of falling back to another tool family."
+        )
+    elif assigned_count == 0 and installed_count > 0:
+        status = "installed_not_assigned"
+        reason = "Tools are installed in this workspace but not assigned to this agent."
+    elif installed_count == 0:
+        status = "not_installed"
+        reason = "No MCP tools are installed in this workspace."
+    else:
+        status = "ready"
+        reason = "Assigned tools are available after policy filtering."
+    return {
+        "status": status,
+        "reason": reason,
+        "installed": installed_count,
+        "assigned": assigned_count,
+        "allowed": allowed_count,
+        "blockedByPolicy": blocked_count,
+        "unassigned": unassigned_count,
+    }
+
+
+async def stream_with_capability_diagnosis(
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+    stream: AsyncGenerator[AgentChatStreamEvent, None],
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    diagnosis = capability_diagnosis_payload(guardrail_filter)
+    yield AgentChatToolActivityEvent(
+        id=f"diagnosis-{uuid.uuid4()}",
+        tool_name="Capability diagnosis",
+        status="completed",
+        message=diagnosis["reason"],
+        result=(
+            f"Installed {diagnosis['installed']}, assigned {diagnosis['assigned']}, "
+            f"allowed {diagnosis['allowed']}, blocked by policy "
+            f"{diagnosis['blockedByPolicy']}."
+        ),
+        details={"capabilityDiagnosis": diagnosis},
+    )
+    async for event in stream:
+        yield event
+
+
 async def persisted_agent_chat_stream(
     conversation: WorkspaceConversation | None,
     stream: AsyncGenerator[AgentChatStreamEvent, None],
@@ -179,6 +252,10 @@ async def persisted_agent_chat_stream(
                 reasoning_summary_parts[summary] = summary_part
                 yield ui_message_sse_chunk(summary_part)
                 continue
+            previous_data = {}
+            existing_part = activity_parts.get(event.id)
+            if existing_part and isinstance(existing_part.get("data"), dict):
+                previous_data = existing_part["data"]
             data: dict[str, Any] = {
                 "toolName": event.tool_name,
                 "status": event.status,
@@ -189,6 +266,8 @@ async def persisted_agent_chat_stream(
                 data["arguments"] = sanitize_run_payload(event.arguments)
             if event.error:
                 data["error"] = event.error
+            if event.failure_reason:
+                data["failureReason"] = event.failure_reason
             if event.message:
                 data["message"] = event.message
             if event.progress is not None:
@@ -197,6 +276,16 @@ async def persisted_agent_chat_stream(
                 data["progressToken"] = event.progress_token
             if event.result:
                 data["result"] = sanitize_run_payload(event.result)
+            if event.details:
+                previous_details = previous_data.get("details")
+                data["details"] = sanitize_run_payload(
+                    {
+                        **(previous_details if isinstance(previous_details, dict) else {}),
+                        **event.details,
+                    }
+                )
+            elif isinstance(previous_data.get("details"), dict):
+                data["details"] = previous_data["details"]
             if event.total is not None:
                 data["total"] = event.total
             if event.approval:
@@ -313,6 +402,18 @@ async def preflight_blocked_tool_stream(
         tool_name=tool_name,
         status="blocked",
         error=first_decision.message or message,
+        failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+        details={
+            "policy": {
+                "mode": first_decision.mode,
+                "policyId": str(first_decision.policy_id) if first_decision.policy_id else None,
+                "policyName": first_decision.policy_name,
+                "message": first_decision.message,
+                "matchedPolicyIds": [
+                    str(policy_id) for policy_id in first_decision.matched_policy_ids
+                ],
+            }
+        },
     )
     yield AgentChatTextEvent(text=message)
 
@@ -321,7 +422,7 @@ async def run_agent_chat(
     agent: Agent,
     credential: LLMProviderCredential,
     payload: AgentChatRequest,
-    tools: dict[str, AgentRuntimeTool],
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
     *,
     session_factory: AgentSessionFactory | None = None,
     user: User | None = None,
@@ -330,6 +431,7 @@ async def run_agent_chat(
     conversation: WorkspaceConversation | None = None,
     agent_run: AgentRun | None = None,
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    guardrail_filter = agent_guardrail_filter_from_tools(tools)
     messages = provider_messages(payload.messages)
     if not messages:
         raise InvalidAgentScopeError("chat requires at least one user message")
@@ -453,7 +555,7 @@ async def run_agent_chat(
                     account_id,
                 ),
                 messages=payload.messages,
-                tools=tools,
+                tools=guardrail_filter,
             ):
                 yield text
         except AgentChatProviderError as exc:
@@ -482,7 +584,7 @@ async def run_agent_chat(
                     account_id,
                 ),
                 messages=payload.messages,
-                tools=tools,
+                tools=guardrail_filter,
             ):
                 yield text
         return
@@ -523,8 +625,10 @@ async def stream_chatgpt_codex_response_text(
     agent_run: AgentRun | None = None,
     headers: dict[str, str],
     messages: list[AgentChatMessage],
-    tools: dict[str, AgentRuntimeTool],
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    guardrail_filter = agent_guardrail_filter_from_tools(tools)
+    allowed_tools = guardrail_filter.allowed_tools
     try:
         async with websocket_connect(
             CHATGPT_CODEX_RESPONSES_WS_URL,
@@ -537,9 +641,9 @@ async def stream_chatgpt_codex_response_text(
         ) as websocket:
             previous_response_id = None
             input_items = chatgpt_codex_messages(messages)
-            function_tools = agent_dynamic_function_tools(tools) + agent_skill_function_tools(
-                agent.skill_ids or []
-            )
+            function_tools = agent_dynamic_function_tools(
+                guardrail_filter
+            ) + agent_skill_function_tools(agent.skill_ids or [])
             latest_user = latest_user_message(messages)
             latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
 
@@ -662,7 +766,7 @@ async def stream_chatgpt_codex_response_text(
                     if is_agent_dynamic_tool_name(tool_call.name):
                         execution: AgentToolExecutionResult | None = None
                         async for event in execute_agent_dynamic_tool_call_stream(
-                            tools,
+                            guardrail_filter,
                             tool_call,
                             session_factory=session_factory,
                             user=user,
@@ -693,7 +797,7 @@ async def stream_chatgpt_codex_response_text(
                         )
                         continue
 
-                    tool = tools.get(tool_call.name)
+                    tool = allowed_tools.get(tool_call.name)
                     tool_name = tool.tool_schema.tool_name if tool is not None else tool_call.name
                     activity_id = f"tool-{tool_call.call_id}"
                     yield AgentChatToolActivityEvent(
@@ -712,7 +816,7 @@ async def stream_chatgpt_codex_response_text(
                         )
                     else:
                         async for update in execute_agent_tool_call_with_progress(
-                            tools,
+                            allowed_tools,
                             tool_call,
                             session_factory=session_factory,
                             activity_id=activity_id,
@@ -796,7 +900,7 @@ async def execute_agent_skill_tool_call_stream(
 
 
 async def execute_agent_dynamic_tool_call_stream(
-    tools: dict[str, AgentRuntimeTool],
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
     tool_call: AgentToolCall,
     *,
     session_factory: AgentSessionFactory | None = None,
@@ -808,6 +912,8 @@ async def execute_agent_dynamic_tool_call_stream(
     agent_run: AgentRun | None = None,
     request_meta: dict[str, Any] | None = None,
 ) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
+    guardrail_filter = agent_guardrail_filter_from_tools(tools)
+    allowed_tools = guardrail_filter.allowed_tools
     activity_id = f"tool-{tool_call.call_id}"
     if tool_call.name == AGENT_SEARCH_TOOLS_TOOL_NAME:
         yield AgentChatToolActivityEvent(
@@ -816,18 +922,20 @@ async def execute_agent_dynamic_tool_call_stream(
             status="running",
             arguments=tool_call.arguments,
         )
-        execution = execute_agent_search_tools(tools, tool_call)
+        execution = execute_agent_search_tools(guardrail_filter, tool_call)
         yield AgentChatToolActivityEvent(
             id=activity_id,
             tool_name=AGENT_SEARCH_TOOLS_TOOL_NAME,
             status=execution.status,
             error=execution.error,
+            failure_reason=execution.failure_reason,
             result=execution.result,
+            details=execution.details,
         )
         yield execution
         return
 
-    resolved = resolve_agent_run_tool_call(tools, tool_call)
+    resolved = resolve_agent_run_tool_call(guardrail_filter, tool_call)
     if isinstance(resolved, AgentToolExecutionResult):
         yield AgentChatToolActivityEvent(
             id=activity_id,
@@ -840,13 +948,30 @@ async def execute_agent_dynamic_tool_call_stream(
             tool_name=AGENT_RUN_TOOL_TOOL_NAME,
             status=resolved.status,
             error=resolved.error,
+            failure_reason=resolved.failure_reason,
             result=resolved.result,
+            details=resolved.details,
         )
         yield resolved
         return
 
     tool, target_call = resolved
     tool_name = tool.tool_schema.tool_name
+    yield AgentChatToolActivityEvent(
+        id=f"selection-{tool_call.call_id}",
+        tool_name="Tool selected",
+        status="completed",
+        message=f"Selected {tool_name} on {tool.installation.config_name}.",
+        details={
+            "selection": {
+                "toolName": tool_name,
+                "serverName": tool.server.name,
+                "configuredTarget": tool.installation.config_name,
+                "installationId": str(tool.installation.id),
+                "toolSchemaId": str(tool.tool_schema.id),
+            }
+        },
+    )
     yield AgentChatToolActivityEvent(
         id=activity_id,
         tool_name=tool_name,
@@ -855,7 +980,7 @@ async def execute_agent_dynamic_tool_call_stream(
     )
     execution: AgentToolExecutionResult | None = None
     async for update in execute_agent_tool_call_with_progress(
-        tools,
+        allowed_tools,
         target_call,
         session_factory=session_factory,
         activity_id=activity_id,
@@ -882,7 +1007,9 @@ async def execute_agent_dynamic_tool_call_stream(
         tool_name=tool_name,
         status=execution.status,
         error=execution.error,
+        failure_reason=execution.failure_reason,
         result=execution.result,
+        details=execution.details,
         approval=execution.approval,
     )
     yield execution
@@ -1016,9 +1143,14 @@ async def filter_agent_runtime_tools_for_guardrails(
     organization_id: uuid.UUID | None,
     workspace_id: uuid.UUID | None,
     agent: Agent,
+    installed_tools: dict[str, AgentInstalledTool] | None = None,
 ) -> AgentRuntimeToolGuardrailFilter:
     if organization_id is None:
-        return AgentRuntimeToolGuardrailFilter(allowed_tools=tools, denied_tools={})
+        return AgentRuntimeToolGuardrailFilter(
+            allowed_tools=tools,
+            denied_tools={},
+            installed_tools=installed_tools,
+        )
     filtered_tools: dict[str, AgentRuntimeTool] = {}
     denied_tools: dict[str, tuple[AgentRuntimeTool, GuardrailDecision]] = {}
     for wire_name, tool in tools.items():
@@ -1045,6 +1177,7 @@ async def filter_agent_runtime_tools_for_guardrails(
     return AgentRuntimeToolGuardrailFilter(
         allowed_tools=filtered_tools,
         denied_tools=denied_tools,
+        installed_tools=installed_tools,
     )
 
 

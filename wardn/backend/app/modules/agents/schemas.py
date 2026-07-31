@@ -252,6 +252,44 @@ class AgentAvailableToolListResponse(APIModel):
     tools: list[AgentAvailableToolRead]
 
 
+class AgentCapabilityDiagnosisSummary(APIModel):
+    installed: int
+    assigned: int
+    allowed: int
+    blocked_by_policy: int
+    healthy: int
+    runnable: int
+
+
+class AgentCapabilityDiagnosisToolRead(APIModel):
+    tool_schema_id: uuid.UUID
+    installation_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    config_name: str
+    tool_name: str
+    title: str
+    description: str
+    installed: bool
+    assigned: bool
+    allowed: bool
+    healthy: bool
+    can_run: bool
+    status: str
+    reason_code: str
+    reason: str
+    policy: dict[str, Any] | None = None
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentCapabilityDiagnosisResponse(APIModel):
+    agent_id: uuid.UUID
+    workspace_id: uuid.UUID
+    query: str = ""
+    summary: AgentCapabilityDiagnosisSummary
+    tools: list[AgentCapabilityDiagnosisToolRead]
+
+
 class AgentChatMessage(APIModel):
     role: Literal["system", "user", "assistant"]
     parts: list[dict[str, Any]] = Field(default_factory=list)

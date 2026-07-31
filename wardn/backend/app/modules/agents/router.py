@@ -9,6 +9,7 @@ from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.agents.schemas import (
     AgentAvailableToolListResponse,
+    AgentCapabilityDiagnosisResponse,
     AgentChatRequest,
     AgentConversationResponse,
     AgentCreate,
@@ -26,6 +27,7 @@ from app.modules.agents.service import (
     create_workspace_agent,
     decide_agent_tool_approval,
     delete_agent,
+    diagnose_agent_capabilities,
     get_agent,
     get_workspace_agent_run,
     get_workspace_conversation,
@@ -418,6 +420,34 @@ async def list_workspace_agent_tools_route(
         organization_id,
         agent_id,
         workspace_id=workspace_id,
+    )
+
+
+@workspace_router.get(
+    "/{agent_id}/capability-diagnosis",
+    response_model=AgentCapabilityDiagnosisResponse,
+    operation_id="workspace_agents_diagnose_capabilities",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def diagnose_workspace_agent_capabilities_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    query: str = "",
+) -> AgentCapabilityDiagnosisResponse:
+    return await diagnose_agent_capabilities(
+        session,
+        current_user,
+        organization_id,
+        agent_id,
+        workspace_id,
+        query=query,
     )
 
 

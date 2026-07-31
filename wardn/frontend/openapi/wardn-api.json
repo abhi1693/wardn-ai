@@ -138,6 +138,189 @@
         "title": "AgentAvailableToolRead",
         "type": "object"
       },
+      "AgentCapabilityDiagnosisResponse": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AgentCapabilityDiagnosisSummary"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/AgentCapabilityDiagnosisToolRead"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "workspaceId",
+          "summary",
+          "tools"
+        ],
+        "title": "AgentCapabilityDiagnosisResponse",
+        "type": "object"
+      },
+      "AgentCapabilityDiagnosisSummary": {
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "integer"
+          },
+          "assigned": {
+            "title": "Assigned",
+            "type": "integer"
+          },
+          "blockedByPolicy": {
+            "title": "Blockedbypolicy",
+            "type": "integer"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "integer"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "integer"
+          },
+          "runnable": {
+            "title": "Runnable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "installed",
+          "assigned",
+          "allowed",
+          "blockedByPolicy",
+          "healthy",
+          "runnable"
+        ],
+        "title": "AgentCapabilityDiagnosisSummary",
+        "type": "object"
+      },
+      "AgentCapabilityDiagnosisToolRead": {
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "assigned": {
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "canRun": {
+            "title": "Canrun",
+            "type": "boolean"
+          },
+          "configName": {
+            "title": "Configname",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reasonCode": {
+            "title": "Reasoncode",
+            "type": "string"
+          },
+          "runtime": {
+            "additionalProperties": true,
+            "title": "Runtime",
+            "type": "object"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          },
+          "toolSchemaId": {
+            "format": "uuid",
+            "title": "Toolschemaid",
+            "type": "string"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "toolSchemaId",
+          "installationId",
+          "workspaceId",
+          "serverName",
+          "configName",
+          "toolName",
+          "title",
+          "description",
+          "installed",
+          "assigned",
+          "allowed",
+          "healthy",
+          "canRun",
+          "status",
+          "reasonCode",
+          "reason"
+        ],
+        "title": "AgentCapabilityDiagnosisToolRead",
+        "type": "object"
+      },
       "AgentChatMessage": {
         "properties": {
           "parts": {
@@ -13693,6 +13876,125 @@
           }
         },
         "summary": "Update Workspace Agent Route",
+        "tags": [
+          "workspace-agents"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}/capability-diagnosis": {
+      "get": {
+        "operationId": "workspace_agents_diagnose_capabilities",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCapabilityDiagnosisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diagnose Workspace Agent Capabilities Route",
         "tags": [
           "workspace-agents"
         ]

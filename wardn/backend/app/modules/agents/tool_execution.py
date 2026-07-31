@@ -13,6 +13,11 @@ from app.modules.agents.conversations import AgentSessionFactory, agent_stream_u
 from app.modules.agents.mappers import sanitize_run_payload
 from app.modules.agents.models import Agent, AgentRun, AgentToolApproval, WorkspaceConversation
 from app.modules.agents.types import (
+    FAILURE_TARGET_MISMATCH_BLOCKED,
+    FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+    FAILURE_TOOL_INSTALLED_NOT_ASSIGNED,
+    FAILURE_TOOL_RAN_UPSTREAM_REJECTED,
+    FAILURE_TOOL_SELECTED_RUNTIME_FAILED,
     AgentChatToolActivityEvent,
     AgentRuntimeTool,
     AgentToolCall,
@@ -56,6 +61,7 @@ async def _execute_agent_tool_call(
         return tool_execution_result(
             tool_call.name,
             f"Tool {tool_call.name} is not assigned to this agent.",
+            failure_reason=FAILURE_TOOL_INSTALLED_NOT_ASSIGNED,
         )
     if organization_id is not None:
         decision = await evaluate_tool_call_guardrails(
@@ -74,6 +80,27 @@ async def _execute_agent_tool_call(
                 arguments=tool_call.arguments,
             ),
         )
+        decision_details = {
+            "mode": decision.mode,
+            "policyId": str(decision.policy_id) if decision.policy_id else None,
+            "policyName": decision.policy_name,
+            "matchedPolicyIds": [
+                str(policy_id) for policy_id in decision.matched_policy_ids
+            ],
+            "message": decision.message,
+            "toolName": tool.tool_schema.tool_name,
+            "serverName": tool.server.name,
+            "installationId": str(tool.installation.id),
+            "toolSchemaId": str(tool.tool_schema.id),
+            "arguments": tool_call.arguments,
+        }
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "message": f"Policy result: {decision.mode}",
+                    "details": {"policy": decision_details},
+                }
+            )
         if agent_run is not None:
             await repository.append_agent_run_step(
                 session,
@@ -82,32 +109,23 @@ async def _execute_agent_tool_call(
                 status=decision.mode,
                 title=tool.tool_schema.tool_name,
                 payload=sanitize_run_payload(
-                    {
-                        "mode": decision.mode,
-                        "policyId": str(decision.policy_id) if decision.policy_id else None,
-                        "policyName": decision.policy_name,
-                        "matchedPolicyIds": [
-                            str(policy_id) for policy_id in decision.matched_policy_ids
-                        ],
-                        "message": decision.message,
-                        "toolName": tool.tool_schema.tool_name,
-                        "serverName": tool.server.name,
-                        "installationId": str(tool.installation.id),
-                        "toolSchemaId": str(tool.tool_schema.id),
-                        "arguments": tool_call.arguments,
-                    }
+                    decision_details
                 ),
             )
         if decision.mode == GUARDRAIL_MODE_DENY:
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} {decision.message}",
+                failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+                details={"policy": decision_details},
             )
         if decision.mode == GUARDRAIL_MODE_REQUIRE_CONFIRMATION:
             if agent is None:
                 return tool_execution_result(
                     tool.tool_schema.tool_name,
                     f"{AGENT_TOOL_BLOCKED_PREFIX} confirmation requires an agent context",
+                    failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+                    details={"policy": decision_details},
                 )
             approval = await repository.create_tool_approval(
                 session,
@@ -126,12 +144,15 @@ async def _execute_agent_tool_call(
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_CONFIRMATION_PREFIX} {decision.message}",
+                details={"policy": decision_details},
                 approval=tool_approval_payload(approval, tool),
             )
         if decision.mode != GUARDRAIL_MODE_ALLOW:
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} unsupported guardrail decision",
+                failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
+                details={"policy": decision_details},
             )
     target_safety_message = ambiguous_mutating_tool_target_message(
         tools,
@@ -142,8 +163,30 @@ async def _execute_agent_tool_call(
         return tool_execution_result(
             tool.tool_schema.tool_name,
             f"{AGENT_TOOL_TARGET_SAFETY_PREFIX} {target_safety_message}",
+            failure_reason=FAILURE_TARGET_MISMATCH_BLOCKED,
+            details={
+                "targetSafety": {
+                    "message": target_safety_message,
+                    "selectedTarget": target_label(tool),
+                }
+            },
         )
     try:
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "message": "Runtime selected.",
+                    "details": {
+                        "runtime": {
+                            "provider": tool.installation.runtime_config.get("provider"),
+                            "installType": tool.installation.install_type,
+                            "installationId": str(tool.installation.id),
+                            "serverName": tool.server.name,
+                            "configuredTarget": tool.installation.config_name,
+                        }
+                    },
+                }
+            )
         result = await call_tool_with_isolated_tracking(
             session,
             tool.installation,
@@ -158,12 +201,48 @@ async def _execute_agent_tool_call(
             request_meta=request_meta,
             progress_callback=progress_callback,
         )
-    except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
+    except KubernetesRuntimeProviderError as exc:
         return tool_execution_result(
             tool.tool_schema.tool_name,
             f"Tool {tool.tool_schema.tool_name} failed: {exc}",
+            failure_reason=FAILURE_TOOL_SELECTED_RUNTIME_FAILED,
+            details={
+                "runtime": {
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                    "installationId": str(tool.installation.id),
+                    "serverName": tool.server.name,
+                    "configuredTarget": tool.installation.config_name,
+                }
+            },
         )
-    return tool_execution_result(tool.tool_schema.tool_name, mcp_result_text(result))
+    except MCPGatewayUpstreamError as exc:
+        return tool_execution_result(
+            tool.tool_schema.tool_name,
+            f"Tool {tool.tool_schema.tool_name} failed: {exc}",
+            failure_reason=FAILURE_TOOL_RAN_UPSTREAM_REJECTED,
+            details={
+                "upstream": {
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                    "installationId": str(tool.installation.id),
+                    "serverName": tool.server.name,
+                    "configuredTarget": tool.installation.config_name,
+                }
+            },
+        )
+    return tool_execution_result(
+        tool.tool_schema.tool_name,
+        mcp_result_text(result),
+        details={
+            "runtime": {
+                "installationId": str(tool.installation.id),
+                "serverName": tool.server.name,
+                "configuredTarget": tool.installation.config_name,
+            },
+            "upstream": {"accepted": True},
+        },
+    )
 
 
 def progress_token_value(value: Any) -> str | int | None:
@@ -195,9 +274,11 @@ def progress_activity_event(
         id=activity_id,
         tool_name=tool_name,
         status="running",
+        failure_reason=progress_message(params.get("failureReason")),
         message=progress_message(params.get("message")),
         progress=progress_number(params.get("progress")),
         progress_token=progress_token_value(params.get("progressToken")),
+        details=progress_details(params.get("details")),
         total=progress_number(params.get("total")),
     )
 
@@ -217,6 +298,10 @@ def tool_activity_status_for_output(tool_name: str, output: str) -> tuple[str, s
 
 def progress_message(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def progress_details(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
 
 
 def mcp_result_text(result: dict[str, Any]) -> str:
@@ -242,13 +327,17 @@ def tool_execution_result(
     output: str,
     *,
     approval: dict[str, Any] | None = None,
+    failure_reason: str | None = None,
+    details: dict[str, Any] | None = None,
 ) -> AgentToolExecutionResult:
     status, error = tool_activity_status_for_output(tool_name, output)
     return AgentToolExecutionResult(
         output=output,
         status=status,
         error=error,
+        failure_reason=failure_reason if error else None,
         result=None if error else output,
+        details=details,
         approval=approval,
     )
 

@@ -11,7 +11,6 @@ import {
   ShieldOff,
   Square,
   UserRound,
-  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import { type ComponentPropsWithoutRef, useState } from "react";
@@ -34,7 +33,9 @@ export type ToolApprovalData = {
 export type ToolActivityData = {
   approval?: ToolApprovalData;
   arguments?: unknown;
+  details?: unknown;
   error?: string;
+  failureReason?: string;
   message?: string;
   progress?: number;
   progressToken?: string | number;
@@ -349,6 +350,14 @@ export function toolActivityResult(activity: ToolActivityPart) {
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
 }
 
+export function toolActivityDetails(activity: ToolActivityPart) {
+  const details = activity.data?.details;
+  if (details === undefined || details === null || details === "") {
+    return "";
+  }
+  return typeof details === "string" ? details : JSON.stringify(details, null, 2);
+}
+
 export function toolActivityArguments(activity: ToolActivityPart) {
   const args = activity.data?.arguments;
   if (args === undefined || args === null || args === "") {
@@ -396,16 +405,23 @@ export function ToolActivity({
   approvalDecisions = {},
   activities,
   onDecideApproval,
+  summaries = [],
   traceHref,
 }: {
   approvalDecisions?: Record<string, string>;
   activities: ToolActivityPart[];
   onDecideApproval?: (activity: ToolActivityPart, decision: "approve" | "deny") => void;
+  summaries?: ReasoningSummaryPart[];
   traceHref?: string;
 }) {
-  if (activities.length === 0) {
+  const reasoningText = summaries
+    .map((summary) => reasoningSummaryText(summary))
+    .filter(Boolean)
+    .join("\n\n");
+  if (activities.length === 0 && !reasoningText) {
     return null;
   }
+  const summaryBadge = activities.length > 0 ? toolActivitySummary(activities) : "Reasoning";
   return (
     <details
       className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]"
@@ -413,8 +429,8 @@ export function ToolActivity({
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-[var(--on-surface-variant)]">
         <span className="flex min-w-0 items-center gap-2">
-          <Wrench className="size-3.5 shrink-0" />
-          <span>Tool steps</span>
+          <Brain className="size-3.5 shrink-0" />
+          <span>Thinking</span>
         </span>
         <span className="flex items-center gap-2">
           {traceHref ? (
@@ -426,10 +442,17 @@ export function ToolActivity({
               Trace
             </Link>
           ) : null}
-          <Badge variant="outline">{toolActivitySummary(activities)}</Badge>
+          {reasoningText ? <Badge variant="outline">Reasoning summary</Badge> : null}
+          <Badge variant="outline">{summaryBadge}</Badge>
         </span>
       </summary>
       <div className="border-t border-[var(--outline-variant)] px-3 py-2">
+        {reasoningText ? (
+          <div className="mb-3 rounded border border-[var(--outline-variant)] bg-white px-2 py-2 text-xs leading-5 text-[var(--on-surface-variant)]">
+            <MessageMarkdown role="assistant" text={reasoningText} />
+          </div>
+        ) : null}
+        {activities.length > 0 ? (
         <div>
           {activities.map((activity, index) => {
             const status = activity.data?.status ?? "running";
@@ -446,7 +469,9 @@ export function ToolActivity({
             const decisionInFlight = approvalId ? approvalDecisions[approvalId] : "";
             const args = toolActivityArguments(activity);
             const result = toolActivityResult(activity);
+            const details = toolActivityDetails(activity);
             const progress = toolActivityProgress(activity);
+            const failureReason = activity.data?.failureReason ?? "";
             const activityMessage =
               isFailed || isBlocked || isDenied || needsConfirmation
                 ? activity.data?.error ?? toolActivityStatusLabel(status)
@@ -491,6 +516,13 @@ export function ToolActivity({
                       {toolActivityStatusLabel(status)}
                     </Badge>
                   </div>
+                  {failureReason ? (
+                    <div className="mt-2">
+                      <Badge className="font-mono" variant="secondary">
+                        {failureReason}
+                      </Badge>
+                    </div>
+                  ) : null}
                   {progress ? (
                     <div className="mt-2 max-w-sm">
                       {progress.percent !== null ? (
@@ -549,6 +581,16 @@ export function ToolActivity({
                       </pre>
                     </details>
                   ) : null}
+                  {details ? (
+                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                        Evidence
+                      </summary>
+                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                        {details}
+                      </pre>
+                    </details>
+                  ) : null}
                   {result ? (
                     <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
                       <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
@@ -564,6 +606,7 @@ export function ToolActivity({
             );
           })}
         </div>
+        ) : null}
       </div>
     </details>
   );
