@@ -96,6 +96,10 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/guardrails/simulate"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/guardrails/starter-policies"
         ),
         (

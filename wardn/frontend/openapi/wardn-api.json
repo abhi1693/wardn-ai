@@ -1570,6 +1570,49 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "GuardrailDecisionRead": {
+        "properties": {
+          "matchedPolicyIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Matchedpolicyids",
+            "type": "array"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "policyId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policyid"
+          },
+          "policyName": {
+            "default": "",
+            "title": "Policyname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "GuardrailDecisionRead",
+        "type": "object"
+      },
       "GuardrailPolicyCreate": {
         "properties": {
           "conditions": {
@@ -1711,6 +1754,133 @@
           "updatedAt"
         ],
         "title": "GuardrailPolicyRead",
+        "type": "object"
+      },
+      "GuardrailPolicySimulationRequest": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "toolSchemaId": {
+            "format": "uuid",
+            "title": "Toolschemaid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "toolSchemaId"
+        ],
+        "title": "GuardrailPolicySimulationRequest",
+        "type": "object"
+      },
+      "GuardrailPolicySimulationResponse": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "assigned": {
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "configName": {
+            "default": "",
+            "title": "Configname",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/GuardrailDecisionRead"
+          },
+          "installationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installationid"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reasonCode": {
+            "title": "Reasoncode",
+            "type": "string"
+          },
+          "requiresConfirmation": {
+            "title": "Requiresconfirmation",
+            "type": "boolean"
+          },
+          "serverName": {
+            "default": "",
+            "title": "Servername",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "toolName": {
+            "default": "",
+            "title": "Toolname",
+            "type": "string"
+          },
+          "toolSchemaId": {
+            "format": "uuid",
+            "title": "Toolschemaid",
+            "type": "string"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "workspaceId",
+          "toolSchemaId",
+          "installed",
+          "assigned",
+          "allowed",
+          "requiresConfirmation",
+          "blocked",
+          "status",
+          "reasonCode",
+          "reason",
+          "decision"
+        ],
+        "title": "GuardrailPolicySimulationResponse",
         "type": "object"
       },
       "GuardrailPolicyUpdate": {
@@ -15297,6 +15467,115 @@
           }
         },
         "summary": "Update Workspace Guardrail Settings Route",
+        "tags": [
+          "workspace-guardrails"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/guardrails/simulate": {
+      "post": {
+        "operationId": "workspace_guardrails_simulate_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailPolicySimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicySimulationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Simulate Workspace Guardrail Policy Route",
         "tags": [
           "workspace-guardrails"
         ]

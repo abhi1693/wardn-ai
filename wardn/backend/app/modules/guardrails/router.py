@@ -10,6 +10,8 @@ from app.modules.guardrails.schemas import (
     GuardrailPolicyCreate,
     GuardrailPolicyListResponse,
     GuardrailPolicyRead,
+    GuardrailPolicySimulationRequest,
+    GuardrailPolicySimulationResponse,
     GuardrailPolicyUpdate,
     GuardrailSettingsRead,
     GuardrailSettingsUpdate,
@@ -23,6 +25,7 @@ from app.modules.guardrails.service import (
     get_guardrail_policy,
     get_guardrail_settings,
     list_guardrail_policies,
+    simulate_guardrail_policy,
     update_guardrail_policy,
     update_guardrail_settings,
 )
@@ -81,6 +84,32 @@ async def update_workspace_guardrail_settings_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> GuardrailSettingsRead:
     return await update_guardrail_settings(
+        session,
+        current_user,
+        organization_id,
+        payload,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_settings_router.post(
+    "/simulate",
+    response_model=GuardrailPolicySimulationResponse,
+    operation_id="workspace_guardrails_simulate_policy",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def simulate_workspace_guardrail_policy_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: GuardrailPolicySimulationRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GuardrailPolicySimulationResponse:
+    return await simulate_guardrail_policy(
         session,
         current_user,
         organization_id,

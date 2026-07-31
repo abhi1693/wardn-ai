@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.errors import is_constraint_violation
 from app.modules.agents import repository as agents_repository
+from app.modules.agents.exceptions import AgentNotFoundError
 from app.modules.guardrails import repository
 from app.modules.guardrails.exceptions import (
     DuplicateGuardrailPolicyError,
@@ -15,9 +16,12 @@ from app.modules.guardrails.exceptions import (
 )
 from app.modules.guardrails.models import GuardrailPolicy
 from app.modules.guardrails.schemas import (
+    GuardrailDecisionRead,
     GuardrailPolicyCreate,
     GuardrailPolicyListResponse,
     GuardrailPolicyRead,
+    GuardrailPolicySimulationRequest,
+    GuardrailPolicySimulationResponse,
     GuardrailPolicyUpdate,
     GuardrailSettingsRead,
     GuardrailSettingsUpdate,
@@ -41,6 +45,11 @@ RULE_FIELDS = {"tool_schema_id", "tool_name"}
 MAX_POLICY_RULE_DEPTH = 3
 MAX_POLICY_RULES = 50
 STARTER_POLICY_NAME_MAX_LENGTH = 120
+SIMULATION_STATUS_ALLOWED = "allowed"
+SIMULATION_STATUS_REQUIRES_CONFIRMATION = "requires_confirmation"
+SIMULATION_STATUS_BLOCKED_BY_POLICY = "blocked_by_policy"
+SIMULATION_STATUS_INSTALLED_NOT_ASSIGNED = "installed_not_assigned"
+SIMULATION_STATUS_TOOL_NOT_INSTALLED = "tool_not_installed"
 
 
 @dataclass(frozen=True)
@@ -85,6 +94,23 @@ def policy_response(policy: GuardrailPolicy) -> GuardrailPolicyRead:
         isActive=policy.is_active,
         createdAt=policy.created_at,
         updatedAt=policy.updated_at,
+    )
+
+
+def decision_response(decision: GuardrailDecision) -> GuardrailDecisionRead:
+    return GuardrailDecisionRead(
+        mode=decision.mode,
+        policyId=decision.policy_id,
+        policyName=decision.policy_name,
+        message=decision.message,
+        matchedPolicyIds=list(decision.matched_policy_ids),
+    )
+
+
+def not_evaluated_decision_response(message: str) -> GuardrailDecisionRead:
+    return GuardrailDecisionRead(
+        mode="not_evaluated",
+        message=message,
     )
 
 
@@ -543,6 +569,130 @@ async def create_starter_guardrail_policies(
         skippedExisting=skipped_existing,
         readOnlyPolicyCount=read_only_policy_count,
         confirmationPolicyCount=confirmation_policy_count,
+    )
+
+
+async def simulate_guardrail_policy(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    payload: GuardrailPolicySimulationRequest,
+    *,
+    workspace_id: uuid.UUID,
+) -> GuardrailPolicySimulationResponse:
+    await require_guardrail_scope_member(session, user, organization_id, workspace_id)
+    agent = await agents_repository.get_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=payload.agent_id,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+
+    installed_tools = await agents_repository.list_workspace_available_tools(
+        session,
+        workspace_id=workspace_id,
+    )
+    installed_tool = next(
+        (
+            (tool_schema, installation)
+            for tool_schema, installation in installed_tools
+            if tool_schema.id == payload.tool_schema_id
+        ),
+        None,
+    )
+    if installed_tool is None:
+        reason = "Tool is not installed in this workspace."
+        return GuardrailPolicySimulationResponse(
+            agentId=agent.id,
+            workspaceId=workspace_id,
+            toolSchemaId=payload.tool_schema_id,
+            installed=False,
+            assigned=False,
+            allowed=False,
+            requiresConfirmation=False,
+            blocked=True,
+            status=SIMULATION_STATUS_TOOL_NOT_INSTALLED,
+            reasonCode=SIMULATION_STATUS_TOOL_NOT_INSTALLED,
+            reason=reason,
+            decision=not_evaluated_decision_response(reason),
+        )
+
+    tool_schema, installation = installed_tool
+    agent_tool_rows = await agents_repository.list_agent_tools(
+        session,
+        agent_id=agent.id,
+    )
+    assigned_tool_ids = {
+        assigned_tool_schema.id
+        for _assignment, assigned_tool_schema, _installation in agent_tool_rows
+    }
+    if tool_schema.id not in assigned_tool_ids:
+        reason = "Tool is installed in this workspace but is not assigned to this agent."
+        return GuardrailPolicySimulationResponse(
+            agentId=agent.id,
+            workspaceId=workspace_id,
+            toolSchemaId=tool_schema.id,
+            installationId=installation.id,
+            serverName=tool_schema.server_name,
+            configName=installation.config_name,
+            toolName=tool_schema.tool_name,
+            title=tool_schema.title,
+            installed=True,
+            assigned=False,
+            allowed=False,
+            requiresConfirmation=False,
+            blocked=True,
+            status=SIMULATION_STATUS_INSTALLED_NOT_ASSIGNED,
+            reasonCode=SIMULATION_STATUS_INSTALLED_NOT_ASSIGNED,
+            reason=reason,
+            decision=not_evaluated_decision_response(reason),
+        )
+
+    decision = await evaluate_tool_call_guardrails(
+        session,
+        GuardrailEvaluationContext(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            user_id=user.id,
+            agent_id=agent.id,
+            conversation_id=None,
+            agent_run_id=None,
+            installation_id=installation.id,
+            tool_schema_id=tool_schema.id,
+            server_name=tool_schema.server_name,
+            tool_name=tool_schema.tool_name,
+            arguments=payload.arguments,
+        ),
+    )
+    allowed = decision.mode == GUARDRAIL_MODE_ALLOW
+    requires_confirmation = decision.mode == GUARDRAIL_MODE_REQUIRE_CONFIRMATION
+    status = (
+        SIMULATION_STATUS_ALLOWED
+        if allowed
+        else SIMULATION_STATUS_REQUIRES_CONFIRMATION
+        if requires_confirmation
+        else SIMULATION_STATUS_BLOCKED_BY_POLICY
+    )
+    return GuardrailPolicySimulationResponse(
+        agentId=agent.id,
+        workspaceId=workspace_id,
+        toolSchemaId=tool_schema.id,
+        installationId=installation.id,
+        serverName=tool_schema.server_name,
+        configName=installation.config_name,
+        toolName=tool_schema.tool_name,
+        title=tool_schema.title,
+        installed=True,
+        assigned=True,
+        allowed=allowed,
+        requiresConfirmation=requires_confirmation,
+        blocked=not allowed and not requires_confirmation,
+        status=status,
+        reasonCode=status,
+        reason=decision.message,
+        decision=decision_response(decision),
     )
 
 

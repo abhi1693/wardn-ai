@@ -25,6 +25,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -33,22 +41,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { GuardrailPolicyRead, GuardrailSettingsRead } from "@/lib/api/generated/model";
+import type {
+  GuardrailPolicyRead,
+  GuardrailPolicySimulationResponse,
+  GuardrailSettingsRead,
+} from "@/lib/api/generated/model";
 import {
   workspaceGuardrailPoliciesDelete,
   workspaceGuardrailPoliciesUpdate,
 } from "@/lib/api/generated/workspace-guardrail-policies/workspace-guardrail-policies";
 import {
   workspaceGuardrailsCreateStarterPolicies,
+  workspaceGuardrailsSimulatePolicy,
   workspaceGuardrailsUpdateSettings,
 } from "@/lib/api/generated/workspace-guardrails/workspace-guardrails";
 
 import type {
+  GuardrailAgentOption,
   GuardrailPolicyRecord,
   GuardrailToolOption,
 } from "./data";
 
 type GuardrailsClientProps = {
+  agents: GuardrailAgentOption[];
   basePath: string;
   initialSettings: GuardrailSettingsRead;
   organizationId: string;
@@ -75,6 +90,32 @@ function modeLabel(mode: string) {
     return "Require confirmation";
   }
   return mode.slice(0, 1).toUpperCase() + mode.slice(1);
+}
+
+function simulationStatusLabel(status: string) {
+  if (status === "allowed") {
+    return "Allowed";
+  }
+  if (status === "requires_confirmation") {
+    return "Needs approval";
+  }
+  if (status === "installed_not_assigned") {
+    return "Not assigned";
+  }
+  if (status === "tool_not_installed") {
+    return "Not installed";
+  }
+  return "Blocked";
+}
+
+function simulationBadgeVariant(status: string) {
+  if (status === "allowed") {
+    return "success" as const;
+  }
+  if (status === "requires_confirmation") {
+    return "outline" as const;
+  }
+  return "destructive" as const;
 }
 
 function modeActionClassName(mode: GuardrailMode, isActive: boolean) {
@@ -177,6 +218,7 @@ function sortPolicyRecords(records: GuardrailPolicyRecord[]) {
 }
 
 export function GuardrailsClient({
+  agents,
   basePath,
   initialSettings,
   organizationId,
@@ -188,6 +230,13 @@ export function GuardrailsClient({
   const [settings, setSettings] = useState(initialSettings);
   const [deletingPolicyId, setDeletingPolicyId] = useState<string | null>(null);
   const [generatingStarterPolicies, setGeneratingStarterPolicies] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState(agents[0]?.agentId ?? "");
+  const [selectedToolSchemaId, setSelectedToolSchemaId] = useState(tools[0]?.toolSchemaId ?? "");
+  const [simulationArguments, setSimulationArguments] = useState("{}");
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const [simulationResult, setSimulationResult] =
+    useState<GuardrailPolicySimulationResponse | null>(null);
+  const [simulatingPolicy, setSimulatingPolicy] = useState(false);
   const [updatingMode, setUpdatingMode] = useState<{ mode: GuardrailMode; policyId: string } | null>(
     null
   );
@@ -274,6 +323,57 @@ export function GuardrailsClient({
       );
     } finally {
       setDeletingPolicyId(null);
+    }
+  }
+
+  async function simulatePolicy() {
+    if (!selectedAgentId || !selectedToolSchemaId || simulatingPolicy) {
+      return;
+    }
+
+    let parsedArguments: unknown = {};
+    const trimmedArguments = simulationArguments.trim();
+    if (trimmedArguments) {
+      try {
+        parsedArguments = JSON.parse(trimmedArguments);
+      } catch {
+        setSimulationError("Arguments must be valid JSON.");
+        setSimulationResult(null);
+        return;
+      }
+    }
+    if (
+      typeof parsedArguments !== "object" ||
+      parsedArguments === null ||
+      Array.isArray(parsedArguments)
+    ) {
+      setSimulationError("Arguments must be a JSON object.");
+      setSimulationResult(null);
+      return;
+    }
+
+    setSimulatingPolicy(true);
+    setSimulationError(null);
+    setSimulationResult(null);
+    try {
+      const response = await workspaceGuardrailsSimulatePolicy(
+        organizationId,
+        workspaceId,
+        {
+          agentId: selectedAgentId,
+          arguments: parsedArguments as Record<string, unknown>,
+          toolSchemaId: selectedToolSchemaId,
+        }
+      );
+      setSimulationResult(response);
+    } catch (caught) {
+      setSimulationError(
+        caught instanceof Error
+          ? caught.message
+          : "Access rule simulation could not be completed."
+      );
+    } finally {
+      setSimulatingPolicy(false);
     }
   }
 
@@ -413,6 +513,124 @@ export function GuardrailsClient({
                 Generate starter rules
               </Button>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-semibold">Policy simulator</h3>
+              <p className="text-sm text-[var(--on-surface-variant)]">
+                Check whether an agent can run a selected tool before it executes.
+              </p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+              <div className="space-y-1.5">
+                <Label htmlFor="guardrail-simulator-agent">Agent</Label>
+                <Select
+                  disabled={agents.length === 0 || simulatingPolicy}
+                  onValueChange={setSelectedAgentId}
+                  value={selectedAgentId}
+                >
+                  <SelectTrigger id="guardrail-simulator-agent">
+                    <SelectValue placeholder="Select agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents.map((agent) => (
+                      <SelectItem key={agent.agentId} value={agent.agentId}>
+                        {agent.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="guardrail-simulator-tool">Tool</Label>
+                <Select
+                  disabled={tools.length === 0 || simulatingPolicy}
+                  onValueChange={setSelectedToolSchemaId}
+                  value={selectedToolSchemaId}
+                >
+                  <SelectTrigger id="guardrail-simulator-tool">
+                    <SelectValue placeholder="Select tool" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tools.map((tool) => (
+                      <SelectItem key={tool.toolSchemaId} value={tool.toolSchemaId}>
+                        {tool.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="guardrail-simulator-arguments">Arguments</Label>
+              <textarea
+                className="min-h-24 w-full resize-y rounded-[var(--radius)] border border-input bg-card px-3 py-2 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
+                disabled={simulatingPolicy}
+                id="guardrail-simulator-arguments"
+                onChange={(event) => setSimulationArguments(event.target.value)}
+                spellCheck={false}
+                value={simulationArguments}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                disabled={!selectedAgentId || !selectedToolSchemaId || simulatingPolicy}
+                onClick={simulatePolicy}
+                size="sm"
+                type="button"
+              >
+                {simulatingPolicy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="size-4" />
+                )}
+                Simulate
+              </Button>
+              {simulationError ? (
+                <span className="text-sm text-red-700">{simulationError}</span>
+              ) : null}
+            </div>
+            {simulationResult ? (
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={simulationBadgeVariant(simulationResult.status)}>
+                    {simulationStatusLabel(simulationResult.status)}
+                  </Badge>
+                  <span className="text-sm font-medium">
+                    {simulationResult.toolName || "Selected tool"}
+                  </span>
+                  {simulationResult.configName ? (
+                    <span className="text-sm text-[var(--on-surface-variant)]">
+                      on {simulationResult.configName}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-sm text-[var(--on-surface-variant)]">
+                  {simulationResult.reason}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs text-[var(--on-surface-variant)] sm:grid-cols-4">
+                  <div>
+                    <span className="font-medium text-foreground">Installed:</span>{" "}
+                    {simulationResult.installed ? "Yes" : "No"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Assigned:</span>{" "}
+                    {simulationResult.assigned ? "Yes" : "No"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Policy:</span>{" "}
+                    {simulationResult.decision.policyName || "No matching rule"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Matched:</span>{" "}
+                    {simulationResult.decision.matchedPolicyIds?.length ?? 0}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
 

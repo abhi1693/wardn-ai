@@ -90,3 +90,29 @@ class GuardrailStarterPoliciesResponse(APIModel):
     skipped_existing: int = 0
     read_only_policy_count: int = 0
     confirmation_policy_count: int = 0
+
+
+class GuardrailPolicySimulationRequest(APIModel):
+    agent_id: uuid.UUID
+    tool_schema_id: uuid.UUID
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class GuardrailPolicySimulationResponse(APIModel):
+    agent_id: uuid.UUID
+    workspace_id: uuid.UUID
+    tool_schema_id: uuid.UUID
+    installation_id: uuid.UUID | None = None
+    server_name: str = ""
+    config_name: str = ""
+    tool_name: str = ""
+    title: str = ""
+    installed: bool
+    assigned: bool
+    allowed: bool
+    requires_confirmation: bool
+    blocked: bool
+    status: str
+    reason_code: str
+    reason: str
+    decision: GuardrailDecisionRead

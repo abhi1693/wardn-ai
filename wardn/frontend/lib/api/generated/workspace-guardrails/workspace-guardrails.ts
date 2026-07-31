@@ -5,6 +5,8 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
+  GuardrailPolicySimulationRequest,
+  GuardrailPolicySimulationResponse,
   GuardrailSettingsRead,
   GuardrailSettingsUpdate,
   GuardrailStarterPoliciesRequest,
@@ -60,6 +62,32 @@ export const workspaceGuardrailsUpdateSettings = async (organizationId: string,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(guardrailSettingsUpdate)
+  }
+);}
+
+
+export const getWorkspaceGuardrailsSimulatePolicyUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/guardrails/simulate`
+}
+
+/**
+ * @summary Simulate Workspace Guardrail Policy Route
+ */
+export const workspaceGuardrailsSimulatePolicy = async (organizationId: string,
+    workspaceId: string,
+    guardrailPolicySimulationRequest: GuardrailPolicySimulationRequest, options?: Parameters<typeof apiRequest>[1]): Promise<GuardrailPolicySimulationResponse> => {
+
+  return apiRequest<GuardrailPolicySimulationResponse>(getWorkspaceGuardrailsSimulatePolicyUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guardrailPolicySimulationRequest)
   }
 );}
 

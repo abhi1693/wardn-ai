@@ -467,6 +467,197 @@ async def test_create_starter_guardrail_policies_enables_default_deny_and_classi
 
 
 @pytest.mark.asyncio
+async def test_simulate_guardrail_policy_reports_installed_not_assigned(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    agent_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=agent_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/github",
+        config_name="github",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="search_repositories",
+        title="Search repositories",
+        description="Search repositories",
+        input_schema={"type": "object"},
+        annotations={"readOnlyHint": True},
+        is_active=True,
+    )
+
+    async def require_guardrail_scope_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def list_workspace_available_tools(*args, **kwargs):
+        return [(tool_schema, installation)]
+
+    async def list_agent_tools(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(service, "require_guardrail_scope_member", require_guardrail_scope_member)
+    monkeypatch.setattr(service.agents_repository, "get_agent", get_agent)
+    monkeypatch.setattr(
+        service.agents_repository,
+        "list_workspace_available_tools",
+        list_workspace_available_tools,
+    )
+    monkeypatch.setattr(service.agents_repository, "list_agent_tools", list_agent_tools)
+
+    response = await service.simulate_guardrail_policy(
+        FakeSession(),
+        user,
+        organization_id,
+        service.GuardrailPolicySimulationRequest(
+            agentId=agent_id,
+            toolSchemaId=tool_schema.id,
+            arguments={"query": "wardn"},
+        ),
+        workspace_id=workspace_id,
+    )
+
+    assert response.status == "installed_not_assigned"
+    assert response.installed is True
+    assert response.assigned is False
+    assert response.allowed is False
+    assert response.decision.mode == "not_evaluated"
+
+
+@pytest.mark.asyncio
+async def test_simulate_guardrail_policy_evaluates_assigned_tool(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    agent_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=agent_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/kubernetes",
+        config_name="rancher-qa",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="create_namespace",
+        title="Create namespace",
+        description="Create namespace",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    policy = GuardrailPolicy(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Confirm Kubernetes changes",
+        description="",
+        mode="require_confirmation",
+        priority=50,
+        conditions=service.tool_schema_condition(tool_schema.id),
+        is_active=True,
+        created_at=datetime(2026, 7, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+
+    async def require_guardrail_scope_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def list_workspace_available_tools(*args, **kwargs):
+        return [(tool_schema, installation)]
+
+    async def list_agent_tools(*args, **kwargs):
+        return [(SimpleNamespace(id=uuid4()), tool_schema, installation)]
+
+    async def list_matching_policies(*args, **kwargs):
+        return [policy]
+
+    async def get_workspace_guardrail_default_deny(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(service, "require_guardrail_scope_member", require_guardrail_scope_member)
+    monkeypatch.setattr(service.agents_repository, "get_agent", get_agent)
+    monkeypatch.setattr(
+        service.agents_repository,
+        "list_workspace_available_tools",
+        list_workspace_available_tools,
+    )
+    monkeypatch.setattr(service.agents_repository, "list_agent_tools", list_agent_tools)
+    monkeypatch.setattr(repository, "list_matching_policies", list_matching_policies)
+    monkeypatch.setattr(
+        repository,
+        "get_workspace_guardrail_default_deny",
+        get_workspace_guardrail_default_deny,
+    )
+
+    response = await service.simulate_guardrail_policy(
+        FakeSession(),
+        user,
+        organization_id,
+        service.GuardrailPolicySimulationRequest(
+            agentId=agent_id,
+            toolSchemaId=tool_schema.id,
+            arguments={"name": "test-ns"},
+        ),
+        workspace_id=workspace_id,
+    )
+
+    assert response.status == "requires_confirmation"
+    assert response.assigned is True
+    assert response.allowed is False
+    assert response.requires_confirmation is True
+    assert response.blocked is False
+    assert response.decision.policy_id == policy.id
+    assert response.decision.policy_name == "Confirm Kubernetes changes"
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_call_guardrail_block_skips_runtime(monkeypatch) -> None:
     organization_id = uuid4()
     workspace_id = uuid4()

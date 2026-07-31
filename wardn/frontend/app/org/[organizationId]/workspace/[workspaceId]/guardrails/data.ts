@@ -1,8 +1,9 @@
 import type {
   AgentAvailableToolListResponse,
-  GuardrailSettingsRead,
+  AgentListResponse,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
+  GuardrailSettingsRead,
   MCPServerInstallationListResponse,
 } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
@@ -27,6 +28,11 @@ export type GuardrailToolOption = {
   toolName: string;
   toolSchemaId: string;
   workspaceId: string;
+};
+
+export type GuardrailAgentOption = {
+  agentId: string;
+  label: string;
 };
 
 export async function getWorkspaceGuardrailPolicies(
@@ -105,4 +111,19 @@ export async function getGuardrailWorkspaceOptions(
   }));
 
   return { servers, tools };
+}
+
+export async function getGuardrailAgentOptions(
+  organizationId: string,
+  workspaceId: string,
+) {
+  const payload = await backendJson<AgentListResponse>(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/workspaces/${encodeURIComponent(workspaceId)}/agents?limit=100`
+  );
+  return payload.agents.map((agent) => ({
+    agentId: agent.id,
+    label: agent.name,
+  }));
 }
