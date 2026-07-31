@@ -283,15 +283,15 @@ async def persisted_agent_chat_stream(
 async def preflight_blocked_tool_stream(
     guardrail_filter: AgentRuntimeToolGuardrailFilter,
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
-    first_tool, first_decision = next(iter(guardrail_filter.denied_tools.values()))
+    _first_tool, first_decision = next(iter(guardrail_filter.denied_tools.values()))
     policy_name = first_decision.policy_name or "workspace guardrail"
     message = (
-        f"I can't run that MCP request because it is blocked by guardrail policy: "
-        f"{policy_name}."
+        f"I can't run MCP tools because current guardrail policies do not allow any "
+        f"assigned MCP tool for this agent. Policy: {policy_name}."
     )
     yield AgentChatToolActivityEvent(
         id=f"guardrail-{uuid.uuid4()}",
-        tool_name=first_tool.tool_schema.tool_name,
+        tool_name="mcp_tools",
         status="blocked",
         error=first_decision.message or message,
     )
@@ -742,6 +742,8 @@ def message_requests_denied_mcp_tool(
     message: AgentChatMessage | None,
     guardrail_filter: AgentRuntimeToolGuardrailFilter,
 ) -> bool:
+    if guardrail_filter.allowed_tools:
+        return False
     if message is None or not guardrail_filter.denied_tools:
         return False
     text = normalize_match_text(text_from_chat_message(message))
@@ -749,10 +751,7 @@ def message_requests_denied_mcp_tool(
         return False
     words = set(text.split())
     has_action = bool(words & MCP_REQUEST_ACTION_WORDS)
-    for tool, _decision in guardrail_filter.denied_tools.values():
-        if any(term and term in text for term in denied_tool_match_terms(tool)):
-            return True
-    return has_action and not guardrail_filter.allowed_tools
+    return has_action
 
 
 async def refresh_agent_chat_credential(
@@ -882,22 +881,3 @@ async def require_agent_llm_budget_available(
             model=agent.model_name,
         ),
     )
-
-
-def denied_tool_match_terms(tool: AgentRuntimeTool) -> set[str]:
-    values = [
-        tool.tool_schema.tool_name,
-        tool.tool_schema.title or "",
-        tool.tool_schema.description or "",
-        tool.tool_schema.server_name,
-        tool.server.name,
-        tool.server.description or "",
-        tool.installation.config_name,
-    ]
-    terms: set[str] = set()
-    for value in values:
-        normalized = normalize_match_text(value)
-        if normalized:
-            terms.add(normalized)
-            terms.update(part for part in normalized.split() if len(part) >= 4)
-    return terms

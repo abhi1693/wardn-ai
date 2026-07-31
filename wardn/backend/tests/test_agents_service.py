@@ -889,9 +889,108 @@ async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
 
     assert isinstance(events[0], service.AgentChatToolActivityEvent)
     assert events[0].status == "blocked"
-    assert events[0].tool_name == "search_repositories"
+    assert events[0].tool_name == "mcp_tools"
     assert isinstance(events[1], service.AgentChatTextEvent)
     assert "deny all" in events[1].text
+
+
+def test_denied_mcp_request_preflight_skips_when_any_tool_is_allowed() -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    installation_id = uuid4()
+    installation = MCPServerInstallation(
+        id=installation_id,
+        workspace_id=workspace_id,
+        server_name="io.github.AIops-tools/k8s-aiops",
+        config_name="rancher-qa-omsllc",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version="1.0.0",
+        description="Kubernetes tools",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    allowed_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="namespace_list",
+        title="namespace_list",
+        description="[READ] List namespaces.",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    denied_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="api_resources",
+        title="api_resources",
+        description="[READ] List available API groups and their versions.",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={
+            "allowed": service.AgentRuntimeTool(
+                wire_name="allowed",
+                assignment_id=uuid4(),
+                tool_schema=allowed_schema,
+                installation=installation,
+                server=server,
+            )
+        },
+        denied_tools={
+            "denied": (
+                service.AgentRuntimeTool(
+                    wire_name="denied",
+                    assignment_id=uuid4(),
+                    tool_schema=denied_schema,
+                    installation=installation,
+                    server=server,
+                ),
+                GuardrailDecision(
+                    mode="deny",
+                    message=(
+                        "Tool call blocked because it did not match any active allow "
+                        "guardrail policy."
+                    ),
+                ),
+            )
+        },
+    )
+
+    assert not service.message_requests_denied_mcp_tool(
+        AgentChatMessage(
+            role="user",
+            parts=[{"type": "text", "text": "list all namespaces from omsllc cluster"}],
+        ),
+        guardrail_filter,
+    )
+    assert not service.message_requests_denied_mcp_tool(
+        AgentChatMessage(
+            role="user",
+            parts=[{"type": "text", "text": "read my latest emails"}],
+        ),
+        guardrail_filter,
+    )
 
 
 @pytest.mark.asyncio
@@ -1068,7 +1167,7 @@ async def test_stream_agent_chat_preflight_block_uses_cached_tools_before_refres
     assert any(chunk.get("type") == "data-tool-activity" for chunk in chunks)
     assert any(
         chunk.get("type") == "text-delta"
-        and "blocked by guardrail policy" in chunk.get("delta", "")
+        and "guardrail policies do not allow" in chunk.get("delta", "")
         for chunk in chunks
     )
     assert [step["step_type"] for step in steps] == [
