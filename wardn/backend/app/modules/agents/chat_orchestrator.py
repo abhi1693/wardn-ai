@@ -474,10 +474,14 @@ async def run_agent_chat(
 def conversation_id_from_payload(payload: AgentChatRequest) -> uuid.UUID | None:
     if not payload.id:
         return None
+    raw_id = str(payload.id).strip()
     try:
-        return uuid.UUID(str(payload.id))
-    except ValueError as exc:
-        raise InvalidAgentScopeError("chat conversation id is invalid") from exc
+        conversation_id = uuid.UUID(raw_id)
+    except ValueError:
+        return None
+    if raw_id.casefold() != str(conversation_id):
+        return None
+    return conversation_id
 
 
 def ui_message_sse_chunk(chunk: dict[str, Any]) -> str:

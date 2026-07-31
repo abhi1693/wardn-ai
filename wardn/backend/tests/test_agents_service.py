@@ -520,6 +520,9 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     async def get_agent_run(*args, **kwargs):
         return agent_run
 
+    async def get_workspace_conversation(*args, **kwargs):
+        raise AssertionError("client-generated chat ids must not be loaded as conversations")
+
     async def refresh_wildcard_agent_server_tools(*args, **kwargs):
         return None
 
@@ -538,6 +541,11 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
     monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
     monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service.repository,
+        "get_workspace_conversation",
+        get_workspace_conversation,
+    )
     monkeypatch.setattr(
         service,
         "refresh_wildcard_agent_server_tools",
@@ -561,6 +569,7 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
         organization_id,
         agent.id,
         AgentChatRequest(
+            id="client-chat-13adec9fa6e64ffe9bb9e4f865b1a4eb",
             messages=[
                 AgentChatMessage(role="user", parts=[{"type": "text", "text": "hi"}])
             ]
@@ -586,6 +595,29 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     assert steps[-1]["step_type"] == "model_output"
     assert finished == [{"status": "succeeded", "error": ""}]
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+def test_conversation_id_from_payload_only_accepts_canonical_wardn_uuids() -> None:
+    conversation_id = uuid4()
+
+    assert (
+        service.conversation_id_from_payload(
+            AgentChatRequest(id=str(conversation_id), messages=[])
+        )
+        == conversation_id
+    )
+    assert (
+        service.conversation_id_from_payload(
+            AgentChatRequest(id=conversation_id.hex, messages=[])
+        )
+        is None
+    )
+    assert (
+        service.conversation_id_from_payload(
+            AgentChatRequest(id="client-chat-13adec9fa6e64ffe9bb9e4f865b1a4eb", messages=[])
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
