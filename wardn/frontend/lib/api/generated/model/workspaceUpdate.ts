@@ -9,6 +9,7 @@ import type { WorkspaceUpdateStatus } from './workspaceUpdateStatus';
 export interface WorkspaceUpdate {
   /** @maxLength 2000 */
   description?: string;
+  guardrailDefaultDeny?: boolean | null;
   /**
      * @minLength 1
      * @maxLength 100

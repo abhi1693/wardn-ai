@@ -9,6 +9,7 @@ export interface WorkspaceRead {
   createdAt: string;
   currentUserRole: string;
   description: string;
+  guardrailDefaultDeny: boolean;
   id: string;
   name: string;
   organizationId: string;

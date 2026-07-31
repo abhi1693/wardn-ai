@@ -4,6 +4,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.guardrails.models import GuardrailPolicy
+from app.modules.organizations.models import Workspace
 
 
 async def list_policies(
@@ -102,6 +103,17 @@ async def list_matching_policies(
         )
     )
     return list(result.scalars().all())
+
+
+async def get_workspace_guardrail_default_deny(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(Workspace.guardrail_default_deny).where(Workspace.id == workspace_id)
+    )
+    return bool(result.scalar_one_or_none())
 
 
 async def delete_policy(session: AsyncSession, policy: GuardrailPolicy) -> None:

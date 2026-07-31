@@ -1,5 +1,6 @@
 import type {
   AgentAvailableToolListResponse,
+  GuardrailSettingsRead,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
   MCPServerInstallationListResponse,
@@ -38,6 +39,17 @@ export async function getWorkspaceGuardrailPolicies(
     )}/workspaces/${encodeURIComponent(workspaceId)}/guardrails/policies`
   );
   return payload.policies;
+}
+
+export async function getWorkspaceGuardrailSettings(
+  organizationId: string,
+  workspaceId: string,
+) {
+  return backendJson<GuardrailSettingsRead>(
+    `/api/v1/organizations/${encodeURIComponent(
+      organizationId
+    )}/workspaces/${encodeURIComponent(workspaceId)}/guardrails/settings`
+  );
 }
 
 export async function getGuardrailPolicyRecords(

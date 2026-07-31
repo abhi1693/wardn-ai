@@ -3,6 +3,9 @@ from fastapi import APIRouter
 from app.modules.agents.router import workspace_router as workspace_agents_router
 from app.modules.agents.router import workspace_runs_router as workspace_agent_runs_router
 from app.modules.guardrails.router import workspace_router as workspace_guardrails_router
+from app.modules.guardrails.router import (
+    workspace_settings_router as workspace_guardrail_settings_router,
+)
 from app.modules.health.router import router as health_router
 from app.modules.limits.router import router as limits_router
 from app.modules.llm_providers.router import router as llm_provider_credentials_router
@@ -33,6 +36,7 @@ api_router.include_router(organizations_router)
 api_router.include_router(secrets_router)
 api_router.include_router(limits_router)
 api_router.include_router(llm_provider_credentials_router)
+api_router.include_router(workspace_guardrail_settings_router)
 api_router.include_router(workspace_guardrails_router)
 api_router.include_router(usage_router)
 api_router.include_router(organization_observability_router)

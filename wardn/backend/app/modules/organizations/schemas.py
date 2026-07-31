@@ -56,6 +56,7 @@ class WorkspaceUpdate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=2000)
     status: WorkspaceStatus = "active"
+    guardrail_default_deny: bool | None = None
 
 
 class WorkspaceRead(APIModel):
@@ -65,6 +66,7 @@ class WorkspaceRead(APIModel):
     slug: str
     description: str
     status: str
+    guardrail_default_deny: bool
     current_user_role: str
     created_at: datetime
     updated_at: datetime

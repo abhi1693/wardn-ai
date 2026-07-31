@@ -3,11 +3,14 @@
 import {
   CheckCircle2,
   CircleAlert,
+  LockKeyhole,
   Loader2,
   Pencil,
   ShieldCheck,
   ShieldOff,
   Trash2,
+  UnlockKeyhole,
+  WandSparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -30,11 +33,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { GuardrailPolicyRead } from "@/lib/api/generated/model";
+import type { GuardrailPolicyRead, GuardrailSettingsRead } from "@/lib/api/generated/model";
 import {
   workspaceGuardrailPoliciesDelete,
   workspaceGuardrailPoliciesUpdate,
 } from "@/lib/api/generated/workspace-guardrail-policies/workspace-guardrail-policies";
+import {
+  workspaceGuardrailsCreateStarterPolicies,
+  workspaceGuardrailsUpdateSettings,
+} from "@/lib/api/generated/workspace-guardrails/workspace-guardrails";
 
 import type {
   GuardrailPolicyRecord,
@@ -43,6 +50,7 @@ import type {
 
 type GuardrailsClientProps = {
   basePath: string;
+  initialSettings: GuardrailSettingsRead;
   organizationId: string;
   policies: GuardrailPolicyRecord[];
   tools: GuardrailToolOption[];
@@ -158,19 +166,34 @@ function targetLabel(policy: GuardrailPolicyRead, tools: GuardrailToolOption[]) 
   return "All tool calls";
 }
 
+function sortPolicyRecords(records: GuardrailPolicyRecord[]) {
+  return [...records].sort((left, right) => {
+    const priorityCompare = left.policy.priority - right.policy.priority;
+    if (priorityCompare !== 0) {
+      return priorityCompare;
+    }
+    return left.policy.name.localeCompare(right.policy.name);
+  });
+}
+
 export function GuardrailsClient({
   basePath,
+  initialSettings,
   organizationId,
   policies: initialPolicies,
   tools,
   workspaceId,
 }: GuardrailsClientProps) {
-  const [policies, setPolicies] = useState(initialPolicies);
+  const [policies, setPolicies] = useState(sortPolicyRecords(initialPolicies));
+  const [settings, setSettings] = useState(initialSettings);
   const [deletingPolicyId, setDeletingPolicyId] = useState<string | null>(null);
+  const [generatingStarterPolicies, setGeneratingStarterPolicies] = useState(false);
   const [updatingMode, setUpdatingMode] = useState<{ mode: GuardrailMode; policyId: string } | null>(
     null
   );
+  const [updatingSettings, setUpdatingSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const activePolicies = policies.filter((record) => record.policy.isActive);
   const summaryCards = [
     {
@@ -206,6 +229,7 @@ export function GuardrailsClient({
 
     setUpdatingMode({ policyId: record.policy.id, mode });
     setError(null);
+    setNotice(null);
     try {
       const updated = await workspaceGuardrailPoliciesUpdate(
         organizationId,
@@ -236,6 +260,7 @@ export function GuardrailsClient({
 
     setDeletingPolicyId(record.policy.id);
     setError(null);
+    setNotice(null);
     try {
       await workspaceGuardrailPoliciesDelete(organizationId, workspaceId, record.policy.id);
       setPolicies((current) =>
@@ -252,6 +277,71 @@ export function GuardrailsClient({
     }
   }
 
+  async function updateDefaultDeny(defaultDeny: boolean) {
+    if (settings.defaultDeny === defaultDeny || updatingSettings) {
+      return;
+    }
+
+    setUpdatingSettings(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await workspaceGuardrailsUpdateSettings(organizationId, workspaceId, {
+        defaultDeny,
+      });
+      setSettings(updated);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Workspace access mode could not be changed."
+      );
+    } finally {
+      setUpdatingSettings(false);
+    }
+  }
+
+  async function createStarterPolicies() {
+    if (generatingStarterPolicies) {
+      return;
+    }
+
+    setGeneratingStarterPolicies(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await workspaceGuardrailsCreateStarterPolicies(
+        organizationId,
+        workspaceId,
+        { enableDefaultDeny: true }
+      );
+      setSettings({
+        workspaceId: response.workspaceId,
+        defaultDeny: response.defaultDeny,
+      });
+      setPolicies((current) =>
+        sortPolicyRecords([
+          ...current,
+          ...(response.createdPolicies ?? []).map((policy) => ({ policy })),
+        ])
+      );
+      const createdCount = response.createdPolicies?.length ?? 0;
+      setNotice(
+        createdCount > 0
+          ? `Created ${createdCount} starter access rules.`
+          : "No starter access rules were needed."
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Starter access rules could not be generated."
+      );
+    } finally {
+      setGeneratingStarterPolicies(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -264,6 +354,67 @@ export function GuardrailsClient({
         {error ? (
           <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
+        {notice ? (
+          <AsyncFeedback variant="success">{notice}</AsyncFeedback>
+        ) : null}
+
+        <section className="rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-[var(--surface-container)] text-primary">
+                {settings.defaultDeny ? (
+                  <LockKeyhole className="size-5" />
+                ) : (
+                  <UnlockKeyhole className="size-5" />
+                )}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold">Workspace access mode</h3>
+                  <Badge variant={settings.defaultDeny ? "success" : "secondary"}>
+                    {settings.defaultDeny ? "Default deny" : "Open by default"}
+                  </Badge>
+                </div>
+                <p className="mt-1 max-w-3xl text-sm text-[var(--on-surface-variant)]">
+                  {settings.defaultDeny
+                    ? "Tool calls must match an active allow rule, deny rule, or approval rule."
+                    : "Unmatched tool calls are allowed unless an active allow rule exists."}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={updatingSettings || generatingStarterPolicies}
+                onClick={() => updateDefaultDeny(!settings.defaultDeny)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {updatingSettings ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : settings.defaultDeny ? (
+                  <UnlockKeyhole className="size-4" />
+                ) : (
+                  <LockKeyhole className="size-4" />
+                )}
+                {settings.defaultDeny ? "Disable default deny" : "Enable default deny"}
+              </Button>
+              <Button
+                disabled={updatingSettings || generatingStarterPolicies}
+                onClick={createStarterPolicies}
+                size="sm"
+                type="button"
+              >
+                {generatingStarterPolicies ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <WandSparkles className="size-4" />
+                )}
+                Generate starter rules
+              </Button>
+            </div>
+          </div>
+        </section>
 
         <section className="grid gap-3 md:grid-cols-4">
           {summaryCards.map((card) => {

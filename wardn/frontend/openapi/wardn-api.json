@@ -1794,6 +1794,90 @@
         "title": "GuardrailPolicyUpdate",
         "type": "object"
       },
+      "GuardrailSettingsRead": {
+        "properties": {
+          "defaultDeny": {
+            "title": "Defaultdeny",
+            "type": "boolean"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "defaultDeny"
+        ],
+        "title": "GuardrailSettingsRead",
+        "type": "object"
+      },
+      "GuardrailSettingsUpdate": {
+        "properties": {
+          "defaultDeny": {
+            "title": "Defaultdeny",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "defaultDeny"
+        ],
+        "title": "GuardrailSettingsUpdate",
+        "type": "object"
+      },
+      "GuardrailStarterPoliciesRequest": {
+        "properties": {
+          "enableDefaultDeny": {
+            "default": true,
+            "title": "Enabledefaultdeny",
+            "type": "boolean"
+          }
+        },
+        "title": "GuardrailStarterPoliciesRequest",
+        "type": "object"
+      },
+      "GuardrailStarterPoliciesResponse": {
+        "properties": {
+          "confirmationPolicyCount": {
+            "default": 0,
+            "title": "Confirmationpolicycount",
+            "type": "integer"
+          },
+          "createdPolicies": {
+            "items": {
+              "$ref": "#/components/schemas/GuardrailPolicyRead"
+            },
+            "title": "Createdpolicies",
+            "type": "array"
+          },
+          "defaultDeny": {
+            "title": "Defaultdeny",
+            "type": "boolean"
+          },
+          "readOnlyPolicyCount": {
+            "default": 0,
+            "title": "Readonlypolicycount",
+            "type": "integer"
+          },
+          "skippedExisting": {
+            "default": 0,
+            "title": "Skippedexisting",
+            "type": "integer"
+          },
+          "workspaceId": {
+            "format": "uuid",
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "defaultDeny"
+        ],
+        "title": "GuardrailStarterPoliciesResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6946,6 +7030,10 @@
             "title": "Description",
             "type": "string"
           },
+          "guardrailDefaultDeny": {
+            "title": "Guardraildefaultdeny",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -6981,6 +7069,7 @@
           "slug",
           "description",
           "status",
+          "guardrailDefaultDeny",
           "currentUserRole",
           "createdAt",
           "updatedAt"
@@ -6995,6 +7084,17 @@
             "maxLength": 2000,
             "title": "Description",
             "type": "string"
+          },
+          "guardrailDefaultDeny": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardraildefaultdeny"
           },
           "name": {
             "maxLength": 100,
@@ -15003,6 +15103,321 @@
         "summary": "Update Workspace Guardrail Policy Route",
         "tags": [
           "workspace-guardrail-policies"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/guardrails/settings": {
+      "get": {
+        "operationId": "workspace_guardrails_get_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Guardrail Settings Route",
+        "tags": [
+          "workspace-guardrails"
+        ]
+      },
+      "patch": {
+        "operationId": "workspace_guardrails_update_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Workspace Guardrail Settings Route",
+        "tags": [
+          "workspace-guardrails"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/guardrails/starter-policies": {
+      "post": {
+        "operationId": "workspace_guardrails_create_starter_policies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailStarterPoliciesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailStarterPoliciesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Workspace Guardrail Starter Policies Route",
+        "tags": [
+          "workspace-guardrails"
         ]
       }
     },

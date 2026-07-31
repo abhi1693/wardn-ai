@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.errors import is_constraint_violation
+from app.modules.agents import repository as agents_repository
 from app.modules.guardrails import repository
 from app.modules.guardrails.exceptions import (
     DuplicateGuardrailPolicyError,
@@ -18,6 +19,10 @@ from app.modules.guardrails.schemas import (
     GuardrailPolicyListResponse,
     GuardrailPolicyRead,
     GuardrailPolicyUpdate,
+    GuardrailSettingsRead,
+    GuardrailSettingsUpdate,
+    GuardrailStarterPoliciesRequest,
+    GuardrailStarterPoliciesResponse,
 )
 from app.modules.limits import service as limits_service
 from app.modules.organizations.service import (
@@ -35,6 +40,7 @@ RULE_OPERATORS = {"equals", "not_equals", "contains", "in"}
 RULE_FIELDS = {"tool_schema_id", "tool_name"}
 MAX_POLICY_RULE_DEPTH = 3
 MAX_POLICY_RULES = 50
+STARTER_POLICY_NAME_MAX_LENGTH = 120
 
 
 @dataclass(frozen=True)
@@ -418,10 +424,193 @@ async def delete_guardrail_policy(
     await repository.delete_policy(session, policy)
 
 
+async def get_guardrail_settings(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID,
+) -> GuardrailSettingsRead:
+    workspace, _organization_membership, _workspace_membership = (
+        await require_guardrail_scope_member(session, user, organization_id, workspace_id)
+    )
+    return GuardrailSettingsRead(
+        workspaceId=workspace.id,
+        defaultDeny=workspace.guardrail_default_deny,
+    )
+
+
+async def update_guardrail_settings(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    payload: GuardrailSettingsUpdate,
+    *,
+    workspace_id: uuid.UUID,
+) -> GuardrailSettingsRead:
+    workspace, _organization_membership, _workspace_membership = (
+        await require_guardrail_scope_admin(session, user, organization_id, workspace_id)
+    )
+    workspace.guardrail_default_deny = payload.default_deny
+    await session.flush()
+    await session.refresh(workspace)
+    return GuardrailSettingsRead(
+        workspaceId=workspace.id,
+        defaultDeny=workspace.guardrail_default_deny,
+    )
+
+
+async def create_starter_guardrail_policies(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    payload: GuardrailStarterPoliciesRequest,
+    *,
+    workspace_id: uuid.UUID,
+) -> GuardrailStarterPoliciesResponse:
+    workspace, _organization_membership, _workspace_membership = (
+        await require_guardrail_scope_admin(session, user, organization_id, workspace_id)
+    )
+    if payload.enable_default_deny:
+        workspace.guardrail_default_deny = True
+
+    existing_policies = await repository.list_policies(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    existing_tool_schema_ids = {
+        tool_schema_id
+        for policy in existing_policies
+        for tool_schema_id in policy_condition_tool_schema_ids(policy.conditions)
+    }
+    existing_names = {policy.name for policy in existing_policies}
+    created: list[GuardrailPolicyRead] = []
+    skipped_existing = 0
+    read_only_policy_count = 0
+    confirmation_policy_count = 0
+
+    for tool_schema, installation in await agents_repository.list_workspace_available_tools(
+        session,
+        workspace_id=workspace_id,
+    ):
+        tool_schema_id = str(tool_schema.id)
+        if tool_schema_id in existing_tool_schema_ids:
+            skipped_existing += 1
+            continue
+        mode = (
+            GUARDRAIL_MODE_ALLOW
+            if tool_schema_read_only_hint(tool_schema.annotations)
+            else GUARDRAIL_MODE_REQUIRE_CONFIRMATION
+        )
+        name = starter_policy_name(
+            mode=mode,
+            config_name=installation.config_name,
+            tool_name=tool_schema.tool_name,
+            tool_schema_id=tool_schema.id,
+        )
+        if name in existing_names:
+            skipped_existing += 1
+            continue
+        policy = await create_guardrail_policy(
+            session,
+            user,
+            organization_id,
+            GuardrailPolicyCreate(
+                name=name,
+                description=starter_policy_description(mode),
+                mode=mode,
+                priority=100 if mode == GUARDRAIL_MODE_ALLOW else 50,
+                conditions=tool_schema_condition(tool_schema.id),
+                is_active=True,
+            ),
+            workspace_id=workspace_id,
+        )
+        created.append(policy)
+        existing_names.add(policy.name)
+        existing_tool_schema_ids.add(tool_schema_id)
+        if mode == GUARDRAIL_MODE_ALLOW:
+            read_only_policy_count += 1
+        else:
+            confirmation_policy_count += 1
+
+    await session.flush()
+    await session.refresh(workspace)
+    return GuardrailStarterPoliciesResponse(
+        workspaceId=workspace.id,
+        defaultDeny=workspace.guardrail_default_deny,
+        createdPolicies=created,
+        skippedExisting=skipped_existing,
+        readOnlyPolicyCount=read_only_policy_count,
+        confirmationPolicyCount=confirmation_policy_count,
+    )
+
+
+def tool_schema_condition(tool_schema_id: uuid.UUID) -> dict[str, Any]:
+    return {
+        "operator": "all",
+        "rules": [
+            {
+                "field": "tool_schema_id",
+                "operator": "equals",
+                "value": str(tool_schema_id),
+            }
+        ],
+    }
+
+
+def tool_schema_read_only_hint(annotations: dict[str, Any] | None) -> bool:
+    return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
+
+
+def starter_policy_description(mode: GuardrailMode) -> str:
+    if mode == GUARDRAIL_MODE_ALLOW:
+        return "Generated starter rule for an assigned read-only tool."
+    return "Generated starter rule that pauses mutating or unknown tools for approval."
+
+
+def starter_policy_name(
+    *,
+    mode: GuardrailMode,
+    config_name: str,
+    tool_name: str,
+    tool_schema_id: uuid.UUID,
+) -> str:
+    action = "allow" if mode == GUARDRAIL_MODE_ALLOW else "confirm"
+    suffix = f" ({tool_schema_id.hex[:8]})"
+    base = f"Starter {action}: {config_name} / {tool_name}"
+    max_base_length = STARTER_POLICY_NAME_MAX_LENGTH - len(suffix)
+    return normalize_name(f"{base[:max_base_length].rstrip()}{suffix}")
+
+
+def policy_condition_tool_schema_ids(conditions: dict[str, Any]) -> set[str]:
+    if not isinstance(conditions, dict):
+        return set()
+    if "rules" in conditions:
+        rule_values: set[str] = set()
+        rules = conditions.get("rules")
+        if not isinstance(rules, list):
+            return rule_values
+        for rule in rules:
+            if isinstance(rule, dict):
+                rule_values.update(policy_condition_tool_schema_ids(rule))
+        return rule_values
+    if conditions.get("field") != "tool_schema_id":
+        return set()
+    operator = conditions.get("operator", "equals")
+    value = conditions.get("value")
+    if operator == "equals" and isinstance(value, str):
+        return {value}
+    if operator == "in" and isinstance(value, list):
+        return {item for item in value if isinstance(item, str)}
+    return set()
+
+
 def decision_for_policies(
     policies: list[GuardrailPolicy],
     *,
     has_active_allow_policy: bool = False,
+    default_deny: bool = False,
 ) -> GuardrailDecision:
     matched_policy_ids = tuple(policy.id for policy in policies)
     for mode in (GUARDRAIL_MODE_DENY, GUARDRAIL_MODE_REQUIRE_CONFIRMATION):
@@ -447,6 +636,15 @@ def decision_for_policies(
             policy_id=allow_policy.id,
             policy_name=allow_policy.name,
             message=f"Tool call allowed by guardrail policy: {allow_policy.name}",
+            matched_policy_ids=matched_policy_ids,
+        )
+    if default_deny:
+        return GuardrailDecision(
+            mode=GUARDRAIL_MODE_DENY,
+            message=(
+                "Tool call blocked because workspace default-deny access mode is enabled "
+                "and no active allow guardrail policy matched."
+            ),
             matched_policy_ids=matched_policy_ids,
         )
     if has_active_allow_policy:
@@ -477,6 +675,10 @@ async def evaluate_tool_call_guardrails(
     has_active_allow_policy = any(
         policy.mode == GUARDRAIL_MODE_ALLOW for policy in candidate_policies
     )
+    default_deny = await repository.get_workspace_guardrail_default_deny(
+        session,
+        workspace_id=context.workspace_id,
+    )
     policies = [
         policy
         for policy in candidate_policies
@@ -485,4 +687,5 @@ async def evaluate_tool_call_guardrails(
     return decision_for_policies(
         policies,
         has_active_allow_policy=has_active_allow_policy,
+        default_deny=default_deny,
     )

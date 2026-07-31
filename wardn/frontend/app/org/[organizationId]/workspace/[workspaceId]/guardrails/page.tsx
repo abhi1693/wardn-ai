@@ -8,6 +8,7 @@ import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import {
   getGuardrailPolicyRecords,
+  getWorkspaceGuardrailSettings,
   getGuardrailWorkspaceOptions,
 } from "./data";
 import { GuardrailsClient } from "./guardrails-client";
@@ -26,8 +27,9 @@ export default async function GuardrailsPage({ params }: GuardrailsPageProps) {
     notFound();
   }
 
-  const [policies, options] = await Promise.all([
+  const [policies, settings, options] = await Promise.all([
     getGuardrailPolicyRecords(organization.id, workspace.id),
+    getWorkspaceGuardrailSettings(organization.id, workspace.id),
     getGuardrailWorkspaceOptions(organization.id, workspace.id),
   ]);
   const basePath = `/org/${encodeURIComponent(organization.id)}/workspace/${encodeURIComponent(
@@ -51,6 +53,7 @@ export default async function GuardrailsPage({ params }: GuardrailsPageProps) {
     >
       <GuardrailsClient
         basePath={basePath}
+        initialSettings={settings}
         organizationId={organization.id}
         policies={policies}
         tools={options.tools}

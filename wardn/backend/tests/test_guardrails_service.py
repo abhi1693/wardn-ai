@@ -18,6 +18,7 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
+from app.modules.organizations.models import Workspace
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
@@ -119,6 +120,15 @@ def test_guardrail_decision_blocks_unmatched_tool_when_allow_policy_exists() -> 
     assert decision.mode == "deny"
     assert decision.policy_id is None
     assert "did not match any active allow guardrail policy" in decision.message
+    assert decision.matched_policy_ids == ()
+
+
+def test_guardrail_decision_blocks_unmatched_tool_when_workspace_default_deny() -> None:
+    decision = service.decision_for_policies([], default_deny=True)
+
+    assert decision.mode == "deny"
+    assert decision.policy_id is None
+    assert "workspace default-deny access mode is enabled" in decision.message
     assert decision.matched_policy_ids == ()
 
 
@@ -302,6 +312,158 @@ async def test_evaluate_guardrails_denies_unmatched_tool_when_allow_policy_exist
 
     assert decision.mode == "deny"
     assert "did not match any active allow guardrail policy" in decision.message
+
+
+@pytest.mark.asyncio
+async def test_evaluate_guardrails_denies_unmatched_tool_when_workspace_default_deny(
+    monkeypatch,
+) -> None:
+    async def list_matching_policies(*args, **kwargs):
+        return []
+
+    async def get_workspace_guardrail_default_deny(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(repository, "list_matching_policies", list_matching_policies)
+    monkeypatch.setattr(
+        repository,
+        "get_workspace_guardrail_default_deny",
+        get_workspace_guardrail_default_deny,
+    )
+
+    decision = await service.evaluate_tool_call_guardrails(
+        FakeSession(),
+        service.GuardrailEvaluationContext(
+            organization_id=uuid4(),
+            workspace_id=uuid4(),
+            user_id=uuid4(),
+            agent_id=uuid4(),
+            conversation_id=None,
+            agent_run_id=None,
+            installation_id=uuid4(),
+            tool_schema_id=uuid4(),
+            server_name="io.github.AIops-tools/k8s-aiops",
+            tool_name="create_namespace",
+            arguments={"name": "test-ns"},
+        ),
+    )
+
+    assert decision.mode == "deny"
+    assert "workspace default-deny access mode is enabled" in decision.message
+
+
+@pytest.mark.asyncio
+async def test_create_starter_guardrail_policies_enables_default_deny_and_classifies_tools(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    workspace = Workspace(
+        id=workspace_id,
+        organization_id=organization_id,
+        name="Default",
+        slug="default",
+        description="",
+        status="active",
+        guardrail_default_deny=False,
+    )
+    read_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/github",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    write_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/kubernetes",
+        config_name="rancher-qa",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    read_tool = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=read_installation.id,
+        server_name=read_installation.server_name,
+        server_version="1.0.0",
+        tool_name="search_repositories",
+        title="Search repositories",
+        description="Search repositories",
+        input_schema={"type": "object"},
+        annotations={"readOnlyHint": True},
+        is_active=True,
+    )
+    write_tool = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=write_installation.id,
+        server_name=write_installation.server_name,
+        server_version="1.0.0",
+        tool_name="create_namespace",
+        title="Create namespace",
+        description="Create namespace",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+
+    async def require_guardrail_scope_admin(*args, **kwargs):
+        return workspace, None, None
+
+    async def get_policy_by_name(*args, **kwargs):
+        return None
+
+    async def list_policies(*args, **kwargs):
+        return []
+
+    async def list_workspace_available_tools(*args, **kwargs):
+        return [(read_tool, read_installation), (write_tool, write_installation)]
+
+    async def count_policies(*args, **kwargs):
+        return 0
+
+    async def no_op(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "require_guardrail_scope_admin", require_guardrail_scope_admin)
+    monkeypatch.setattr(repository, "get_policy_by_name", get_policy_by_name)
+    monkeypatch.setattr(repository, "list_policies", list_policies)
+    monkeypatch.setattr(
+        service.agents_repository,
+        "list_workspace_available_tools",
+        list_workspace_available_tools,
+    )
+    monkeypatch.setattr(repository, "count_policies_for_workspace", count_policies)
+    monkeypatch.setattr(repository, "count_policies_created_by_user_for_workspace", count_policies)
+    monkeypatch.setattr(service.limits_service, "lock_quota_capacity", no_op)
+    monkeypatch.setattr(service.limits_service, "require_limit_available", no_op)
+
+    response = await service.create_starter_guardrail_policies(
+        FakeSession(),
+        user,
+        organization_id,
+        service.GuardrailStarterPoliciesRequest(enable_default_deny=True),
+        workspace_id=workspace_id,
+    )
+
+    assert response.default_deny is True
+    assert workspace.guardrail_default_deny is True
+    assert response.read_only_policy_count == 1
+    assert response.confirmation_policy_count == 1
+    assert [policy.mode for policy in response.created_policies] == [
+        "allow",
+        "require_confirmation",
+    ]
+    assert response.created_policies[0].conditions == service.tool_schema_condition(read_tool.id)
+    assert response.created_policies[1].conditions == service.tool_schema_condition(write_tool.id)
 
 
 @pytest.mark.asyncio

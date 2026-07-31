@@ -11,13 +11,20 @@ from app.modules.guardrails.schemas import (
     GuardrailPolicyListResponse,
     GuardrailPolicyRead,
     GuardrailPolicyUpdate,
+    GuardrailSettingsRead,
+    GuardrailSettingsUpdate,
+    GuardrailStarterPoliciesRequest,
+    GuardrailStarterPoliciesResponse,
 )
 from app.modules.guardrails.service import (
     create_guardrail_policy,
+    create_starter_guardrail_policies,
     delete_guardrail_policy,
     get_guardrail_policy,
+    get_guardrail_settings,
     list_guardrail_policies,
     update_guardrail_policy,
+    update_guardrail_settings,
 )
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
@@ -26,6 +33,87 @@ workspace_router = APIRouter(
     prefix="/organizations/{organization_id}/workspaces/{workspace_id}/guardrails/policies",
     tags=["workspace-guardrail-policies"],
 )
+
+workspace_settings_router = APIRouter(
+    prefix="/organizations/{organization_id}/workspaces/{workspace_id}/guardrails",
+    tags=["workspace-guardrails"],
+)
+
+
+@workspace_settings_router.get(
+    "/settings",
+    response_model=GuardrailSettingsRead,
+    operation_id="workspace_guardrails_get_settings",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def get_workspace_guardrail_settings_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GuardrailSettingsRead:
+    return await get_guardrail_settings(
+        session,
+        current_user,
+        organization_id,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_settings_router.patch(
+    "/settings",
+    response_model=GuardrailSettingsRead,
+    operation_id="workspace_guardrails_update_settings",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def update_workspace_guardrail_settings_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: GuardrailSettingsUpdate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GuardrailSettingsRead:
+    return await update_guardrail_settings(
+        session,
+        current_user,
+        organization_id,
+        payload,
+        workspace_id=workspace_id,
+    )
+
+
+@workspace_settings_router.post(
+    "/starter-policies",
+    response_model=GuardrailStarterPoliciesResponse,
+    operation_id="workspace_guardrails_create_starter_policies",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+    },
+)
+async def create_workspace_guardrail_starter_policies_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: GuardrailStarterPoliciesRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> GuardrailStarterPoliciesResponse:
+    return await create_starter_guardrail_policies(
+        session,
+        current_user,
+        organization_id,
+        payload,
+        workspace_id=workspace_id,
+    )
 
 
 @workspace_router.get(

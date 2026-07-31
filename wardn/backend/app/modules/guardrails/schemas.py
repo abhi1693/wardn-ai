@@ -68,3 +68,25 @@ class GuardrailDecisionRead(APIModel):
     policy_name: str = ""
     message: str = ""
     matched_policy_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class GuardrailSettingsRead(APIModel):
+    workspace_id: uuid.UUID
+    default_deny: bool
+
+
+class GuardrailSettingsUpdate(APIModel):
+    default_deny: bool
+
+
+class GuardrailStarterPoliciesRequest(APIModel):
+    enable_default_deny: bool = True
+
+
+class GuardrailStarterPoliciesResponse(APIModel):
+    workspace_id: uuid.UUID
+    default_deny: bool
+    created_policies: list[GuardrailPolicyRead] = Field(default_factory=list)
+    skipped_existing: int = 0
+    read_only_policy_count: int = 0
+    confirmation_policy_count: int = 0

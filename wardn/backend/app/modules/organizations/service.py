@@ -92,6 +92,7 @@ def workspace_response(
         slug=workspace.slug,
         description=workspace.description,
         status=workspace.status,
+        guardrailDefaultDeny=bool(workspace.guardrail_default_deny),
         currentUserRole=role,
         createdAt=workspace.created_at,
         updatedAt=workspace.updated_at,
@@ -457,6 +458,8 @@ async def update_workspace(
     workspace.name = payload.name.strip()
     workspace.description = payload.description.strip()
     workspace.status = payload.status
+    if payload.guardrail_default_deny is not None:
+        workspace.guardrail_default_deny = payload.guardrail_default_deny
     await session.flush()
     await session.refresh(workspace)
     logger.info(
