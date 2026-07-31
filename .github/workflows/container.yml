@@ -28,7 +28,7 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-backend-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -50,7 +50,7 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-frontend-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -73,7 +73,7 @@ jobs:
       platforms: linux/arm64
       cache-scope: wardn-ai-worker-arm64
       build-args: |
-        APP_VERSION=${{ github.event.release.tag_name || inputs.version || github.sha }}
+        APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
