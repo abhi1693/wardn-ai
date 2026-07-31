@@ -309,6 +309,88 @@ def test_install_server_runtime_uses_prompted_remote_config(tmp_path, monkeypatc
     assert install.runtime_config["transport"]["headers"][0]["configured"] is True
 
 
+def test_install_server_runtime_adds_bearer_scheme_to_bare_authorization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        remotes=[
+            {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": [
+                    {
+                        "name": "Authorization",
+                        "isRequired": True,
+                        "isSecret": True,
+                    }
+                ],
+            }
+        ]
+    )
+    seen_headers = []
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
+        lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
+        or {
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {"name": "example"},
+            "toolCount": 3,
+            "verifiedAt": "2026-06-21T00:00:00Z",
+        },
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"Authorization": "wardn_hub_key.secret"},
+        install_root=tmp_path,
+    )
+
+    assert install.secret_config == {"headers": {"Authorization": "Bearer wardn_hub_key.secret"}}
+    assert seen_headers == [{"Authorization": "Bearer wardn_hub_key.secret"}]
+
+
+def test_install_server_runtime_preserves_explicit_authorization_scheme(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        remotes=[
+            {
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+                "headers": [
+                    {
+                        "name": "Authorization",
+                        "isRequired": True,
+                        "isSecret": True,
+                    }
+                ],
+            }
+        ]
+    )
+    seen_headers = []
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
+        lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
+        or {
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {"name": "example"},
+            "toolCount": 3,
+            "verifiedAt": "2026-06-21T00:00:00Z",
+        },
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"Authorization": "Basic token"},
+        install_root=tmp_path,
+    )
+
+    assert install.secret_config == {"headers": {"Authorization": "Basic token"}}
+    assert seen_headers == [{"Authorization": "Basic token"}]
+
+
 def test_install_server_runtime_uses_optional_remote_config(tmp_path, monkeypatch) -> None:
     server = server_version(
         remotes=[
@@ -374,6 +456,35 @@ def test_install_server_runtime_uses_custom_remote_header(tmp_path, monkeypatch)
     assert seen_headers == [{"Authorization": "Bearer token"}]
     assert install.runtime_config["transport"]["headers"][0]["configured"] is True
     assert install.runtime_config["transport"]["headers"][0]["custom"] is True
+
+
+def test_install_server_runtime_adds_bearer_scheme_to_custom_authorization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        remotes=[{"type": "streamable-http", "url": "https://example.com/mcp"}]
+    )
+    seen_headers = []
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.remote.verify_remote_mcp_server",
+        lambda remote, **kwargs: seen_headers.append(kwargs["extra_headers"])
+        or {
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {"name": "example"},
+            "toolCount": 3,
+            "verifiedAt": "2026-06-21T00:00:00Z",
+        },
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"headers.Authorization": "wardn_hub_key.secret"},
+        install_root=tmp_path,
+    )
+
+    assert install.secret_config == {"headers": {"Authorization": "Bearer wardn_hub_key.secret"}}
+    assert seen_headers == [{"Authorization": "Bearer wardn_hub_key.secret"}]
 
 
 def test_install_server_runtime_fails_when_remote_verification_fails(
