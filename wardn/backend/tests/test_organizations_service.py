@@ -207,6 +207,11 @@ async def test_organization_admin_can_create_workspace(monkeypatch) -> None:
     async def require_limit_available(*args, **kwargs):
         return None
 
+    default_limit_workspaces = []
+
+    async def ensure_default_workspace_resource_limits(*args, **kwargs):
+        default_limit_workspaces.append(args[1])
+
     monkeypatch.setattr(service.repository, "get_organization_by_id", get_organization_by_id)
     monkeypatch.setattr(
         service.repository,
@@ -229,6 +234,11 @@ async def test_organization_admin_can_create_workspace(monkeypatch) -> None:
         "require_limit_available",
         require_limit_available,
     )
+    monkeypatch.setattr(
+        service.limits_service,
+        "ensure_default_workspace_resource_limits",
+        ensure_default_workspace_resource_limits,
+    )
     session = FakeSession()
 
     response = await service.create_workspace(
@@ -248,6 +258,7 @@ async def test_organization_admin_can_create_workspace(monkeypatch) -> None:
     assert workspace.organization_id == organization_id
     assert membership.workspace_id == workspace.id
     assert membership.role == "owner"
+    assert default_limit_workspaces == [workspace.id]
 
 
 @pytest.mark.asyncio

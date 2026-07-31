@@ -102,7 +102,6 @@ from app.modules.observability import service as observability_service
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
-AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 DENIED_MCP_TOOL_MATCH_LIMIT = 5
 MCP_REQUEST_ACTION_WORDS = {
     "call",
@@ -628,8 +627,13 @@ async def stream_openai_responses_response_text(
     latest_user = latest_user_message(messages)
     latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
     previous_response_id = None
+    max_tool_rounds = await agent_chat_max_tool_rounds(
+        session_factory=session_factory,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
 
-    for _round_index in range(AGENT_CHAT_MAX_TOOL_ROUNDS):
+    for _round_index in range(max_tool_rounds):
         body = openai_responses_request_body(
             agent,
             input_items=input_items,
@@ -740,7 +744,12 @@ async def stream_openai_responses_response_text(
                 }
             )
 
-    yield AgentChatTextEvent(text="\n\nStopped after reaching the tool call limit.")
+    yield AgentChatTextEvent(
+        text=(
+            "\n\nStopped after reaching the configured tool call limit "
+            f"({max_tool_rounds})."
+        )
+    )
 
 
 def conversation_id_from_payload(payload: AgentChatRequest) -> uuid.UUID | None:
@@ -762,6 +771,22 @@ def ui_message_sse_chunk(chunk: dict[str, Any]) -> str:
 
 def normalize_match_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+async def agent_chat_max_tool_rounds(
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+) -> int:
+    if organization_id is None or workspace_id is None:
+        return limits_service.DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS
+    async with agent_stream_unit_of_work(session_factory) as session:
+        return await limits_service.effective_agent_chat_max_tool_rounds(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
 
 
 async def stream_chatgpt_codex_response_text(
@@ -797,8 +822,13 @@ async def stream_chatgpt_codex_response_text(
             )
             latest_user = latest_user_message(messages)
             latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
+            max_tool_rounds = await agent_chat_max_tool_rounds(
+                session_factory=session_factory,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+            )
 
-            for _round_index in range(AGENT_CHAT_MAX_TOOL_ROUNDS):
+            for _round_index in range(max_tool_rounds):
                 body = chatgpt_codex_request_body(
                     agent,
                     input_items=input_items,
@@ -924,7 +954,12 @@ async def stream_chatgpt_codex_response_text(
                         }
                     )
 
-            yield AgentChatTextEvent(text="\n\nStopped after reaching the tool call limit.")
+            yield AgentChatTextEvent(
+                text=(
+                    "\n\nStopped after reaching the configured tool call limit "
+                    f"({max_tool_rounds})."
+                )
+            )
     except AgentChatProviderError:
         raise
     except InvalidStatus as exc:

@@ -6,7 +6,7 @@ import pytest
 
 from app.modules.limits import service
 from app.modules.limits.exceptions import InvalidLimitKeyError, LimitExceededError
-from app.modules.limits.models import UsageBudget
+from app.modules.limits.models import ResourceLimit, UsageBudget
 
 
 class RecordingSession:
@@ -36,6 +36,24 @@ def usage_budget(
         unit=unit,
         period=period,
         model_filter=model_filter,
+        created_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+    )
+
+
+def resource_limit(
+    *,
+    scope_type: str = "workspace",
+    scope_id: uuid.UUID | None = None,
+    limit_key: str = service.AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN,
+    value: int = 100,
+) -> ResourceLimit:
+    return ResourceLimit(
+        id=uuid.uuid4(),
+        scope_type=scope_type,
+        scope_id=scope_id or uuid.uuid4(),
+        limit_key=limit_key,
+        value=value,
         created_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
         updated_at=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
     )
@@ -83,6 +101,37 @@ def test_quota_lock_id_is_stable_and_scope_specific() -> None:
 )
 def test_runtime_policy_limit_keys_are_supported(limit_key: str) -> None:
     assert service.normalize_limit_key(limit_key) == limit_key
+
+
+def test_agent_chat_tool_round_limit_key_is_supported() -> None:
+    assert (
+        service.normalize_limit_key(service.AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN)
+        == service.AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN
+    )
+
+
+@pytest.mark.asyncio
+async def test_effective_agent_chat_max_tool_rounds_uses_workspace_limit(
+    monkeypatch,
+) -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    workspace_limit = resource_limit(scope_id=workspace_id, value=42)
+
+    async def get_limit(session, *, scope_type, scope_id, limit_key):
+        if scope_type == "workspace":
+            assert scope_id == workspace_id
+            assert limit_key == service.AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN
+            return workspace_limit
+        raise AssertionError("workspace limit should be evaluated first")
+
+    monkeypatch.setattr(service.repository, "get_limit", get_limit)
+
+    assert await service.effective_agent_chat_max_tool_rounds(
+        RecordingSession(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    ) == 42
 
 
 @pytest.mark.asyncio

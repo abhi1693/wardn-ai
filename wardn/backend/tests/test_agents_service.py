@@ -1572,8 +1572,8 @@ async def test_run_agent_chat_closes_database_transactions_before_external_strea
     ]
 
     assert events == [service.AgentChatTextEvent(text="ok")]
-    assert external_transaction_states == [[False, False]]
-    assert len(session_factory.sessions) == 3
+    assert external_transaction_states == [[False, False, False]]
+    assert len(session_factory.sessions) == 4
     assert all(session.commits == 1 for session in session_factory.sessions)
 
 
@@ -2486,6 +2486,124 @@ async def test_stream_openai_responses_uses_dynamic_tools_and_runs_resolved_targ
     assert [event.text for event in events if isinstance(event, service.AgentChatTextEvent)] == [
         "done"
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_openai_responses_uses_configured_tool_round_limit(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.1",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+
+    async def stream_response_events(*args, **kwargs):
+        sent_bodies.append(kwargs["body"])
+        yield {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "name": service.AGENT_RUN_TOOL_TOOL_NAME,
+                "call_id": f"call_{len(sent_bodies)}",
+                "arguments": json.dumps(
+                    {
+                        "tool_name": "namespace_list",
+                        "configured_target": "rancher-qa-omsllc",
+                        "tool_args": {},
+                    }
+                ),
+            },
+        }
+        yield {
+            "type": "response.completed",
+            "response": {
+                "id": f"resp_{len(sent_bodies)}",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        }
+
+    async def agent_chat_max_tool_rounds(*args, **kwargs):
+        return 1
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(chat_orchestrator, "stream_response_events", stream_response_events)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "agent_chat_max_tool_rounds",
+        agent_chat_max_tool_rounds,
+    )
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in chat_orchestrator.stream_openai_responses_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            user=User(id=uuid4(), email="owner@example.com"),
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            headers={"Authorization": "Bearer sk-test"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "list namespaces in rancher-qa"}],
+                )
+            ],
+            tools={runtime_tool.wire_name: runtime_tool},
+        )
+    ]
+
+    text_events = [event.text for event in events if isinstance(event, service.AgentChatTextEvent)]
+    assert text_events[-1] == (
+        "\n\nStopped after reaching the configured tool call limit (1)."
+    )
+    assert len(sent_bodies) == 1
 
 
 @pytest.mark.asyncio

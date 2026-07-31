@@ -229,7 +229,6 @@ from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
-AGENT_CHAT_MAX_TOOL_ROUNDS = 8
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
 QUICK_START_AGENT_NAME = "Workspace Assistant"
 QUICK_START_AGENT_DESCRIPTION = "Default assistant for workspace chat."

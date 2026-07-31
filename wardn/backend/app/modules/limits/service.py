@@ -41,6 +41,7 @@ WORKSPACE_CONVERSATIONS_PER_WORKSPACE = "workspace_conversations.per_workspace"
 WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER = (
     "workspace_conversations.per_workspace_per_user"
 )
+AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN = "agent_chat.max_tool_rounds.per_run"
 GUARDRAIL_POLICIES_PER_WORKSPACE = "guardrail_policies.per_workspace"
 GUARDRAIL_POLICIES_PER_WORKSPACE_PER_USER = "guardrail_policies.per_workspace_per_user"
 MCP_CATALOG_SOURCES_PER_ORGANIZATION = "mcp_catalog_sources.per_organization"
@@ -79,6 +80,7 @@ SUPPORTED_LIMIT_KEYS = {
     AGENTS_PER_WORKSPACE_PER_USER,
     WORKSPACE_CONVERSATIONS_PER_WORKSPACE,
     WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER,
+    AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN,
     GUARDRAIL_POLICIES_PER_WORKSPACE,
     GUARDRAIL_POLICIES_PER_WORKSPACE_PER_USER,
     MCP_CATALOG_SOURCES_PER_ORGANIZATION,
@@ -96,6 +98,11 @@ SUPPORTED_LIMIT_KEYS = {
     LLM_PROVIDER_CREDENTIALS_PER_ORGANIZATION,
     LLM_PROVIDER_CREDENTIALS_PER_WORKSPACE,
     LLM_PROVIDER_CREDENTIALS_PER_USER,
+}
+
+DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS = 100
+DEFAULT_WORKSPACE_RESOURCE_LIMITS = {
+    AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN: DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS,
 }
 
 
@@ -279,6 +286,28 @@ async def upsert_resource_limit(
     return limit_response(limit)
 
 
+async def ensure_default_workspace_resource_limits(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> None:
+    for limit_key, value in DEFAULT_WORKSPACE_RESOURCE_LIMITS.items():
+        existing = await repository.get_limit(
+            session,
+            scope_type="workspace",
+            scope_id=workspace_id,
+            limit_key=limit_key,
+        )
+        if existing is not None:
+            continue
+        await repository.upsert_resource_limit(
+            session,
+            scope_type="workspace",
+            scope_id=workspace_id,
+            limit_key=limit_key,
+            value=value,
+        )
+
+
 async def delete_resource_limit(
     session: AsyncSession,
     user: User,
@@ -368,6 +397,25 @@ async def effective_limit(
         if limit is not None:
             return limit
     return None
+
+
+async def effective_agent_chat_max_tool_rounds(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> int:
+    limit = await effective_limit(
+        session,
+        limit_key=AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN,
+        scope_chain=[
+            ("workspace", workspace_id),
+            ("organization", organization_id),
+        ],
+    )
+    if limit is None:
+        return DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS
+    return max(limit.value, 0)
 
 
 async def require_limit_available(

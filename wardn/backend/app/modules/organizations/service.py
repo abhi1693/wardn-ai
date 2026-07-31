@@ -406,6 +406,7 @@ async def create_workspace(
         is_active=True,
     )
     session.add(membership)
+    await limits_service.ensure_default_workspace_resource_limits(session, workspace.id)
     await session.flush()
     await session.refresh(workspace)
     logger.info(
