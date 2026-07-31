@@ -28,11 +28,14 @@ from app.modules.agents.chat_orchestrator import (
     conversation_id_from_payload as conversation_id_from_payload,
 )
 from app.modules.agents.chat_orchestrator import (
+    denied_mcp_tool_matches,
     filter_agent_runtime_tools_for_guardrails,
     latest_user_message,
-    message_requests_denied_mcp_tool,
     persisted_agent_chat_stream,
     preflight_blocked_tool_stream,
+)
+from app.modules.agents.chat_orchestrator import (
+    message_requests_denied_mcp_tool as message_requests_denied_mcp_tool,
 )
 from app.modules.agents.chat_orchestrator import (
     persist_chat_turn_user_message as persist_chat_turn_user_message,
@@ -191,6 +194,7 @@ from app.modules.llm_providers.service import OPENAI_CHATGPT_PROVIDER as OPENAI_
 from app.modules.llm_providers.service import list_models_for_credential, user_can_see_credential
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_registry import repository as mcp_registry_repository
+from app.modules.mcp_registry import tool_repository as mcp_tool_repository
 from app.modules.mcp_registry.exceptions import MCPServerInstallationFailedError
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
@@ -940,6 +944,14 @@ async def refresh_wildcard_agent_server_tools(
     failures: list[AgentToolRefreshFailure] = []
     for _assignment, installation, server in rows:
         try:
+            cached_tool_count = await mcp_tool_repository.count_active_tool_schemas(
+                session,
+                installation_id=installation.id,
+                server_name=installation.server_name,
+                server_version=installation.installed_version,
+            )
+            if cached_tool_count > 0:
+                continue
             await refresh_tool_schemas_for_installation(
                 session,
                 installation=installation,
@@ -1069,8 +1081,9 @@ async def stream_agent_chat(
         agent=agent,
     )
     latest_message = latest_user_message(payload.messages)
-    if message_requests_denied_mcp_tool(latest_message, guardrail_filter):
-        stream = preflight_blocked_tool_stream(guardrail_filter)
+    denied_matches = denied_mcp_tool_matches(latest_message, guardrail_filter)
+    if denied_matches:
+        stream = preflight_blocked_tool_stream(guardrail_filter, denied_matches=denied_matches)
         return persisted_agent_chat_stream(
             conversation,
             stream,
@@ -1111,8 +1124,9 @@ async def stream_agent_chat(
         workspace_id=workspace_id,
         agent=agent,
     )
-    if message_requests_denied_mcp_tool(latest_message, guardrail_filter):
-        stream = preflight_blocked_tool_stream(guardrail_filter)
+    denied_matches = denied_mcp_tool_matches(latest_message, guardrail_filter)
+    if denied_matches:
+        stream = preflight_blocked_tool_stream(guardrail_filter, denied_matches=denied_matches)
     else:
         stream = run_agent_chat(
             agent,

@@ -65,7 +65,10 @@ def agent_dynamic_function_tools(tools: dict[str, AgentRuntimeTool]) -> list[dic
             "description": (
                 "Search the MCP tools currently available to this agent after assignment, "
                 "runtime reachability, and guardrail filtering. Returns exact toolName values "
-                f"that can be passed to {AGENT_RUN_TOOL_TOOL_NAME}."
+                f"that can be passed to {AGENT_RUN_TOOL_TOOL_NAME}. Search by capability "
+                "and system name, not only by the object being inspected; for example "
+                "'google search console gsc shipyardhq.dev', 'kubernetes namespaces "
+                "rancher-qa', or 'arxiv papers'."
             ),
             "parameters": {
                 "type": "object",
@@ -74,7 +77,8 @@ def agent_dynamic_function_tools(tools: dict[str, AgentRuntimeTool]) -> list[dic
                         "type": "string",
                         "description": (
                             "Keywords for the capability and target, for example "
-                            "'kubernetes namespaces rancher-qa' or 'arxiv read paper'."
+                            "'google search console gsc', 'kubernetes namespaces "
+                            "rancher-qa', or 'arxiv read paper'."
                         ),
                     },
                     "limit": {
@@ -95,6 +99,8 @@ def agent_dynamic_function_tools(tools: dict[str, AgentRuntimeTool]) -> list[dic
             "description": (
                 "Execute one MCP tool available to this agent. Use the exact toolName returned "
                 f"by {AGENT_SEARCH_TOOLS_TOOL_NAME}; put the target tool arguments in tool_args. "
+                "Do not copy configuredTarget into tool_args; Wardn uses configuredTarget to "
+                "route to the configured MCP installation. "
                 "The target tool is resolved server-side and evaluated by guardrail policies "
                 "again immediately before execution."
             ),
@@ -191,12 +197,13 @@ def resolve_agent_run_tool_call(
         raw_tool_args = {}
     if not isinstance(raw_tool_args, dict):
         return run_tool_error("tool_args must be an object.")
+    tool_args = normalize_agent_tool_args(tool, raw_tool_args)
     return (
         tool,
         AgentToolCall(
             name=tool.wire_name,
             call_id=tool_call.call_id,
-            arguments=raw_tool_args,
+            arguments=tool_args,
         ),
     )
 
@@ -206,6 +213,37 @@ def run_tool_error(message: str) -> AgentToolExecutionResult:
         AGENT_RUN_TOOL_TOOL_NAME,
         f"Tool {AGENT_RUN_TOOL_TOOL_NAME} failed: {message}",
     )
+
+
+def normalize_agent_tool_args(
+    tool: AgentRuntimeTool,
+    raw_tool_args: dict[str, Any],
+) -> dict[str, Any]:
+    tool_args = dict(raw_tool_args)
+    if should_strip_configured_target_arg(tool, tool_args):
+        tool_args.pop("target", None)
+    return tool_args
+
+
+def should_strip_configured_target_arg(
+    tool: AgentRuntimeTool,
+    tool_args: dict[str, Any],
+) -> bool:
+    target = tool_args.get("target")
+    if not isinstance(target, str):
+        return False
+    if "target" in required_schema_names(tool.tool_schema.input_schema):
+        return False
+    return normalize_search_text(target) == normalize_search_text(tool.installation.config_name)
+
+
+def required_schema_names(schema: Any) -> set[str]:
+    if not isinstance(schema, dict):
+        return set()
+    required = schema.get("required")
+    if not isinstance(required, list):
+        return set()
+    return {item for item in required if isinstance(item, str)}
 
 
 def search_agent_tools(
@@ -228,6 +266,13 @@ def search_agent_tools(
     ]
     matches.sort(key=lambda item: (-item[0], tool_sort_key(item[1])))
     return [tool for _score, tool in matches[:limit]]
+
+
+def score_agent_tool_match(tool: AgentRuntimeTool, *, query: str) -> int:
+    terms = query_terms(query)
+    if not terms:
+        return 0
+    return score_tool(tool, terms=terms, query=query)
 
 
 def search_hint(
@@ -331,6 +376,11 @@ def tool_search_result(tool: AgentRuntimeTool) -> dict[str, Any]:
         "description": truncate_text(tool.tool_schema.description or "", 700),
         "serverName": tool.tool_schema.server_name,
         "configuredTarget": tool.installation.config_name,
+        "configuredTargetHint": (
+            "Wardn uses configuredTarget to route to this MCP installation. Do not pass "
+            "configuredTarget as a target tool argument unless that exact in-tool target is "
+            "separately required."
+        ),
         "installationId": str(tool.installation.id),
         "toolSchemaId": str(tool.tool_schema.id),
         "readOnly": read_only_hint(tool),

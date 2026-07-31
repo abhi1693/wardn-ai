@@ -18,6 +18,8 @@ from app.modules.agents.dynamic_tools import (
     execute_agent_search_tools,
     is_agent_dynamic_tool_name,
     resolve_agent_run_tool_call,
+    score_agent_tool_match,
+    search_agent_tools,
 )
 from app.modules.agents.exceptions import InvalidAgentScopeError
 from app.modules.agents.mappers import (
@@ -92,6 +94,7 @@ from app.modules.observability import service as observability_service
 from app.modules.users.models import User
 
 AGENT_CHAT_MAX_TOOL_ROUNDS = 8
+DENIED_MCP_TOOL_MATCH_LIMIT = 5
 MCP_REQUEST_ACTION_WORDS = {
     "call",
     "check",
@@ -289,16 +292,25 @@ async def persisted_agent_chat_stream(
 
 async def preflight_blocked_tool_stream(
     guardrail_filter: AgentRuntimeToolGuardrailFilter,
+    denied_matches: list[tuple[AgentRuntimeTool, GuardrailDecision]] | None = None,
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
-    _first_tool, first_decision = next(iter(guardrail_filter.denied_tools.values()))
+    matches = denied_matches or list(guardrail_filter.denied_tools.values())
+    first_tool, first_decision = matches[0]
+    tool_name = first_tool.tool_schema.tool_name or first_tool.wire_name
     policy_name = first_decision.policy_name or "workspace guardrail"
-    message = (
-        f"I can't run MCP tools because current guardrail policies do not allow any "
-        f"assigned MCP tool for this agent. Policy: {policy_name}."
-    )
+    if guardrail_filter.allowed_tools and denied_matches:
+        message = (
+            f"I can't run `{tool_name}` because current guardrail policies do not allow "
+            f"that assigned MCP tool for this agent. Policy: {policy_name}."
+        )
+    else:
+        message = (
+            f"I can't run MCP tools because current guardrail policies do not allow any "
+            f"assigned MCP tool for this agent. Policy: {policy_name}."
+        )
     yield AgentChatToolActivityEvent(
         id=f"guardrail-{uuid.uuid4()}",
-        tool_name="mcp_tools",
+        tool_name=tool_name,
         status="blocked",
         error=first_decision.message or message,
     )
@@ -880,16 +892,53 @@ def message_requests_denied_mcp_tool(
     message: AgentChatMessage | None,
     guardrail_filter: AgentRuntimeToolGuardrailFilter,
 ) -> bool:
-    if guardrail_filter.allowed_tools:
-        return False
+    return bool(denied_mcp_tool_matches(message, guardrail_filter))
+
+
+def denied_mcp_tool_matches(
+    message: AgentChatMessage | None,
+    guardrail_filter: AgentRuntimeToolGuardrailFilter,
+) -> list[tuple[AgentRuntimeTool, GuardrailDecision]]:
     if message is None or not guardrail_filter.denied_tools:
-        return False
+        return []
     text = normalize_match_text(text_from_chat_message(message))
     if not text:
-        return False
+        return []
+    denied_tools = {
+        wire_name: tool
+        for wire_name, (tool, _decision) in guardrail_filter.denied_tools.items()
+    }
+    matches = search_agent_tools(
+        denied_tools,
+        query=text,
+        limit=DENIED_MCP_TOOL_MATCH_LIMIT,
+    )
+    if matches:
+        allowed_best_score = max(
+            (
+                score_agent_tool_match(tool, query=text)
+                for tool in guardrail_filter.allowed_tools.values()
+            ),
+            default=0,
+        )
+        if allowed_best_score > 0:
+            matches = [
+                tool
+                for tool in matches
+                if score_agent_tool_match(tool, query=text) > allowed_best_score
+            ]
+        return [
+            guardrail_filter.denied_tools[tool.wire_name]
+            for tool in matches
+            if tool.wire_name in guardrail_filter.denied_tools
+        ]
+    if guardrail_filter.allowed_tools:
+        return []
     words = set(text.split())
     has_action = bool(words & MCP_REQUEST_ACTION_WORDS)
-    return has_action
+    if not has_action:
+        return []
+    return [next(iter(guardrail_filter.denied_tools.values()))]
 
 
 async def refresh_agent_chat_credential(

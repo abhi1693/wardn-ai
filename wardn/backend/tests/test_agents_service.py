@@ -949,7 +949,7 @@ async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
 
     assert isinstance(events[0], service.AgentChatToolActivityEvent)
     assert events[0].status == "blocked"
-    assert events[0].tool_name == "mcp_tools"
+    assert events[0].tool_name == "search_repositories"
     assert isinstance(events[1], service.AgentChatTextEvent)
     assert "deny all" in events[1].text
 
@@ -1051,6 +1051,90 @@ def test_denied_mcp_request_preflight_skips_when_any_tool_is_allowed() -> None:
         ),
         guardrail_filter,
     )
+
+
+def test_denied_mcp_request_preflight_blocks_matching_denied_tool_with_allowed_tools() -> None:
+    allowed_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        server_name="io.github.AIops-tools/k8s-aiops",
+        title="List namespaces",
+        description="[READ] List Kubernetes namespaces.",
+    )
+    denied_tool = make_agent_runtime_tool(
+        wire_name="wardn_gsc_sites",
+        tool_name="gsc_sites",
+        server_name="io.github.acamolese/google-search-console-mcp",
+        title="List Search Console sites",
+        description="[READ] List Google Search Console sites.",
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={allowed_tool.wire_name: allowed_tool},
+        denied_tools={
+            denied_tool.wire_name: (
+                denied_tool,
+                GuardrailDecision(
+                    mode="deny",
+                    message=(
+                        "Tool call blocked because it did not match any active allow "
+                        "guardrail policy."
+                    ),
+                ),
+            )
+        },
+    )
+    message = AgentChatMessage(
+        role="user",
+        parts=[{"type": "text", "text": "check on shipyardhq.dev in gsc"}],
+    )
+
+    matches = service.denied_mcp_tool_matches(message, guardrail_filter)
+
+    assert service.message_requests_denied_mcp_tool(message, guardrail_filter)
+    assert matches[0][0] is denied_tool
+
+
+@pytest.mark.asyncio
+async def test_preflight_blocked_tool_stream_reports_matching_denied_tool() -> None:
+    allowed_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        server_name="io.github.AIops-tools/k8s-aiops",
+    )
+    denied_tool = make_agent_runtime_tool(
+        wire_name="wardn_gsc_sites",
+        tool_name="gsc_sites",
+        server_name="io.github.acamolese/google-search-console-mcp",
+        title="List Search Console sites",
+        description="[READ] List Google Search Console sites.",
+    )
+    denied_match = (
+        denied_tool,
+        GuardrailDecision(
+            mode="deny",
+            message="Tool call blocked because it did not match any active allow guardrail policy.",
+        ),
+    )
+    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+        allowed_tools={allowed_tool.wire_name: allowed_tool},
+        denied_tools={denied_tool.wire_name: denied_match},
+    )
+
+    events = [
+        event
+        async for event in service.preflight_blocked_tool_stream(
+            guardrail_filter,
+            denied_matches=[denied_match],
+        )
+    ]
+
+    assert isinstance(events[0], service.AgentChatToolActivityEvent)
+    assert events[0].tool_name == "gsc_sites"
+    assert events[0].status == "blocked"
+    assert isinstance(events[1], service.AgentChatTextEvent)
+    assert "gsc_sites" in events[1].text
 
 
 @pytest.mark.asyncio
@@ -1708,6 +1792,7 @@ def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
     assert payload["tools"][0]["toolName"] == "wardn_namespace"
     assert payload["tools"][0]["mcpToolName"] == "namespace_list"
     assert payload["tools"][0]["configuredTarget"] == "rancher-qa-omsllc"
+    assert "route to this MCP installation" in payload["tools"][0]["configuredTargetHint"]
     assert payload["tools"][0]["readOnly"] is True
     assert payload["tools"][0]["params"][0]["name"] == "target"
 
@@ -1748,7 +1833,7 @@ def test_resolve_agent_run_tool_call_requires_exact_name_for_duplicates() -> Non
             call_id="call_2",
             arguments={
                 "tool_name": "wardn_rancher_namespace",
-                "tool_args": {"target": "rancher-qa-omsllc"},
+                "tool_args": {"target": "rancher-qa-omsllc", "namespace": "default"},
             },
         ),
     )
@@ -1758,6 +1843,37 @@ def test_resolve_agent_run_tool_call_requires_exact_name_for_duplicates() -> Non
     assert tool is rancher_tool
     assert target_call.name == "wardn_rancher_namespace"
     assert target_call.call_id == "call_2"
+    assert target_call.arguments == {"namespace": "default"}
+
+
+def test_resolve_agent_run_tool_call_keeps_required_target_argument() -> None:
+    required_target_tool = make_agent_runtime_tool(
+        wire_name="wardn_required_target",
+        tool_name="required_target",
+        config_name="rancher-qa-omsllc",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+            },
+            "required": ["target"],
+        },
+    )
+
+    resolved = service.resolve_agent_run_tool_call(
+        {required_target_tool.wire_name: required_target_tool},
+        service.AgentToolCall(
+            name=service.AGENT_RUN_TOOL_TOOL_NAME,
+            call_id="call_1",
+            arguments={
+                "tool_name": "wardn_required_target",
+                "tool_args": {"target": "rancher-qa-omsllc"},
+            },
+        ),
+    )
+
+    assert isinstance(resolved, tuple)
+    _tool, target_call = resolved
     assert target_call.arguments == {"target": "rancher-qa-omsllc"}
 
 
@@ -1802,11 +1918,11 @@ async def test_execute_agent_dynamic_run_tool_stream_dispatches_resolved_target(
 
     assert isinstance(events[0], service.AgentChatToolActivityEvent)
     assert events[0].tool_name == "namespace_list"
-    assert events[0].arguments == {"target": "rancher-qa-omsllc"}
+    assert events[0].arguments == {}
     assert isinstance(events[-1], service.AgentToolExecutionResult)
     assert events[-1].status == "completed"
     assert calls[0]["tool_name"] == "namespace_list"
-    assert calls[0]["arguments"] == {"target": "rancher-qa-omsllc"}
+    assert calls[0]["arguments"] == {}
 
 
 @pytest.mark.asyncio
@@ -2418,10 +2534,19 @@ async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monk
     async def refresh_tool_schemas_for_installation(*args, **kwargs):
         refreshed.append((kwargs["installation"], kwargs["server"]))
 
+    async def count_active_tool_schemas(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
+        return 0
+
     monkeypatch.setattr(
         service.repository,
         "list_agent_wildcard_server_version_rows",
         list_agent_wildcard_server_version_rows,
+    )
+    monkeypatch.setattr(
+        service.mcp_tool_repository,
+        "count_active_tool_schemas",
+        count_active_tool_schemas,
     )
     monkeypatch.setattr(
         service,
@@ -2435,6 +2560,78 @@ async def test_refresh_wildcard_agent_server_tools_loads_bound_server_tools(monk
     assert refreshed == [(installation, server)]
     assert failures == []
     assert session.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_wildcard_agent_server_tools_skips_cached_server_tools(monkeypatch) -> None:
+    agent_id = uuid4()
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent_id,
+        installation_id=uuid4(),
+    )
+    installation = MCPServerInstallation(
+        id=assignment.installation_id,
+        workspace_id=uuid4(),
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="Server",
+        server_json={
+            "$schema": "https://example.com/schema.json",
+            "name": installation.server_name,
+            "description": "Server",
+            "version": installation.installed_version,
+        },
+        is_latest=True,
+    )
+    cached_checks = []
+    refreshed = []
+
+    async def list_agent_wildcard_server_version_rows(*args, **kwargs):
+        assert kwargs["agent_id"] == agent_id
+        return [(assignment, installation, server)]
+
+    async def count_active_tool_schemas(*args, **kwargs):
+        cached_checks.append(kwargs)
+        return 8
+
+    async def refresh_tool_schemas_for_installation(*args, **kwargs):
+        refreshed.append((kwargs["installation"], kwargs["server"]))
+
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_wildcard_server_version_rows",
+        list_agent_wildcard_server_version_rows,
+    )
+    monkeypatch.setattr(
+        service.mcp_tool_repository,
+        "count_active_tool_schemas",
+        count_active_tool_schemas,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_tool_schemas_for_installation",
+        refresh_tool_schemas_for_installation,
+    )
+
+    failures = await service.refresh_wildcard_agent_server_tools(FakeSession(), agent_id)
+
+    assert failures == []
+    assert refreshed == []
+    assert cached_checks == [
+        {
+            "installation_id": installation.id,
+            "server_name": installation.server_name,
+            "server_version": installation.installed_version,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -2477,10 +2674,18 @@ async def test_refresh_wildcard_agent_server_tools_returns_failed_servers(
     async def refresh_tool_schemas_for_installation(*args, **kwargs):
         raise service.MCPGatewayUpstreamError("upstream initialize returned no result")
 
+    async def count_active_tool_schemas(*args, **kwargs):
+        return 0
+
     monkeypatch.setattr(
         service.repository,
         "list_agent_wildcard_server_version_rows",
         list_agent_wildcard_server_version_rows,
+    )
+    monkeypatch.setattr(
+        service.mcp_tool_repository,
+        "count_active_tool_schemas",
+        count_active_tool_schemas,
     )
     monkeypatch.setattr(
         service,
