@@ -51,6 +51,7 @@ from app.modules.mcp_registry.exceptions import (
     MCPServerVersionInUseError,
 )
 from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
     DuplicateWorkspaceError,
@@ -148,6 +149,7 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     DuplicateMCPCatalogSourceError: _definition(409, "mcp_catalog_source_already_exists"),
     MCPOperationJobNotFoundError: _definition(404, "mcp_operation_job_not_found"),
     MCPRuntimeSessionNotFoundError: _definition(404, "mcp_runtime_session_not_found"),
+    KubernetesRuntimeProviderError: _definition(502, "mcp_runtime_provider_error"),
     InvalidCursorError: _definition(400, "invalid_cursor"),
     DuplicateUserError: _definition(409, "user_already_exists"),
     BootstrapUserExistsError: _definition(409, "bootstrap_user_already_exists"),

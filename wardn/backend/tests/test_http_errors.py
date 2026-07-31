@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.http_errors import PROBLEM_CONTENT_TYPE, configure_error_handling
 from app.api.request_id import RequestIDMiddleware
 from app.modules.agents.exceptions import AgentNotFoundError
+from app.modules.mcp_runtime.providers.kubernetes import KubernetesConfigError
 from app.modules.secrets.exceptions import SecretInUseError
 
 
@@ -27,6 +28,10 @@ def error_app() -> FastAPI:
     @app.get("/secret-in-use")
     async def secret_in_use() -> None:
         raise SecretInUseError("secret handle is used by a credential")
+
+    @app.get("/runtime-provider-error")
+    async def runtime_provider_error() -> None:
+        raise KubernetesConfigError("Kubernetes in-cluster config is unavailable")
 
     @app.get("/validation-error/{item_id}")
     async def validation_error(item_id: int) -> int:
@@ -75,6 +80,14 @@ def test_secret_in_use_error_is_a_typed_conflict() -> None:
     assert response.status_code == 409
     assert response.json()["code"] == "secret_in_use"
     assert response.json()["detail"] == "secret handle is used by a credential"
+
+
+def test_runtime_provider_error_is_a_typed_bad_gateway() -> None:
+    response = TestClient(error_app()).get("/runtime-provider-error")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "mcp_runtime_provider_error"
+    assert response.json()["detail"] == "Kubernetes in-cluster config is unavailable"
 
 
 def test_validation_error_has_stable_code_and_safe_details() -> None:

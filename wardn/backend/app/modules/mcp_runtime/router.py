@@ -68,7 +68,10 @@ async def list_workspace_mcp_runtime_sessions(
     "/installations/{installation_id}",
     response_model=MCPRuntimeInstallationControlResponse,
     operation_id="workspace_mcp_runtime_get_installation_state",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def get_workspace_mcp_runtime_installation_state(
     organization_id: UUID,
@@ -89,7 +92,10 @@ async def get_workspace_mcp_runtime_installation_state(
     "/installations/{installation_id}/start",
     response_model=MCPRuntimeInstallationControlResponse,
     operation_id="workspace_mcp_runtime_start_installation",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def start_workspace_mcp_runtime_installation(
     organization_id: UUID,
@@ -110,7 +116,10 @@ async def start_workspace_mcp_runtime_installation(
     "/installations/{installation_id}/stop",
     response_model=MCPRuntimeInstallationControlResponse,
     operation_id="workspace_mcp_runtime_stop_installation",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def stop_workspace_mcp_runtime_installation(
     organization_id: UUID,
@@ -131,7 +140,10 @@ async def stop_workspace_mcp_runtime_installation(
     "/installations/{installation_id}/restart",
     response_model=MCPRuntimeInstallationControlResponse,
     operation_id="workspace_mcp_runtime_restart_installation",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def restart_workspace_mcp_runtime_installation(
     organization_id: UUID,
@@ -152,7 +164,10 @@ async def restart_workspace_mcp_runtime_installation(
     "/installations/{installation_id}/redeploy",
     response_model=MCPRuntimeInstallationControlResponse,
     operation_id="workspace_mcp_runtime_redeploy_installation",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def redeploy_workspace_mcp_runtime_installation(
     organization_id: UUID,
@@ -215,7 +230,10 @@ async def stop_workspace_mcp_runtime_session(
     "/sessions/{runtime_session_id}/health",
     response_model=MCPRuntimeSessionHealthResponse,
     operation_id="workspace_mcp_runtime_get_session_health",
-    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+    responses={
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
 )
 async def get_workspace_mcp_runtime_session_health(
     organization_id: UUID,
