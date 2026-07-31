@@ -27,8 +27,37 @@ import type { LlmCredentialRead } from "../../llm-credentials/types";
 export type MessageRole = UIMessage["role"];
 export type MessagePart = UIMessage["parts"][number];
 export type ToolApprovalData = {
+  actionReview?: ActionReviewData;
   id?: string;
   status?: string;
+};
+export type ActionReviewData = {
+  matchingPolicy?: {
+    matchedPolicyIds?: string[];
+    message?: string;
+    mode?: string;
+    policyId?: string | null;
+    policyName?: string | null;
+  };
+  normalizedArguments?: unknown;
+  targetConnection?: {
+    configurationName?: string;
+    installationId?: string;
+    installType?: string;
+    serverName?: string;
+    serverVersion?: string;
+  };
+  targetEnvironment?: {
+    configuredTarget?: string;
+    provider?: string;
+    runtimeKind?: string;
+  };
+  tool?: {
+    name?: string;
+    schemaId?: string;
+    serverName?: string;
+    title?: string;
+  };
 };
 export type ToolActivityData = {
   approval?: ToolApprovalData;
@@ -385,6 +414,37 @@ export function toolActivityProgress(activity: ToolActivityPart) {
   };
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function actionReviewValue(review: ActionReviewData | undefined) {
+  return review && typeof review === "object" ? review : null;
+}
+
+export function toolActivityActionReview(activity: ToolActivityPart) {
+  const approvalReview = actionReviewValue(activity.data?.approval?.actionReview);
+  if (approvalReview) {
+    return approvalReview;
+  }
+  const details = objectValue(activity.data?.details);
+  return actionReviewValue(details?.actionReview as ActionReviewData | undefined);
+}
+
+export function actionReviewArguments(review: ActionReviewData) {
+  const args = review.normalizedArguments;
+  if (args === undefined || args === null || args === "") {
+    return "";
+  }
+  return typeof args === "string" ? args : JSON.stringify(args, null, 2);
+}
+
 export function toolActivityStatusLabel(status: string) {
   if (status === "requires_confirmation") {
     return "Needs approval";
@@ -399,6 +459,78 @@ export function agentRunIdFromMessage(message: UIMessage) {
   }
   const value = (metadata as { agentRunId?: unknown }).agentRunId;
   return typeof value === "string" && value ? value : null;
+}
+
+export function ActionReview({ review }: { review: ActionReviewData }) {
+  const connection = review.targetConnection ?? {};
+  const environment = review.targetEnvironment ?? {};
+  const tool = review.tool ?? {};
+  const policy = review.matchingPolicy ?? {};
+  const args = actionReviewArguments(review);
+  const rows = [
+    {
+      label: "Connection",
+      value: [
+        stringValue(connection.serverName),
+        stringValue(connection.configurationName),
+      ]
+        .filter(Boolean)
+        .join(" / "),
+    },
+    {
+      label: "Environment",
+      value: [
+        stringValue(environment.configuredTarget),
+        stringValue(environment.provider),
+      ]
+        .filter(Boolean)
+        .join(" / "),
+    },
+    {
+      label: "Tool",
+      value: [stringValue(tool.name), stringValue(tool.title)].filter(Boolean).join(" / "),
+    },
+    {
+      label: "Policy",
+      value: [
+        stringValue(policy.mode),
+        stringValue(policy.policyName),
+      ]
+        .filter(Boolean)
+        .join(" / "),
+    },
+  ].filter((row) => row.value);
+
+  return (
+    <div className="mt-3 rounded border border-amber-200 bg-amber-50/70 text-xs text-amber-950">
+      <div className="border-b border-amber-200 px-3 py-2 font-medium">Action review</div>
+      <dl className="grid gap-2 px-3 py-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
+        {rows.map((row) => (
+          <div className="contents" key={row.label}>
+            <dt className="font-medium text-amber-900">{row.label}</dt>
+            <dd className="min-w-0 break-words font-mono text-[11px] text-amber-950">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {stringValue(policy.message) ? (
+        <div className="border-t border-amber-200 px-3 py-2 text-amber-900">
+          {policy.message}
+        </div>
+      ) : null}
+      {args ? (
+        <details className="border-t border-amber-200">
+          <summary className="cursor-pointer px-3 py-2 font-medium text-amber-900">
+            Normalized arguments
+          </summary>
+          <pre className="max-h-52 overflow-auto border-t border-amber-200 px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap">
+            {args}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 export function ToolActivity({
@@ -472,6 +604,7 @@ export function ToolActivity({
             const details = toolActivityDetails(activity);
             const progress = toolActivityProgress(activity);
             const failureReason = activity.data?.failureReason ?? "";
+            const actionReview = needsConfirmation ? toolActivityActionReview(activity) : null;
             const activityMessage =
               isFailed || isBlocked || isDenied || needsConfirmation
                 ? activity.data?.error ?? toolActivityStatusLabel(status)
@@ -538,6 +671,7 @@ export function ToolActivity({
                       </div>
                     </div>
                   ) : null}
+                  {actionReview ? <ActionReview review={actionReview} /> : null}
                   {isApprovalPending && onDecideApproval ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Button

@@ -562,6 +562,23 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
     assert execution.status == "requires_confirmation"
     assert execution.approval
     assert execution.approval["id"] == str(approvals[0].id)
+    review = execution.approval["actionReview"]
+    assert review["targetConnection"] == {
+        "serverName": "io.github.example/server",
+        "serverVersion": "1.0.0",
+        "installationId": str(installation_id),
+        "configurationName": "default",
+        "installType": "",
+    }
+    assert review["targetEnvironment"] == {
+        "configuredTarget": "default",
+        "provider": None,
+        "runtimeKind": None,
+    }
+    assert review["tool"]["name"] == "search_repositories"
+    assert review["normalizedArguments"] == {"query": "wardn"}
+    assert review["matchingPolicy"]["mode"] == "require_confirmation"
+    assert review["matchingPolicy"]["policyName"] == "Confirm searches"
     assert approvals[0].arguments == {"query": "wardn"}
     assert approvals[0].requested_by_id == user.id
     assert session.commits == 1

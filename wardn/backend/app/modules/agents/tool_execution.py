@@ -146,8 +146,19 @@ async def _execute_agent_tool_call(
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_CONFIRMATION_PREFIX} {decision.message}",
-                details={"policy": decision_details},
-                approval=tool_approval_payload(approval, tool),
+                details={
+                    "policy": decision_details,
+                    "actionReview": action_review_payload(
+                        approval=approval,
+                        tool=tool,
+                        decision_details=decision_details,
+                    ),
+                },
+                approval=tool_approval_payload_with_review(
+                    approval,
+                    tool,
+                    decision_details=decision_details,
+                ),
             )
         if decision.mode != GUARDRAIL_MODE_ALLOW:
             return tool_execution_result(
@@ -264,6 +275,58 @@ def tool_approval_payload(approval: AgentToolApproval, tool: AgentRuntimeTool) -
         "toolSchemaId": str(tool.tool_schema.id),
         "toolName": tool.tool_schema.tool_name,
     }
+
+
+def action_review_payload(
+    *,
+    approval: AgentToolApproval,
+    tool: AgentRuntimeTool,
+    decision_details: dict[str, Any],
+) -> dict[str, Any]:
+    runtime_config = tool.installation.runtime_config or {}
+    return {
+        "targetConnection": {
+            "serverName": tool.server.name,
+            "serverVersion": tool.server.version,
+            "installationId": str(tool.installation.id),
+            "configurationName": tool.installation.config_name or "",
+            "installType": tool.installation.install_type or "",
+        },
+        "targetEnvironment": {
+            "configuredTarget": tool.installation.config_name,
+            "provider": runtime_config.get("provider"),
+            "runtimeKind": runtime_config.get("kind"),
+        },
+        "tool": {
+            "name": tool.tool_schema.tool_name,
+            "title": tool.tool_schema.title,
+            "schemaId": str(tool.tool_schema.id),
+            "serverName": tool.tool_schema.server_name,
+        },
+        "normalizedArguments": sanitize_run_payload(approval.arguments),
+        "matchingPolicy": {
+            "mode": decision_details.get("mode"),
+            "policyId": decision_details.get("policyId"),
+            "policyName": decision_details.get("policyName"),
+            "message": decision_details.get("message"),
+            "matchedPolicyIds": decision_details.get("matchedPolicyIds", []),
+        },
+    }
+
+
+def tool_approval_payload_with_review(
+    approval: AgentToolApproval,
+    tool: AgentRuntimeTool,
+    *,
+    decision_details: dict[str, Any],
+) -> dict[str, Any]:
+    payload = tool_approval_payload(approval, tool)
+    payload["actionReview"] = action_review_payload(
+        approval=approval,
+        tool=tool,
+        decision_details=decision_details,
+    )
+    return payload
 
 
 def progress_activity_event(
