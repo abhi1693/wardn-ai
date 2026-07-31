@@ -45,6 +45,10 @@ function editInstallUrl(basePath: string, installationId: string) {
   return `${basePath}/${encodeURIComponent(installationId)}/edit`;
 }
 
+function connectionDetailUrl(basePath: string, installationId: string) {
+  return `${basePath}/${encodeURIComponent(installationId)}`;
+}
+
 type ConnectionStatusLabel =
   | "Needs credential"
   | "Connected"
@@ -291,7 +295,7 @@ export function InstalledListClient({
                   <TableRow key={installation.id}>
                     <TableCell>
                       <ServerIdentityCell
-                        href={editInstallUrl(basePath, installation.id)}
+                        href={connectionDetailUrl(basePath, installation.id)}
                         iconUrl={iconUrl}
                         name={installation.serverName}
                         title={installation.server.title || installation.serverName}
