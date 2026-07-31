@@ -41,12 +41,12 @@ export default async function GuardrailsPage({ params }: GuardrailsPageProps) {
         <Button asChild size="sm">
           <Link href={`${basePath}/new`}>
             <Plus className="size-4" />
-            New policy
+            New rule
           </Link>
         </Button>
       }
       eyebrow="Workspace"
-      title="Guardrails"
+      title="Access Rules"
       workspaceContext={workspaceContext}
     >
       <GuardrailsClient

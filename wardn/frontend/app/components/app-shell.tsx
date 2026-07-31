@@ -1,19 +1,13 @@
 import {
   BookOpen,
   Boxes,
-  Activity,
-  BadgeDollarSign,
-  BarChart3,
-  Gauge,
   Home,
-  KeyRound,
+  ListTree,
   MessageSquare,
   PlugZap,
   Replace,
-  ServerCog,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -45,48 +39,21 @@ function organizationNavItems(workspaceContext?: WorkspaceContext) {
       activeKey: "catalog",
       icon: BookOpen,
     },
-    {
-      label: "LLM Credentials",
-      href: organizationId ? `/org/${organizationId}/llm-credentials` : "/org",
-      activeKey: "llm-credentials",
-      icon: PlugZap,
-    },
-    {
-      label: "LLM Pricing",
-      href: organizationId ? `/org/${organizationId}/llm-pricing` : "/org",
-      activeKey: "llm-pricing",
-      icon: BadgeDollarSign,
-    },
-    {
-      label: "Usage",
-      href: organizationId ? `/org/${organizationId}/usage` : "/org",
-      activeKey: "usage",
-      icon: BarChart3,
-    },
-    {
-      label: "Agent Tokens",
-      href: organizationId ? `/org/${organizationId}/tokens` : "/org",
-      activeKey: "agent-tokens",
-      icon: KeyRound,
-    },
-    {
-      label: "Limits",
-      href: organizationId ? `/org/${organizationId}/limits` : "/org",
-      activeKey: "limits",
-      icon: SlidersHorizontal,
-    },
-    {
-      label: "Secret Backends",
-      href: organizationId ? `/org/${organizationId}/secret-backends` : "/org",
-      activeKey: "secret-backends",
-      icon: ShieldCheck,
-    },
     ...(organizationId
       ? [
           {
             label: "Settings",
             href: `/organizations/${organizationId}/settings`,
             activeKey: "organization-settings",
+            activeKeys: [
+              "organization-settings",
+              "llm-credentials",
+              "llm-pricing",
+              "usage",
+              "agent-tokens",
+              "limits",
+              "secret-backends",
+            ],
             icon: Settings,
           },
         ]
@@ -113,34 +80,22 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
       icon: MessageSquare,
     },
     {
-      label: "Dashboard",
-      href: `${workspaceBasePath}/dashboard`,
-      activeKey: "workspace-dashboard",
-      icon: Home,
-    },
-    {
-      label: "MCP Servers",
+      label: "Connections",
       href: `${workspaceBasePath}/install`,
       activeKey: "install",
-      icon: ServerCog,
+      icon: PlugZap,
     },
     {
-      label: "Runtime",
-      href: `${workspaceBasePath}/runtime`,
-      activeKey: "runtime",
-      icon: Activity,
-    },
-    {
-      label: "Observability",
-      href: `${workspaceBasePath}/observability`,
-      activeKey: "workspace-observability",
-      icon: Gauge,
-    },
-    {
-      label: "Guardrails",
+      label: "Access",
       href: `${workspaceBasePath}/guardrails`,
       activeKey: "workspace-guardrails",
       icon: ShieldCheck,
+    },
+    {
+      label: "Runs",
+      href: `${workspaceBasePath}/agent-runs`,
+      activeKey: "workspace-runs",
+      icon: ListTree,
     },
     {
       label: "Settings",
@@ -148,6 +103,13 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
         organizationId
       )}/workspaces/${encodeURIComponent(workspaceId)}/settings`,
       activeKey: "workspace-settings",
+      activeKeys: [
+        "workspace-settings",
+        "workspace-dashboard",
+        "workspace-agents",
+        "runtime",
+        "workspace-observability",
+      ],
       icon: Settings,
     },
   ];
@@ -163,6 +125,7 @@ type AppShellProps = {
     | "workspace-settings"
     | "workspace-dashboard"
     | "workspace-chat"
+    | "workspace-runs"
     | "workspace-observability"
     | "catalog"
     | "llm-credentials"
@@ -200,6 +163,7 @@ export function AppShell({
   const isWorkspaceScope =
     active === "workspace-dashboard" ||
     active === "workspace-chat" ||
+    active === "workspace-runs" ||
     active === "install" ||
     active === "runtime" ||
     active === "workspace-observability" ||
@@ -213,7 +177,7 @@ export function AppShell({
   const selectedWorkspace = workspaceContext?.selectedWorkspace;
   const primaryNavItems = navigationItems.map((item) => ({
     ...item,
-    active: item.activeKey === active,
+    active: item.activeKey === active || item.activeKeys?.includes(active),
   }));
   const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
   const showBreadcrumbParent = breadcrumbLabel !== title;

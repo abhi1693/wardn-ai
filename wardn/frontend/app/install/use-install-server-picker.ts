@@ -93,7 +93,7 @@ export function useInstallServerPicker({
         setServerPreviousCursors(previous);
       } catch (caught) {
         if (searchRequestId.current === requestId) {
-          setError(caught instanceof Error ? caught.message : "Server search failed.");
+          setError(caught instanceof Error ? caught.message : "Connection search failed.");
         }
       } finally {
         if (searchRequestId.current === requestId) {

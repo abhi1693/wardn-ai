@@ -1,13 +1,10 @@
 import { redirect } from "next/navigation";
 
-type WorkspaceDashboardPageProps = {
-  params: Promise<{
-    organizationId: string;
-    workspaceId: string;
-  }>;
+type WorkspaceLandingPageProps = {
+  params: Promise<{ organizationId: string; workspaceId: string }>;
 };
 
-export default async function WorkspaceDashboardPage({ params }: WorkspaceDashboardPageProps) {
+export default async function WorkspaceLandingPage({ params }: WorkspaceLandingPageProps) {
   const { organizationId, workspaceId } = await params;
 
   redirect(

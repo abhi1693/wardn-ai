@@ -37,12 +37,12 @@ export async function InstallListView({ workspaceContext }: InstallListViewProps
         <Button asChild size="sm">
           <Link href={`${basePath}/new`}>
             <Plus className="size-4" />
-            Add
+            Add connection
           </Link>
         </Button>
       }
-      eyebrow="MCP Runtime"
-      title="MCP Servers"
+      eyebrow="Workspace"
+      title="Connections"
       workspaceContext={workspaceContext}
     >
       <InstalledListClient

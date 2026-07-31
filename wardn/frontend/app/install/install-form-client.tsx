@@ -279,7 +279,7 @@ export function InstallFormClient({
         isEdit ? mergeInstallValues(fields, current) : defaultInstallValues(fields)
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Server version could not be loaded.");
+      setError(caught instanceof Error ? caught.message : "Connection version could not be loaded.");
     } finally {
       setIsLoadingVersions(false);
     }
@@ -367,7 +367,7 @@ export function InstallFormClient({
   async function submitConfiguration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedServer) {
-      setError("Select a server first.");
+      setError("Select a connection first.");
       return;
     }
 
@@ -384,7 +384,7 @@ export function InstallFormClient({
         installation.configName === trimmedConfigName
     );
     if (duplicate) {
-      setError("An instance with this name already exists for the selected server.");
+      setError("An instance with this name already exists for the selected connection.");
       return;
     }
 
@@ -407,7 +407,7 @@ export function InstallFormClient({
       return;
     }
     if (needsSecretBackend && !configSecretStoreId) {
-      setError("Secret backend is required for MCP secrets.");
+      setError("Secret backend is required for connection secrets.");
       return;
     }
     let networkPolicyPayload = null;
@@ -443,7 +443,7 @@ export function InstallFormClient({
         body as MCPServerInstallRequest
       );
       const installation = await waitForJob<MCPServerInstallationRead>({
-        failureMessage: "Server installation failed.",
+        failureMessage: "Connection installation failed.",
         fetchJob: (jobId, signal) =>
           workspaceMcpRegistryGetOperationJob(organizationId, workspaceId, jobId, { signal }),
         initialJob: job,
@@ -465,7 +465,7 @@ export function InstallFormClient({
       if (isOperationJobPollingCancelled(caught)) {
         return;
       }
-      setError(caught instanceof Error ? caught.message : "Server instance could not be saved.");
+      setError(caught instanceof Error ? caught.message : "Connection could not be saved.");
     } finally {
       setIsMutating(false);
       setJobProgress("");
@@ -487,7 +487,7 @@ export function InstallFormClient({
       {!selectedServer ? (
         <section className="space-y-4">
           <div className="grid gap-2">
-            <Label htmlFor="install-server-search">Server</Label>
+            <Label htmlFor="install-server-search">Connection</Label>
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -499,7 +499,7 @@ export function InstallFormClient({
                     event.preventDefault();
                   }
                 }}
-                placeholder="Search supported servers"
+                placeholder="Search supported connections"
                 type="search"
                 value={serverQuery}
               />
@@ -514,7 +514,7 @@ export function InstallFormClient({
               className="rounded-md border bg-white px-3 py-10 text-center text-sm text-muted-foreground"
               role="status"
             >
-              {isSearching ? "Loading supported servers" : hasSearched ? "No servers found" : "No supported MCP servers are registered yet"}
+              {isSearching ? "Loading supported connections" : hasSearched ? "No connections found" : "No supported connections are registered yet"}
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -536,7 +536,7 @@ export function InstallFormClient({
                   {appliedServerQuery ? ` for "${appliedServerQuery}"` : ""}
                 </>
               ) : (
-                "No servers to display"
+                "No connections to display"
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -571,7 +571,7 @@ export function InstallFormClient({
       {selectedServer ? (
         <>
           <Card>
-            <CardHeader><CardTitle>Server</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Connection Source</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
                 <div className="min-w-0">
@@ -744,7 +744,7 @@ export function InstallFormClient({
 
           {runtimeFields.length > 0 ? (
             <Card>
-              <CardHeader><CardTitle>Runtime options</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Advanced Runtime Options</CardTitle></CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
                 {runtimeFields.map((field) => (
                   <InstallFieldControl
@@ -761,12 +761,12 @@ export function InstallFormClient({
 
           {showNetworkPolicyControls ? (
             <Card>
-              <CardHeader><CardTitle>Runtime policies</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Network Policies</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2">
                   <RuntimePolicyToggle
                     checked={networkPolicy.isolationEnabled}
-                    description="Default-deny ingress and egress around this MCP runtime pod."
+                    description="Default-deny ingress and egress around this connection runtime pod."
                     icon={<Shield className="size-4" />}
                     onChange={(checked) => updateNetworkPolicy({ isolationEnabled: checked })}
                     title="Network isolation"

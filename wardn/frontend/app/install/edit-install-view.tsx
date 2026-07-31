@@ -51,8 +51,8 @@ export async function EditInstallView({ installationId, workspaceContext }: Edit
   return (
     <AppShell
       active="install"
-      eyebrow="MCP Runtime"
-      title="Edit MCP server"
+      eyebrow="Connections"
+      title="Edit Connection"
       workspaceContext={workspaceContext}
     >
       <InstallFormClient

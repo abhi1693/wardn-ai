@@ -42,15 +42,18 @@ export default async function WorkspaceConversationChatPage({
   if (!organization || !conversation) {
     notFound();
   }
+  const workspaceSettingsPath = `/organizations/${encodeURIComponent(
+    organization.id
+  )}/workspaces/${encodeURIComponent(workspaceId)}/settings`;
 
   return (
     <AppShell
       active="workspace-chat"
       actions={
         <Button asChild size="sm" variant="outline">
-          <Link href={`/org/${organization.id}/workspace/${workspaceId}/agents`}>
+          <Link href={workspaceSettingsPath}>
             <Settings className="size-4" />
-            Manage agents
+            Settings
           </Link>
         </Button>
       }

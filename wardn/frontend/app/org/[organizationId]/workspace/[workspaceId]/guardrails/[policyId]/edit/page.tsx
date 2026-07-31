@@ -46,12 +46,12 @@ export default async function EditGuardrailPage({ params }: EditGuardrailPagePro
         <Button asChild size="sm" variant="outline">
           <Link href={basePath}>
             <ArrowLeft className="size-4" />
-            Guardrails
+            Access
           </Link>
         </Button>
       }
-      eyebrow="Guardrails"
-      title="Edit Policy"
+      eyebrow="Access Rules"
+      title="Edit Rule"
       workspaceContext={workspaceContext}
     >
       <GuardrailForm

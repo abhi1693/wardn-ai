@@ -195,7 +195,7 @@ export function installTargetOptions(entry: MCPRegistryServerResponse): InstallT
       description: remoteDescription(remoteRecord),
       referenceLabel: "Endpoint",
       referenceValue: url || "Unspecified endpoint",
-      versionLabel: "Server version",
+      versionLabel: "Connection version",
       versionValue: entry.server.version,
     };
   });

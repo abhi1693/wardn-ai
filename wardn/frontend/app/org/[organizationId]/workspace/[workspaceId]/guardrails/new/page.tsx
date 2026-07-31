@@ -35,12 +35,12 @@ export default async function NewGuardrailPage({ params }: NewGuardrailPageProps
         <Button asChild size="sm" variant="outline">
           <Link href={basePath}>
             <ArrowLeft className="size-4" />
-            Guardrails
+            Access
           </Link>
         </Button>
       }
-      eyebrow="Guardrails"
-      title="Create Policy"
+      eyebrow="Access Rules"
+      title="Create Rule"
       workspaceContext={workspaceContext}
     >
       <GuardrailForm

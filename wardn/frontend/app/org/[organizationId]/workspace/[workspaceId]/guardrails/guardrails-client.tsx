@@ -171,6 +171,33 @@ export function GuardrailsClient({
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const activePolicies = policies.filter((record) => record.policy.isActive);
+  const summaryCards = [
+    {
+      count: activePolicies.filter((record) => record.policy.mode === "allow").length,
+      detail: "Explicitly permitted tool calls.",
+      icon: CheckCircle2,
+      label: "Connected",
+    },
+    {
+      count: activePolicies.filter((record) => record.policy.mode === "deny").length,
+      detail: "Tool calls that will be blocked.",
+      icon: ShieldOff,
+      label: "Blocked by policy",
+    },
+    {
+      count: activePolicies.filter((record) => record.policy.mode === "require_confirmation").length,
+      detail: "Tool calls that need approval.",
+      icon: CircleAlert,
+      label: "Needs approval",
+    },
+    {
+      count: policies.filter((record) => !record.policy.isActive).length,
+      detail: "Saved rules that are not active.",
+      icon: ShieldCheck,
+      label: "Inactive",
+    },
+  ];
 
   async function updatePolicyMode(record: GuardrailPolicyRecord, mode: GuardrailMode) {
     if (record.policy.mode === mode || updatingMode) {
@@ -195,7 +222,7 @@ export function GuardrailsClient({
       setError(
         caught instanceof Error
           ? caught.message
-          : "Guardrail policy mode could not be changed."
+          : "Access rule mode could not be changed."
       );
     } finally {
       setUpdatingMode(null);
@@ -218,7 +245,7 @@ export function GuardrailsClient({
       setError(
         caught instanceof Error
           ? caught.message
-          : "Guardrail policy could not be deleted."
+          : "Access rule could not be deleted."
       );
     } finally {
       setDeletingPolicyId(null);
@@ -228,15 +255,38 @@ export function GuardrailsClient({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Guardrail Policies</CardTitle>
+        <CardTitle>Access Rules</CardTitle>
         <CardDescription>
-          Control which workspace tool calls clients can run.
+          Control which workspace tool calls agents can run, block, or pause for approval.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error ? (
           <AsyncFeedback variant="error">{error}</AsyncFeedback>
         ) : null}
+
+        <section className="grid gap-3 md:grid-cols-4">
+          {summaryCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <div
+                className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+                key={card.label}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{card.label}</div>
+                    <div className="mt-1 text-xs leading-4 text-muted-foreground">
+                      {card.detail}
+                    </div>
+                  </div>
+                  <Icon className="size-4 text-muted-foreground" />
+                </div>
+                <div className="mt-3 text-2xl font-semibold">{card.count}</div>
+              </div>
+            );
+          })}
+        </section>
 
         {policies.length > 0 ? (
           <Table>
@@ -344,12 +394,12 @@ export function GuardrailsClient({
             <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
               <ShieldCheck className="size-5" />
             </div>
-            <h3 className="text-base font-semibold">No guardrail policies</h3>
+            <h3 className="text-base font-semibold">No access rules</h3>
             <p className="mt-1 text-sm text-[var(--on-surface-variant)]">
-              Add a policy to allow, deny, or require confirmation for MCP tool calls.
+              Add an access rule to allow, deny, or require confirmation for tool calls.
             </p>
             <Button asChild className="mt-4" size="sm">
-              <Link href={`${basePath}/new`}>New policy</Link>
+              <Link href={`${basePath}/new`}>New rule</Link>
             </Button>
           </div>
         )}

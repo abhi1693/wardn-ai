@@ -62,7 +62,7 @@ const modeOptions: Array<{
   {
     value: "deny",
     label: "Deny",
-    description: "Block matching MCP tool calls before runtime execution.",
+    description: "Block matching tool calls before runtime execution.",
   },
   {
     value: "require_confirmation",
@@ -223,7 +223,7 @@ export function GuardrailForm({
       setError(
         caught instanceof Error
           ? caught.message
-          : "Guardrail policy could not be saved."
+          : "Access rule could not be saved."
       );
     } finally {
       setIsSubmitting(false);
@@ -235,9 +235,9 @@ export function GuardrailForm({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle>{isEditing ? "Edit Guardrail Policy" : "Create Guardrail Policy"}</CardTitle>
+            <CardTitle>{isEditing ? "Edit Access Rule" : "Create Access Rule"}</CardTitle>
             <CardDescription>
-              Apply policy before any client executes workspace tools.
+              Apply a rule before any agent executes workspace tools.
             </CardDescription>
           </div>
           <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
@@ -304,7 +304,7 @@ export function GuardrailForm({
               >
                 <span className="block text-sm font-semibold">All tools</span>
                 <span className="mt-1 block text-sm text-[var(--on-surface-variant)]">
-                  Apply this policy to every tool call.
+                  Apply this rule to every tool call.
                 </span>
               </button>
               <button
@@ -337,7 +337,7 @@ export function GuardrailForm({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={noneValue}>All MCP servers</SelectItem>
+                      <SelectItem value={noneValue}>All connections</SelectItem>
                       {workspaceServers.map((server) => (
                         <SelectItem key={server.installationId} value={server.installationId}>
                           {server.label}
@@ -445,7 +445,7 @@ export function GuardrailForm({
               ) : (
                 <Save className="size-4" />
               )}
-              {isEditing ? "Save policy" : "Create policy"}
+              {isEditing ? "Save rule" : "Create rule"}
             </Button>
           </div>
         </form>

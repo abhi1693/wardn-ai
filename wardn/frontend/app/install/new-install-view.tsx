@@ -81,8 +81,8 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
   return (
     <AppShell
       active="install"
-      eyebrow="MCP Runtime"
-      title="Add MCP server"
+      eyebrow="Connections"
+      title="Add Connection"
       workspaceContext={workspaceContext}
     >
       <InstallFormClient

@@ -5,6 +5,7 @@ import {
   Database,
   ExternalLink,
   ListTree,
+  MessageSquare,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -99,16 +100,28 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
 
   return (
     <AppShell
-      active="workspace-chat"
+      active="workspace-runs"
       actions={
-        detail.run.conversationId ? (
+        <div className="flex gap-2">
           <Button asChild size="sm" variant="outline">
-            <Link href={chatHref}>
+            <Link
+              href={`/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+                workspaceId
+              )}/agent-runs`}
+            >
               <ArrowLeft className="size-4" />
-              Back to chat
+              Runs
             </Link>
           </Button>
-        ) : null
+          {detail.run.conversationId ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={chatHref}>
+                <MessageSquare className="size-4" />
+                Chat
+              </Link>
+            </Button>
+          ) : null}
+        </div>
       }
       eyebrow="Agent Run"
       title="Run Trace"
