@@ -211,6 +211,8 @@ async def enqueue_server_installation(
         networkPolicy=network_policy_config,
         installTarget=payload.install_target,
     ).model_dump(mode="json", by_alias=True)
+    if network_policy_config is not None:
+        desired_state["networkPolicy"] = network_policy_config
     response = await enqueue_operation_job(
         session,
         organization_id=organization_id,
@@ -288,6 +290,8 @@ async def enqueue_installed_server_updates(
                 networkPolicy=network_policy_config,
                 installTarget=install_target,
             ).model_dump(mode="json", by_alias=True)
+            if network_policy_config is not None:
+                desired_state["networkPolicy"] = network_policy_config
             targets.append({"serverName": server_name, "desiredState": desired_state})
 
     response = await enqueue_operation_job(

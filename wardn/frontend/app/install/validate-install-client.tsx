@@ -98,26 +98,24 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
   const rawPolicy = runtimeConfig.networkPolicy;
   if (!isRecord(rawPolicy)) {
-    return ["Network isolation default", "Public egress default"];
+    return ["Default-deny egress", "Remote MCP endpoint egress"];
   }
-  if (rawPolicy.isolationEnabled === false) {
-    return ["Network isolation off"];
+  const denyOtherEgress = rawPolicy.denyOtherEgress ?? rawPolicy.isolationEnabled;
+  if (denyOtherEgress === false) {
+    return ["Default-deny egress off"];
   }
-  const details = ["Network isolation on"];
-  if (rawPolicy.publicEgress !== false) {
-    details.push("Public egress");
+  const details = ["Default-deny egress"];
+  if (rawPolicy.allowRemoteMcpEgress !== false) {
+    details.push("Remote MCP endpoint egress");
   }
-  if (rawPolicy.privateEgress === true) {
-    details.push("Private egress");
-  }
-  if (rawPolicy.inClusterKubernetesApi === true) {
+  if (rawPolicy.allowKubernetesApi === true || rawPolicy.inClusterKubernetesApi === true) {
     details.push("Kubernetes API");
   }
-  const customEgressCount = Array.isArray(rawPolicy.customEgress)
-    ? rawPolicy.customEgress.length
-    : 0;
-  if (customEgressCount > 0) {
-    details.push(`${customEgressCount} custom CIDR${customEgressCount === 1 ? "" : "s"}`);
+  if (rawPolicy.publicEgress === true) {
+    details.push("Legacy public egress");
+  }
+  if (rawPolicy.privateEgress === true) {
+    details.push("Legacy private egress");
   }
   return details;
 }

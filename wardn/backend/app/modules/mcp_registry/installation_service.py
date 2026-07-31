@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 from app.core.pagination import CursorPageMetadata
 from app.db.domain_types import MCPInstallationStatus
@@ -69,12 +70,17 @@ from app.modules.users.models import User
 logger = logging.getLogger(__name__)
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG = {
+    "mode": "intent",
+    "allowKubernetesApi": False,
+    "allowRemoteMcpEgress": True,
+    "denyOtherEgress": True,
     "isolationEnabled": True,
-    "publicEgress": True,
+    "publicEgress": False,
     "privateEgress": False,
     "privateEgressPorts": [80, 443],
     "inClusterKubernetesApi": False,
     "customEgress": [],
+    "remoteDestinations": [],
 }
 
 
@@ -116,14 +122,97 @@ def merged_install_network_policy_config(
     requested,
 ) -> dict | None:
     if requested is not None:
-        return requested.model_dump(mode="json", by_alias=True)
+        payload = requested.model_dump(mode="json", by_alias=True)
+        explicit_intent_fields = {
+            "allow_kubernetes_api",
+            "allow_remote_mcp_egress",
+            "deny_other_egress",
+        }
+        if requested.model_fields_set.isdisjoint(explicit_intent_fields):
+            payload.pop("allowKubernetesApi", None)
+            payload.pop("allowRemoteMcpEgress", None)
+            payload.pop("denyOtherEgress", None)
+            payload["mode"] = "legacy"
+        else:
+            payload["mode"] = "intent"
+        return payload
     return installation_network_policy_config(existing)
 
 
 def effective_runtime_network_policy_config(config: dict | None) -> dict:
     if not isinstance(config, dict):
         return dict(DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG)
-    return {**DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG, **config}
+    effective = {**DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG, **config}
+    mode = str(config.get("mode") or "").strip().casefold()
+    has_intent_fields = any(
+        key in config
+        for key in ("allowKubernetesApi", "allowRemoteMcpEgress", "denyOtherEgress")
+    )
+    uses_intents = mode == "intent" or (mode != "legacy" and (not config or has_intent_fields))
+    allow_kubernetes_api = bool(
+        config.get("allowKubernetesApi", config.get("inClusterKubernetesApi", False))
+    )
+    if uses_intents:
+        deny_other_egress = bool(
+            config.get("denyOtherEgress", config.get("isolationEnabled", True))
+        )
+        effective["mode"] = "intent"
+        effective["denyOtherEgress"] = deny_other_egress
+        effective["isolationEnabled"] = deny_other_egress
+        effective["publicEgress"] = False
+        effective["privateEgress"] = False
+        effective["customEgress"] = []
+    else:
+        effective["mode"] = "legacy"
+    effective["allowKubernetesApi"] = allow_kubernetes_api
+    effective["inClusterKubernetesApi"] = allow_kubernetes_api
+    return effective
+
+
+def remote_mcp_policy_destinations(server: MCPServerVersion) -> list[dict[str, str | int]]:
+    destinations: list[dict[str, str | int]] = []
+    for index, remote in enumerate(server.remotes or []):
+        if not isinstance(remote, dict):
+            continue
+        raw_url = str(remote.get("url") or "").strip()
+        if not raw_url:
+            continue
+        parsed = urlparse(raw_url)
+        if not parsed.hostname:
+            continue
+        scheme = parsed.scheme.casefold()
+        port = parsed.port
+        if port is None:
+            port = 80 if scheme == "http" else 443
+        if port < 1 or port > 65_535:
+            continue
+        destination = {
+            "label": str(remote.get("name") or remote.get("type") or f"remote-{index + 1}")[:120],
+            "host": parsed.hostname.rstrip(".").lower(),
+            "port": port,
+        }
+        if destination not in destinations:
+            destinations.append(destination)
+    return destinations
+
+
+def runtime_network_policy_with_remote_destinations(
+    config: dict | None,
+    server: MCPServerVersion,
+) -> dict | None:
+    if config is None:
+        return None
+    normalized = effective_runtime_network_policy_config(config)
+    if normalized.get("mode") != "intent" or not bool(
+        normalized.get("allowRemoteMcpEgress", True)
+    ):
+        normalized["remoteDestinations"] = []
+        return normalized
+    existing = normalized.get("remoteDestinations")
+    if isinstance(existing, list) and existing:
+        return normalized
+    normalized["remoteDestinations"] = remote_mcp_policy_destinations(server)
+    return normalized
 
 
 def runtime_provider_probe(
@@ -594,6 +683,10 @@ async def install_server_version(
         network_policy_requested=payload.network_policy is not None,
         runtime_provider_name=runtime_provider_name,
     )
+    network_policy_config = runtime_network_policy_with_remote_destinations(
+        network_policy_config,
+        server,
+    )
     if runtime_provider_name == RUNTIME_PROVIDER_KUBERNETES:
         await require_install_network_policy_limits(
             session,
@@ -916,6 +1009,10 @@ async def update_installed_servers(
                 network_policy_config=installation_network_policy_config(installation),
                 network_policy_requested=False,
                 runtime_provider_name=runtime_provider_name,
+            )
+            network_policy_config = runtime_network_policy_with_remote_destinations(
+                network_policy_config,
+                latest,
             )
             if runtime_provider_name == RUNTIME_PROVIDER_KUBERNETES:
                 await require_install_network_policy_limits(

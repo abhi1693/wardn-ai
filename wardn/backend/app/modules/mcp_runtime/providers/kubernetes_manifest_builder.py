@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import shlex
+import socket
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
@@ -55,10 +57,13 @@ from app.modules.mcp_runtime.providers.kubernetes_types import (
     KubernetesCustomNetworkPolicy,
     KubernetesCustomNetworkPolicyRef,
     KubernetesMetadataError,
+    KubernetesNetworkDiscovery,
     KubernetesReconcileError,
     KubernetesRuntimeManifest,
     KubernetesRuntimeNames,
 )
+
+logger = logging.getLogger(__name__)
 
 POD_SECURITY_RESTRICTED_LABELS = {
     "pod-security.kubernetes.io/enforce": "restricted",
@@ -92,10 +97,17 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 ]
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
+RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 20
 KUBERNETES_API_SERVICE_NAMESPACE = "default"
 KUBERNETES_API_SERVICE_NAME = "kubernetes"
 KUBERNETES_API_DEFAULT_SERVICE_PORT = 443
 KUBERNETES_API_COMMON_ENDPOINT_PORT = 6443
+KUBERNETES_API_DISCOVERY_SERVICE_NAME = "kubernetes"
+KUBERNETES_API_DISCOVERY_SERVICE_NAMESPACE = "default"
+KUBERNETES_SERVICE_CIDR_GROUP = "networking.k8s.io"
+KUBERNETES_SERVICE_CIDR_VERSION = "v1"
+KUBERNETES_SERVICE_CIDR_PLURAL = "servicecidrs"
+KUBE_DNS_SERVICE_NAMES = ("kube-dns", "coredns")
 CILIUM_NETWORK_POLICY_GROUP = "cilium.io"
 CILIUM_NETWORK_POLICY_VERSION = "v2"
 CILIUM_NETWORK_POLICY_PLURAL = "ciliumnetworkpolicies"
@@ -206,6 +218,32 @@ def public_egress_ports(settings=None) -> list[int]:
     return ports
 
 
+def runtime_network_policy_has_intents(raw_config: dict[str, Any]) -> bool:
+    mode = str(raw_config.get("mode") or "").strip().casefold()
+    if mode == "intent":
+        return True
+    if mode == "legacy":
+        return False
+    if not raw_config:
+        return True
+    return any(
+        key in raw_config
+        for key in ("allowKubernetesApi", "allowRemoteMcpEgress", "denyOtherEgress")
+    )
+
+
+def bool_config(
+    raw_config: dict[str, Any],
+    key: str,
+    *,
+    fallback: bool,
+) -> bool:
+    value = raw_config.get(key)
+    if isinstance(value, bool):
+        return value
+    return fallback
+
+
 def network_policy_config(
     installation: MCPServerInstallation,
     *,
@@ -217,20 +255,55 @@ def network_policy_config(
     if not isinstance(raw_config, dict):
         raw_config = {}
 
-    return {
-        "isolationEnabled": bool(raw_config.get("isolationEnabled", True)),
-        "publicEgress": (
-            bool(raw_config.get("publicEgress", True))
+    uses_intents = runtime_network_policy_has_intents(raw_config)
+    deny_other_egress = bool_config(
+        raw_config,
+        "denyOtherEgress",
+        fallback=bool_config(raw_config, "isolationEnabled", fallback=True),
+    )
+    allow_kubernetes_api = bool_config(
+        raw_config,
+        "allowKubernetesApi",
+        fallback=bool_config(raw_config, "inClusterKubernetesApi", fallback=False),
+    )
+    allow_remote_mcp_egress = bool_config(
+        raw_config,
+        "allowRemoteMcpEgress",
+        fallback=True if uses_intents else False,
+    )
+    if uses_intents:
+        public_egress = False
+        private_egress = False
+        private_egress_ports = [80, 443]
+        custom_egress = []
+        isolation_enabled = deny_other_egress
+    else:
+        public_egress = (
+            bool(raw_config.get("publicEgress", False))
             and runtime_settings.mcp_runtime_kubernetes_allow_public_egress
-        ),
-        "privateEgress": bool(raw_config.get("privateEgress", False)),
-        "privateEgressPorts": normalize_network_policy_ports(
+        )
+        private_egress = bool(raw_config.get("privateEgress", False))
+        private_egress_ports = normalize_network_policy_ports(
             raw_config.get("privateEgressPorts"),
             default=[80, 443],
             field_name="Kubernetes runtime private egress ports",
+        )
+        custom_egress = normalize_custom_egress_rules(raw_config.get("customEgress"))
+        isolation_enabled = bool(raw_config.get("isolationEnabled", True))
+
+    return {
+        "isolationEnabled": isolation_enabled,
+        "denyOtherEgress": deny_other_egress,
+        "allowKubernetesApi": allow_kubernetes_api,
+        "allowRemoteMcpEgress": allow_remote_mcp_egress,
+        "publicEgress": public_egress,
+        "privateEgress": private_egress,
+        "privateEgressPorts": private_egress_ports,
+        "inClusterKubernetesApi": allow_kubernetes_api,
+        "customEgress": custom_egress,
+        "remoteDestinations": normalize_remote_mcp_destinations(
+            raw_config.get("remoteDestinations")
         ),
-        "inClusterKubernetesApi": bool(raw_config.get("inClusterKubernetesApi", False)),
-        "customEgress": normalize_custom_egress_rules(raw_config.get("customEgress")),
     }
 
 
@@ -293,16 +366,95 @@ def normalize_custom_egress_rules(raw_rules: Any) -> list[dict[str, Any]]:
     return rules
 
 
-def in_cluster_kubernetes_api_cidr() -> str | None:
-    service_host = os.environ.get("KUBERNETES_SERVICE_HOST", "").strip()
-    if not service_host:
-        return None
+def ip_cidr_for_address(value: str) -> str | None:
     try:
-        address = ip_address(service_host)
+        address = ip_address(value.strip())
     except ValueError:
         return None
     prefix_length = 32 if address.version == 4 else 128
     return f"{address}/{prefix_length}"
+
+
+def normalize_ip_cidr(value: str) -> str | None:
+    raw_value = value.strip()
+    if not raw_value:
+        return None
+    try:
+        return str(ip_network(raw_value, strict=False))
+    except ValueError:
+        return ip_cidr_for_address(raw_value)
+
+
+def resolve_remote_host_cidrs(host: str) -> list[str]:
+    if cidr := ip_cidr_for_address(host):
+        return [cidr]
+    cidrs: list[str] = []
+    try:
+        address_infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return []
+    for address_info in address_infos:
+        sockaddr = address_info[4]
+        if not sockaddr:
+            continue
+        cidr = ip_cidr_for_address(str(sockaddr[0]))
+        if cidr and cidr not in cidrs:
+            cidrs.append(cidr)
+    return cidrs
+
+
+def normalize_remote_mcp_destinations(raw_destinations: Any) -> list[dict[str, Any]]:
+    if raw_destinations is None:
+        return []
+    if not isinstance(raw_destinations, list):
+        raise KubernetesMetadataError("Kubernetes runtime remote MCP destinations must be a list")
+    if len(raw_destinations) > RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT:
+        raise KubernetesMetadataError("Kubernetes runtime remote MCP destinations exceed the limit")
+
+    destinations: list[dict[str, Any]] = []
+    for raw_destination in raw_destinations:
+        if not isinstance(raw_destination, dict):
+            raise KubernetesMetadataError("Kubernetes runtime remote MCP destination is invalid")
+        host = str(raw_destination.get("host") or "").strip().rstrip(".").lower()
+        if not host:
+            continue
+        try:
+            port = int(raw_destination.get("port") or 443)
+        except (TypeError, ValueError) as exc:
+            raise KubernetesMetadataError(
+                "Kubernetes runtime remote MCP destination port is invalid"
+            ) from exc
+        if port < 1 or port > 65_535:
+            raise KubernetesMetadataError(
+                "Kubernetes runtime remote MCP destination port must be between 1 and 65535"
+            )
+
+        cidrs = []
+        raw_cidrs = raw_destination.get("cidrs")
+        if isinstance(raw_cidrs, list):
+            for raw_cidr in raw_cidrs:
+                cidr = normalize_ip_cidr(str(raw_cidr))
+                if cidr and cidr not in cidrs:
+                    cidrs.append(cidr)
+        if not cidrs:
+            cidrs = resolve_remote_host_cidrs(host)
+
+        destinations.append(
+            {
+                "label": str(raw_destination.get("label") or host).strip()[:120],
+                "host": host,
+                "port": port,
+                "cidrs": cidrs,
+            }
+        )
+    return destinations
+
+
+def in_cluster_kubernetes_api_cidr() -> str | None:
+    service_host = os.environ.get("KUBERNETES_SERVICE_HOST", "").strip()
+    if not service_host:
+        return None
+    return ip_cidr_for_address(service_host)
 
 
 def in_cluster_kubernetes_api_service_ports() -> list[int]:
@@ -327,6 +479,265 @@ def in_cluster_kubernetes_api_endpoint_ports() -> list[int]:
     if KUBERNETES_API_COMMON_ENDPOINT_PORT not in ports:
         ports.append(KUBERNETES_API_COMMON_ENDPOINT_PORT)
     return ports
+
+
+def unique_tuple(values: list[str] | list[int]) -> tuple:
+    seen = []
+    for value in values:
+        if value not in seen:
+            seen.append(value)
+    return tuple(seen)
+
+
+def valid_service_cidrs(values: list[str]) -> list[str]:
+    cidrs: list[str] = []
+    for value in values:
+        raw_value = str(value or "").strip()
+        if not raw_value or raw_value.casefold() == "none":
+            continue
+        cidr = normalize_ip_cidr(raw_value)
+        if cidr and cidr not in cidrs:
+            cidrs.append(cidr)
+    return cidrs
+
+
+def service_cluster_cidrs(service: Any) -> list[str]:
+    spec = getattr(service, "spec", None)
+    if spec is None:
+        return []
+    values: list[str] = []
+    cluster_ips = getattr(spec, "cluster_ips", None)
+    if isinstance(cluster_ips, list):
+        values.extend(str(value) for value in cluster_ips)
+    cluster_ip = getattr(spec, "cluster_ip", "")
+    if cluster_ip:
+        values.append(str(cluster_ip))
+    return valid_service_cidrs(values)
+
+
+def service_cluster_host(service: Any) -> str:
+    spec = getattr(service, "spec", None)
+    if spec is None:
+        return ""
+    cluster_ip = str(getattr(spec, "cluster_ip", "") or "").strip()
+    if cluster_ip and cluster_ip.casefold() != "none":
+        return cluster_ip
+    cluster_ips = getattr(spec, "cluster_ips", None)
+    if isinstance(cluster_ips, list):
+        for value in cluster_ips:
+            host = str(value or "").strip()
+            if host and host.casefold() != "none":
+                return host
+    return ""
+
+
+def service_ports(service: Any, *, default: list[int]) -> list[int]:
+    spec = getattr(service, "spec", None)
+    ports: list[int] = []
+    for service_port in getattr(spec, "ports", None) or []:
+        try:
+            port = int(getattr(service_port, "port", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= port <= 65_535 and port not in ports:
+            ports.append(port)
+    return ports or list(default)
+
+
+def service_selector_from_service(service: Any) -> dict[str, str]:
+    spec = getattr(service, "spec", None)
+    selector = getattr(spec, "selector", None)
+    if not isinstance(selector, dict):
+        return {}
+    return {str(key): str(value) for key, value in selector.items() if key and value}
+
+
+def kubernetes_items(response: Any) -> list[Any]:
+    if isinstance(response, dict):
+        items = response.get("items")
+        return items if isinstance(items, list) else []
+    items = getattr(response, "items", None)
+    return items if isinstance(items, list) else []
+
+
+def kubernetes_spec_value(item: Any, key: str) -> Any:
+    if isinstance(item, dict):
+        spec = item.get("spec")
+        return spec.get(key) if isinstance(spec, dict) else None
+    spec = getattr(item, "spec", None)
+    return getattr(spec, key, None)
+
+
+def call_kubernetes_discovery(method: Any, *args: Any, **kwargs: Any) -> Any | None:
+    if method is None:
+        return None
+    try:
+        return method(*args, **kwargs)
+    except Exception as exc:
+        logger.debug(
+            "Kubernetes runtime network discovery call failed.",
+            extra={
+                "kubernetes_discovery_method": getattr(method, "__name__", ""),
+                "error_type": exc.__class__.__name__,
+            },
+        )
+        return None
+
+
+def list_kube_system_pods(core_v1: Any, *, label_selector: str) -> list[Any]:
+    response = call_kubernetes_discovery(
+        getattr(core_v1, "list_namespaced_pod", None),
+        namespace=KUBE_SYSTEM_NAMESPACE_NAME,
+        label_selector=label_selector,
+    )
+    return kubernetes_items(response)
+
+
+def discover_kubernetes_cni_provider(client_set: Any) -> tuple[str, bool, bool]:
+    core_v1 = getattr(client_set, "core_v1", None)
+    cilium_pods = [
+        *list_kube_system_pods(core_v1, label_selector="k8s-app=cilium"),
+        *list_kube_system_pods(core_v1, label_selector="app.kubernetes.io/name=cilium-agent"),
+    ]
+    if cilium_pods:
+        return "cilium", True, False
+
+    calico_pods = [
+        *list_kube_system_pods(core_v1, label_selector="k8s-app=calico-node"),
+        *list_kube_system_pods(core_v1, label_selector="app=calico-node"),
+    ]
+    if calico_pods:
+        return "calico", False, True
+
+    return "network_policy", False, False
+
+
+def discover_kubernetes_pod_cidrs(client_set: Any) -> tuple[str, ...]:
+    core_v1 = getattr(client_set, "core_v1", None)
+    response = call_kubernetes_discovery(getattr(core_v1, "list_node", None))
+    cidrs: list[str] = []
+    for node in kubernetes_items(response):
+        spec = getattr(node, "spec", None)
+        pod_cidrs = getattr(spec, "pod_cidrs", None)
+        if isinstance(pod_cidrs, list):
+            for raw_cidr in pod_cidrs:
+                cidr = normalize_ip_cidr(str(raw_cidr))
+                if cidr and cidr not in cidrs:
+                    cidrs.append(cidr)
+        pod_cidr = getattr(spec, "pod_cidr", "")
+        if pod_cidr:
+            cidr = normalize_ip_cidr(str(pod_cidr))
+            if cidr and cidr not in cidrs:
+                cidrs.append(cidr)
+    return tuple(cidrs)
+
+
+def service_cidrs_from_response(response: Any) -> list[str]:
+    cidrs: list[str] = []
+    for item in kubernetes_items(response):
+        raw_cidrs = kubernetes_spec_value(item, "cidrs")
+        if not isinstance(raw_cidrs, list):
+            continue
+        for raw_cidr in raw_cidrs:
+            cidr = normalize_ip_cidr(str(raw_cidr))
+            if cidr and cidr not in cidrs:
+                cidrs.append(cidr)
+    return cidrs
+
+
+def discover_kubernetes_service_cidrs(
+    client_set: Any,
+    *,
+    fallback: list[str],
+) -> tuple[str, ...]:
+    networking_v1 = getattr(client_set, "networking_v1", None)
+    cidrs = service_cidrs_from_response(
+        call_kubernetes_discovery(getattr(networking_v1, "list_service_cidr", None))
+    )
+    if cidrs:
+        return tuple(cidrs)
+
+    custom_objects = getattr(client_set, "custom_objects", None)
+    cidrs = service_cidrs_from_response(
+        call_kubernetes_discovery(
+            getattr(custom_objects, "list_cluster_custom_object", None),
+            group=KUBERNETES_SERVICE_CIDR_GROUP,
+            version=KUBERNETES_SERVICE_CIDR_VERSION,
+            plural=KUBERNETES_SERVICE_CIDR_PLURAL,
+        )
+    )
+    if cidrs:
+        return tuple(cidrs)
+    return unique_tuple(fallback)
+
+
+def default_kubernetes_network_discovery() -> KubernetesNetworkDiscovery:
+    api_host = os.environ.get("KUBERNETES_SERVICE_HOST", "").strip()
+    api_cidrs = []
+    if cidr := in_cluster_kubernetes_api_cidr():
+        api_cidrs.append(cidr)
+    service_ports = in_cluster_kubernetes_api_service_ports()
+    endpoint_ports = in_cluster_kubernetes_api_endpoint_ports()
+    return KubernetesNetworkDiscovery(
+        kubernetes_api_host=api_host,
+        kubernetes_api_cidrs=tuple(api_cidrs),
+        kubernetes_api_service_ports=tuple(service_ports),
+        kubernetes_api_endpoint_ports=tuple(endpoint_ports),
+    )
+
+
+def discover_kubernetes_network(client_set: Any) -> KubernetesNetworkDiscovery:
+    discovery = default_kubernetes_network_discovery()
+    core_v1 = getattr(client_set, "core_v1", None)
+
+    api_service = call_kubernetes_discovery(
+        getattr(core_v1, "read_namespaced_service", None),
+        name=KUBERNETES_API_DISCOVERY_SERVICE_NAME,
+        namespace=KUBERNETES_API_DISCOVERY_SERVICE_NAMESPACE,
+    )
+    api_host = service_cluster_host(api_service) or discovery.kubernetes_api_host
+    api_cidrs = service_cluster_cidrs(api_service) or list(discovery.kubernetes_api_cidrs)
+    api_service_ports = service_ports(
+        api_service,
+        default=list(discovery.kubernetes_api_service_ports),
+    )
+    api_endpoint_ports = list(api_service_ports)
+    if KUBERNETES_API_COMMON_ENDPOINT_PORT not in api_endpoint_ports:
+        api_endpoint_ports.append(KUBERNETES_API_COMMON_ENDPOINT_PORT)
+
+    dns_service = None
+    for service_name in KUBE_DNS_SERVICE_NAMES:
+        dns_service = call_kubernetes_discovery(
+            getattr(core_v1, "read_namespaced_service", None),
+            name=service_name,
+            namespace=KUBE_SYSTEM_NAMESPACE_NAME,
+        )
+        if dns_service is not None:
+            break
+    dns_service_cidrs = service_cluster_cidrs(dns_service)
+    dns_selector = service_selector_from_service(dns_service) or discovery.dns_selector
+    dns_ports = service_ports(dns_service, default=list(discovery.dns_ports))
+    service_cidrs = discover_kubernetes_service_cidrs(
+        client_set,
+        fallback=[*api_cidrs, *dns_service_cidrs],
+    )
+    cni_provider, supports_cilium, supports_calico = discover_kubernetes_cni_provider(client_set)
+
+    return KubernetesNetworkDiscovery(
+        dns_namespace=KUBE_SYSTEM_NAMESPACE_NAME,
+        dns_selector=dns_selector,
+        dns_service_cidrs=tuple(dns_service_cidrs),
+        dns_ports=tuple(dns_ports),
+        service_cidrs=service_cidrs,
+        pod_cidrs=discover_kubernetes_pod_cidrs(client_set),
+        kubernetes_api_host=api_host,
+        kubernetes_api_cidrs=tuple(api_cidrs),
+        kubernetes_api_service_ports=tuple(api_service_ports),
+        kubernetes_api_endpoint_ports=tuple(api_endpoint_ports),
+        cni_provider=cni_provider,
+        supports_cilium=supports_cilium,
+        supports_calico=supports_calico,
+    )
 
 
 def runtime_secret_data(
@@ -1244,6 +1655,7 @@ def runtime_network_policy_names(names: KubernetesRuntimeNames) -> tuple[str, ..
         safe_kubernetes_name(f"{names.pod_name}-allow-private-egress"),
         safe_kubernetes_name(f"{names.pod_name}-allow-kubernetes-api-egress"),
         safe_kubernetes_name(f"{names.pod_name}-allow-custom-egress"),
+        safe_kubernetes_name(f"{names.pod_name}-allow-remote-mcp-egress"),
     )
 
 
@@ -1264,6 +1676,13 @@ def runtime_custom_network_policy_refs(
             plural=CALICO_NETWORK_POLICY_PLURAL,
             kind=CALICO_NETWORK_POLICY_KIND,
             name=safe_kubernetes_name(f"{names.pod_name}-allow-calico-kube-api-egress"),
+        ),
+        KubernetesCustomNetworkPolicyRef(
+            group=CILIUM_NETWORK_POLICY_GROUP,
+            version=CILIUM_NETWORK_POLICY_VERSION,
+            plural=CILIUM_NETWORK_POLICY_PLURAL,
+            kind=CILIUM_NETWORK_POLICY_KIND,
+            name=safe_kubernetes_name(f"{names.pod_name}-allow-cilium-remote-mcp-egress"),
         ),
     )
 
@@ -1357,9 +1776,33 @@ def build_dns_egress_network_policy(
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     policy_name: str,
+    network_discovery: KubernetesNetworkDiscovery | None = None,
     client_module: Any | None = None,
 ) -> Any:
     client = kubernetes_client_module(client_module)
+    discovery = network_discovery or default_kubernetes_network_discovery()
+    if discovery.dns_service_cidrs:
+        destinations = [
+            client.V1NetworkPolicyPeer(
+                ip_block=client.V1IPBlock(cidr=cidr)
+            )
+            for cidr in discovery.dns_service_cidrs
+        ]
+    else:
+        destinations = [
+            client.V1NetworkPolicyPeer(
+                namespace_selector=namespace_name_selector(
+                    discovery.dns_namespace,
+                    client_module=client,
+                ),
+                pod_selector=label_selector(discovery.dns_selector, client),
+            )
+        ]
+    ports = [
+        client.V1NetworkPolicyPort(protocol=protocol, port=port)
+        for port in discovery.dns_ports
+        for protocol in ("UDP", "TCP")
+    ]
     return client.V1NetworkPolicy(
         metadata=client.V1ObjectMeta(
             name=policy_name,
@@ -1371,19 +1814,8 @@ def build_dns_egress_network_policy(
             policy_types=["Egress"],
             egress=[
                 client.V1NetworkPolicyEgressRule(
-                    to=[
-                        client.V1NetworkPolicyPeer(
-                            namespace_selector=namespace_name_selector(
-                                KUBE_SYSTEM_NAMESPACE_NAME,
-                                client_module=client,
-                            ),
-                            pod_selector=label_selector(KUBE_DNS_SELECTOR, client),
-                        )
-                    ],
-                    ports=[
-                        client.V1NetworkPolicyPort(protocol="UDP", port=53),
-                        client.V1NetworkPolicyPort(protocol="TCP", port=53),
-                    ],
+                    to=destinations,
+                    ports=ports,
                 )
             ],
         ),
@@ -1489,16 +1921,20 @@ def build_kubernetes_api_egress_network_policy(
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     policy_name: str,
+    network_discovery: KubernetesNetworkDiscovery | None = None,
     client_module: Any | None = None,
 ) -> Any | None:
-    cidr = in_cluster_kubernetes_api_cidr()
-    if cidr is None:
+    discovery = network_discovery or default_kubernetes_network_discovery()
+    if not discovery.kubernetes_api_cidrs:
         return None
     return build_ip_block_egress_network_policy(
         names=names,
         labels=labels,
         policy_name=policy_name,
-        rules=[{"cidr": cidr, "ports": in_cluster_kubernetes_api_service_ports()}],
+        rules=[
+            {"cidr": cidr, "ports": list(discovery.kubernetes_api_service_ports)}
+            for cidr in discovery.kubernetes_api_cidrs
+        ],
         client_module=client_module,
     )
 
@@ -1515,7 +1951,9 @@ def build_cilium_kubernetes_api_egress_network_policy(
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     policy_ref: KubernetesCustomNetworkPolicyRef,
+    network_discovery: KubernetesNetworkDiscovery | None = None,
 ) -> KubernetesCustomNetworkPolicy:
+    discovery = network_discovery or default_kubernetes_network_discovery()
     return KubernetesCustomNetworkPolicy(
         ref=policy_ref,
         body={
@@ -1537,7 +1975,7 @@ def build_cilium_kubernetes_api_egress_network_policy(
                             {
                                 "ports": [
                                     {"port": str(port), "protocol": "TCP"}
-                                    for port in in_cluster_kubernetes_api_endpoint_ports()
+                                    for port in discovery.kubernetes_api_endpoint_ports
                                 ],
                             }
                         ],
@@ -1584,33 +2022,170 @@ def build_calico_kubernetes_api_egress_network_policy(
     )
 
 
+def network_policy_backend(discovery: KubernetesNetworkDiscovery | None) -> str:
+    if discovery is None:
+        return "network_policy"
+    if discovery.supports_cilium:
+        return "cilium"
+    if discovery.supports_calico:
+        return "calico"
+    return "network_policy"
+
+
+def remote_destination_ip_block_rules(
+    destinations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for destination in destinations:
+        port = destination["port"]
+        for cidr in destination.get("cidrs") or []:
+            rules.append(
+                {
+                    "cidr": cidr,
+                    "ports": [port],
+                    "label": destination.get("label") or destination["host"],
+                }
+            )
+    return rules
+
+
+def build_remote_mcp_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    destinations: list[dict[str, Any]],
+    client_module: Any | None = None,
+) -> Any | None:
+    rules = remote_destination_ip_block_rules(destinations)
+    if not rules:
+        return None
+    return build_ip_block_egress_network_policy(
+        names=names,
+        labels=labels,
+        policy_name=policy_name,
+        rules=rules,
+        client_module=client_module,
+    )
+
+
+def build_cilium_remote_mcp_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_ref: KubernetesCustomNetworkPolicyRef,
+    destinations: list[dict[str, Any]],
+) -> KubernetesCustomNetworkPolicy | None:
+    egress: list[dict[str, Any]] = []
+    for destination in destinations:
+        port_rule = {
+            "toPorts": [
+                {
+                    "ports": [
+                        {"port": str(destination["port"]), "protocol": "TCP"},
+                    ],
+                }
+            ]
+        }
+        host = destination["host"]
+        if ip_cidr_for_address(host) is None:
+            egress.append(
+                {
+                    "toFQDNs": [{"matchName": host}],
+                    **port_rule,
+                }
+            )
+            continue
+        for cidr in destination.get("cidrs") or []:
+            egress.append(
+                {
+                    "toCIDRSet": [{"cidr": cidr}],
+                    **port_rule,
+                }
+            )
+    if not egress:
+        return None
+
+    return KubernetesCustomNetworkPolicy(
+        ref=policy_ref,
+        body={
+            "apiVersion": f"{policy_ref.group}/{policy_ref.version}",
+            "kind": policy_ref.kind,
+            "metadata": {
+                "name": policy_ref.name,
+                "namespace": names.namespace,
+                "labels": labels,
+            },
+            "spec": {
+                "endpointSelector": {
+                    "matchLabels": service_selector(labels),
+                },
+                "egress": egress,
+            },
+        },
+    )
+
+
 def build_custom_network_policy_manifests(
     installation: MCPServerInstallation,
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
+    network_discovery: KubernetesNetworkDiscovery | None = None,
     settings=None,
 ) -> list[KubernetesCustomNetworkPolicy]:
     runtime_settings = settings or get_settings()
     if not runtime_settings.mcp_runtime_kubernetes_network_policy_enabled:
         return []
     policy_config = network_policy_config(installation, settings=runtime_settings)
-    if not policy_config["isolationEnabled"] or not policy_config["inClusterKubernetesApi"]:
+    if not policy_config["isolationEnabled"]:
         return []
 
-    cilium_ref, calico_ref = runtime_custom_network_policy_refs(names)
-    return [
-        build_cilium_kubernetes_api_egress_network_policy(
+    backend = network_policy_backend(network_discovery)
+    cilium_kube_ref, calico_kube_ref, cilium_remote_ref = runtime_custom_network_policy_refs(names)
+    custom_policies: list[KubernetesCustomNetworkPolicy] = []
+    if policy_config["allowKubernetesApi"] and backend == "cilium":
+        custom_policies.append(
+            build_cilium_kubernetes_api_egress_network_policy(
+                names=names,
+                labels=labels,
+                policy_ref=cilium_kube_ref,
+                network_discovery=network_discovery,
+            )
+        )
+    elif policy_config["allowKubernetesApi"] and backend == "calico":
+        custom_policies.append(
+            build_calico_kubernetes_api_egress_network_policy(
+                names=names,
+                labels=labels,
+                policy_ref=calico_kube_ref,
+            )
+        )
+
+    if (
+        policy_config["allowRemoteMcpEgress"]
+        and backend == "cilium"
+        and policy_config["remoteDestinations"]
+    ):
+        cilium_remote_policy = build_cilium_remote_mcp_egress_network_policy(
             names=names,
             labels=labels,
-            policy_ref=cilium_ref,
-        ),
-        build_calico_kubernetes_api_egress_network_policy(
-            names=names,
-            labels=labels,
-            policy_ref=calico_ref,
-        ),
-    ]
+            policy_ref=cilium_remote_ref,
+            destinations=policy_config["remoteDestinations"],
+        )
+        if cilium_remote_policy is not None:
+            custom_policies.append(cilium_remote_policy)
+    return custom_policies
+
+
+def standard_kubernetes_api_policy_allowed(
+    policy_config: dict[str, Any],
+    network_discovery: KubernetesNetworkDiscovery | None,
+) -> bool:
+    return (
+        bool(policy_config["allowKubernetesApi"])
+        and network_policy_backend(network_discovery) == "network_policy"
+    )
 
 
 def build_custom_egress_network_policy(
@@ -1636,6 +2211,7 @@ def build_network_policy_manifests(
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     gateway_port: int,
+    network_discovery: KubernetesNetworkDiscovery | None = None,
     settings=None,
     client_module: Any | None = None,
 ) -> list[Any]:
@@ -1667,6 +2243,7 @@ def build_network_policy_manifests(
             names=names,
             labels=labels,
             policy_name=policy_names[2],
+            network_discovery=network_discovery,
             client_module=client,
         ),
     ]
@@ -1690,11 +2267,12 @@ def build_network_policy_manifests(
                 client_module=client,
             )
         )
-    if policy_config["inClusterKubernetesApi"]:
+    if standard_kubernetes_api_policy_allowed(policy_config, network_discovery):
         kubernetes_api_policy = build_kubernetes_api_egress_network_policy(
             names=names,
             labels=labels,
             policy_name=policy_names[5],
+            network_discovery=network_discovery,
             client_module=client,
         )
         if kubernetes_api_policy is not None:
@@ -1709,6 +2287,19 @@ def build_network_policy_manifests(
                 client_module=client,
             )
         )
+    if (
+        policy_config["allowRemoteMcpEgress"]
+        and network_policy_backend(network_discovery) != "cilium"
+    ):
+        remote_mcp_policy = build_remote_mcp_egress_network_policy(
+            names=names,
+            labels=labels,
+            policy_name=policy_names[7],
+            destinations=policy_config["remoteDestinations"],
+            client_module=client,
+        )
+        if remote_mcp_policy is not None:
+            policies.append(remote_mcp_policy)
     return policies
 
 def build_ingress_manifest(
@@ -1773,6 +2364,7 @@ def build_runtime_manifests(
     installation: MCPServerInstallation,
     runtime_session: MCPRuntimeSession,
     *,
+    network_discovery: KubernetesNetworkDiscovery | None = None,
     settings=None,
     client_module: Any | None = None,
 ) -> KubernetesRuntimeManifest:
@@ -1912,6 +2504,7 @@ def build_runtime_manifests(
             names=names,
             labels=labels,
             gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+            network_discovery=network_discovery,
             settings=runtime_settings,
             client_module=client,
         ),
@@ -1919,6 +2512,7 @@ def build_runtime_manifests(
             installation,
             names=names,
             labels=labels,
+            network_discovery=network_discovery,
             settings=runtime_settings,
         ),
         network_policy_cleanup_names=(

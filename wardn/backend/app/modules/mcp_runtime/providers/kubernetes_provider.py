@@ -24,6 +24,7 @@ from app.modules.mcp_runtime.provider import (
 from app.modules.mcp_runtime.providers.kubernetes_client import KubernetesClientFactory
 from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
     build_runtime_manifests,
+    discover_kubernetes_network,
     is_oci_runtime,
     kubernetes_runtime_process,
     oci_runtime_container_args,
@@ -34,6 +35,7 @@ from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
 from app.modules.mcp_runtime.providers.kubernetes_naming import runtime_object_names_for_session
 from app.modules.mcp_runtime.providers.kubernetes_reconciler import KubernetesRuntimeReconciler
 from app.modules.mcp_runtime.providers.kubernetes_types import (
+    KubernetesClientSet,
     KubernetesReconcileError,
     KubernetesRuntimeManifest,
 )
@@ -233,8 +235,14 @@ class KubernetesRuntimeProvider:
             raise NotImplementedError(
                 "kubernetes MCP runtime reconciliation requires a runtime session"
             )
-        manifest = build_runtime_manifests(installation, runtime_session)
-        reconciler = self._new_reconciler()
+        client_set = self._client_factory.load()
+        network_discovery = discover_kubernetes_network(client_set)
+        manifest = build_runtime_manifests(
+            installation,
+            runtime_session,
+            network_discovery=network_discovery,
+        )
+        reconciler = self._new_reconciler(client_set)
         reconcile_result = reconciler.reconcile(manifest)
         runtime_session.namespace = manifest.names.namespace
         runtime_session.pod_name = manifest.names.pod_name
@@ -331,8 +339,11 @@ class KubernetesRuntimeProvider:
             details=details,
         )
 
-    def _new_reconciler(self) -> KubernetesRuntimeReconciler:
-        client_set = self._client_factory.load()
+    def _new_reconciler(
+        self,
+        client_set: KubernetesClientSet | None = None,
+    ) -> KubernetesRuntimeReconciler:
+        client_set = client_set or self._client_factory.load()
         return self._reconciler_factory(
             core_v1=client_set.core_v1,
             apps_v1=client_set.apps_v1,

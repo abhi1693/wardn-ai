@@ -80,6 +80,23 @@ class KubernetesClientSet:
 
 
 @dataclass(frozen=True)
+class KubernetesNetworkDiscovery:
+    dns_namespace: str = "kube-system"
+    dns_selector: dict[str, str] = field(default_factory=lambda: {"k8s-app": "kube-dns"})
+    dns_service_cidrs: tuple[str, ...] = ()
+    dns_ports: tuple[int, ...] = (53,)
+    service_cidrs: tuple[str, ...] = ()
+    pod_cidrs: tuple[str, ...] = ()
+    kubernetes_api_host: str = ""
+    kubernetes_api_cidrs: tuple[str, ...] = ()
+    kubernetes_api_service_ports: tuple[int, ...] = (443,)
+    kubernetes_api_endpoint_ports: tuple[int, ...] = (443, 6443)
+    cni_provider: str = "network_policy"
+    supports_cilium: bool = False
+    supports_calico: bool = False
+
+
+@dataclass(frozen=True)
 class KubernetesRuntimeNames:
     namespace: str
     pod_name: str

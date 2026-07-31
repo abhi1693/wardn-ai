@@ -1,5 +1,6 @@
 import uuid
 from collections import deque
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,12 +27,14 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     KubernetesImagePullSecretError,
     KubernetesIngressError,
     KubernetesMetadataError,
+    KubernetesNetworkDiscovery,
     KubernetesReconcileError,
     KubernetesReconcileResult,
     KubernetesRuntimeNotReadyError,
     KubernetesRuntimeProvider,
     KubernetesRuntimeReconciler,
     build_runtime_manifests,
+    discover_kubernetes_network,
     in_cluster_kubernetes_api_endpoint_ports,
     in_cluster_kubernetes_api_service_ports,
     runtime_custom_network_policy_refs,
@@ -284,6 +287,78 @@ class FakeCoreV1Api:
         self._call("delete_namespaced_network_policy", name, namespace)
 
 
+def test_kubernetes_network_discovery_reads_cluster_network_details() -> None:
+    class DiscoveryCoreV1:
+        def read_namespaced_service(self, *, name, namespace):
+            if (namespace, name) == ("default", "kubernetes"):
+                return SimpleNamespace(
+                    spec=SimpleNamespace(
+                        cluster_ip="10.43.0.1",
+                        cluster_ips=["10.43.0.1"],
+                        ports=[SimpleNamespace(port=443)],
+                    )
+                )
+            if (namespace, name) == ("kube-system", "kube-dns"):
+                return SimpleNamespace(
+                    spec=SimpleNamespace(
+                        cluster_ip="10.43.0.10",
+                        cluster_ips=["10.43.0.10"],
+                        ports=[SimpleNamespace(port=53)],
+                        selector={"k8s-app": "kube-dns"},
+                    )
+                )
+            raise FakeApiException(404, "NotFound")
+
+        def list_namespaced_pod(self, *, namespace, label_selector):
+            if namespace == "kube-system" and label_selector == "k8s-app=cilium":
+                return SimpleNamespace(
+                    items=[SimpleNamespace(metadata=SimpleNamespace(name="cilium"))]
+                )
+            return SimpleNamespace(items=[])
+
+        def list_node(self):
+            return SimpleNamespace(
+                items=[
+                    SimpleNamespace(
+                        spec=SimpleNamespace(
+                            pod_cidr="10.42.0.0/24",
+                            pod_cidrs=["10.42.0.0/24", "fd00:10:42::/64"],
+                        )
+                    )
+                ]
+            )
+
+    class DiscoveryNetworkingV1:
+        def list_service_cidr(self):
+            return SimpleNamespace(
+                items=[
+                    SimpleNamespace(
+                        spec=SimpleNamespace(
+                            cidrs=["10.43.0.0/16", "fd00:10:43::/108"]
+                        )
+                    )
+                ]
+            )
+
+    discovery = discover_kubernetes_network(
+        SimpleNamespace(
+            core_v1=DiscoveryCoreV1(),
+            networking_v1=DiscoveryNetworkingV1(),
+        )
+    )
+
+    assert discovery.kubernetes_api_host == "10.43.0.1"
+    assert discovery.kubernetes_api_cidrs == ("10.43.0.1/32",)
+    assert discovery.kubernetes_api_service_ports == (443,)
+    assert discovery.kubernetes_api_endpoint_ports == (443, 6443)
+    assert discovery.dns_service_cidrs == ("10.43.0.10/32",)
+    assert discovery.dns_selector == {"k8s-app": "kube-dns"}
+    assert discovery.service_cidrs == ("10.43.0.0/16", "fd00:10:43::/108")
+    assert discovery.pod_cidrs == ("10.42.0.0/24", "fd00:10:42::/64")
+    assert discovery.cni_provider == "cilium"
+    assert discovery.supports_cilium is True
+
+
 class FakeCustomObjectsApi:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str, str, str, str]] = []
@@ -451,6 +526,16 @@ class FakeReconciler:
             pod=FakeKubernetesModel(),
             gateway_status={"ready": True},
         )
+
+
+def cilium_network_discovery() -> KubernetesNetworkDiscovery:
+    return KubernetesNetworkDiscovery(
+        kubernetes_api_cidrs=("10.43.0.1/32",),
+        kubernetes_api_service_ports=(443,),
+        kubernetes_api_endpoint_ports=(443, 6443),
+        cni_provider="cilium",
+        supports_cilium=True,
+    )
 
 
 def fake_pod(
@@ -904,9 +989,8 @@ def test_runtime_manifest_generates_strict_network_policies(tmp_path, monkeypatc
         ["Ingress", "Egress"],
         ["Ingress"],
         ["Egress"],
-        ["Egress"],
     ]
-    default_deny, ingress, dns_egress, public_egress = manifest.network_policies
+    default_deny, ingress, dns_egress = manifest.network_policies
     assert default_deny.spec.ingress == []
     assert default_deny.spec.egress == []
 
@@ -930,15 +1014,6 @@ def test_runtime_manifest_generates_strict_network_policies(tmp_path, monkeypatc
         ("UDP", 53),
         ("TCP", 53),
     }
-
-    public_rule = public_egress.spec.egress[0]
-    assert public_rule.to[0].ip_block.cidr == "0.0.0.0/0"
-    assert "10.0.0.0/8" in public_rule.to[0].ip_block._except
-    assert "192.168.0.0/16" in public_rule.to[0].ip_block._except
-    assert [(port.protocol, port.port) for port in public_rule.ports] == [
-        ("TCP", 80),
-        ("TCP", 443),
-    ]
 
 
 def test_runtime_manifest_honors_install_network_policy_controls(
@@ -965,14 +1040,11 @@ def test_runtime_manifest_honors_install_network_policy_controls(
             "cwd": str(tmp_path),
             "transport": {"type": RUNTIME_TRANSPORT_STDIO},
             "networkPolicy": {
-                "isolationEnabled": True,
-                "publicEgress": False,
-                "privateEgress": True,
-                "privateEgressPorts": [443],
-                "inClusterKubernetesApi": True,
-                "customEgress": [
-                    {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
-                    {"label": "vault", "cidr": "10.43.12.20/32", "ports": [8200]},
+                "allowKubernetesApi": True,
+                "allowRemoteMcpEgress": True,
+                "denyOtherEgress": True,
+                "remoteDestinations": [
+                    {"label": "wardn-hub", "host": "hub.wardnai.dev", "port": 443},
                 ],
             },
         },
@@ -998,6 +1070,17 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     manifest = build_runtime_manifests(
         installation,
         runtime_session,
+        network_discovery=KubernetesNetworkDiscovery(
+            dns_service_cidrs=("10.43.0.10/32",),
+            dns_ports=(53,),
+            service_cidrs=("10.43.0.1/32", "10.43.0.10/32"),
+            pod_cidrs=("10.42.0.0/16",),
+            kubernetes_api_cidrs=("10.43.0.1/32",),
+            kubernetes_api_service_ports=(443,),
+            kubernetes_api_endpoint_ports=(443, 6443),
+            cni_provider="cilium",
+            supports_cilium=True,
+        ),
         settings=FakeSettings(),
         client_module=FakeKubernetesClient,
     )
@@ -1009,9 +1092,10 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     assert any(name.endswith("-allow-wardn-ingress") for name in policy_names)
     assert any(name.endswith("-allow-dns-egress") for name in policy_names)
     assert not any(name.endswith("-allow-public-egress") for name in policy_names)
-    assert any(name.endswith("-allow-private-egress") for name in policy_names)
-    assert any(name.endswith("-allow-kubernetes-api-egress") for name in policy_names)
-    assert any(name.endswith("-allow-custom-egress") for name in policy_names)
+    assert not any(name.endswith("-allow-private-egress") for name in policy_names)
+    assert not any(name.endswith("-allow-kubernetes-api-egress") for name in policy_names)
+    assert not any(name.endswith("-allow-custom-egress") for name in policy_names)
+    assert not any(name.endswith("-allow-remote-mcp-egress") for name in policy_names)
     assert manifest.network_policy_cleanup_names == list(
         runtime_network_policy_names(manifest.names)
     )
@@ -1019,38 +1103,25 @@ def test_runtime_manifest_honors_install_network_policy_controls(
         runtime_custom_network_policy_refs(manifest.names)
     )
 
-    private_policy = next(
+    dns_policy = next(
         policy
         for policy in manifest.network_policies
-        if policy.metadata.name.endswith("-allow-private-egress")
+        if policy.metadata.name.endswith("-allow-dns-egress")
     )
-    assert {rule.to[0].ip_block.cidr for rule in private_policy.spec.egress} == {
-        "10.0.0.0/8",
-        "100.64.0.0/10",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
+    assert dns_policy.spec.egress[0].to[0].ip_block.cidr == "10.43.0.10/32"
+    assert {(port.protocol, port.port) for port in dns_policy.spec.egress[0].ports} == {
+        ("UDP", 53),
+        ("TCP", 53),
     }
-    assert {(port.protocol, port.port) for port in private_policy.spec.egress[0].ports} == {
-        ("TCP", 443)
+    assert {policy.ref.kind for policy in manifest.custom_network_policies} == {
+        "CiliumNetworkPolicy"
     }
-
-    kubernetes_api_policy = next(
-        policy
-        for policy in manifest.network_policies
-        if policy.metadata.name.endswith("-allow-kubernetes-api-egress")
-    )
-    assert kubernetes_api_policy.spec.egress[0].to[0].ip_block.cidr == "10.43.0.1/32"
-    assert [(port.protocol, port.port) for port in kubernetes_api_policy.spec.egress[0].ports] == [
-        ("TCP", 9443),
-        ("TCP", 443)
-    ]
-    custom_policy_kinds = {policy.ref.kind for policy in manifest.custom_network_policies}
-    assert custom_policy_kinds == {"CiliumNetworkPolicy", "NetworkPolicy"}
+    assert len(manifest.custom_network_policies) == 2
 
     cilium_policy = next(
         policy
         for policy in manifest.custom_network_policies
-        if policy.ref.kind == "CiliumNetworkPolicy"
+        if policy.ref.name.endswith("-allow-cilium-kube-api-egress")
     )
     cilium_egress = cilium_policy.body["spec"]["egress"][0]
     assert cilium_policy.body["spec"]["endpointSelector"]["matchLabels"] == {
@@ -1059,35 +1130,18 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     }
     assert cilium_egress["toEntities"] == ["kube-apiserver"]
     assert [port["port"] for port in cilium_egress["toPorts"][0]["ports"]] == [
-        "9443",
         "443",
         "6443",
     ]
 
-    calico_policy = next(
+    remote_policy = next(
         policy
         for policy in manifest.custom_network_policies
-        if policy.ref.group == "projectcalico.org"
+        if policy.ref.name != cilium_policy.ref.name
     )
-    assert "wardn.ai/runtime-id" in calico_policy.body["spec"]["selector"]
-    assert calico_policy.body["spec"]["egress"][0]["destination"]["services"] == {
-        "name": "kubernetes",
-        "namespace": "default",
-    }
-
-    custom_policy = next(
-        policy
-        for policy in manifest.network_policies
-        if policy.metadata.name.endswith("-allow-custom-egress")
-    )
-    assert [rule.to[0].ip_block.cidr for rule in custom_policy.spec.egress] == [
-        "192.168.3.3/32",
-        "10.43.12.20/32",
-    ]
-    assert [[port.port for port in rule.ports] for rule in custom_policy.spec.egress] == [
-        [443],
-        [8200],
-    ]
+    remote_egress = remote_policy.body["spec"]["egress"][0]
+    assert remote_egress["toFQDNs"] == [{"matchName": "hub.wardnai.dev"}]
+    assert remote_egress["toPorts"][0]["ports"] == [{"port": "443", "protocol": "TCP"}]
 
 
 def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
@@ -2993,6 +3047,7 @@ def test_kubernetes_reconciler_creates_custom_cni_network_policies(
     manifest = build_runtime_manifests(
         installation,
         runtime_session,
+        network_discovery=cilium_network_discovery(),
         settings=FakeSettings(),
         client_module=FakeKubernetesClient,
     )
@@ -3006,7 +3061,10 @@ def test_kubernetes_reconciler_creates_custom_cni_network_policies(
 
     reconciler.reconcile(manifest)
 
-    assert custom_objects.calls == [
+    create_calls = [
+        call for call in custom_objects.calls if call[0] == "create_namespaced_custom_object"
+    ]
+    assert create_calls == [
         (
             "create_namespaced_custom_object",
             policy.ref.group,
@@ -3069,6 +3127,7 @@ def test_kubernetes_reconciler_replaces_custom_cni_policy_with_resource_version(
     manifest = build_runtime_manifests(
         installation,
         runtime_session,
+        network_discovery=cilium_network_discovery(),
         settings=FakeSettings(),
         client_module=FakeKubernetesClient,
     )
@@ -3105,7 +3164,12 @@ def test_kubernetes_reconciler_replaces_custom_cni_policy_with_resource_version(
     assert [
         (method, name)
         for method, _group, _version, _plural, name, _namespace in custom_objects.calls
-        if method.endswith("_namespaced_custom_object")
+        if method
+        in {
+            "create_namespaced_custom_object",
+            "get_namespaced_custom_object",
+            "replace_namespaced_custom_object",
+        }
     ] == expected_custom_object_calls
     replaced_bodies = [
         (name, body)
@@ -3169,6 +3233,7 @@ def test_kubernetes_reconciler_skips_custom_cni_policy_when_crd_is_absent(
     manifest = build_runtime_manifests(
         installation,
         runtime_session,
+        network_discovery=cilium_network_discovery(),
         settings=FakeSettings(),
         client_module=FakeKubernetesClient,
     )
@@ -3186,7 +3251,10 @@ def test_kubernetes_reconciler_skips_custom_cni_policy_when_crd_is_absent(
 
     reconciler.reconcile(manifest)
 
-    assert len(custom_objects.calls) == len(manifest.custom_network_policies)
+    create_calls = [
+        call for call in custom_objects.calls if call[0] == "create_namespaced_custom_object"
+    ]
+    assert len(create_calls) == len(manifest.custom_network_policies)
 
 
 def test_kubernetes_reconciler_deletes_undesired_explicit_network_policies(

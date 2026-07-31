@@ -7,8 +7,11 @@
 import type { MCPRuntimeNetworkPolicyCustomEgress } from './mCPRuntimeNetworkPolicyCustomEgress';
 
 export interface MCPRuntimeNetworkPolicyConfig {
+  allowKubernetesApi?: boolean;
+  allowRemoteMcpEgress?: boolean;
   /** @maxItems 20 */
   customEgress?: MCPRuntimeNetworkPolicyCustomEgress[];
+  denyOtherEgress?: boolean;
   inClusterKubernetesApi?: boolean;
   isolationEnabled?: boolean;
   privateEgress?: boolean;

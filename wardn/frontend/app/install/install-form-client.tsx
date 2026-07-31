@@ -4,11 +4,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Globe2,
-  LockKeyhole,
   Network,
   Package,
-  Plus,
   Search,
   Server,
   Shield,
@@ -64,7 +61,6 @@ import {
   type InstallFormClientProps,
   type InstallTarget,
   type InstallValue,
-  type NetworkPolicyCustomEgressForm,
   type NetworkPolicyFormState,
 } from "./install-form-domain";
 import { InstallFieldControl, ServerPickerCard } from "./install-form-fields";
@@ -204,7 +200,6 @@ export function InstallFormClient({
   );
   const [configSecretStoreId, setConfigSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const customHeaderId = useRef(0);
-  const customEgressId = useRef(networkPolicy.customEgress.length);
 
   const availableInstallTargets = selectedServer ? installTargetOptions(selectedServer) : [];
   const selectedInstallTargetDetails = selectedServer
@@ -313,38 +308,6 @@ export function InstallFormClient({
 
   function updateNetworkPolicy(patch: Partial<NetworkPolicyFormState>) {
     setNetworkPolicy((current) => ({ ...current, ...patch }));
-  }
-
-  function addCustomEgress() {
-    customEgressId.current += 1;
-    setNetworkPolicy((current) => ({
-      ...current,
-      customEgress: [
-        ...current.customEgress,
-        {
-          id: `custom-egress-${customEgressId.current}`,
-          label: "",
-          cidr: "",
-          ports: "443",
-        },
-      ],
-    }));
-  }
-
-  function updateCustomEgress(id: string, patch: Partial<NetworkPolicyCustomEgressForm>) {
-    setNetworkPolicy((current) => ({
-      ...current,
-      customEgress: current.customEgress.map((rule) =>
-        rule.id === id ? { ...rule, ...patch } : rule
-      ),
-    }));
-  }
-
-  function removeCustomEgress(id: string) {
-    setNetworkPolicy((current) => ({
-      ...current,
-      customEgress: current.customEgress.filter((rule) => rule.id !== id),
-    }));
   }
 
   function installPayloadValues(): MCPServerInstallRequestConfigValues {
@@ -761,126 +724,40 @@ export function InstallFormClient({
 
           {showNetworkPolicyControls ? (
             <Card>
-              <CardHeader><CardTitle>Network Policies</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Runtime Access</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <RuntimePolicyToggle
-                    checked={networkPolicy.isolationEnabled}
-                    description="Default-deny ingress and egress around this connection runtime pod."
-                    icon={<Shield className="size-4" />}
-                    onChange={(checked) => updateNetworkPolicy({ isolationEnabled: checked })}
-                    title="Network isolation"
-                  />
-                  <RuntimePolicyToggle
-                    checked={networkPolicy.publicEgress}
-                    description="Allow outbound TCP traffic to public IP ranges on configured public ports."
-                    disabled={!networkPolicy.isolationEnabled}
-                    icon={<Globe2 className="size-4" />}
-                    onChange={(checked) => updateNetworkPolicy({ publicEgress: checked })}
-                    title="Public egress"
-                  />
-                  <RuntimePolicyToggle
-                    checked={networkPolicy.privateEgress}
-                    description="Allow broad private RFC1918 and carrier-grade NAT egress on selected ports."
-                    disabled={!networkPolicy.isolationEnabled}
-                    icon={<LockKeyhole className="size-4" />}
-                    onChange={(checked) => updateNetworkPolicy({ privateEgress: checked })}
-                    title="Private egress"
-                  />
-                  <RuntimePolicyToggle
-                    checked={networkPolicy.inClusterKubernetesApi}
-                    description="Allow this runtime to reach the Kubernetes API service for the Wardn cluster."
-                    disabled={!networkPolicy.isolationEnabled}
+                    checked={networkPolicy.allowKubernetesApi}
+                    description="Allow this runtime to reach the in-cluster Kubernetes API. Wardn discovers the service address, ports, and CNI policy type."
+                    disabled={!networkPolicy.denyOtherEgress}
                     icon={<Server className="size-4" />}
-                    onChange={(checked) => updateNetworkPolicy({ inClusterKubernetesApi: checked })}
-                    title="In-cluster Kubernetes API"
+                    onChange={(checked) => updateNetworkPolicy({ allowKubernetesApi: checked })}
+                    title="Kubernetes API"
+                  />
+                  <RuntimePolicyToggle
+                    checked={networkPolicy.allowRemoteMcpEgress}
+                    description="Allow egress only to remote MCP endpoints declared by the installed connection. Wardn derives host, port, and policy rules."
+                    disabled={!networkPolicy.denyOtherEgress}
+                    icon={<Network className="size-4" />}
+                    onChange={(checked) => updateNetworkPolicy({ allowRemoteMcpEgress: checked })}
+                    title="Remote MCP egress"
+                  />
+                  <RuntimePolicyToggle
+                    checked={networkPolicy.denyOtherEgress}
+                    description="Apply default-deny egress except for Wardn-managed DNS and the selected access intents."
+                    icon={<Shield className="size-4" />}
+                    onChange={(checked) => updateNetworkPolicy({ denyOtherEgress: checked })}
+                    title="Deny other egress"
                   />
                 </div>
 
-                {!networkPolicy.isolationEnabled ? (
+                {!networkPolicy.denyOtherEgress ? (
                   <AsyncFeedback variant="info">
-                    Saving with network isolation off removes Wardn-managed runtime NetworkPolicies
-                    for this install.
+                    Saving with default-deny off removes Wardn-managed runtime NetworkPolicies
+                    for this connection.
                   </AsyncFeedback>
                 ) : null}
-
-                <div className="grid gap-2 md:max-w-sm">
-                  <Label htmlFor="network-policy-private-ports">Private egress ports</Label>
-                  <Input
-                    disabled={!networkPolicy.isolationEnabled || !networkPolicy.privateEgress}
-                    id="network-policy-private-ports"
-                    onChange={(event) =>
-                      updateNetworkPolicy({ privateEgressPorts: event.target.value })
-                    }
-                    placeholder="80, 443"
-                    value={networkPolicy.privateEgressPorts}
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <Label>Custom egress CIDRs</Label>
-                    <Button
-                      disabled={!networkPolicy.isolationEnabled || isMutating}
-                      onClick={addCustomEgress}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Plus className="size-4" />
-                      Add CIDR
-                    </Button>
-                  </div>
-                  {networkPolicy.customEgress.length === 0 ? (
-                    <div className="rounded-md border border-dashed bg-muted/20 px-3 py-6 text-sm text-muted-foreground">
-                      No custom egress CIDRs.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {networkPolicy.customEgress.map((rule) => (
-                        <div
-                          className="grid gap-2 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.1fr)_minmax(8rem,0.6fr)_auto]"
-                          key={rule.id}
-                        >
-                          <Input
-                            disabled={!networkPolicy.isolationEnabled}
-                            onChange={(event) =>
-                              updateCustomEgress(rule.id, { label: event.target.value })
-                            }
-                            placeholder="Label"
-                            value={rule.label}
-                          />
-                          <Input
-                            disabled={!networkPolicy.isolationEnabled}
-                            onChange={(event) =>
-                              updateCustomEgress(rule.id, { cidr: event.target.value })
-                            }
-                            placeholder="192.168.3.3/32"
-                            value={rule.cidr}
-                          />
-                          <Input
-                            disabled={!networkPolicy.isolationEnabled}
-                            onChange={(event) =>
-                              updateCustomEgress(rule.id, { ports: event.target.value })
-                            }
-                            placeholder="443"
-                            value={rule.ports}
-                          />
-                          <Button
-                            aria-label="Remove custom egress CIDR"
-                            disabled={isMutating}
-                            onClick={() => removeCustomEgress(rule.id)}
-                            size="icon"
-                            type="button"
-                            variant="outline"
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </CardContent>
             </Card>
           ) : null}

@@ -1045,7 +1045,9 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
     seen = {}
 
     async def get_server_version(*args, **kwargs):
-        return server_version("1.0.0", is_latest=True)
+        server = server_version("1.0.0", is_latest=True)
+        server.remotes = [{"type": "streamable-http", "url": "https://hub.wardnai.dev/mcp"}]
+        return server
 
     async def get_installation(*args, **kwargs):
         return installation
@@ -1102,7 +1104,9 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
     seen = {}
 
     async def get_server_version(*args, **kwargs):
-        return server_version("1.0.0", is_latest=True)
+        server = server_version("1.0.0", is_latest=True)
+        server.remotes = [{"type": "streamable-http", "url": "https://hub.wardnai.dev/mcp"}]
+        return server
 
     async def get_installation(*args, **kwargs):
         return installation
@@ -1120,30 +1124,35 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
     await service.install_server_version(
         session,
         "io.github.example/weather",
-        MCPServerInstallRequest(
-            version="latest",
-            installTarget="package",
-            networkPolicy={
-                "isolationEnabled": True,
-                "publicEgress": False,
-                "privateEgress": True,
-                "privateEgressPorts": [443, 443],
-                "customEgress": [
-                    {"label": "rancher", "cidr": "192.168.3.3", "ports": [443]},
-                ],
-            },
-        ),
+            MCPServerInstallRequest(
+                version="latest",
+                installTarget="package",
+                networkPolicy={
+                    "allowKubernetesApi": True,
+                    "allowRemoteMcpEgress": True,
+                    "denyOtherEgress": True,
+                },
+            ),
         workspace_id=WORKSPACE_ID,
     )
 
     assert seen["network_policy"] == {
+        "mode": "intent",
+        "allowKubernetesApi": True,
+        "allowRemoteMcpEgress": True,
+        "denyOtherEgress": True,
         "isolationEnabled": True,
         "publicEgress": False,
-        "privateEgress": True,
-        "privateEgressPorts": [443],
-        "inClusterKubernetesApi": False,
-        "customEgress": [
-            {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
+        "privateEgress": False,
+        "privateEgressPorts": [80, 443],
+        "inClusterKubernetesApi": True,
+        "customEgress": [],
+        "remoteDestinations": [
+            {
+                "label": "streamable-http",
+                "host": "hub.wardnai.dev",
+                "port": 443,
+            },
         ],
     }
 

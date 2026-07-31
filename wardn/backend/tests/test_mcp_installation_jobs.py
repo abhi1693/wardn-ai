@@ -367,6 +367,7 @@ async def test_enqueue_installation_includes_network_policy(monkeypatch) -> None
     assert result == "queued-job"
     desired_state = seen["job"]["request_payload"]["desiredState"]
     assert desired_state["networkPolicy"] == {
+        "mode": "legacy",
         "isolationEnabled": True,
         "publicEgress": False,
         "privateEgress": False,

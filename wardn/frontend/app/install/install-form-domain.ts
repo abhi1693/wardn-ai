@@ -47,20 +47,10 @@ export type CustomHeader = {
   value: string;
 };
 
-export type NetworkPolicyCustomEgressForm = {
-  id: string;
-  label: string;
-  cidr: string;
-  ports: string;
-};
-
 export type NetworkPolicyFormState = {
-  isolationEnabled: boolean;
-  publicEgress: boolean;
-  privateEgress: boolean;
-  privateEgressPorts: string;
-  inClusterKubernetesApi: boolean;
-  customEgress: NetworkPolicyCustomEgressForm[];
+  allowKubernetesApi: boolean;
+  allowRemoteMcpEgress: boolean;
+  denyOtherEgress: boolean;
 };
 
 export type InstallFormClientProps = {
@@ -254,24 +244,11 @@ export function uniqueServerResponses(servers: MCPRegistryServerResponse[]) {
   return Array.from(byVersion.values());
 }
 
-export function portsText(value: unknown, fallback: string) {
-  if (!Array.isArray(value)) {
-    return fallback;
-  }
-  const ports = value
-    .filter((item): item is number => typeof item === "number" && Number.isInteger(item))
-    .map(String);
-  return ports.length > 0 ? ports.join(", ") : fallback;
-}
-
 export function defaultNetworkPolicyState(): NetworkPolicyFormState {
   return {
-    isolationEnabled: true,
-    publicEgress: true,
-    privateEgress: false,
-    privateEgressPorts: "80, 443",
-    inClusterKubernetesApi: false,
-    customEgress: [],
+    allowKubernetesApi: false,
+    allowRemoteMcpEgress: true,
+    denyOtherEgress: true,
   };
 }
 
@@ -284,75 +261,30 @@ export function networkPolicyFromInstallation(
   if (!isRecord(networkPolicy)) {
     return defaults;
   }
-  const customEgress = Array.isArray(networkPolicy.customEgress)
-    ? networkPolicy.customEgress
-        .filter(isRecord)
-        .map((item, index) => ({
-          id: `existing-custom-egress-${index}`,
-          label: stringValue(item.label),
-          cidr: stringValue(item.cidr),
-          ports: portsText(item.ports, "443"),
-        }))
-    : [];
 
   return {
-    isolationEnabled: booleanValue(networkPolicy.isolationEnabled, defaults.isolationEnabled),
-    publicEgress: booleanValue(networkPolicy.publicEgress, defaults.publicEgress),
-    privateEgress: booleanValue(networkPolicy.privateEgress, defaults.privateEgress),
-    privateEgressPorts: portsText(networkPolicy.privateEgressPorts, defaults.privateEgressPorts),
-    inClusterKubernetesApi: booleanValue(
-      networkPolicy.inClusterKubernetesApi,
-      defaults.inClusterKubernetesApi,
+    allowKubernetesApi: booleanValue(
+      networkPolicy.allowKubernetesApi,
+      booleanValue(networkPolicy.inClusterKubernetesApi, defaults.allowKubernetesApi),
     ),
-    customEgress,
+    allowRemoteMcpEgress: booleanValue(
+      networkPolicy.allowRemoteMcpEgress,
+      defaults.allowRemoteMcpEgress,
+    ),
+    denyOtherEgress: booleanValue(
+      networkPolicy.denyOtherEgress,
+      booleanValue(networkPolicy.isolationEnabled, defaults.denyOtherEgress),
+    ),
   };
-}
-
-export function parseNetworkPolicyPorts(value: string, label: string): number[] {
-  const rawPorts = value.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
-  if (rawPorts.length === 0) {
-    throw new Error(`${label} requires at least one port.`);
-  }
-  const ports: number[] = [];
-  for (const rawPort of rawPorts) {
-    const port = Number(rawPort);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`${label} has an invalid port: ${rawPort}`);
-    }
-    if (!ports.includes(port)) {
-      ports.push(port);
-    }
-  }
-  return ports;
 }
 
 export function networkPolicyPayloadValue(
   value: NetworkPolicyFormState,
 ): MCPRuntimeNetworkPolicyConfig {
-  const customEgress = value.customEgress
-    .filter((rule) => rule.label.trim() || rule.cidr.trim())
-    .map((rule) => {
-      const cidr = rule.cidr.trim();
-      if (!cidr) {
-        throw new Error("Custom egress rules require a CIDR.");
-      }
-      return {
-        label: rule.label.trim(),
-        cidr,
-        ports: parseNetworkPolicyPorts(rule.ports, `Custom egress ${cidr}`),
-      };
-    });
-
   return {
-    isolationEnabled: value.isolationEnabled,
-    publicEgress: value.publicEgress,
-    privateEgress: value.privateEgress,
-    privateEgressPorts: parseNetworkPolicyPorts(
-      value.privateEgressPorts,
-      "Private egress",
-    ),
-    inClusterKubernetesApi: value.inClusterKubernetesApi,
-    customEgress,
+    allowKubernetesApi: value.allowKubernetesApi,
+    allowRemoteMcpEgress: value.allowRemoteMcpEgress,
+    denyOtherEgress: value.denyOtherEgress,
   };
 }
 

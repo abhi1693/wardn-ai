@@ -4229,6 +4229,16 @@
       },
       "MCPRuntimeNetworkPolicyConfig": {
         "properties": {
+          "allowKubernetesApi": {
+            "default": false,
+            "title": "Allowkubernetesapi",
+            "type": "boolean"
+          },
+          "allowRemoteMcpEgress": {
+            "default": true,
+            "title": "Allowremotemcpegress",
+            "type": "boolean"
+          },
           "customEgress": {
             "items": {
               "$ref": "#/components/schemas/MCPRuntimeNetworkPolicyCustomEgress"
@@ -4236,6 +4246,11 @@
             "maxItems": 20,
             "title": "Customegress",
             "type": "array"
+          },
+          "denyOtherEgress": {
+            "default": true,
+            "title": "Denyotheregress",
+            "type": "boolean"
           },
           "inClusterKubernetesApi": {
             "default": false,
@@ -4261,7 +4276,7 @@
             "type": "array"
           },
           "publicEgress": {
-            "default": true,
+            "default": false,
             "title": "Publicegress",
             "type": "boolean"
           }
