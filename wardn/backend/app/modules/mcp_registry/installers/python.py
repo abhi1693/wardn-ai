@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.modules.mcp_registry.exceptions import MCPServerInstallationUnsupportedError
+from app.modules.mcp_registry.exceptions import (
+    MCPServerInstallationUnsupportedError,
+    MCPServerPackageUnavailableError,
+)
 from app.modules.mcp_registry.installers.support import (
     ConfigValues,
     MCPRuntimeInstall,
@@ -19,6 +22,10 @@ from app.modules.mcp_registry.installers.support import (
     write_secret_manifest,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
+from app.modules.mcp_registry.python_runtime import (
+    apply_python_runtime_requirement,
+    resolve_python_runtime_requirement,
+)
 
 PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
 
@@ -70,6 +77,26 @@ def pypi_runtime_process(
     return str(python_path), ["-m", identifier.replace("-", "_"), *configured_args]
 
 
+def create_pypi_virtualenv(
+    install_path: Path,
+    venv_path: Path,
+    python_version: str,
+) -> None:
+    if python_version:
+        run_install_command(
+            [
+                shutil.which("uv") or "uv",
+                "venv",
+                "--python",
+                python_version,
+                str(venv_path),
+            ],
+            cwd=install_path,
+        )
+        return
+    run_install_command([sys.executable, "-m", "venv", str(venv_path)], cwd=install_path)
+
+
 def build_pypi_install(
     server: MCPServerVersion,
     package: dict[str, Any],
@@ -78,17 +105,39 @@ def build_pypi_install(
 ) -> MCPRuntimeInstall:
     identifier = str(package["identifier"])
     version = normalized_package_version(package.get("version") or server.version)
+    python_requirement = resolve_python_runtime_requirement(
+        package,
+        identifier=identifier,
+        version=version,
+    )
     venv_path = install_path / "venv"
     install_path.mkdir(parents=True, exist_ok=True)
-    run_install_command([sys.executable, "-m", "venv", str(venv_path)], cwd=install_path)
     pip_path = venv_path / "bin" / "pip"
     python_path = venv_path / "bin" / "python"
     package_spec = identifier if version == "latest" else f"{identifier}=={version}"
     python_dependencies = python_runtime_dependencies(package)
-    run_install_command(
-        [str(pip_path), "install", package_spec, *python_dependencies],
-        cwd=install_path,
-    )
+    create_pypi_virtualenv(install_path, venv_path, python_requirement.python_version)
+    try:
+        run_install_command(
+            [str(pip_path), "install", package_spec, *python_dependencies],
+            cwd=install_path,
+        )
+    except MCPServerPackageUnavailableError:
+        fetched_requirement = resolve_python_runtime_requirement(
+            package,
+            identifier=identifier,
+            version=version,
+            fetch_pypi_metadata=True,
+        )
+        if not fetched_requirement.python_version:
+            raise
+        shutil.rmtree(venv_path, ignore_errors=True)
+        python_requirement = fetched_requirement
+        create_pypi_virtualenv(install_path, venv_path, python_requirement.python_version)
+        run_install_command(
+            [str(pip_path), "install", package_spec, *python_dependencies],
+            cwd=install_path,
+        )
 
     env_vars = (
         package.get("environmentVariables", [])
@@ -112,7 +161,10 @@ def build_pypi_install(
         config_values,
         file_paths=file_paths,
     )
-    public_package = public_package_config(package, env_vars, package_args, config_values)
+    public_package = apply_python_runtime_requirement(
+        public_package_config(package, env_vars, package_args, config_values),
+        python_requirement,
+    )
     secret_config = package_secret_config(
         env_vars,
         package_args,
@@ -143,6 +195,8 @@ def build_pypi_install(
     }
     if python_dependencies:
         runtime_config["pythonDependencies"] = python_dependencies
+    if python_requirement.python_version:
+        runtime_config["pythonVersion"] = python_requirement.python_version
     write_runtime_manifest(install_path, runtime_config)
     write_secret_manifest(install_path, secret_config)
     return MCPRuntimeInstall(
@@ -165,6 +219,12 @@ def build_uvx_install(
         raise MCPServerInstallationUnsupportedError("required installer is not available: uvx")
 
     install_path.mkdir(parents=True, exist_ok=True)
+    version = normalized_package_version(package.get("version") or server.version)
+    python_requirement = resolve_python_runtime_requirement(
+        package,
+        identifier=identifier,
+        version=version,
+    )
     env_vars = (
         package.get("environmentVariables", [])
         if isinstance(package.get("environmentVariables"), list)
@@ -187,6 +247,11 @@ def build_uvx_install(
         config_values,
         file_paths=file_paths,
     )
+    python_args = (
+        ["--python", python_requirement.python_version]
+        if python_requirement.python_version
+        else []
+    )
     if identifier.startswith(("git+", "http://", "https://", "file:")) or identifier.startswith(
         (".", "/")
     ):
@@ -194,10 +259,13 @@ def build_uvx_install(
             raise MCPServerInstallationUnsupportedError(
                 "uvx source installs require a package argument with the command to run"
             )
-        runtime_args = ["--from", identifier, *configured_args]
+        runtime_args = [*python_args, "--from", identifier, *configured_args]
     else:
-        runtime_args = [identifier, *configured_args]
-    public_package = public_package_config(package, env_vars, package_args, config_values)
+        runtime_args = [*python_args, identifier, *configured_args]
+    public_package = apply_python_runtime_requirement(
+        public_package_config(package, env_vars, package_args, config_values),
+        python_requirement,
+    )
     secret_config = package_secret_config(
         env_vars,
         package_args,
@@ -219,6 +287,8 @@ def build_uvx_install(
         "cwd": str(install_path),
         "requiresConfiguration": False,
     }
+    if python_requirement.python_version:
+        runtime_config["pythonVersion"] = python_requirement.python_version
     write_runtime_manifest(install_path, runtime_config)
     write_secret_manifest(install_path, secret_config)
     return MCPRuntimeInstall(

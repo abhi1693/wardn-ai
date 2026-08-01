@@ -10,6 +10,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.modules.mcp_registry.models import MCPServerInstallation
+from app.modules.mcp_registry.python_runtime import resolve_python_runtime_requirement
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
     fingerprint_payload,
@@ -1030,6 +1031,33 @@ def pypi_runtime_dependency_args(runtime_config: dict[str, Any]) -> list[str]:
     return args
 
 
+def package_python_version_args(runtime_config: dict[str, Any]) -> list[str]:
+    identifier = runtime_package_identifier(runtime_config)
+    version = runtime_package_version(runtime_config)
+    package = runtime_config.get("package")
+    sources = [runtime_config]
+    if isinstance(package, dict):
+        sources.append(package)
+    for source in sources:
+        requirement = resolve_python_runtime_requirement(
+            source,
+            identifier=identifier,
+            version=version,
+        )
+        if requirement.python_version:
+            return ["--python", requirement.python_version]
+    return []
+
+
+def add_python_version_args(
+    args: list[str],
+    runtime_config: dict[str, Any],
+) -> list[str]:
+    if "--python" in args:
+        return args
+    return [*package_python_version_args(runtime_config), *args]
+
+
 def trim_overlapping_process_args(base_args: list[str], extra_args: list[str]) -> list[str]:
     remaining = list(extra_args)
     max_overlap = min(len(base_args), len(remaining))
@@ -1061,12 +1089,21 @@ def pypi_transport_process_args(
         package_transport or runtime_config.get("transport")
     )
     dependency_args = pypi_runtime_dependency_args(runtime_config)
+    python_args = package_python_version_args(runtime_config)
     transport_command_name = Path(transport_command).name
     configured_args = trim_overlapping_process_args(transport_args, configured_args)
     if transport_command_name == "uvx" and transport_args:
-        return ["--from", package_spec, *dependency_args, *transport_args, *configured_args]
+        return [
+            *python_args,
+            "--from",
+            package_spec,
+            *dependency_args,
+            *transport_args,
+            *configured_args,
+        ]
     if transport_command_name not in {"", "python", "python3"}:
         return [
+            *python_args,
             "--from",
             package_spec,
             *dependency_args,
@@ -1097,7 +1134,10 @@ def kubernetes_runtime_process(
     if package_registry_type == "uvx":
         return (
             Path(runtime.command).name,
-            rewrite_runtime_file_paths(runtime.args, runtime_config),
+            rewrite_runtime_file_paths(
+                add_python_version_args(runtime.args, runtime_config),
+                runtime_config,
+            ),
             "",
         )
 
@@ -1137,6 +1177,7 @@ def kubernetes_runtime_process(
             "uvx",
             rewrite_runtime_file_paths(
                 [
+                    *package_python_version_args(runtime_config),
                     "--from",
                     package_spec,
                     *pypi_runtime_dependency_args(runtime_config),

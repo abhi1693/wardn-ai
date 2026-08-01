@@ -2381,6 +2381,81 @@ def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
+def test_kubernetes_runtime_manifest_adds_pypi_python_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.sirkirby/unifi-access-mcp",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "pythonVersion": "3.13",
+            "command": str(python_path),
+            "args": ["-m", "unifi_access_mcp"],
+            "cwd": str(tmp_path),
+            "package": {
+                "identifier": "unifi-access-mcp",
+                "version": "0.5.2",
+                "requiresPython": ">=3.13",
+                "pythonVersion": "3.13",
+                "transport": {
+                    "type": RUNTIME_TRANSPORT_STDIO,
+                    "command": "uvx",
+                    "args": ["unifi-access-mcp"],
+                },
+            },
+            "transport": {
+                "type": RUNTIME_TRANSPORT_STDIO,
+                "command": "uvx",
+                "args": ["unifi-access-mcp"],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert supergateway_stdio_arg(manifest) == (
+        "uvx --python 3.13 --from unifi-access-mcp==0.5.2 unifi-access-mcp"
+    )
+    assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
+
+
 def test_kubernetes_runtime_manifest_deduplicates_installed_pypi_transport_args(
     tmp_path,
     monkeypatch,

@@ -20,6 +20,7 @@ from app.modules.mcp_registry.installer import (
     verify_remote_mcp_server,
 )
 from app.modules.mcp_registry.models import MCPServerVersion
+from app.modules.mcp_registry.python_runtime import PythonRuntimeRequirement
 
 
 def server_version(
@@ -1336,6 +1337,75 @@ def test_install_server_runtime_uses_pypi_declared_console_script(
         "/venv/bin/mcp-google-search-console"
     )
     assert install.runtime_config["args"] == ["--site-url", "https://example.com/"]
+
+
+def test_install_server_runtime_retries_pypi_with_requires_python_metadata(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "pypi",
+                "identifier": "unifi-access-mcp",
+                "version": "0.5.2",
+                "transport": {
+                    "type": "stdio",
+                    "command": "uvx",
+                    "args": ["unifi-access-mcp"],
+                },
+            }
+        ]
+    )
+    commands = []
+    pip_attempts = 0
+
+    def resolve_python_runtime_requirement(*args, **kwargs):
+        if kwargs.get("fetch_pypi_metadata"):
+            return PythonRuntimeRequirement(
+                requires_python=">=3.13",
+                python_version="3.13",
+            )
+        return PythonRuntimeRequirement()
+
+    def run_install_command(command, *, cwd):
+        nonlocal pip_attempts
+        commands.append(command)
+        if Path(command[0]).name == "pip":
+            pip_attempts += 1
+            if pip_attempts == 1:
+                raise MCPServerPackageUnavailableError(
+                    "No matching distribution found for unifi-access-mcp==0.5.2"
+                )
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.resolve_python_runtime_requirement",
+        resolve_python_runtime_requirement,
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.shutil.which",
+        lambda name: "/bin/uv" if name == "uv" else None,
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.python.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(server, install_root=tmp_path)
+
+    assert commands[0][1:3] == ["-m", "venv"]
+    assert commands[1][-1] == "unifi-access-mcp==0.5.2"
+    assert commands[2] == [
+        "/bin/uv",
+        "venv",
+        "--python",
+        "3.13",
+        str(tmp_path / "io.github.example__weather" / "default" / "1.0.0.tmp" / "venv"),
+    ]
+    assert commands[3][-1] == "unifi-access-mcp==0.5.2"
+    assert install.runtime_config["pythonVersion"] == "3.13"
+    assert install.runtime_config["package"]["requiresPython"] == ">=3.13"
+    assert install.runtime_config["package"]["pythonVersion"] == "3.13"
 
 
 def test_install_server_runtime_installs_pypi_runtime_dependencies(
