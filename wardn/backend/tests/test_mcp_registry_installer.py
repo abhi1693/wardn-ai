@@ -1398,6 +1398,7 @@ def test_install_server_runtime_retries_pypi_with_requires_python_metadata(
     assert commands[2] == [
         "/bin/uv",
         "venv",
+        "--seed",
         "--python",
         "3.13",
         str(tmp_path / "io.github.example__weather" / "default" / "1.0.0.tmp" / "venv"),

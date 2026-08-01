@@ -87,6 +87,7 @@ def create_pypi_virtualenv(
             [
                 shutil.which("uv") or "uv",
                 "venv",
+                "--seed",
                 "--python",
                 python_version,
                 str(venv_path),
