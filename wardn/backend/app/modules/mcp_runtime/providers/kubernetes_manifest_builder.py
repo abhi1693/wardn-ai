@@ -350,7 +350,7 @@ def network_policy_config(
         public_egress = False
         private_egress = False
         private_egress_ports = [80, 443]
-        custom_egress = []
+        custom_egress = normalize_custom_egress_rules(raw_config.get("customEgress"))
         isolation_enabled = deny_other_egress
     else:
         public_egress = (

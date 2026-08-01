@@ -61,6 +61,7 @@ import {
   type InstallFormClientProps,
   type InstallTarget,
   type InstallValue,
+  type NetworkPolicyCustomEgressFormState,
   type NetworkPolicyFormState,
 } from "./install-form-domain";
 import { InstallFieldControl, ServerPickerCard } from "./install-form-fields";
@@ -200,6 +201,7 @@ export function InstallFormClient({
   );
   const [configSecretStoreId, setConfigSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const customHeaderId = useRef(0);
+  const customEgressId = useRef(networkPolicy.customEgress.length);
 
   const availableInstallTargets = selectedServer ? installTargetOptions(selectedServer) : [];
   const selectedInstallTargetDetails = selectedServer
@@ -308,6 +310,41 @@ export function InstallFormClient({
 
   function updateNetworkPolicy(patch: Partial<NetworkPolicyFormState>) {
     setNetworkPolicy((current) => ({ ...current, ...patch }));
+  }
+
+  function addCustomEgressRule() {
+    customEgressId.current += 1;
+    setNetworkPolicy((current) => ({
+      ...current,
+      customEgress: [
+        ...current.customEgress,
+        {
+          id: `custom-egress-${customEgressId.current}`,
+          label: "",
+          cidr: "",
+          ports: "443",
+        },
+      ],
+    }));
+  }
+
+  function updateCustomEgressRule(
+    id: string,
+    patch: Partial<NetworkPolicyCustomEgressFormState>
+  ) {
+    setNetworkPolicy((current) => ({
+      ...current,
+      customEgress: current.customEgress.map((rule) =>
+        rule.id === id ? { ...rule, ...patch } : rule
+      ),
+    }));
+  }
+
+  function removeCustomEgressRule(id: string) {
+    setNetworkPolicy((current) => ({
+      ...current,
+      customEgress: current.customEgress.filter((rule) => rule.id !== id),
+    }));
   }
 
   function installPayloadValues(): MCPServerInstallRequestConfigValues {
@@ -757,6 +794,72 @@ export function InstallFormClient({
                     Saving with default-deny off removes Wardn-managed runtime NetworkPolicies
                     for this connection.
                   </AsyncFeedback>
+                ) : null}
+
+                {networkPolicy.denyOtherEgress ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <Label>Custom egress</Label>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Add CIDR-scoped destinations this runtime may reach.
+                        </p>
+                      </div>
+                      <Button onClick={addCustomEgressRule} size="sm" type="button" variant="outline">
+                        <X className="size-4 rotate-45" />
+                        Add egress
+                      </Button>
+                    </div>
+
+                    {networkPolicy.customEgress.length === 0 ? (
+                      <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                        No custom egress rules.
+                      </div>
+                    ) : null}
+
+                    {networkPolicy.customEgress.map((rule) => (
+                      <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(8rem,.7fr)_auto]" key={rule.id}>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`${rule.id}-label`}>Label</Label>
+                          <Input
+                            id={`${rule.id}-label`}
+                            onChange={(event) => updateCustomEgressRule(rule.id, { label: event.target.value })}
+                            placeholder="unifi-access"
+                            value={rule.label}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`${rule.id}-cidr`}>CIDR</Label>
+                          <Input
+                            id={`${rule.id}-cidr`}
+                            onChange={(event) => updateCustomEgressRule(rule.id, { cidr: event.target.value })}
+                            placeholder="192.168.3.1/32"
+                            value={rule.cidr}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`${rule.id}-ports`}>Ports</Label>
+                          <Input
+                            id={`${rule.id}-ports`}
+                            onChange={(event) => updateCustomEgressRule(rule.id, { ports: event.target.value })}
+                            placeholder="443"
+                            value={rule.ports}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            aria-label="Remove custom egress"
+                            onClick={() => removeCustomEgressRule(rule.id)}
+                            size="icon"
+                            type="button"
+                            variant="outline"
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </CardContent>
             </Card>

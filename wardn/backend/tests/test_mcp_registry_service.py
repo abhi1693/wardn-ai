@@ -1131,6 +1131,13 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
                     "allowKubernetesApi": True,
                     "allowRemoteMcpEgress": True,
                     "denyOtherEgress": True,
+                    "customEgress": [
+                        {
+                            "label": "unifi-access",
+                            "cidr": "192.168.3.1/32",
+                            "ports": [443],
+                        }
+                    ],
                 },
             ),
         workspace_id=WORKSPACE_ID,
@@ -1146,7 +1153,13 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
         "privateEgress": False,
         "privateEgressPorts": [80, 443],
         "inClusterKubernetesApi": True,
-        "customEgress": [],
+        "customEgress": [
+            {
+                "label": "unifi-access",
+                "cidr": "192.168.3.1/32",
+                "ports": [443],
+            }
+        ],
         "remoteDestinations": [
             {
                 "label": "streamable-http",

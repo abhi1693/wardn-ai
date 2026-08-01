@@ -158,6 +158,9 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   if (rawPolicy.privateEgress === true) {
     details.push("Legacy private egress");
   }
+  if (Array.isArray(rawPolicy.customEgress) && rawPolicy.customEgress.length > 0) {
+    details.push("Custom egress");
+  }
   return details;
 }
 

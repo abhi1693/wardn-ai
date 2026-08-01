@@ -161,7 +161,8 @@ def effective_runtime_network_policy_config(config: dict | None) -> dict:
         effective["isolationEnabled"] = deny_other_egress
         effective["publicEgress"] = False
         effective["privateEgress"] = False
-        effective["customEgress"] = []
+        custom_egress = config.get("customEgress")
+        effective["customEgress"] = custom_egress if isinstance(custom_egress, list) else []
     else:
         effective["mode"] = "legacy"
     effective["allowKubernetesApi"] = allow_kubernetes_api

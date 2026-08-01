@@ -47,10 +47,18 @@ export type CustomHeader = {
   value: string;
 };
 
+export type NetworkPolicyCustomEgressFormState = {
+  id: string;
+  label: string;
+  cidr: string;
+  ports: string;
+};
+
 export type NetworkPolicyFormState = {
   allowKubernetesApi: boolean;
   allowRemoteMcpEgress: boolean;
   denyOtherEgress: boolean;
+  customEgress: NetworkPolicyCustomEgressFormState[];
 };
 
 export type InstallFormClientProps = {
@@ -249,7 +257,29 @@ export function defaultNetworkPolicyState(): NetworkPolicyFormState {
     allowKubernetesApi: false,
     allowRemoteMcpEgress: true,
     denyOtherEgress: true,
+    customEgress: [],
   };
+}
+
+function customEgressRows(value: unknown): NetworkPolicyCustomEgressFormState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter(isRecord)
+    .map((rule, index) => {
+      const rawPorts = Array.isArray(rule.ports) ? rule.ports : [443];
+      const ports = rawPorts
+        .map((port) => (typeof port === "number" && Number.isFinite(port) ? String(port) : ""))
+        .filter(Boolean)
+        .join(", ");
+      return {
+        id: `custom-egress-${index + 1}`,
+        label: stringValue(rule.label),
+        cidr: stringValue(rule.cidr),
+        ports: ports || "443",
+      };
+    });
 }
 
 export function networkPolicyFromInstallation(
@@ -275,16 +305,44 @@ export function networkPolicyFromInstallation(
       networkPolicy.denyOtherEgress,
       booleanValue(networkPolicy.isolationEnabled, defaults.denyOtherEgress),
     ),
+    customEgress: customEgressRows(networkPolicy.customEgress),
   };
+}
+
+function parsePortList(value: string) {
+  const ports = value
+    .split(/[,\s]+/)
+    .map((port) => port.trim())
+    .filter(Boolean)
+    .map((port) => Number(port));
+  if (ports.length === 0) {
+    return [443];
+  }
+  if (ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
+    throw new Error("Custom egress ports must be between 1 and 65535.");
+  }
+  return Array.from(new Set(ports));
 }
 
 export function networkPolicyPayloadValue(
   value: NetworkPolicyFormState,
 ): MCPRuntimeNetworkPolicyConfig {
+  const customEgress = value.customEgress
+    .map((rule) => ({
+      label: rule.label.trim(),
+      cidr: rule.cidr.trim(),
+      ports: parsePortList(rule.ports),
+    }))
+    .filter((rule) => rule.label || rule.cidr || rule.ports.length > 0);
+  const incompleteCustomEgress = customEgress.some((rule) => !rule.cidr);
+  if (incompleteCustomEgress) {
+    throw new Error("Custom egress rules require a CIDR.");
+  }
   return {
     allowKubernetesApi: value.allowKubernetesApi,
     allowRemoteMcpEgress: value.allowRemoteMcpEgress,
     denyOtherEgress: value.denyOtherEgress,
+    customEgress,
   };
 }
 

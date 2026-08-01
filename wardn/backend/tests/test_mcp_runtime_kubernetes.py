@@ -1144,6 +1144,73 @@ def test_runtime_manifest_honors_install_network_policy_controls(
     assert remote_egress["toPorts"][0]["ports"] == [{"port": "443", "protocol": "TCP"}]
 
 
+def test_runtime_manifest_keeps_intent_custom_egress_rules(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": True,
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {"label": "unifi-access", "cidr": "192.168.3.1/32", "ports": [443]},
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    custom_policy = next(
+        policy
+        for policy in manifest.network_policies
+        if policy.metadata.name == runtime_network_policy_names(manifest.names)[6]
+    )
+    assert custom_policy.spec.egress[0].to[0].ip_block.cidr == "192.168.3.1/32"
+    assert [(port.protocol, port.port) for port in custom_policy.spec.egress[0].ports] == [
+        ("TCP", 443)
+    ]
+
+
 def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
     tmp_path,
     monkeypatch,
