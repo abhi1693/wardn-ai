@@ -21,6 +21,9 @@ COPY --from=builder /app/wardn/frontend/.next/standalone ./
 COPY --from=builder /app/wardn/frontend/.next/static ./wardn/frontend/.next/static
 COPY --from=builder /app/wardn/frontend/public ./wardn/frontend/public
 
+RUN mkdir -p /app/wardn/frontend/.next/cache \
+    && chown -R wardn:wardn /app/wardn/frontend/.next/cache
+
 ARG APP_VERSION=0.0.0
 ENV APP_VERSION=$APP_VERSION
 LABEL org.opencontainers.image.version=$APP_VERSION

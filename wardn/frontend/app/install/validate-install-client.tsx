@@ -65,6 +65,8 @@ type RefreshOptions = {
   reportError?: boolean;
 };
 
+const mcpToolDiscoveryTimeoutMs = 120_000;
+
 function caughtMessage(caught: unknown, fallback: string) {
   return caught instanceof Error && caught.message ? caught.message : fallback;
 }
@@ -392,24 +394,25 @@ async function loadToolsFromGateway(
         organizationId
       )}/workspaces/${encodeURIComponent(workspaceId)}/mcp/gateway`,
       {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId,
-        method: "tools/call",
-        params: {
-          name: "search_mcp_tools",
-          arguments: {
-            serverName: installation.serverName,
-            limit: 25,
-            ...(cursor ? { cursor } : {}),
-          },
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
         },
-      }),
-      cache: "no-store",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "tools/call",
+          params: {
+            name: "search_mcp_tools",
+            arguments: {
+              serverName: installation.serverName,
+              limit: 25,
+              ...(cursor ? { cursor } : {}),
+            },
+          },
+        }),
+        cache: "no-store",
+        timeoutMs: mcpToolDiscoveryTimeoutMs,
       }
     );
 
@@ -521,7 +524,8 @@ export function ValidateInstallClient({
       const data = await workspaceMcpRegistryListInstalledServerTools(
         organizationId,
         workspaceId,
-        installation.id
+        installation.id,
+        { timeoutMs: mcpToolDiscoveryTimeoutMs }
       );
       const sortedTools = [...data.tools].sort((left, right) =>
         left.toolName.localeCompare(right.toolName)
