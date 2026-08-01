@@ -99,6 +99,39 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
 RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 20
+PACKAGE_REGISTRY_REMOTE_DESTINATIONS: dict[str, tuple[dict[str, str | int], ...]] = {
+    "npm": (
+        {
+            "label": "npm-registry",
+            "host": "registry.npmjs.org",
+            "port": 443,
+        },
+    ),
+    "pypi": (
+        {
+            "label": "pypi-index",
+            "host": "pypi.org",
+            "port": 443,
+        },
+        {
+            "label": "pypi-files",
+            "host": "files.pythonhosted.org",
+            "port": 443,
+        },
+    ),
+    "uvx": (
+        {
+            "label": "pypi-index",
+            "host": "pypi.org",
+            "port": 443,
+        },
+        {
+            "label": "pypi-files",
+            "host": "files.pythonhosted.org",
+            "port": 443,
+        },
+    ),
+}
 KUBERNETES_API_SERVICE_NAMESPACE = "default"
 KUBERNETES_API_SERVICE_NAME = "kubernetes"
 KUBERNETES_API_DEFAULT_SERVICE_PORT = 443
@@ -245,6 +278,47 @@ def bool_config(
     return fallback
 
 
+def runtime_config_registry_type(
+    installation: MCPServerInstallation,
+    runtime_config: dict[str, Any],
+) -> str:
+    package = runtime_config.get("package")
+    sources = [runtime_config]
+    if isinstance(package, dict):
+        sources.append(package)
+    for source in sources:
+        package_registry_type = str(source.get("registryType") or "").strip().lower()
+        if package_registry_type:
+            return package_registry_type
+    if isinstance(package, dict) and str(package.get("identifier") or "").strip():
+        return str(installation.install_type or "").strip().lower()
+    return ""
+
+
+def package_registry_remote_destinations(
+    installation: MCPServerInstallation,
+    runtime_config: dict[str, Any],
+) -> list[dict[str, str | int]]:
+    package_registry_type = runtime_config_registry_type(installation, runtime_config)
+    destinations = PACKAGE_REGISTRY_REMOTE_DESTINATIONS.get(package_registry_type, ())
+    return [dict(destination) for destination in destinations]
+
+
+def merge_remote_destinations(
+    *destination_groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for destinations in destination_groups:
+        for destination in destinations:
+            key = (str(destination.get("host") or ""), int(destination.get("port") or 443))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(destination)
+    return merged
+
+
 def network_policy_config(
     installation: MCPServerInstallation,
     *,
@@ -292,6 +366,15 @@ def network_policy_config(
         custom_egress = normalize_custom_egress_rules(raw_config.get("customEgress"))
         isolation_enabled = bool(raw_config.get("isolationEnabled", True))
 
+    remote_destinations = []
+    if allow_remote_mcp_egress:
+        remote_destinations = merge_remote_destinations(
+            normalize_remote_mcp_destinations(raw_config.get("remoteDestinations")),
+            normalize_remote_mcp_destinations(
+                package_registry_remote_destinations(installation, runtime_config)
+            ),
+        )
+
     return {
         "isolationEnabled": isolation_enabled,
         "denyOtherEgress": deny_other_egress,
@@ -302,9 +385,7 @@ def network_policy_config(
         "privateEgressPorts": private_egress_ports,
         "inClusterKubernetesApi": allow_kubernetes_api,
         "customEgress": custom_egress,
-        "remoteDestinations": normalize_remote_mcp_destinations(
-            raw_config.get("remoteDestinations")
-        ),
+        "remoteDestinations": remote_destinations,
     }
 
 

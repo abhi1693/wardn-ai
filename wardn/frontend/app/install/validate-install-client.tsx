@@ -93,14 +93,50 @@ function runtimeStatusBadgeVariant(
   return "outline";
 }
 
+function runtimePackageRegistryType(installation: MCPServerInstallationRead) {
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  const registryType = runtimeConfig.registryType;
+  if (typeof registryType === "string" && registryType.trim()) {
+    return registryType.trim().toLowerCase();
+  }
+  const packageConfig = runtimeConfig.package;
+  if (isRecord(packageConfig)) {
+    const packageRegistryType = packageConfig.registryType;
+    if (typeof packageRegistryType === "string" && packageRegistryType.trim()) {
+      return packageRegistryType.trim().toLowerCase();
+    }
+    const packageIdentifier = packageConfig.identifier;
+    if (typeof packageIdentifier === "string" && packageIdentifier.trim()) {
+      return installation.installType.trim().toLowerCase();
+    }
+  }
+  return "";
+}
+
+function packageRegistryPolicyDetail(installation: MCPServerInstallationRead) {
+  const registryType = runtimePackageRegistryType(installation);
+  if (registryType === "pypi" || registryType === "uvx") {
+    return "PyPI registry egress";
+  }
+  if (registryType === "npm") {
+    return "npm registry egress";
+  }
+  return "";
+}
+
 function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   if (installation.runtimeProvider !== "kubernetes") {
     return [];
   }
   const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
   const rawPolicy = runtimeConfig.networkPolicy;
+  const packageRegistryDetail = packageRegistryPolicyDetail(installation);
   if (!isRecord(rawPolicy)) {
-    return ["Default-deny egress", "Remote MCP endpoint egress"];
+    return [
+      "Default-deny egress",
+      "Remote MCP endpoint egress",
+      ...(packageRegistryDetail ? [packageRegistryDetail] : []),
+    ];
   }
   const denyOtherEgress = rawPolicy.denyOtherEgress ?? rawPolicy.isolationEnabled;
   if (denyOtherEgress === false) {
@@ -109,6 +145,9 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   const details = ["Default-deny egress"];
   if (rawPolicy.allowRemoteMcpEgress !== false) {
     details.push("Remote MCP endpoint egress");
+    if (packageRegistryDetail) {
+      details.push(packageRegistryDetail);
+    }
   }
   if (rawPolicy.allowKubernetesApi === true || rawPolicy.inClusterKubernetesApi === true) {
     details.push("Kubernetes API");

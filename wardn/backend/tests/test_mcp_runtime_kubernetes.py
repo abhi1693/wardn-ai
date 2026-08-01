@@ -2456,6 +2456,164 @@ def test_kubernetes_runtime_manifest_adds_pypi_python_version(
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
+def test_kubernetes_runtime_manifest_allows_pypi_registry_egress(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+
+    def fake_getaddrinfo(host, *_args, **_kwargs):
+        addresses = {
+            "pypi.org": ["151.101.0.223"],
+            "files.pythonhosted.org": ["146.75.112.223"],
+        }
+        return [(None, None, None, "", (address, 443)) for address in addresses.get(host, [])]
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.sirkirby/unifi-access-mcp",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "unifi_access_mcp"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "unifi-access-mcp", "version": "0.5.2"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    remote_policy_name = runtime_network_policy_names(manifest.names)[7]
+    remote_policy = next(
+        policy
+        for policy in manifest.network_policies
+        if policy.metadata.name == remote_policy_name
+    )
+    assert [rule.to[0].ip_block.cidr for rule in remote_policy.spec.egress] == [
+        "151.101.0.223/32",
+        "146.75.112.223/32",
+    ]
+    assert [
+        [(port.protocol, port.port) for port in rule.ports]
+        for rule in remote_policy.spec.egress
+    ] == [[("TCP", 443)], [("TCP", 443)]]
+
+
+def test_kubernetes_runtime_manifest_honors_registry_egress_opt_out(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    resolved_hosts = []
+
+    def fake_getaddrinfo(host, *_args, **_kwargs):
+        resolved_hosts.append(host)
+        return [(None, None, None, "", ("151.101.0.223", 443))]
+
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_manifest_builder.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.sirkirby/unifi-access-mcp",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "unifi_access_mcp"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "unifi-access-mcp", "version": "0.5.2"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "denyOtherEgress": True,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert not any(
+        policy.metadata.name == runtime_network_policy_names(manifest.names)[7]
+        for policy in manifest.network_policies
+    )
+    assert resolved_hosts == []
+
+
 def test_kubernetes_runtime_manifest_deduplicates_installed_pypi_transport_args(
     tmp_path,
     monkeypatch,
