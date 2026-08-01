@@ -37,11 +37,13 @@ import type {
   AgentToolListResponse,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
+  MCPGatewayToolApprovalListResponse,
   MCPRuntimeInstallationControlResponse,
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
   MCPServerInstallationToolsResponse,
 } from "@/lib/api/generated/model";
+import { ConnectionApprovalsClient } from "./connection-approvals-client";
 
 type ConnectionTool = {
   description: string;
@@ -383,7 +385,7 @@ export async function ConnectionDetailView({
     notFound();
   }
 
-  const [availableTools, policies, runtimeResult] = await Promise.all([
+  const [availableTools, policies, runtimeResult, approvalsResult] = await Promise.all([
     getAvailableTools(organization.id, workspace.id),
     getAccessRules(organization.id, workspace.id),
     optionalBackendJson<MCPRuntimeInstallationControlResponse>(
@@ -393,6 +395,16 @@ export async function ConnectionDetailView({
         installation.id
       )}`,
       "Runtime health could not be loaded."
+    ),
+    optionalBackendJson<MCPGatewayToolApprovalListResponse>(
+      `/api/v1/organizations/${encodeURIComponent(
+        organization.id
+      )}/workspaces/${encodeURIComponent(
+        workspace.id
+      )}/mcp/gateway/tool-approvals?installationId=${encodeURIComponent(
+        installation.id
+      )}&status=pending&limit=25`,
+      "Gateway approvals could not be loaded."
     ),
   ]);
   const { tools, error: toolsError } = await getConnectionTools(
@@ -615,6 +627,13 @@ export async function ConnectionDetailView({
         </Card>
 
         <div className="space-y-5">
+          <ConnectionApprovalsClient
+            initialApprovals={approvalsResult.data?.approvals ?? []}
+            loadError={approvalsResult.error}
+            organizationId={organization.id}
+            workspaceId={workspace.id}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Which Agents Can Use It?</CardTitle>

@@ -4,6 +4,13 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type {
+  MCPGatewayToolApprovalDecisionRequest,
+  MCPGatewayToolApprovalDecisionResponse,
+  MCPGatewayToolApprovalListResponse,
+  WorkspaceMcpGatewayListToolApprovalsParams
+} from '../model';
+
 import { apiRequest } from '../../client';
 
 export const getWorkspaceMcpGatewayRpcUrl = (organizationId: string,
@@ -27,6 +34,68 @@ export const workspaceMcpGatewayRpc = async (organizationId: string,
     method: 'POST'
 
 
+  }
+);}
+
+
+export const getWorkspaceMcpGatewayListToolApprovalsUrl = (organizationId: string,
+    workspaceId: string,
+    params?: WorkspaceMcpGatewayListToolApprovalsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/gateway/tool-approvals?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/gateway/tool-approvals`
+}
+
+/**
+ * @summary List Workspace Mcp Gateway Tool Approvals
+ */
+export const workspaceMcpGatewayListToolApprovals = async (organizationId: string,
+    workspaceId: string,
+    params?: WorkspaceMcpGatewayListToolApprovalsParams, options?: Parameters<typeof apiRequest>[1]): Promise<MCPGatewayToolApprovalListResponse> => {
+
+  return apiRequest<MCPGatewayToolApprovalListResponse>(getWorkspaceMcpGatewayListToolApprovalsUrl(organizationId,workspaceId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export const getWorkspaceMcpGatewayDecideToolApprovalUrl = (organizationId: string,
+    workspaceId: string,
+    approvalId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/gateway/tool-approvals/${approvalId}`
+}
+
+/**
+ * @summary Decide Workspace Mcp Gateway Tool Approval
+ */
+export const workspaceMcpGatewayDecideToolApproval = async (organizationId: string,
+    workspaceId: string,
+    approvalId: string,
+    mCPGatewayToolApprovalDecisionRequest: MCPGatewayToolApprovalDecisionRequest, options?: Parameters<typeof apiRequest>[1]): Promise<MCPGatewayToolApprovalDecisionResponse> => {
+
+  return apiRequest<MCPGatewayToolApprovalDecisionResponse>(getWorkspaceMcpGatewayDecideToolApprovalUrl(organizationId,workspaceId,approvalId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mCPGatewayToolApprovalDecisionRequest)
   }
 );}
 

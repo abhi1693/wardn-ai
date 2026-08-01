@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 
@@ -20,6 +21,7 @@ from app.modules.mcp_gateway import oauth as gateway_oauth
 from app.modules.mcp_gateway import repository
 from app.modules.mcp_gateway import router as gateway_router
 from app.modules.mcp_gateway import service as gateway_service
+from app.modules.mcp_gateway.schemas import MCPGatewayToolApprovalDecisionRequest
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_registry.models import (
@@ -624,6 +626,7 @@ def test_mcp_gateway_tools_list_is_bounded() -> None:
         "search_mcp_tools",
         "get_mcp_tool",
         "run_mcp_tool",
+        "get_mcp_tool_approval",
     ]
 
 
@@ -1264,6 +1267,10 @@ def test_mcp_gateway_run_tool_denies_guardrail_before_runtime(monkeypatch) -> No
 
 def test_mcp_gateway_run_tool_requires_confirmation_before_runtime(monkeypatch) -> None:
     policy_id = uuid.uuid4()
+    approval_id = uuid.uuid4()
+    tool_schema = cached_tool()
+    tool_schema.id = uuid.uuid4()
+    now = datetime(2026, 8, 1, tzinfo=UTC)
 
     async def get_enabled_installation(*args, **kwargs):
         return installed_server()
@@ -1280,7 +1287,53 @@ def test_mcp_gateway_run_tool_requires_confirmation_before_runtime(monkeypatch) 
     async def call_tool_with_tracking(*args, **kwargs):
         raise AssertionError("runtime should not be called")
 
+    async def get_workspace_by_id(*args, **kwargs):
+        return SimpleNamespace(
+            id=uuid.UUID(TEST_WORKSPACE_ID),
+            organization_id=uuid.UUID(TEST_ORGANIZATION_ID),
+        )
+
+    async def get_enabled_tool_schema(*args, **kwargs):
+        return tool_schema
+
+    async def create_gateway_tool_approval(*args, **kwargs):
+        assert kwargs["organization_id"] == uuid.UUID(TEST_ORGANIZATION_ID)
+        assert kwargs["workspace_id"] == uuid.UUID(TEST_WORKSPACE_ID)
+        assert kwargs["installation_id"]
+        assert kwargs["tool_schema_id"] == tool_schema.id
+        assert kwargs["server_name"] == "io.github.example/weather"
+        assert kwargs["tool_name"] == "get_forecast"
+        assert kwargs["arguments"] == {"location": "Delhi"}
+        assert kwargs["guardrail"]["status"] == "approval_required"
+        return SimpleNamespace(
+            id=approval_id,
+            organization_id=uuid.UUID(TEST_ORGANIZATION_ID),
+            workspace_id=uuid.UUID(TEST_WORKSPACE_ID),
+            requested_by_id=uuid.uuid4(),
+            decided_by_id=None,
+            installation_id=kwargs["installation_id"],
+            tool_schema_id=tool_schema.id,
+            tool_call_id=kwargs["tool_call_id"],
+            server_name=kwargs["server_name"],
+            tool_name=kwargs["tool_name"],
+            arguments=kwargs["arguments"],
+            request_meta=kwargs["request_meta"],
+            guardrail=kwargs["guardrail"],
+            status="pending",
+            result=None,
+            error="",
+            created_at=now,
+            updated_at=now,
+        )
+
     monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(repository, "create_gateway_tool_approval", create_gateway_tool_approval)
+    monkeypatch.setattr(tool_repository, "get_enabled_tool_schema", get_enabled_tool_schema)
+    monkeypatch.setattr(
+        gateway_service.organizations_repository,
+        "get_workspace_by_id",
+        get_workspace_by_id,
+    )
     monkeypatch.setattr(
         gateway_service,
         "evaluate_gateway_tool_guardrails",
@@ -1318,6 +1371,175 @@ def test_mcp_gateway_run_tool_requires_confirmation_before_runtime(monkeypatch) 
         "policyName": "Confirm weather",
         "message": "Tool call requires confirmation by guardrail policy: Confirm weather",
         "matchedPolicyIds": [str(policy_id)],
+        "approval": {
+            "id": str(approval_id),
+            "status": "pending",
+            "serverName": "io.github.example/weather",
+            "toolName": "get_forecast",
+            "installationId": result["structuredContent"]["guardrail"]["approval"][
+                "installationId"
+            ],
+            "toolSchemaId": str(tool_schema.id),
+            "approvalUrl": result["structuredContent"]["guardrail"]["approval"]["approvalUrl"],
+            "createdAt": now.isoformat(),
+            "updatedAt": now.isoformat(),
+            "error": "",
+        },
+    }
+    assert str(approval_id) in result["structuredContent"]["guardrail"]["approval"]["approvalUrl"]
+
+
+def test_mcp_gateway_get_tool_approval_returns_approved_result(monkeypatch) -> None:
+    approval_id = uuid.uuid4()
+    now = datetime(2026, 8, 1, tzinfo=UTC)
+
+    async def get_gateway_tool_approval(*args, **kwargs):
+        return SimpleNamespace(
+            id=approval_id,
+            organization_id=uuid.UUID(TEST_ORGANIZATION_ID),
+            workspace_id=uuid.UUID(TEST_WORKSPACE_ID),
+            requested_by_id=uuid.uuid4(),
+            decided_by_id=uuid.uuid4(),
+            installation_id=uuid.uuid4(),
+            tool_schema_id=uuid.uuid4(),
+            tool_call_id="call-1",
+            server_name="io.github.example/weather",
+            tool_name="get_forecast",
+            arguments={"location": "Delhi"},
+            request_meta={},
+            guardrail={},
+            status="completed",
+            result={
+                "content": [{"type": "text", "text": "Sunny"}],
+                "structuredContent": {"forecast": "Sunny"},
+                "isError": False,
+            },
+            error="",
+            created_at=now,
+            updated_at=now,
+        )
+
+    monkeypatch.setattr(repository, "get_gateway_tool_approval", get_gateway_tool_approval)
+
+    response = gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "get_mcp_tool_approval",
+                "arguments": {"approvalId": str(approval_id)},
+            },
+        },
+    )
+
+    result = response.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["approval"]["id"] == str(approval_id)
+    assert result["structuredContent"]["approval"]["status"] == "completed"
+    assert result["structuredContent"]["approvedToolResult"]["content"] == [
+        {"type": "text", "text": "Sunny"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decide_gateway_tool_approval_executes_stored_tool_call(monkeypatch) -> None:
+    class FlushSession(FakeSession):
+        flushed = 0
+
+        async def flush(self):
+            self.flushed += 1
+
+    session = FlushSession()
+    installation, server = installed_server()
+    approval_id = uuid.uuid4()
+    approval = SimpleNamespace(
+        id=approval_id,
+        organization_id=uuid.UUID(TEST_ORGANIZATION_ID),
+        workspace_id=uuid.UUID(TEST_WORKSPACE_ID),
+        requested_by_id=uuid.uuid4(),
+        decided_by_id=None,
+        installation_id=installation.id,
+        tool_schema_id=uuid.uuid4(),
+        tool_call_id="call-1",
+        server_name=installation.server_name,
+        tool_name="get_forecast",
+        arguments={"location": "Delhi"},
+        request_meta={"progressToken": "approval-1"},
+        guardrail={},
+        status="pending",
+        result=None,
+        error="",
+    )
+    user = User(id=uuid.uuid4(), email="admin@example.com", is_superuser=True)
+    seen = {}
+
+    async def require_workspace_admin(*args, **kwargs):
+        return None
+
+    async def get_workspace_gateway_tool_approval(*args, **kwargs):
+        return approval
+
+    async def get_enabled_installation(*args, **kwargs):
+        assert kwargs["installation_id"] == installation.id
+        return installation, server
+
+    async def call_tool_with_tracking(
+        session,
+        installation,
+        server,
+        *,
+        tool_name,
+        arguments,
+        user_id=None,
+        request_meta=None,
+    ):
+        seen.update(
+            {
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "user_id": user_id,
+                "request_meta": request_meta,
+            }
+        )
+        return {
+            "content": [{"type": "text", "text": "{\"forecast\":\"Sunny\"}"}],
+            "isError": False,
+        }
+
+    monkeypatch.setattr(gateway_service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(
+        repository,
+        "get_workspace_gateway_tool_approval",
+        get_workspace_gateway_tool_approval,
+    )
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+
+    response = await gateway_service.decide_gateway_tool_approval(
+        session,
+        user,
+        uuid.UUID(TEST_ORGANIZATION_ID),
+        uuid.UUID(TEST_WORKSPACE_ID),
+        approval_id,
+        MCPGatewayToolApprovalDecisionRequest(decision="approve"),
+    )
+
+    assert approval.decided_by_id == user.id
+    assert approval.status == "completed"
+    assert approval.error == ""
+    assert approval.result["structuredContent"] == {"forecast": "Sunny"}
+    assert response.status == "completed"
+    assert seen == {
+        "tool_name": "get_forecast",
+        "arguments": {"location": "Delhi"},
+        "user_id": user.id,
+        "request_meta": {"progressToken": "approval-1"},
     }
 
 

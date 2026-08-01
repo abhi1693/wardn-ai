@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.modules.guardrails.service import (
     GUARDRAIL_MODE_ALLOW,
     GUARDRAIL_MODE_DENY,
@@ -14,6 +15,13 @@ from app.modules.guardrails.service import (
 )
 from app.modules.mcp_gateway import repository
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
+from app.modules.mcp_gateway.models import MCPGatewayToolApproval
+from app.modules.mcp_gateway.schemas import (
+    MCPGatewayToolApprovalDecisionRequest,
+    MCPGatewayToolApprovalDecisionResponse,
+    MCPGatewayToolApprovalListResponse,
+    MCPGatewayToolApprovalRead,
+)
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import tool_repository
 from app.modules.mcp_registry.models import (
@@ -29,6 +37,8 @@ from app.modules.mcp_runtime.service import (
     tool_result_with_structured_content,
 )
 from app.modules.organizations import repository as organizations_repository
+from app.modules.organizations.service import require_workspace_admin
+from app.modules.users.models import User
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_SEARCH_LIMIT = 25
@@ -170,11 +180,85 @@ def error_tool_result(message: str, payload: dict[str, Any] | None = None) -> di
     }
 
 
+def guardrail_payload(
+    decision: GuardrailDecision,
+    *,
+    status: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "mode": decision.mode,
+        "policyId": str(decision.policy_id) if decision.policy_id else "",
+        "policyName": decision.policy_name,
+        "message": message,
+        "matchedPolicyIds": [
+            str(policy_id) for policy_id in decision.matched_policy_ids
+        ],
+    }
+
+
+def gateway_approval_url(approval: MCPGatewayToolApproval) -> str:
+    base_url = get_settings().frontend_base_url.rstrip("/")
+    return (
+        f"{base_url}/org/{approval.organization_id}/workspace/{approval.workspace_id}"
+        f"/install/{approval.installation_id}?approvalId={approval.id}"
+    )
+
+
+def gateway_tool_approval_payload(
+    approval: MCPGatewayToolApproval,
+    *,
+    include_result: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": str(approval.id),
+        "status": approval.status,
+        "serverName": approval.server_name,
+        "toolName": approval.tool_name,
+        "installationId": str(approval.installation_id),
+        "toolSchemaId": str(approval.tool_schema_id) if approval.tool_schema_id else "",
+        "approvalUrl": gateway_approval_url(approval),
+        "createdAt": approval.created_at.isoformat() if approval.created_at else "",
+        "updatedAt": approval.updated_at.isoformat() if approval.updated_at else "",
+        "error": approval.error,
+    }
+    if include_result and approval.result is not None:
+        payload["result"] = approval.result
+    return payload
+
+
+def gateway_tool_approval_read(
+    approval: MCPGatewayToolApproval,
+) -> MCPGatewayToolApprovalRead:
+    return MCPGatewayToolApprovalRead(
+        id=approval.id,
+        organization_id=approval.organization_id,
+        workspace_id=approval.workspace_id,
+        requested_by_id=approval.requested_by_id,
+        decided_by_id=approval.decided_by_id,
+        installation_id=approval.installation_id,
+        tool_schema_id=approval.tool_schema_id,
+        tool_call_id=approval.tool_call_id,
+        server_name=approval.server_name,
+        tool_name=approval.tool_name,
+        arguments=approval.arguments,
+        request_meta=approval.request_meta,
+        guardrail=approval.guardrail,
+        status=approval.status,
+        result=approval.result,
+        error=approval.error,
+        created_at=approval.created_at,
+        updated_at=approval.updated_at,
+    )
+
+
 def guardrail_tool_result(
     decision: GuardrailDecision,
     *,
     server_name: str,
     tool_name: str,
+    approval: MCPGatewayToolApproval | None = None,
 ) -> dict[str, Any]:
     status = (
         "blocked"
@@ -197,14 +281,12 @@ def guardrail_tool_result(
             "serverName": server_name,
             "toolName": tool_name,
             "guardrail": {
-                "status": status,
-                "mode": decision.mode,
-                "policyId": str(decision.policy_id) if decision.policy_id else "",
-                "policyName": decision.policy_name,
-                "message": message,
-                "matchedPolicyIds": [
-                    str(policy_id) for policy_id in decision.matched_policy_ids
-                ],
+                **guardrail_payload(decision, status=status, message=message),
+                **(
+                    {"approval": gateway_tool_approval_payload(approval)}
+                    if approval is not None
+                    else {}
+                ),
             },
         },
     )
@@ -336,6 +418,30 @@ def gateway_tools() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["serverName", "toolName"],
+            },
+        },
+        {
+            "name": "get_mcp_tool_approval",
+            "title": "Get MCP tool approval",
+            "description": (
+                "Check a gateway approval request created by run_mcp_tool. If the "
+                "approval was completed in Wardn, returns the approved tool result."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "approvalId": {
+                        "type": "string",
+                        "description": "Approval ID returned by run_mcp_tool.",
+                    },
+                },
+                "required": ["approvalId"],
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
             },
         },
     ]
@@ -507,6 +613,32 @@ async def get_mcp_tool(
     raise LookupError("MCP tool was not found")
 
 
+async def get_mcp_tool_approval(
+    session: AsyncSession,
+    arguments: dict[str, Any],
+    *,
+    scope: GatewayScope,
+) -> dict[str, Any]:
+    approval_id = parse_uuid_argument(arguments.get("approvalId"), "approvalId")
+    if approval_id is None:
+        raise ValueError("approvalId is required")
+    approval = await repository.get_gateway_tool_approval(
+        session,
+        approval_id,
+        scope=scope,
+    )
+    if approval is None:
+        raise LookupError("MCP tool approval was not found")
+    payload: dict[str, Any] = {
+        "approval": gateway_tool_approval_payload(approval, include_result=True),
+    }
+    if approval.result is not None:
+        payload["approvedToolResult"] = approval.result
+    if approval.status in {"failed", "denied"}:
+        return error_tool_result(approval.error or f"Approval {approval.status}.", payload)
+    return text_tool_result(payload)
+
+
 async def run_mcp_tool(
     session: AsyncSession,
     arguments: dict[str, Any],
@@ -544,11 +676,50 @@ async def run_mcp_tool(
         arguments=tool_arguments,
         scope=scope,
     )
-    if decision.mode in (GUARDRAIL_MODE_DENY, GUARDRAIL_MODE_REQUIRE_CONFIRMATION):
+    if decision.mode == GUARDRAIL_MODE_DENY:
         return guardrail_tool_result(
             decision,
             server_name=server_name,
             tool_name=tool_name,
+        )
+    if decision.mode == GUARDRAIL_MODE_REQUIRE_CONFIRMATION:
+        workspace = await organizations_repository.get_workspace_by_id(
+            session,
+            installation.workspace_id,
+        )
+        if workspace is None:
+            raise LookupError("workspace was not found for enabled MCP server")
+        tool_schema = await tool_repository.get_enabled_tool_schema(
+            session,
+            scope=scope,
+            installation_id=installation.id,
+            server_name=installation.server_name,
+            tool_name=tool_name,
+        )
+        message = decision.message or "Tool call requires approval by guardrail."
+        approval = await repository.create_gateway_tool_approval(
+            session,
+            organization_id=workspace.organization_id,
+            workspace_id=installation.workspace_id,
+            requested_by_id=scope.user_id,
+            installation_id=installation.id,
+            tool_schema_id=tool_schema.id if tool_schema else None,
+            tool_call_id=str(uuid.uuid4()),
+            server_name=server_name,
+            tool_name=tool_name,
+            arguments=tool_arguments,
+            request_meta=request_meta or {},
+            guardrail=guardrail_payload(
+                decision,
+                status="approval_required",
+                message=message,
+            ),
+        )
+        return guardrail_tool_result(
+            decision,
+            server_name=server_name,
+            tool_name=tool_name,
+            approval=approval,
         )
     if decision.mode != GUARDRAIL_MODE_ALLOW:
         return error_tool_result(
@@ -590,6 +761,113 @@ async def run_mcp_tool(
             "upstreamResult": upstream_result,
         },
     }
+
+
+async def list_gateway_tool_approvals(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    installation_id: uuid.UUID | None = None,
+    status: str | None = "pending",
+    limit: int = 25,
+) -> MCPGatewayToolApprovalListResponse:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    approvals = await repository.list_gateway_tool_approvals(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        status=status,
+        limit=min(max(limit, 1), 100),
+    )
+    return MCPGatewayToolApprovalListResponse(
+        approvals=[gateway_tool_approval_read(approval) for approval in approvals]
+    )
+
+
+async def decide_gateway_tool_approval(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    payload: MCPGatewayToolApprovalDecisionRequest,
+) -> MCPGatewayToolApprovalDecisionResponse:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    approval = await repository.get_workspace_gateway_tool_approval(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        approval_id=approval_id,
+    )
+    if approval is None:
+        raise LookupError("MCP tool approval was not found")
+    if approval.status != "pending":
+        return MCPGatewayToolApprovalDecisionResponse(
+            approval_id=approval.id,
+            status=approval.status,
+            tool_name=approval.tool_name,
+            result=approval.result,
+            error=approval.error,
+        )
+
+    approval.decided_by_id = user.id
+    if payload.decision == "deny":
+        approval.status = "denied"
+        approval.error = "Denied by user."
+        await session.flush()
+        return MCPGatewayToolApprovalDecisionResponse(
+            approval_id=approval.id,
+            status=approval.status,
+            tool_name=approval.tool_name,
+            result=approval.result,
+            error=approval.error,
+        )
+
+    approval.status = "running"
+    await session.flush()
+    row = await repository.get_enabled_installation(
+        session,
+        approval.server_name,
+        scope=GatewayScope(
+            user_id=user.id,
+            is_superuser=user.is_superuser,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        ),
+        installation_id=approval.installation_id,
+    )
+    if row is None:
+        approval.status = "failed"
+        approval.error = "Enabled MCP server was not found."
+    else:
+        installation, server = row
+        try:
+            result = await call_tool_with_isolated_tracking(
+                session,
+                installation,
+                server,
+                tool_name=approval.tool_name,
+                arguments=approval.arguments,
+                user_id=user.id,
+                request_meta=approval.request_meta,
+            )
+            approval.result = tool_result_with_structured_content(result)
+            approval.error = ""
+            approval.status = "completed"
+        except (MCPGatewayUpstreamError, KubernetesRuntimeProviderError) as exc:
+            approval.status = "failed"
+            approval.error = str(exc)
+    await session.flush()
+    return MCPGatewayToolApprovalDecisionResponse(
+        approval_id=approval.id,
+        status=approval.status,
+        tool_name=approval.tool_name,
+        result=approval.result,
+        error=approval.error,
+    )
 
 
 async def evaluate_gateway_tool_guardrails(
@@ -667,4 +945,6 @@ async def call_tool(
             scope=scope,
             request_meta=request_meta,
         )
+    if name == "get_mcp_tool_approval":
+        return await get_mcp_tool_approval(session, arguments, scope=scope)
     raise LookupError(f"unknown gateway tool: {name}")

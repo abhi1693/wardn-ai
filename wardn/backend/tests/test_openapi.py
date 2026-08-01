@@ -84,6 +84,14 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/gateway/tool-approvals"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/mcp/gateway/tool-approvals/{approval_id}"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/guardrails/policies"
         ),
         (

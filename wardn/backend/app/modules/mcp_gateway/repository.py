@@ -4,6 +4,7 @@ from sqlalchemy import and_, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
+from app.modules.mcp_gateway.models import MCPGatewayToolApproval
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.organizations.models import (
@@ -41,6 +42,63 @@ def apply_gateway_scope(statement, scope: GatewayScope, *, workspace_joined: boo
     if scope.organization_ids is not None:
         statement = ensure_workspace_join(statement)
         token_scope_conditions.append(Workspace.organization_id.in_(scope.organization_ids))
+    if token_scope_conditions:
+        statement = statement.where(or_(*token_scope_conditions))
+
+    if scope.is_superuser:
+        return statement
+    return (
+        ensure_workspace_join(statement)
+        .outerjoin(
+            OrganizationMembership,
+            and_(
+                OrganizationMembership.organization_id == Workspace.organization_id,
+                OrganizationMembership.user_id == scope.user_id,
+                OrganizationMembership.is_active.is_(True),
+            ),
+        )
+        .outerjoin(
+            WorkspaceMembership,
+            and_(
+                WorkspaceMembership.workspace_id == Workspace.id,
+                WorkspaceMembership.user_id == scope.user_id,
+                WorkspaceMembership.is_active.is_(True),
+            ),
+        )
+        .where(
+            or_(
+                OrganizationMembership.role.in_(ADMIN_ROLES),
+                WorkspaceMembership.id.is_not(None),
+            )
+        )
+    )
+
+
+def apply_gateway_approval_scope(statement, scope: GatewayScope, *, workspace_joined: bool = False):
+    joined_workspace = workspace_joined
+
+    def ensure_workspace_join(current_statement):
+        nonlocal joined_workspace
+        if joined_workspace:
+            return current_statement
+        joined_workspace = True
+        return current_statement.join(
+            Workspace,
+            Workspace.id == MCPGatewayToolApproval.workspace_id,
+        )
+
+    if scope.workspace_id is not None:
+        statement = statement.where(MCPGatewayToolApproval.workspace_id == scope.workspace_id)
+    if scope.organization_id is not None:
+        statement = statement.where(MCPGatewayToolApproval.organization_id == scope.organization_id)
+
+    token_scope_conditions = []
+    if scope.workspace_ids is not None:
+        token_scope_conditions.append(MCPGatewayToolApproval.workspace_id.in_(scope.workspace_ids))
+    if scope.organization_ids is not None:
+        token_scope_conditions.append(
+            MCPGatewayToolApproval.organization_id.in_(scope.organization_ids)
+        )
     if token_scope_conditions:
         statement = statement.where(or_(*token_scope_conditions))
 
@@ -173,3 +231,92 @@ async def get_enabled_installation(
     if len(rows) > 1:
         raise LookupError("enabled MCP server is ambiguous; pass installationId")
     return (rows[0][0], rows[0][1]) if rows else None
+
+
+async def create_gateway_tool_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    requested_by_id: uuid.UUID | None,
+    installation_id: uuid.UUID,
+    tool_schema_id: uuid.UUID | None,
+    tool_call_id: str,
+    server_name: str,
+    tool_name: str,
+    arguments: dict,
+    request_meta: dict,
+    guardrail: dict,
+) -> MCPGatewayToolApproval:
+    approval = MCPGatewayToolApproval(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        requested_by_id=requested_by_id,
+        decided_by_id=None,
+        installation_id=installation_id,
+        tool_schema_id=tool_schema_id,
+        tool_call_id=tool_call_id,
+        server_name=server_name,
+        tool_name=tool_name,
+        arguments=arguments,
+        request_meta=request_meta,
+        guardrail=guardrail,
+        status="pending",
+        result=None,
+        error="",
+    )
+    session.add(approval)
+    await session.flush()
+    await session.refresh(approval)
+    return approval
+
+
+async def get_gateway_tool_approval(
+    session: AsyncSession,
+    approval_id: uuid.UUID,
+    *,
+    scope: GatewayScope,
+) -> MCPGatewayToolApproval | None:
+    statement = select(MCPGatewayToolApproval).where(MCPGatewayToolApproval.id == approval_id)
+    statement = apply_gateway_approval_scope(statement, scope)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def get_workspace_gateway_tool_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    approval_id: uuid.UUID,
+) -> MCPGatewayToolApproval | None:
+    result = await session.execute(
+        select(MCPGatewayToolApproval).where(
+            MCPGatewayToolApproval.id == approval_id,
+            MCPGatewayToolApproval.organization_id == organization_id,
+            MCPGatewayToolApproval.workspace_id == workspace_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_gateway_tool_approvals(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    installation_id: uuid.UUID | None = None,
+    status: str | None = None,
+    limit: int = 25,
+) -> list[MCPGatewayToolApproval]:
+    statement = select(MCPGatewayToolApproval).where(
+        MCPGatewayToolApproval.organization_id == organization_id,
+        MCPGatewayToolApproval.workspace_id == workspace_id,
+    )
+    if installation_id is not None:
+        statement = statement.where(MCPGatewayToolApproval.installation_id == installation_id)
+    if status:
+        statement = statement.where(MCPGatewayToolApproval.status == status)
+    statement = statement.order_by(MCPGatewayToolApproval.created_at.desc()).limit(limit)
+    result = await session.execute(statement)
+    return list(result.scalars().all())

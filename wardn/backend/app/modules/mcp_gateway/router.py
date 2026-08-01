@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,11 @@ from app.modules.mcp_gateway.oauth import (
     authorization_server_metadata_response,
     bearer_challenge,
     protected_resource_metadata_response,
+)
+from app.modules.mcp_gateway.schemas import (
+    MCPGatewayToolApprovalDecisionRequest,
+    MCPGatewayToolApprovalDecisionResponse,
+    MCPGatewayToolApprovalListResponse,
 )
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.organizations import repository as organizations_repository
@@ -252,3 +257,54 @@ async def workspace_mcp_gateway_rpc(
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
         return jsonrpc_error(None, -32603, str(exc))
     return await handle_mcp_gateway_rpc(request, session, scope=scope)
+
+
+@workspace_router.get(
+    "/tool-approvals",
+    response_model=MCPGatewayToolApprovalListResponse,
+    operation_id="workspace_mcp_gateway_list_tool_approvals",
+)
+async def list_workspace_mcp_gateway_tool_approvals(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    installation_id: Annotated[UUID | None, Query(alias="installationId")] = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = "pending",
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> MCPGatewayToolApprovalListResponse:
+    return await service.list_gateway_tool_approvals(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        installation_id=installation_id,
+        status=status_filter,
+        limit=limit,
+    )
+
+
+@workspace_router.post(
+    "/tool-approvals/{approval_id}",
+    response_model=MCPGatewayToolApprovalDecisionResponse,
+    operation_id="workspace_mcp_gateway_decide_tool_approval",
+)
+async def decide_workspace_mcp_gateway_tool_approval(
+    organization_id: UUID,
+    workspace_id: UUID,
+    approval_id: UUID,
+    payload: MCPGatewayToolApprovalDecisionRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MCPGatewayToolApprovalDecisionResponse:
+    try:
+        return await service.decide_gateway_tool_approval(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+            approval_id,
+            payload,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
