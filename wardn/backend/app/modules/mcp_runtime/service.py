@@ -86,28 +86,40 @@ def tool_result_with_structured_content(result: dict[str, Any]) -> dict[str, Any
         return result
 
     content = result.get("content")
-    if not isinstance(content, list) or len(content) != 1:
+    if not isinstance(content, list) or len(content) == 0:
         return result
 
-    item = content[0]
-    if not isinstance(item, dict) or item.get("type") != "text":
-        return result
+    structured_items: list[dict[str, Any]] = []
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "text":
+            return result
 
-    text = item.get("text")
-    if not isinstance(text, str):
-        return result
+        text = item.get("text")
+        if not isinstance(text, str):
+            return result
 
-    stripped = text.strip()
-    if not stripped.startswith("{"):
-        return result
+        stripped = text.strip()
+        if not stripped.startswith("{"):
+            return result
 
-    try:
-        structured_content = json.loads(stripped)
-    except json.JSONDecodeError:
-        return result
+        try:
+            structured_item = json.loads(stripped)
+        except json.JSONDecodeError:
+            return result
 
-    if not isinstance(structured_content, dict):
-        return result
+        if not isinstance(structured_item, dict):
+            return result
+
+        structured_items.append(structured_item)
+
+    structured_content: dict[str, Any]
+    if len(structured_items) == 1:
+        structured_content = structured_items[0]
+    else:
+        structured_content = {
+            "items": structured_items,
+            "count": len(structured_items),
+        }
 
     return {
         **result,

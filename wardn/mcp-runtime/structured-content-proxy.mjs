@@ -31,37 +31,42 @@ function maybeAddStructuredContent(message) {
   }
 
   const content = result.content;
-  if (!Array.isArray(content) || content.length !== 1) {
+  if (!Array.isArray(content) || content.length === 0) {
     return message;
   }
 
-  const item = content[0];
-  if (!item || typeof item !== "object" || Array.isArray(item)) {
-    return message;
-  }
-  if (item.type !== "text" || typeof item.text !== "string") {
-    return message;
+  const structuredItems = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return message;
+    }
+    if (item.type !== "text" || typeof item.text !== "string") {
+      return message;
+    }
+
+    const text = item.text.trim();
+    if (!text.startsWith("{")) {
+      return message;
+    }
+
+    let structuredItem;
+    try {
+      structuredItem = JSON.parse(text);
+    } catch {
+      return message;
+    }
+
+    if (!structuredItem || typeof structuredItem !== "object" || Array.isArray(structuredItem)) {
+      return message;
+    }
+
+    structuredItems.push(structuredItem);
   }
 
-  const text = item.text.trim();
-  if (!text.startsWith("{")) {
-    return message;
-  }
-
-  let structuredContent;
-  try {
-    structuredContent = JSON.parse(text);
-  } catch {
-    return message;
-  }
-
-  if (
-    !structuredContent ||
-    typeof structuredContent !== "object" ||
-    Array.isArray(structuredContent)
-  ) {
-    return message;
-  }
+  const structuredContent =
+    structuredItems.length === 1
+      ? structuredItems[0]
+      : { items: structuredItems, count: structuredItems.length };
 
   return {
     ...message,

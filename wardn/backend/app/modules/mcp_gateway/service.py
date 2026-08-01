@@ -1,5 +1,6 @@
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,17 @@ from app.modules.users.models import User
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_SEARCH_LIMIT = 25
+
+
+@dataclass(frozen=True)
+class GatewayGuardrailTarget:
+    tool_name: str
+    arguments: dict[str, Any]
+    wrapped_by: str | None = None
+
+    @property
+    def is_wrapped(self) -> bool:
+        return self.wrapped_by is not None and self.wrapped_by != self.tool_name
 
 
 def is_progress_token(value: Any) -> bool:
@@ -153,6 +165,40 @@ def cached_tool_summary(tool: MCPServerToolSchema) -> dict[str, Any]:
     }
 
 
+def gateway_guardrail_target(tool_name: str, arguments: dict[str, Any]) -> GatewayGuardrailTarget:
+    suffix = "_execute"
+    if not tool_name.endswith(suffix):
+        return GatewayGuardrailTarget(tool_name=tool_name, arguments=arguments)
+
+    prefix = tool_name[: -len(suffix)]
+    nested_tool = arguments.get("tool")
+    if not isinstance(nested_tool, str):
+        return GatewayGuardrailTarget(tool_name=tool_name, arguments=arguments)
+
+    nested_tool = nested_tool.strip()
+    if not nested_tool or not nested_tool.startswith(f"{prefix}_"):
+        return GatewayGuardrailTarget(tool_name=tool_name, arguments=arguments)
+
+    nested_arguments = arguments.get("arguments")
+    if not isinstance(nested_arguments, dict):
+        nested_arguments = {}
+
+    return GatewayGuardrailTarget(
+        tool_name=nested_tool,
+        arguments=nested_arguments,
+        wrapped_by=tool_name,
+    )
+
+
+def guardrail_target_payload(target: GatewayGuardrailTarget) -> dict[str, Any]:
+    if not target.is_wrapped:
+        return {}
+    return {
+        "evaluatedToolName": target.tool_name,
+        "wrappedToolName": target.wrapped_by,
+    }
+
+
 def text_tool_result(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "content": [
@@ -259,6 +305,7 @@ def guardrail_tool_result(
     server_name: str,
     tool_name: str,
     approval: MCPGatewayToolApproval | None = None,
+    guardrail_target: GatewayGuardrailTarget | None = None,
 ) -> dict[str, Any]:
     status = (
         "blocked"
@@ -282,6 +329,7 @@ def guardrail_tool_result(
             "toolName": tool_name,
             "guardrail": {
                 **guardrail_payload(decision, status=status, message=message),
+                **(guardrail_target_payload(guardrail_target) if guardrail_target else {}),
                 **(
                     {"approval": gateway_tool_approval_payload(approval)}
                     if approval is not None
@@ -668,12 +716,13 @@ async def run_mcp_tool(
     if row is None:
         raise LookupError("enabled MCP server was not found")
     installation, server = row
+    guardrail_target = gateway_guardrail_target(tool_name, tool_arguments)
     decision = await evaluate_gateway_tool_guardrails(
         session,
         installation,
         server,
-        tool_name=tool_name,
-        arguments=tool_arguments,
+        tool_name=guardrail_target.tool_name,
+        arguments=guardrail_target.arguments,
         scope=scope,
     )
     if decision.mode == GUARDRAIL_MODE_DENY:
@@ -681,6 +730,7 @@ async def run_mcp_tool(
             decision,
             server_name=server_name,
             tool_name=tool_name,
+            guardrail_target=guardrail_target,
         )
     if decision.mode == GUARDRAIL_MODE_REQUIRE_CONFIRMATION:
         workspace = await organizations_repository.get_workspace_by_id(
@@ -694,7 +744,7 @@ async def run_mcp_tool(
             scope=scope,
             installation_id=installation.id,
             server_name=installation.server_name,
-            tool_name=tool_name,
+            tool_name=guardrail_target.tool_name,
         )
         message = decision.message or "Tool call requires approval by guardrail."
         approval = await repository.create_gateway_tool_approval(
@@ -713,13 +763,15 @@ async def run_mcp_tool(
                 decision,
                 status="approval_required",
                 message=message,
-            ),
+            )
+            | guardrail_target_payload(guardrail_target),
         )
         return guardrail_tool_result(
             decision,
             server_name=server_name,
             tool_name=tool_name,
             approval=approval,
+            guardrail_target=guardrail_target,
         )
     if decision.mode != GUARDRAIL_MODE_ALLOW:
         return error_tool_result(

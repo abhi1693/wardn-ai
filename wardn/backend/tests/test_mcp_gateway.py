@@ -1094,6 +1094,71 @@ def test_mcp_gateway_run_tool_adds_missing_upstream_structured_content(monkeypat
     }
 
 
+def test_mcp_gateway_run_tool_evaluates_access_execute_nested_tool_for_guardrails(
+    monkeypatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installed_server()
+
+    async def evaluate_gateway_tool_guardrails(*args, **kwargs):
+        seen["guardrail_tool_name"] = kwargs["tool_name"]
+        seen["guardrail_arguments"] = kwargs["arguments"]
+        return gateway_service.GuardrailDecision(mode="allow", message="allowed")
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        seen["runtime_tool_name"] = kwargs["tool_name"]
+        seen["runtime_arguments"] = kwargs["arguments"]
+        return {
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": False,
+        }
+
+    monkeypatch.setattr(repository, "get_enabled_installation", get_enabled_installation)
+    monkeypatch.setattr(
+        gateway_service,
+        "evaluate_gateway_tool_guardrails",
+        evaluate_gateway_tool_guardrails,
+    )
+    monkeypatch.setattr(
+        gateway_service,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+
+    response = gateway_client().post(
+        GATEWAY_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_mcp_tool",
+                "arguments": {
+                    "serverName": "io.github.example/weather",
+                    "toolName": "access_execute",
+                    "arguments": {
+                        "tool": "access_list_devices",
+                        "arguments": {"compact": True},
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen == {
+        "guardrail_tool_name": "access_list_devices",
+        "guardrail_arguments": {"compact": True},
+        "runtime_tool_name": "access_execute",
+        "runtime_arguments": {
+            "tool": "access_list_devices",
+            "arguments": {"compact": True},
+        },
+    }
+
+
 def test_mcp_gateway_run_tool_returns_tool_error_for_upstream_failure(monkeypatch) -> None:
     async def get_enabled_installation(*args, **kwargs):
         return installed_server()

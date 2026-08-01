@@ -267,6 +267,32 @@ def test_tool_result_with_structured_content_parses_missing_json_text_content() 
     }
 
 
+def test_tool_result_with_structured_content_parses_multiple_json_text_items() -> None:
+    result = service.tool_result_with_structured_content(
+        {
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"group":"apps","versions":["v1"],"preferred":"v1"}',
+                },
+                {
+                    "type": "text",
+                    "text": '{"group":"batch","versions":["v1"],"preferred":"v1"}',
+                },
+            ],
+            "isError": False,
+        }
+    )
+
+    assert result["structuredContent"] == {
+        "items": [
+            {"group": "apps", "versions": ["v1"], "preferred": "v1"},
+            {"group": "batch", "versions": ["v1"], "preferred": "v1"},
+        ],
+        "count": 2,
+    }
+
+
 def test_tool_result_with_structured_content_preserves_existing_structured_content() -> None:
     result = service.tool_result_with_structured_content(
         {
