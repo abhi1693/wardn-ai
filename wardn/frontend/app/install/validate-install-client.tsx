@@ -971,7 +971,7 @@ export function ValidateInstallClient({
           <CardContent className="max-h-[508px] overflow-y-auto px-0 pb-4 pt-0">
             {isLoadingTools ? (
               <div className="p-4 text-sm text-[var(--on-surface-variant)]">
-                Loading tools from the installed server...
+                Loading tools...
               </div>
             ) : tools.length === 0 ? (
               <div className="p-4 text-sm text-[var(--on-surface-variant)]">

@@ -510,7 +510,7 @@ async def list_installation_tools(
             install_type=installation.install_type,
         ),
     )
-    await refresh_tool_schemas_for_installation(
+    refresh_result = await refresh_tool_schemas_for_installation(
         session,
         installation=installation,
         server=server,
@@ -542,7 +542,7 @@ async def list_installation_tools(
         server_version=server.version,
         tools=[tool_schema_response(tool) for tool in tools],
         cache={
-            "mode": "live-refresh",
+            "mode": getattr(refresh_result, "source", "live-refresh"),
             "refreshed": True,
         },
     )
