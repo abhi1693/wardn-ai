@@ -2680,6 +2680,239 @@ async def test_refresh_tool_schemas_uses_hub_metadata_before_runtime(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_refresh_tool_schemas_uses_live_hub_metadata_when_local_metadata_has_no_tools(
+    monkeypatch,
+) -> None:
+    source_id = uuid4()
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.organization_id = ORGANIZATION_ID
+    server.catalog_source_id = source_id
+    server.server_json["introspection"] = {"tools/list": {"tools": []}}
+    server.server_json["_meta"] = {
+        "wardnCatalogSource": {
+            "id": str(source_id),
+            "provider": "wardn_hub",
+            "baseUrl": "https://hub.wardnai.dev",
+        }
+    }
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            raise AssertionError("live Hub metadata should avoid runtime discovery")
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def get_catalog_source(*args, **kwargs):
+        seen["catalog_source_id"] = args[1]
+        seen["catalog_organization_id"] = kwargs["organization_id"]
+        return MCPCatalogSource(
+            id=source_id,
+            organization_id=ORGANIZATION_ID,
+            name="Wardn Hub",
+            provider="wardn_hub",
+            base_url="https://hub.wardnai.dev",
+            sync_mode="latest_only",
+            is_enabled=True,
+        )
+
+    async def catalog_source_auth_headers(*args, **kwargs):
+        seen["auth_source"] = args[2]
+        return {"Authorization": "Bearer test-token"}
+
+    def fetch_hub_version_detail_payload(url, *, headers, timeout_seconds):
+        seen["hub_url"] = url
+        seen["hub_headers"] = headers
+        seen["hub_timeout_seconds"] = timeout_seconds
+        return {
+            "server": {
+                "name": "io.github.example/weather",
+                "title": "Weather",
+                "description": "Weather tools",
+            },
+            "version": {
+                "id": str(uuid4()),
+                "version": "1.0.0",
+                "serverJson": {
+                    "name": "io.github.example/weather",
+                    "version": "1.0.0",
+                    "introspection": {
+                        "tools/list": {
+                            "tools": [
+                                {
+                                    "name": "hub_forecast",
+                                    "description": "Hub forecast metadata",
+                                    "inputSchema": {"type": "object"},
+                                }
+                            ]
+                        }
+                    },
+                },
+            },
+        }
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        raise AssertionError("Hub metadata should not create a Hub proposal")
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(tool_service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(
+        tool_service,
+        "catalog_source_auth_headers",
+        catalog_source_auth_headers,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "fetch_hub_version_detail_payload",
+        fetch_hub_version_detail_payload,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas(
+        session,
+        "io.github.example/weather",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.tool_count == 1
+    assert result.source == "hub-metadata"
+    assert session.commit_count == 0
+    assert seen["catalog_source_id"] == source_id
+    assert seen["catalog_organization_id"] == ORGANIZATION_ID
+    assert seen["auth_source"].id == source_id
+    assert seen["hub_url"] == (
+        "https://hub.wardnai.dev/api/v1/mcp/servers/"
+        "io.github.example/weather/versions/1.0.0"
+    )
+    assert seen["hub_headers"] == {"Authorization": "Bearer test-token"}
+    assert seen["hub_timeout_seconds"] == tool_service.WARDN_HUB_TOOL_METADATA_TIMEOUT_SECONDS
+    assert seen["tools"][0]["name"] == "hub_forecast"
+
+
+@pytest.mark.asyncio
+async def test_refresh_tool_schemas_ignores_mismatched_live_hub_metadata(
+    monkeypatch,
+) -> None:
+    source_id = uuid4()
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    server = server_version("1.0.0")
+    server.organization_id = ORGANIZATION_ID
+    server.catalog_source_id = source_id
+    server.server_json["introspection"] = {"tools/list": {"tools": []}}
+    server.server_json["_meta"] = {
+        "wardnCatalogSource": {
+            "id": str(source_id),
+            "provider": "wardn_hub",
+            "baseUrl": "https://hub.wardnai.dev",
+            "sourceUrl": "https://hub.wardnai.dev/api/v1/mcp/servers",
+        }
+    }
+    seen = {}
+
+    class FakeRuntimeManager:
+        def list_tools(self, runtime_installation):
+            seen["runtime_installation"] = runtime_installation
+            return [
+                {
+                    "name": "live_forecast",
+                    "description": "Runtime forecast metadata",
+                    "inputSchema": {"type": "object"},
+                }
+            ]
+
+    async def get_enabled_installation(*args, **kwargs):
+        return installation, server
+
+    async def get_catalog_source(*args, **kwargs):
+        return None
+
+    def fetch_hub_version_detail_payload(url, *, headers, timeout_seconds):
+        return {
+            "server": {"name": "io.github.example/weather"},
+            "version": {
+                "version": "2.0.0",
+                "serverJson": {
+                    "name": "io.github.example/weather",
+                    "version": "2.0.0",
+                    "tools": [{"name": "wrong_version_tool", "inputSchema": {"type": "object"}}],
+                },
+            },
+        }
+
+    async def upsert_tool_schemas(*args, **kwargs):
+        seen["tools"] = kwargs["tools"]
+        return len(kwargs["tools"])
+
+    def queue_tool_inventory_proposal(*args, **kwargs):
+        seen["proposal_tools"] = kwargs["tools"]
+        return True
+
+    monkeypatch.setattr(
+        tool_service.gateway_repository,
+        "get_enabled_installation",
+        get_enabled_installation,
+    )
+    monkeypatch.setattr(tool_service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(
+        tool_service,
+        "fetch_hub_version_detail_payload",
+        fetch_hub_version_detail_payload,
+    )
+    monkeypatch.setattr(
+        tool_service.tool_repository,
+        "upsert_tool_schemas",
+        upsert_tool_schemas,
+    )
+    monkeypatch.setattr(
+        tool_service,
+        "queue_mcp_hub_tool_inventory_proposal",
+        queue_tool_inventory_proposal,
+    )
+    session = FakeSession()
+
+    result = await tool_service.refresh_tool_schemas(
+        session,
+        "io.github.example/weather",
+        runtime_manager=FakeRuntimeManager(),
+    )
+
+    assert result.tool_count == 1
+    assert result.source == "live-refresh"
+    assert session.commit_count == 1
+    assert seen["runtime_installation"] is installation
+    assert seen["tools"][0]["name"] == "live_forecast"
+    assert seen["proposal_tools"][0]["name"] == "live_forecast"
+
+
+@pytest.mark.asyncio
 async def test_refresh_tool_schemas_falls_back_when_registry_metadata_has_no_tools(
     monkeypatch,
 ) -> None:
