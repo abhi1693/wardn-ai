@@ -133,6 +133,70 @@ def test_guardrail_decision_blocks_unmatched_tool_when_workspace_default_deny() 
 
 
 @pytest.mark.asyncio
+async def test_get_guardrail_settings_returns_workspace_default_deny(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    workspace = Workspace(
+        id=workspace_id,
+        organization_id=organization_id,
+        name="Default",
+        slug="default",
+        description="",
+        status="active",
+        guardrail_default_deny=True,
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return workspace, None, None
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+
+    response = await service.get_guardrail_settings(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id=workspace_id,
+    )
+
+    assert response.workspace_id == workspace_id
+    assert response.default_deny is True
+
+
+@pytest.mark.asyncio
+async def test_update_guardrail_settings_updates_workspace_default_deny(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    workspace = Workspace(
+        id=workspace_id,
+        organization_id=organization_id,
+        name="Default",
+        slug="default",
+        description="",
+        status="active",
+        guardrail_default_deny=False,
+    )
+
+    async def require_workspace_admin(*args, **kwargs):
+        return workspace, None, None
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+
+    response = await service.update_guardrail_settings(
+        FakeSession(),
+        user,
+        organization_id,
+        service.GuardrailSettingsUpdate(defaultDeny=True),
+        workspace_id=workspace_id,
+    )
+
+    assert workspace.guardrail_default_deny is True
+    assert response.workspace_id == workspace_id
+    assert response.default_deny is True
+
+
+@pytest.mark.asyncio
 async def test_create_guardrail_policy_accepts_rule_group_conditions(monkeypatch) -> None:
     async def require_guardrail_scope_admin(*args, **kwargs):
         return None

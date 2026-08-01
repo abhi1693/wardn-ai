@@ -29,6 +29,11 @@ from app.modules.guardrails.schemas import (
     GuardrailStarterPoliciesResponse,
 )
 from app.modules.limits import service as limits_service
+from app.modules.organizations.models import (
+    OrganizationMembership,
+    Workspace,
+    WorkspaceMembership,
+)
 from app.modules.organizations.service import (
     require_workspace_admin,
     require_workspace_member,
@@ -123,8 +128,8 @@ async def require_guardrail_scope_member(
     user: User,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
-) -> None:
-    await require_workspace_member(session, user, organization_id, workspace_id)
+) -> tuple[Workspace, OrganizationMembership | None, WorkspaceMembership | None]:
+    return await require_workspace_member(session, user, organization_id, workspace_id)
 
 
 async def require_guardrail_scope_admin(
@@ -132,8 +137,8 @@ async def require_guardrail_scope_admin(
     user: User,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
-) -> None:
-    await require_workspace_admin(session, user, organization_id, workspace_id)
+) -> tuple[Workspace, OrganizationMembership | None, WorkspaceMembership | None]:
+    return await require_workspace_admin(session, user, organization_id, workspace_id)
 
 
 def guardrail_context_value(context: GuardrailEvaluationContext, field: str) -> Any:
