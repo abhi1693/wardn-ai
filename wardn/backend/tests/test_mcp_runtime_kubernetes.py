@@ -566,6 +566,14 @@ def fake_deployment(*, replicas: int = 1, ready_replicas: int = 0) -> FakeKubern
 
 
 def supergateway_stdio_arg(manifest) -> str:
+    command = supergateway_raw_stdio_arg(manifest)
+    prefix = "node /opt/wardn-runtime/structured-content-proxy.mjs -- "
+    if command.startswith(prefix):
+        return command[len(prefix) :]
+    return command
+
+
+def supergateway_raw_stdio_arg(manifest) -> str:
     args = manifest.pod.spec.containers[0].args
     return args[args.index("--stdio") + 1]
 
@@ -1568,7 +1576,10 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
     assert manifest.secret.string_data == {"WEATHER_TOKEN": "secret"}
     assert container.args == [
         "--stdio",
-        f"sh -lc 'cd {tmp_path} && node weather-mcp'",
+        (
+            "node /opt/wardn-runtime/structured-content-proxy.mjs -- "
+            f"sh -lc 'cd {tmp_path} && node weather-mcp'"
+        ),
         "--outputTransport",
         "streamableHttp",
         "--port",
@@ -1578,6 +1589,7 @@ def test_kubernetes_runtime_manifest_uses_secret_refs_for_gateway_env(
         "--healthEndpoint",
         "/healthz",
     ]
+    assert supergateway_stdio_arg(manifest) == f"sh -lc 'cd {tmp_path} && node weather-mcp'"
     assert env_by_name["HOME"].value == "/tmp/wardn-home"
     assert env_by_name["NPM_CONFIG_CACHE"].value == "/tmp/wardn-cache/npm"
     assert env_by_name["UV_CACHE_DIR"].value == "/tmp/wardn-cache/uv"
@@ -1757,6 +1769,9 @@ def test_kubernetes_runtime_manifest_rewrites_uvx_host_paths(
     )
 
     assert supergateway_stdio_arg(manifest) == "uvx mcp-grafana"
+    assert supergateway_raw_stdio_arg(manifest).startswith(
+        "node /opt/wardn-runtime/structured-content-proxy.mjs -- "
+    )
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 
 
@@ -2374,6 +2389,9 @@ def test_kubernetes_runtime_manifest_uses_package_gateway_image_override(
     )
 
     assert manifest.pod.spec.containers[0].image == "registry.example/custom-gateway:1.0.0"
+    assert not supergateway_raw_stdio_arg(manifest).startswith(
+        "node /opt/wardn-runtime/structured-content-proxy.mjs -- "
+    )
 
 
 def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(

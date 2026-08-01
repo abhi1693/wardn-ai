@@ -1,3 +1,4 @@
+import json
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -162,6 +163,35 @@ class FailingListRuntimeManager(FakeRuntimeManager):
         raise RuntimeError("tools/list failed")
 
 
+class JsonTextRuntimeManager(FakeRuntimeManager):
+    def call_tool(
+        self,
+        installation,
+        *,
+        tool_name,
+        arguments,
+        cancel_event=None,
+        cancel_reason="Tool call cancelled.",
+        request_meta=None,
+        progress_callback=None,
+        runtime_session=None,
+    ):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "tools": [{"name": "access_list_doors"}],
+                            "count": 1,
+                        }
+                    ),
+                }
+            ],
+            "isError": False,
+        }
+
+
 class ThreadRecordingRuntimeManager(FakeRuntimeManager):
     def __init__(self) -> None:
         super().__init__()
@@ -216,6 +246,48 @@ def installed_server() -> tuple[MCPServerInstallation, MCPServerVersion]:
         is_latest=True,
     )
     return installation, server
+
+
+def test_tool_result_with_structured_content_parses_missing_json_text_content() -> None:
+    result = service.tool_result_with_structured_content(
+        {
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"tools":[{"name":"access_list_doors"}],"count":1}',
+                }
+            ],
+            "isError": False,
+        }
+    )
+
+    assert result["structuredContent"] == {
+        "tools": [{"name": "access_list_doors"}],
+        "count": 1,
+    }
+
+
+def test_tool_result_with_structured_content_preserves_existing_structured_content() -> None:
+    result = service.tool_result_with_structured_content(
+        {
+            "content": [{"type": "text", "text": '{"count":1}'}],
+            "structuredContent": {"count": 2},
+            "isError": False,
+        }
+    )
+
+    assert result["structuredContent"] == {"count": 2}
+
+
+def test_tool_result_with_structured_content_ignores_plain_text() -> None:
+    result = service.tool_result_with_structured_content(
+        {
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": False,
+        }
+    )
+
+    assert "structuredContent" not in result
 
 
 @pytest.mark.asyncio
@@ -464,6 +536,32 @@ async def test_call_tool_with_tracking_creates_session_and_invocation(monkeypatc
         service.RUNTIME_EVENT_TOOL_CALL_SUCCEEDED,
     ]
     assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_call_tool_with_tracking_adds_missing_structured_content(monkeypatch) -> None:
+    async def get_active_runtime_session(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(repository, "get_active_runtime_session", get_active_runtime_session)
+    installation, server = installed_server()
+    session = FakeSession()
+
+    result = await service.call_tool_with_tracking(
+        session,
+        installation,
+        server,
+        tool_name="access_tool_index",
+        arguments={},
+        manager=JsonTextRuntimeManager(),
+    )
+
+    invocation = added_one(session, MCPToolInvocation)
+    assert result["structuredContent"] == {
+        "tools": [{"name": "access_list_doors"}],
+        "count": 1,
+    }
+    assert invocation.output_size_bytes == service.payload_size_bytes(result)
 
 
 @pytest.mark.asyncio

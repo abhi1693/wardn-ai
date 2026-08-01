@@ -99,6 +99,9 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
 RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 20
+KUBERNETES_STRUCTURED_CONTENT_PROXY_PATH = (
+    "/opt/wardn-runtime/structured-content-proxy.mjs"
+)
 PACKAGE_REGISTRY_REMOTE_DESTINATIONS: dict[str, tuple[dict[str, str | int], ...]] = {
     "npm": (
         {
@@ -884,10 +887,18 @@ def rewrite_runtime_file_paths(values: list[str], runtime_config: dict[str, Any]
 
 def supergateway_stdio_command(installation: MCPServerInstallation) -> str:
     runtime = package_runtime(installation)
-    command, args, cwd = kubernetes_runtime_process(runtime, installation.runtime_config or {})
+    runtime_config = installation.runtime_config or {}
+    command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
     command_parts = [command, *args]
     if cwd:
         command_parts = ["sh", "-lc", f"cd {shlex.quote(cwd)} && {shlex.join(command_parts)}"]
+    if not runtime_gateway_image_override(runtime_config):
+        command_parts = [
+            "node",
+            KUBERNETES_STRUCTURED_CONTENT_PROXY_PATH,
+            "--",
+            *command_parts,
+        ]
     return shlex.join(command_parts)
 
 def supergateway_container_args(

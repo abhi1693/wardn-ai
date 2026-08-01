@@ -16,6 +16,7 @@ ENV DENO_DIR=/tmp/deno \
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=deno /deno /usr/local/bin/deno
+COPY structured-content-proxy.mjs /opt/wardn-runtime/structured-content-proxy.mjs
 
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes ca-certificates \

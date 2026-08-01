@@ -81,6 +81,40 @@ class PreparedMCPToolCall:
     deferred_runtime_stops: tuple[MCPRuntimeSession, ...] = ()
 
 
+def tool_result_with_structured_content(result: dict[str, Any]) -> dict[str, Any]:
+    if "structuredContent" in result:
+        return result
+
+    content = result.get("content")
+    if not isinstance(content, list) or len(content) != 1:
+        return result
+
+    item = content[0]
+    if not isinstance(item, dict) or item.get("type") != "text":
+        return result
+
+    text = item.get("text")
+    if not isinstance(text, str):
+        return result
+
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return result
+
+    try:
+        structured_content = json.loads(stripped)
+    except json.JSONDecodeError:
+        return result
+
+    if not isinstance(structured_content, dict):
+        return result
+
+    return {
+        **result,
+        "structuredContent": structured_content,
+    }
+
+
 def runtime_session_read(runtime_session: MCPRuntimeSession) -> MCPRuntimeSessionRead:
     return MCPRuntimeSessionRead(
         id=runtime_session.id,
@@ -734,15 +768,17 @@ def execute_prepared_tool_call(
     manager = manager or get_runtime_manager()
     for runtime_session in prepared.deferred_runtime_stops:
         manager.stop_runtime(runtime_session)
-    return manager.call_tool(
-        prepared.installation,
-        tool_name=tool_name,
-        arguments=arguments,
-        cancel_event=cancel_event,
-        cancel_reason=cancel_reason,
-        request_meta=request_meta,
-        progress_callback=progress_callback,
-        runtime_session=prepared.runtime_session,
+    return tool_result_with_structured_content(
+        manager.call_tool(
+            prepared.installation,
+            tool_name=tool_name,
+            arguments=arguments,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
+            request_meta=request_meta,
+            progress_callback=progress_callback,
+            runtime_session=prepared.runtime_session,
+        )
     )
 
 
