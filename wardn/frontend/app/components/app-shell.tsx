@@ -4,6 +4,7 @@ import {
   BookOpen,
   Boxes,
   BarChart3,
+  Building2,
   Gauge,
   Home,
   KeyRound,
@@ -171,7 +172,7 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
 
   return [
     {
-      label: "Workspace",
+      label: "Overview",
       items: [
         {
           label: "Dashboard",
@@ -179,6 +180,11 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           activeKey: "workspace-dashboard",
           icon: Home,
         },
+      ],
+    },
+    {
+      label: "Assistant",
+      items: [
         {
           label: "Chat",
           href: `${workspaceBasePath}/chat`,
@@ -186,11 +192,16 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           icon: MessageSquare,
         },
         {
-          label: "Providers",
+          label: "Chat Providers",
           href: `${workspaceBasePath}/chat-providers`,
           activeKey: "workspace-chat-providers",
           icon: Webhook,
         },
+      ],
+    },
+    {
+      label: "Capabilities",
+      items: [
         {
           label: "Connections",
           href: `${workspaceBasePath}/install`,
@@ -203,23 +214,17 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           activeKey: "workspace-skills",
           icon: Sparkles,
         },
-        {
-          label: "Access",
-          href: `${workspaceBasePath}/guardrails`,
-          activeKey: "workspace-guardrails",
-          icon: ShieldCheck,
-        },
+      ],
+    },
+    {
+      label: "Operations",
+      items: [
         {
           label: "Runs",
           href: `${workspaceBasePath}/agent-runs`,
           activeKey: "workspace-runs",
           icon: ListTree,
         },
-      ],
-    },
-    {
-      label: "Manage",
-      items: [
         {
           label: "Runtime",
           href: `${workspaceBasePath}/runtime`,
@@ -232,21 +237,27 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           activeKey: "workspace-observability",
           icon: Gauge,
         },
+      ],
+    },
+    {
+      label: "Administration",
+      items: [
         {
-          label: "Settings",
+          label: "Access",
+          href: `${workspaceBasePath}/guardrails`,
+          activeKey: "workspace-guardrails",
+          icon: ShieldCheck,
+        },
+        {
+          label: "Workspace Settings",
           href: `/organizations/${encodeURIComponent(
             organizationId
           )}/workspaces/${encodeURIComponent(workspaceId)}/settings`,
           activeKey: "workspace-settings",
           icon: Settings,
         },
-      ],
-    },
-    {
-      label: "Organization",
-      items: [
         {
-          label: "Admin",
+          label: "Organization Admin",
           href: `/organizations/${encodeURIComponent(organizationId)}/settings`,
           activeKey: "organization-settings",
           activeKeys: [
@@ -257,7 +268,7 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
             "limits",
             "secret-backends",
           ],
-          icon: Settings,
+          icon: Building2,
         },
       ],
     },
