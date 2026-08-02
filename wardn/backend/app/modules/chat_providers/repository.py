@@ -113,6 +113,21 @@ async def get_thread(
     return result.scalar_one_or_none()
 
 
+async def list_threads_for_connection(
+    session: AsyncSession,
+    *,
+    connection_id: uuid.UUID,
+    limit: int = 50,
+) -> list[ChatProviderThread]:
+    result = await session.execute(
+        select(ChatProviderThread)
+        .where(ChatProviderThread.connection_id == connection_id)
+        .order_by(ChatProviderThread.updated_at.desc(), ChatProviderThread.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def get_event_by_external_id(
     session: AsyncSession,
     *,

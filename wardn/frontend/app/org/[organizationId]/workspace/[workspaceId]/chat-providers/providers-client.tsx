@@ -4,7 +4,6 @@ import {
   Bot,
   CheckCircle2,
   Copy,
-  FlaskConical,
   KeyRound,
   Loader2,
   MessageCircle,
@@ -14,14 +13,12 @@ import {
   QrCode,
   RefreshCw,
   Search,
-  Send,
   Settings2,
   ShieldCheck,
   Smartphone,
   Trash2,
   Webhook,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -52,7 +49,6 @@ import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
   ChatProviderPairingStatusResponse,
-  ChatProviderTestMessageResponse,
   SecretHandleRead,
   SecretStoreRead,
 } from "@/lib/api/generated/model";
@@ -65,7 +61,6 @@ import {
   workspaceChatProvidersDelete,
   workspaceChatProvidersPairingStatus,
   workspaceChatProvidersRefreshPairingQr,
-  workspaceChatProvidersTestMessage,
   workspaceChatProvidersUpdate,
 } from "@/lib/api/generated/workspace-chat-providers/workspace-chat-providers";
 import { cn } from "@/lib/utils";
@@ -125,9 +120,14 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function boolConfig(config: unknown, ...keys: string[]) {
+function boolConfigDefault(config: unknown, defaultValue: boolean, ...keys: string[]) {
   const values = record(config);
-  return keys.some((key) => values[key] === true);
+  for (const key of keys) {
+    if (typeof values[key] === "boolean") {
+      return values[key] === true;
+    }
+  }
+  return defaultValue;
 }
 
 function stringConfig(config: unknown, ...keys: string[]) {
@@ -141,11 +141,61 @@ function stringConfig(config: unknown, ...keys: string[]) {
   return "";
 }
 
+function arrayConfig(config: unknown, ...keys: string[]) {
+  const values = record(config);
+  for (const key of keys) {
+    const value = values[key];
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 function stringList(value: string) {
   return value
     .split(/[\n,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function listText(values: string[]) {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean))).join("\n");
+}
+
+function appendListValue(values: string[], value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return values;
+  }
+  return Array.from(new Set([...values, normalized]));
+}
+
+function removeListValue(values: string[], value: string) {
+  const normalized = value.trim();
+  return values.filter((item) => item.trim() !== normalized);
+}
+
+function friendlyIdentityId(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return "";
+  }
+  const [user] = trimmed.split("@", 1);
+  const normalized = user.split(":", 1)[0];
+  if (/^\d{8,16}$/.test(normalized)) {
+    return `+${normalized}`;
+  }
+  return normalized || trimmed;
+}
+
+function identityLabel(identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]) {
+  return (
+    identity.displayName?.trim() ||
+    friendlyIdentityId(identity.externalUserId) ||
+    friendlyIdentityId(identity.externalThreadId) ||
+    "Unknown sender"
+  );
 }
 
 function providerOption(provider: string) {
@@ -300,157 +350,6 @@ function providerCounts(
   return { active, connected, needsSetup, total: connections.length, whatsapp: whatsapp.length };
 }
 
-function TestDialog({
-  connection,
-  onOpenChange,
-  organizationId,
-  open,
-  workspaceId,
-}: {
-  connection: ChatProviderConnectionRead | null;
-  onOpenChange: (open: boolean) => void;
-  organizationId: string;
-  open: boolean;
-  workspaceId: string;
-}) {
-  const [text, setText] = useState("Summarize this workspace.");
-  const [threadId, setThreadId] = useState("wardn-test");
-  const [senderId, setSenderId] = useState("wardn-test");
-  const [senderName, setSenderName] = useState("Wardn test");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<ChatProviderTestMessageResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submitTest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!connection || isSubmitting) {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const response = await workspaceChatProvidersTestMessage(
-        organizationId,
-        workspaceId,
-        connection.id,
-        {
-          externalThreadId: threadId.trim() || "wardn-test",
-          externalUserDisplayName: senderName.trim() || "Wardn test",
-          externalUserId: senderId.trim() || "wardn-test",
-          text: text.trim(),
-        },
-        { timeoutMs: 120_000 }
-      );
-      setResult(response);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Provider test message could not be sent."
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  const conversationHref =
-    result?.conversationId && connection
-      ? `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-          workspaceId
-        )}/chat/${encodeURIComponent(result.conversationId)}`
-      : "";
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Send test message</DialogTitle>
-          <DialogDescription>{connection?.name ?? "Workspace provider"}</DialogDescription>
-        </DialogHeader>
-
-        <form className="space-y-4" onSubmit={submitTest}>
-          <div className="space-y-2">
-            <Label htmlFor="provider-test-text">Message</Label>
-            <textarea
-              className="min-h-28 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-              id="provider-test-text"
-              maxLength={4000}
-              onChange={(event) => setText(event.target.value)}
-              required
-              value={text}
-            />
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="provider-test-thread">Thread ID</Label>
-              <Input
-                id="provider-test-thread"
-                maxLength={255}
-                onChange={(event) => setThreadId(event.target.value)}
-                value={threadId}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="provider-test-sender">Sender ID</Label>
-              <Input
-                id="provider-test-sender"
-                maxLength={255}
-                onChange={(event) => setSenderId(event.target.value)}
-                value={senderId}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="provider-test-name">Sender name</Label>
-              <Input
-                id="provider-test-name"
-                maxLength={255}
-                onChange={(event) => setSenderName(event.target.value)}
-                value={senderName}
-              />
-            </div>
-          </div>
-
-          {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
-          {result ? (
-            <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <CheckCircle2 className="size-4 text-emerald-600" />
-                  {result.processed ? "Processed" : "Ignored"}
-                </div>
-                {conversationHref ? (
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={conversationHref}>Open chat</Link>
-                  </Button>
-                ) : null}
-              </div>
-              {result.replyText ? (
-                <div className="rounded-md border border-border bg-card px-3 py-2 text-sm leading-6">
-                  {result.replyText}
-                </div>
-              ) : null}
-              {result.message ? (
-                <div className="text-xs text-muted-foreground">{result.message}</div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <DialogFooter>
-            <Button disabled={isSubmitting || text.trim().length === 0} type="submit">
-              {isSubmitting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Send className="size-4" />
-              )}
-              {isSubmitting ? "Testing" : "Run test"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function ConnectProviderDialog({
   activeSecretStores,
   connectionCount,
@@ -479,6 +378,7 @@ function ConnectProviderDialog({
   const [allowAllSenders, setAllowAllSenders] = useState(true);
   const [allowedSenderIds, setAllowedSenderIds] = useState("");
   const [allowedChatIds, setAllowedChatIds] = useState("");
+  const [accessAdvancedOpen, setAccessAdvancedOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function applyProviderDefaults(nextProvider: ProviderType) {
@@ -493,6 +393,7 @@ function ConnectProviderDialog({
     if (nextProvider === "whatsapp_local") {
       setBridgeBaseUrl(normalizedDefaultBridgeUrl);
     }
+    setAccessAdvancedOpen(false);
     setAdvancedOpen(false);
   }
 
@@ -634,38 +535,66 @@ function ConnectProviderDialog({
             )}
           </div>
 
-          <label className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
-            <input
-              checked={allowAllSenders}
-              className="size-4 accent-primary"
-              onChange={(event) => setAllowAllSenders(event.target.checked)}
-              type="checkbox"
-            />
-            Allow all senders
-          </label>
-
-          {!allowAllSenders ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="chat-provider-senders">Sender IDs</Label>
-                <textarea
-                  className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                  id="chat-provider-senders"
-                  onChange={(event) => setAllowedSenderIds(event.target.value)}
-                  value={allowedSenderIds}
-                />
+          <div className="rounded-md border border-border">
+            <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-medium text-foreground">Replies</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {allowAllSenders ? "Open to every sender" : "Only allowed conversations"}
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="chat-provider-chats">Chat IDs</Label>
-                <textarea
-                  className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                  id="chat-provider-chats"
-                  onChange={(event) => setAllowedChatIds(event.target.value)}
-                  value={allowedChatIds}
+              <label className="flex items-center gap-3 text-sm">
+                <input
+                  checked={allowAllSenders}
+                  className="size-4 accent-primary"
+                  onChange={(event) => setAllowAllSenders(event.target.checked)}
+                  type="checkbox"
                 />
-              </div>
+                Allow all
+              </label>
             </div>
-          ) : null}
+            {!allowAllSenders ? (
+              <div className="space-y-3 border-t border-border p-3">
+                <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                  Connect first, then use Edit to pick known conversations.
+                </div>
+                <div className="rounded-md border border-border">
+                  <button
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium"
+                    onClick={() => setAccessAdvancedOpen((current) => !current)}
+                    type="button"
+                  >
+                    <span>Advanced IDs</span>
+                    <span className="text-xs text-muted-foreground">
+                      {accessAdvancedOpen ? "Hide" : "Show"}
+                    </span>
+                  </button>
+                  {accessAdvancedOpen ? (
+                    <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-provider-senders">Sender IDs</Label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                          id="chat-provider-senders"
+                          onChange={(event) => setAllowedSenderIds(event.target.value)}
+                          value={allowedSenderIds}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-provider-chats">Chat IDs</Label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                          id="chat-provider-chats"
+                          onChange={(event) => setAllowedChatIds(event.target.value)}
+                          value={allowedChatIds}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
 
           <div className="rounded-md border border-border">
             <button
@@ -780,6 +709,239 @@ function ConnectProviderDialog({
   );
 }
 
+function EditProviderDialog({
+  connection,
+  isSaving,
+  onOpenChange,
+  onSave,
+  open,
+}: {
+  connection: ChatProviderConnectionRead;
+  isSaving: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (
+    connection: ChatProviderConnectionRead,
+    payload: {
+      config: Record<string, unknown>;
+      displayName: string;
+      isActive: boolean;
+      name: string;
+    }
+  ) => Promise<void>;
+  open: boolean;
+}) {
+  const initialConfig = record(connection.config);
+  const [name, setName] = useState(connection.name);
+  const [isActive, setIsActive] = useState(connection.isActive);
+  const [allowAllSenders, setAllowAllSenders] = useState(
+    boolConfigDefault(initialConfig, true, "allow_all_senders", "allowAllSenders")
+  );
+  const [allowedSenderIds, setAllowedSenderIds] = useState(
+    listText(arrayConfig(initialConfig, "allowed_sender_ids", "allowedSenderIds"))
+  );
+  const [allowedChatIds, setAllowedChatIds] = useState(
+    listText(arrayConfig(initialConfig, "allowed_chat_ids", "allowedChatIds"))
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const config = record(connection.config);
+  const knownIdentities = connection.knownIdentities ?? [];
+  const selectedChatIds = stringList(allowedChatIds);
+
+  function setKnownConversationAllowed(threadId: string, checked: boolean) {
+    const next = checked
+      ? appendListValue(selectedChatIds, threadId)
+      : removeListValue(selectedChatIds, threadId);
+    setAllowedChatIds(listText(next));
+  }
+
+  function providerConfigPayload() {
+    const common = {
+      allowAllSenders: allowAllSenders,
+      allowedChatIds: stringList(allowedChatIds),
+      allowedSenderIds: stringList(allowedSenderIds),
+      replyOnUnsupportedMessages: boolConfigDefault(
+        config,
+        false,
+        "reply_on_unsupported_messages",
+        "replyOnUnsupportedMessages"
+      ),
+    };
+    if (connection.provider === "whatsapp_local") {
+      return {
+        ...common,
+        accountName: stringConfig(config, "account_name", "accountName"),
+        bridgeBaseUrl: stringConfig(config, "bridge_base_url", "bridgeBaseUrl"),
+        bridgeUserId: stringConfig(config, "bridge_user_id", "bridgeUserId"),
+        outboundWebhookUrl: stringConfig(config, "outbound_webhook_url", "outboundWebhookUrl"),
+      };
+    }
+    return common;
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedName = name.trim();
+    if (!normalizedName || isSaving) {
+      return;
+    }
+    await onSave(connection, {
+      config: providerConfigPayload(),
+      displayName: normalizedName,
+      isActive,
+      name: normalizedName,
+    });
+  }
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Edit provider</DialogTitle>
+          <DialogDescription>{providerOption(connection.provider).shortLabel}</DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="edit-chat-provider-name">Name</Label>
+              <Input
+                id="edit-chat-provider-name"
+                maxLength={100}
+                onChange={(event) => setName(event.target.value)}
+                required
+                value={name}
+              />
+            </div>
+            <label className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm sm:mt-7">
+              <input
+                checked={isActive}
+                className="size-4 accent-primary"
+                onChange={(event) => setIsActive(event.target.checked)}
+                type="checkbox"
+              />
+              Active
+            </label>
+          </div>
+
+          <div className="rounded-md border border-border">
+            <div className="flex flex-col gap-3 border-b border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-medium text-foreground">Replies</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {allowAllSenders ? "Open to every sender" : "Only selected conversations"}
+                </div>
+              </div>
+              <label className="flex items-center gap-3 text-sm">
+                <input
+                  checked={allowAllSenders}
+                  className="size-4 accent-primary"
+                  onChange={(event) => setAllowAllSenders(event.target.checked)}
+                  type="checkbox"
+                />
+                Allow all
+              </label>
+            </div>
+
+            {!allowAllSenders ? (
+              <div className="space-y-3 p-3">
+                {knownIdentities.length > 0 ? (
+                  <div className="grid gap-2">
+                    {knownIdentities.map((identity) => {
+                      const checked = selectedChatIds.includes(identity.externalThreadId);
+                      return (
+                        <label
+                          className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
+                          key={identity.externalThreadId}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-foreground">
+                              {identityLabel(identity)}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              Last message {displayDate(identity.lastSeenAt)}
+                            </span>
+                          </span>
+                          <input
+                            checked={checked}
+                            className="size-4 shrink-0 accent-primary"
+                            onChange={(event) =>
+                              setKnownConversationAllowed(
+                                identity.externalThreadId,
+                                event.target.checked
+                              )
+                            }
+                            type="checkbox"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                    No conversations have messaged this provider yet.
+                  </div>
+                )}
+
+                <div className="rounded-md border border-border">
+                  <button
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium"
+                    onClick={() => setAdvancedOpen((current) => !current)}
+                    type="button"
+                  >
+                    <span>Advanced IDs</span>
+                    <span className="text-xs text-muted-foreground">
+                      {advancedOpen ? "Hide" : "Show"}
+                    </span>
+                  </button>
+                  {advancedOpen ? (
+                    <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-chat-provider-senders">Sender IDs</Label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                          id="edit-chat-provider-senders"
+                          onChange={(event) => setAllowedSenderIds(event.target.value)}
+                          value={allowedSenderIds}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-chat-provider-chats">Chat IDs</Label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                          id="edit-chat-provider-chats"
+                          onChange={(event) => setAllowedChatIds(event.target.value)}
+                          value={allowedChatIds}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={!canSave || isSaving} type="submit">
+              {isSaving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Settings2 className="size-4" />
+              )}
+              {isSaving ? "Saving" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PairingDialog({
   connection,
   onCheck,
@@ -839,7 +1001,7 @@ function PairingDialog({
               {[
                 { label: "Create connection", done: true },
                 { label: "Scan QR", done: isConnected || isWaiting },
-                { label: "Send test", done: isConnected },
+                { label: "Connected", done: isConnected },
               ].map((step, index) => (
                 <div
                   className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm"
@@ -948,11 +1110,12 @@ export function ChatProvidersClient({
   const [pairingConnection, setPairingConnection] = useState<ChatProviderConnectionRead | null>(
     null
   );
-  const [testConnection, setTestConnection] = useState<ChatProviderConnectionRead | null>(null);
+  const [editConnection, setEditConnection] = useState<ChatProviderConnectionRead | null>(null);
   const [pairingStatuses, setPairingStatuses] = useState<
     Record<string, ChatProviderPairingStatusResponse>
   >({});
   const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [busyConnectionId, setBusyConnectionId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1109,6 +1272,37 @@ export function ChatProvidersClient({
       setError(caught instanceof Error ? caught.message : "Provider connection could not be saved.");
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function updateProvider(
+    connection: ChatProviderConnectionRead,
+    payload: {
+      config: Record<string, unknown>;
+      displayName: string;
+      isActive: boolean;
+      name: string;
+    }
+  ) {
+    if (isUpdating) {
+      return;
+    }
+    setIsUpdating(true);
+    setBusyConnectionId(connection.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await workspaceChatProvidersUpdate(organizationId, workspaceId, connection.id, payload);
+      setNotice("Provider connection updated.");
+      setEditConnection(null);
+      router.refresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Provider connection could not be updated."
+      );
+    } finally {
+      setBusyConnectionId(null);
+      setIsUpdating(false);
     }
   }
 
@@ -1276,8 +1470,9 @@ export function ChatProvidersClient({
               stringConfig(config, "bridge_user_id", "bridgeUserId", "account_name", "accountName") ||
               connection.externalId;
             const isBusy = busyConnectionId === connection.id;
-            const allowAllSenders = boolConfig(
+            const allowAllSenders = boolConfigDefault(
               config,
+              true,
               "allow_all_senders",
               "allowAllSenders"
             );
@@ -1369,13 +1564,13 @@ export function ChatProvidersClient({
                       </Button>
                     ) : null}
                     <Button
-                      onClick={() => setTestConnection(connection)}
+                      onClick={() => setEditConnection(connection)}
                       size="sm"
                       type="button"
                       variant="outline"
                     >
-                      <FlaskConical className="size-4" />
-                      Test
+                      <Settings2 className="size-4" />
+                      Edit
                     </Button>
                     <Button
                       aria-label={`Copy webhook URL for ${connection.name}`}
@@ -1433,6 +1628,20 @@ export function ChatProvidersClient({
         onOpenChange={setConnectOpen}
         open={connectOpen}
       />
+      {editConnection ? (
+        <EditProviderDialog
+          connection={editConnection}
+          isSaving={isUpdating}
+          key={editConnection.id}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditConnection(null);
+            }
+          }}
+          onSave={updateProvider}
+          open
+        />
+      ) : null}
       <PairingDialog
         busy={Boolean(pairingConnection && busyConnectionId === pairingConnection.id)}
         connection={pairingConnection}
@@ -1446,17 +1655,6 @@ export function ChatProvidersClient({
         onRefresh={(connection) => refreshPairingStatus(connection, true)}
         open={pairingOpen}
         pairingStatus={pairingConnection ? pairingStatuses[pairingConnection.id] : undefined}
-      />
-      <TestDialog
-        connection={testConnection}
-        onOpenChange={(open) => {
-          if (!open) {
-            setTestConnection(null);
-          }
-        }}
-        open={Boolean(testConnection)}
-        organizationId={organizationId}
-        workspaceId={workspaceId}
       />
     </div>
   );

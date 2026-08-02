@@ -11,7 +11,7 @@ ChatProviderType = Literal["telegram", "whatsapp_local"]
 
 class TelegramProviderConfig(APIModel):
     reply_on_unsupported_messages: bool = False
-    allow_all_senders: bool = False
+    allow_all_senders: bool = True
     allowed_sender_ids: list[str] = Field(default_factory=list)
     allowed_chat_ids: list[str] = Field(default_factory=list)
 
@@ -27,7 +27,7 @@ class WhatsAppLocalProviderConfig(APIModel):
     bridge_user_id: str = Field(default="", max_length=255)
     outbound_webhook_url: str = Field(default="", max_length=2048)
     reply_on_unsupported_messages: bool = False
-    allow_all_senders: bool = False
+    allow_all_senders: bool = True
     allowed_sender_ids: list[str] = Field(default_factory=list)
     allowed_chat_ids: list[str] = Field(default_factory=list)
 
@@ -86,6 +86,13 @@ class ChatProviderConnectionUpdate(APIModel):
         return " ".join(value.strip().split())
 
 
+class ChatProviderKnownIdentityRead(APIModel):
+    external_thread_id: str
+    external_user_id: str = ""
+    display_name: str = ""
+    last_seen_at: datetime
+
+
 class ChatProviderConnectionRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,6 +107,7 @@ class ChatProviderConnectionRead(APIModel):
     secret_handle_ids: dict[str, uuid.UUID] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
     is_active: bool
+    known_identities: list[ChatProviderKnownIdentityRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -136,30 +144,3 @@ class ChatProviderWebhookResponse(APIModel):
     ignored: int = 0
     duplicates: int = 0
     failed: int = 0
-
-
-class ChatProviderTestMessageRequest(APIModel):
-    text: str = Field(min_length=1, max_length=4000)
-    external_thread_id: str = Field(default="wardn-test", min_length=1, max_length=255)
-    external_user_id: str = Field(default="", max_length=255)
-    external_user_display_name: str = Field(default="Wardn test", max_length=255)
-
-    @field_validator(
-        "text",
-        "external_thread_id",
-        "external_user_id",
-        "external_user_display_name",
-    )
-    @classmethod
-    def normalize_message_text(cls, value: str) -> str:
-        return " ".join(value.strip().split())
-
-
-class ChatProviderTestMessageResponse(APIModel):
-    ok: bool
-    processed: bool
-    event_id: str
-    conversation_id: uuid.UUID | None = None
-    thread_id: uuid.UUID | None = None
-    reply_text: str = ""
-    message: str = ""

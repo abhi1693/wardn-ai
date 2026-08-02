@@ -6,6 +6,7 @@
  */
 import type { ChatProviderConnectionReadConfig } from './chatProviderConnectionReadConfig';
 import type { ChatProviderConnectionReadSecretHandleIds } from './chatProviderConnectionReadSecretHandleIds';
+import type { ChatProviderKnownIdentityRead } from './chatProviderKnownIdentityRead';
 
 export interface ChatProviderConnectionRead {
   config?: ChatProviderConnectionReadConfig;
@@ -15,6 +16,7 @@ export interface ChatProviderConnectionRead {
   externalId: string;
   id: string;
   isActive: boolean;
+  knownIdentities?: ChatProviderKnownIdentityRead[];
   name: string;
   organizationId: string;
   provider: string;

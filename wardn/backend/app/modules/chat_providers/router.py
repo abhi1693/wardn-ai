@@ -13,8 +13,6 @@ from app.modules.chat_providers.schemas import (
     ChatProviderConnectionRead,
     ChatProviderConnectionUpdate,
     ChatProviderPairingStatusResponse,
-    ChatProviderTestMessageRequest,
-    ChatProviderTestMessageResponse,
     ChatProviderWebhookResponse,
 )
 from app.modules.chat_providers.service import (
@@ -26,7 +24,6 @@ from app.modules.chat_providers.service import (
     handle_whatsapp_local_webhook,
     list_workspace_chat_provider_connections,
     refresh_workspace_chat_provider_pairing_qr,
-    test_workspace_chat_provider_connection,
     update_workspace_chat_provider_connection,
 )
 from app.modules.users.dependencies import get_current_user
@@ -220,34 +217,6 @@ async def refresh_workspace_chat_provider_pairing_qr_route(
         organization_id,
         workspace_id,
         connection_id,
-    )
-
-
-@workspace_router.post(
-    "/{connection_id}/test-message",
-    response_model=ChatProviderTestMessageResponse,
-    operation_id="workspace_chat_providers_test_message",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def test_workspace_chat_provider_connection_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    connection_id: UUID,
-    payload: ChatProviderTestMessageRequest,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> ChatProviderTestMessageResponse:
-    return await test_workspace_chat_provider_connection(
-        session,
-        current_user,
-        organization_id,
-        workspace_id,
-        connection_id,
-        payload,
     )
 
 

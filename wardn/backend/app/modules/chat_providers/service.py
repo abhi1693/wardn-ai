@@ -37,9 +37,8 @@ from app.modules.chat_providers.schemas import (
     ChatProviderConnectionListResponse,
     ChatProviderConnectionRead,
     ChatProviderConnectionUpdate,
+    ChatProviderKnownIdentityRead,
     ChatProviderPairingStatusResponse,
-    ChatProviderTestMessageRequest,
-    ChatProviderTestMessageResponse,
     ChatProviderWebhookResponse,
     TelegramProviderConfig,
     WhatsAppLocalProviderConfig,
@@ -623,6 +622,18 @@ async def connection_response(
     session: AsyncSession,
     connection: ChatProviderConnection,
 ) -> ChatProviderConnectionRead:
+    known_identities = [
+        ChatProviderKnownIdentityRead(
+            external_thread_id=thread.external_thread_id,
+            external_user_id=thread.external_user_id,
+            display_name=thread.external_user_display_name,
+            last_seen_at=thread.updated_at,
+        )
+        for thread in await repository.list_threads_for_connection(
+            session,
+            connection_id=connection.id,
+        )
+    ]
     return ChatProviderConnectionRead(
         id=connection.id,
         organization_id=connection.organization_id,
@@ -635,6 +646,7 @@ async def connection_response(
         secret_handle_ids=await connection_secret_handle_ids(session, connection),
         config=public_connection_config(connection),
         is_active=connection.is_active,
+        known_identities=known_identities,
         created_at=connection.created_at,
         updated_at=connection.updated_at,
     )
@@ -896,147 +908,6 @@ async def refresh_workspace_chat_provider_pairing_qr(
         connection_id,
     )
     return await whatsapp_pairing_response(connection, refresh_qr=True)
-
-
-async def test_workspace_chat_provider_connection(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    workspace_id: uuid.UUID,
-    connection_id: uuid.UUID,
-    payload: ChatProviderTestMessageRequest,
-    *,
-    session_factory: AgentSessionFactory | None = None,
-) -> ChatProviderTestMessageResponse:
-    await require_workspace_admin(session, user, organization_id, workspace_id)
-    connection = await repository.get_connection(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        connection_id=connection_id,
-    )
-    if connection is None:
-        raise ChatProviderConnectionNotFoundError("chat provider connection not found")
-    if not connection.is_active:
-        raise InvalidChatProviderConnectionError("chat provider connection is inactive")
-
-    event_id = f"test:{uuid.uuid4()}"
-    message = ProviderTextMessage(
-        event_id=event_id,
-        external_thread_id=payload.external_thread_id,
-        external_user_id=payload.external_user_id or str(user.id),
-        external_user_display_name=payload.external_user_display_name or user.email,
-        text=payload.text,
-        raw={
-            "test": True,
-            "text": payload.text,
-            "threadId": payload.external_thread_id,
-            "senderId": payload.external_user_id or str(user.id),
-            "senderDisplayName": payload.external_user_display_name or user.email,
-        },
-    )
-    event = ChatProviderEvent(
-        organization_id=connection.organization_id,
-        workspace_id=connection.workspace_id,
-        connection_id=connection.id,
-        provider=connection.provider,
-        external_event_id=message.event_id,
-        direction="inbound",
-        event_type="message.test",
-        status="processing",
-        payload={"test": message.raw},
-    )
-    session.add(event)
-    await session.flush()
-
-    try:
-        if not sender_allowed(connection, message):
-            event.status = "ignored"
-            event.error = f"{provider_display_name(connection.provider)} sender is not allowed"
-            event.processed_at = datetime.now(UTC)
-            await session.flush()
-            return ChatProviderTestMessageResponse(
-                ok=True,
-                processed=False,
-                eventId=event_id,
-                message=event.error,
-            )
-
-        actor = await provider_actor(session, connection)
-        thread, conversation_id, agent_id = await provider_thread_conversation(
-            session,
-            connection,
-            actor,
-            message,
-        )
-        event.thread_id = thread.id
-        event.conversation_id = conversation_id
-        thread.last_external_message_id = message.event_id
-        await session.flush()
-        stream = await agent_service.stream_agent_chat(
-            session,
-            actor,
-            connection.organization_id,
-            agent_id,
-            AgentChatRequest(
-                id=str(conversation_id),
-                messages=[
-                    AgentChatMessage(
-                        role="user",
-                        parts=text_parts(message.text),
-                    )
-                ],
-            ),
-            workspace_id=connection.workspace_id,
-            session_factory=session_factory,
-        )
-        await session.commit()
-        async for _chunk in stream:
-            pass
-        reply_text = await latest_assistant_text(session, conversation_id)
-        if not reply_text:
-            reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
-
-        outbound_event = ChatProviderEvent(
-            organization_id=connection.organization_id,
-            workspace_id=connection.workspace_id,
-            connection_id=connection.id,
-            thread_id=thread.id,
-            conversation_id=conversation_id,
-            provider=connection.provider,
-            external_event_id=f"test-reply:{message.event_id.removeprefix('test:')}",
-            direction="outbound",
-            event_type="message.test_reply",
-            status="processed",
-            payload={
-                "test": {
-                    "delivery": "skipped",
-                    "replyToEventId": message.event_id,
-                    "text": reply_text,
-                }
-            },
-            processed_at=datetime.now(UTC),
-        )
-        session.add(outbound_event)
-        event.status = "processed"
-        event.processed_at = datetime.now(UTC)
-        await session.flush()
-    except Exception as exc:
-        event.status = "failed"
-        event.error = str(exc)
-        event.processed_at = datetime.now(UTC)
-        await session.flush()
-        raise
-
-    return ChatProviderTestMessageResponse(
-        ok=True,
-        processed=True,
-        eventId=event_id,
-        conversationId=conversation_id,
-        threadId=thread.id,
-        replyText=reply_text,
-        message="External delivery skipped for test message.",
-    )
 
 
 def hmac_compare(left: str, right: str) -> bool:

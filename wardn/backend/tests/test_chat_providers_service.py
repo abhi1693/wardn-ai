@@ -22,10 +22,7 @@ from app.modules.chat_providers.models import (
     ChatProviderEvent,
     ChatProviderThread,
 )
-from app.modules.chat_providers.schemas import (
-    ChatProviderConnectionCreate,
-    ChatProviderTestMessageRequest,
-)
+from app.modules.chat_providers.schemas import ChatProviderConnectionCreate
 from app.modules.secrets.provider import ResolvedSecret
 from app.modules.users.models import User
 
@@ -112,6 +109,56 @@ def test_normalize_whatsapp_config_replaces_loopback_with_deployment_bridge() ->
 
     assert config["bridge_base_url"] == "http://wardn-ai-whatsapp-bridge:8090"
     assert config["bridge_user_id"] == "95273632"
+
+
+def test_provider_config_defaults_allow_all_senders() -> None:
+    assert service.normalize_connection_config(
+        service.PROVIDER_WHATSAPP_LOCAL,
+        {},
+    )["allow_all_senders"] is True
+    assert service.normalize_connection_config(
+        service.PROVIDER_TELEGRAM,
+        {},
+    )["allow_all_senders"] is True
+
+
+@pytest.mark.asyncio
+async def test_connection_response_includes_known_provider_identities(monkeypatch) -> None:
+    connection = make_connection()
+    now = datetime(2026, 8, 2, tzinfo=UTC)
+    connection.created_at = now
+    connection.updated_at = now
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="164750684061759@lid",
+        external_user_id="164750684061759@lid",
+        external_user_display_name="Abhimanyu Saharan",
+    )
+    thread.created_at = now
+    thread.updated_at = now
+
+    async def connection_secret_handle_ids(*args, **kwargs):
+        return {}
+
+    async def list_threads_for_connection(*args, **kwargs):
+        return [thread]
+
+    monkeypatch.setattr(service, "connection_secret_handle_ids", connection_secret_handle_ids)
+    monkeypatch.setattr(
+        service.repository,
+        "list_threads_for_connection",
+        list_threads_for_connection,
+    )
+
+    response = await service.connection_response(FakeSession(), connection)
+
+    assert len(response.known_identities) == 1
+    assert response.known_identities[0].display_name == "Abhimanyu Saharan"
+    assert response.known_identities[0].external_thread_id == "164750684061759@lid"
 
 
 @pytest.mark.asyncio
@@ -214,12 +261,20 @@ async def test_create_connection_writes_secret_values_and_attaches_handles(monke
             and item.connection_id == connection.id
         }
 
+    async def list_threads_for_connection(*args, **kwargs):
+        return []
+
     monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
     monkeypatch.setattr(service, "write_secret_values", write_secret_values)
     monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
     monkeypatch.setattr(service, "validate_secret_handles", validate_secret_handles)
     monkeypatch.setattr(service, "activate_managed_secret", activate_managed_secret)
     monkeypatch.setattr(service, "connection_secret_handle_ids", connection_secret_handle_ids)
+    monkeypatch.setattr(
+        service.repository,
+        "list_threads_for_connection",
+        list_threads_for_connection,
+    )
 
     session = FakeSession()
     response = await service.create_workspace_chat_provider_connection(
@@ -490,6 +545,7 @@ async def test_process_provider_text_message_ignores_disallowed_sender(monkeypat
     fake_session = FakeSession()
     connection = make_connection()
     connection.config = {
+        "allow_all_senders": False,
         "allowed_sender_ids": ["15550000000@s.whatsapp.net"],
         "outbound_webhook_url": "http://bridge.local/send",
     }
@@ -525,90 +581,6 @@ async def test_process_provider_text_message_ignores_disallowed_sender(monkeypat
     assert fake_session.commits == 0
     assert inbound_event.status == "ignored"
     assert inbound_event.error == "WhatsApp sender is not allowed"
-
-
-@pytest.mark.asyncio
-async def test_test_workspace_chat_provider_connection_returns_reply_without_delivery(
-    monkeypatch,
-) -> None:
-    fake_session = FakeSession()
-    connection = make_connection()
-    user = User(id=uuid4(), email="admin@example.com", is_active=True)
-    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
-    thread = ChatProviderThread(
-        id=uuid4(),
-        organization_id=connection.organization_id,
-        workspace_id=connection.workspace_id,
-        connection_id=connection.id,
-        conversation_id=uuid4(),
-        external_thread_id="test-thread",
-        external_user_id=str(user.id),
-        external_user_display_name="Wardn test",
-    )
-    agent_id = uuid4()
-    sent: list[object] = []
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None
-
-    async def get_connection(*args, **kwargs):
-        return connection
-
-    async def provider_actor(*args, **kwargs):
-        return actor
-
-    async def provider_thread_conversation(*args, **kwargs):
-        return thread, thread.conversation_id, agent_id
-
-    async def stream_agent_chat(*args, **kwargs):
-        async def stream():
-            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
-
-        return stream()
-
-    async def latest_assistant_text(*args, **kwargs):
-        return "The workspace is ready."
-
-    async def send_provider_text_message(*args, **kwargs):
-        sent.append(args)
-        return {}
-
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-    monkeypatch.setattr(service.repository, "get_connection", get_connection)
-    monkeypatch.setattr(service, "provider_actor", provider_actor)
-    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
-    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
-    monkeypatch.setattr(service, "latest_assistant_text", latest_assistant_text)
-    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
-
-    response = await service.test_workspace_chat_provider_connection(
-        fake_session,
-        user,
-        connection.organization_id,
-        connection.workspace_id,
-        connection.id,
-        ChatProviderTestMessageRequest(
-            text="Check this provider",
-            externalThreadId="test-thread",
-            externalUserId=str(user.id),
-            externalUserDisplayName="Wardn test",
-        ),
-    )
-
-    outbound_event = next(
-        item
-        for item in fake_session.added
-        if isinstance(item, ChatProviderEvent) and item.direction == "outbound"
-    )
-
-    assert response.ok
-    assert response.processed
-    assert response.reply_text == "The workspace is ready."
-    assert response.conversation_id == thread.conversation_id
-    assert outbound_event.status == "processed"
-    assert outbound_event.event_type == "message.test_reply"
-    assert outbound_event.payload["test"]["delivery"] == "skipped"
-    assert sent == []
 
 
 @pytest.mark.asyncio
