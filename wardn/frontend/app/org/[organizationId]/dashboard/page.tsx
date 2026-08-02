@@ -1,11 +1,21 @@
-import { Activity, BookOpen, Boxes, Building2 } from "lucide-react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
-import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  OrganizationDashboard,
+  type WorkspaceDashboardDigest,
+} from "@/components/organisms/organization-dashboard";
+import type {
+  AgentListResponse,
+  LLMProviderCredentialListResponse,
+  MCPCatalogSourceListResponse,
+  MCPServerInstallationListResponse,
+  MCPServerInstallationRead,
+  ResourceLimitListResponse,
+  ResourceLimitRead,
+  UsageSummaryResponse,
+  WorkspaceRead,
+} from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
 import {
   getWorkspaceContext,
@@ -16,16 +26,119 @@ type OrganizationDashboardPageProps = {
   params: Promise<{ organizationId: string }>;
 };
 
-async function getCatalogSourceCount(context: WorkspaceContext) {
-  const organizationId = context.selectedOrganization?.id;
-  if (!organizationId) {
-    return 0;
+async function optionalBackendJson<T>(path: string) {
+  try {
+    return await backendJson<T>(path, { timeoutMs: 15_000 });
+  } catch {
+    return null;
   }
+}
 
-  const payload = await backendJson<MCPCatalogSourceListResponse>(
+function runtimeLabel(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === "remote") {
+    return "Remote endpoint";
+  }
+  if (normalized === "oci") {
+    return "OCI";
+  }
+  if (normalized === "npm") {
+    return "NPM";
+  }
+  if (normalized === "uvx") {
+    return "UVX";
+  }
+  return value;
+}
+
+function installationNeedsAttention(installation: MCPServerInstallationRead) {
+  return installation.status !== "enabled" || Boolean(installation.installError);
+}
+
+function limitBelongsToOrganization(
+  limit: ResourceLimitRead,
+  organizationId: string,
+  workspaces: WorkspaceRead[],
+) {
+  if (limit.scopeType === "organization") {
+    return limit.scopeId === organizationId;
+  }
+  if (limit.scopeType === "workspace" && limit.scopeId) {
+    return workspaces.some((workspace) => workspace.id === limit.scopeId);
+  }
+  return false;
+}
+
+async function getCatalogSources(organizationId: string) {
+  const payload = await optionalBackendJson<MCPCatalogSourceListResponse>(
     `/api/v1/organizations/${encodeURIComponent(organizationId)}/mcp/catalog/sources`
   );
-  return payload.sources.length;
+  return payload?.sources ?? null;
+}
+
+async function getProviderCredentials(organizationId: string) {
+  const payload = await optionalBackendJson<LLMProviderCredentialListResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/llm/provider-credentials`
+  );
+  return payload?.credentials ?? null;
+}
+
+async function getResourceLimits(context: WorkspaceContext) {
+  const organization = context.selectedOrganization;
+  if (!organization) {
+    return null;
+  }
+  const payload = await optionalBackendJson<ResourceLimitListResponse>("/api/v1/limits");
+  return (
+    payload?.limits.filter((limit) =>
+      limitBelongsToOrganization(limit, organization.id, context.workspaces)
+    ) ?? null
+  );
+}
+
+async function getUsageSummary(organizationId: string) {
+  return optionalBackendJson<UsageSummaryResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/usage/summary`
+  );
+}
+
+async function getWorkspaceDigest(
+  organizationId: string,
+  workspace: WorkspaceRead,
+): Promise<WorkspaceDashboardDigest> {
+  const organizationPath = `/api/v1/organizations/${encodeURIComponent(organizationId)}`;
+  const workspacePath = `${organizationPath}/workspaces/${encodeURIComponent(workspace.id)}`;
+  const [installationsPayload, agentsPayload] = await Promise.all([
+    optionalBackendJson<MCPServerInstallationListResponse>(
+      `${workspacePath}/mcp/registry/installed-servers`
+    ),
+    optionalBackendJson<AgentListResponse>(`${workspacePath}/agents`),
+  ]);
+  const installations = installationsPayload?.installations ?? null;
+  const agents = agentsPayload?.agents ?? null;
+  const runtimeCounts =
+    installations?.reduce<Record<string, number>>((counts, installation) => {
+      const label = runtimeLabel(installation.installType);
+      counts[label] = (counts[label] ?? 0) + 1;
+      return counts;
+    }, {}) ?? null;
+
+  return {
+    activeAgentCount: agents?.filter((agent) => agent.isActive).length ?? null,
+    agentCount: agents?.length ?? null,
+    agentLoadFailed: agents === null,
+    attentionInstallationCount:
+      installations?.filter((installation) => installationNeedsAttention(installation)).length ??
+      null,
+    enabledInstallationCount:
+      installations?.filter((installation) => installation.status === "enabled").length ?? null,
+    installationCount: installations?.length ?? null,
+    installationLoadFailed: installations === null,
+    runtimeCounts,
+    toolCount: agents?.reduce((sum, agent) => sum + agent.toolCount, 0) ?? null,
+    updateCount: installations?.filter((installation) => installation.updateAvailable).length ?? null,
+    workspace,
+  };
 }
 
 export default async function OrganizationDashboardPage({
@@ -34,34 +147,23 @@ export default async function OrganizationDashboardPage({
   const { organizationId } = await params;
   const workspaceContext = await getWorkspaceContext({ organizationId });
   const organization = workspaceContext.selectedOrganization;
-  const workspaces = workspaceContext.workspaces;
 
   if (!organization) {
     notFound();
   }
 
-  const catalogSourceCount = await getCatalogSourceCount(workspaceContext);
-  const activeWorkspaces = workspaces.filter((workspace) => workspace.status === "active").length;
-  const overviewCards = [
-    {
-      label: "Organization",
-      value: organization.status,
-      detail: organization.slug,
-      icon: Building2,
-    },
-    {
-      label: "Workspaces",
-      value: workspaces.length.toString(),
-      detail: `${activeWorkspaces} active`,
-      icon: Boxes,
-    },
-    {
-      label: "Catalog sources",
-      value: catalogSourceCount.toString(),
-      detail: "Upstream URLs",
-      icon: BookOpen,
-    },
-  ];
+  const [catalogSources, providerCredentials, resourceLimits, usage, workspaceDigests] =
+    await Promise.all([
+      getCatalogSources(organization.id),
+      getProviderCredentials(organization.id),
+      getResourceLimits(workspaceContext),
+      getUsageSummary(organization.id),
+      Promise.all(
+        workspaceContext.workspaces.map((workspace) =>
+          getWorkspaceDigest(organization.id, workspace)
+        )
+      ),
+    ]);
 
   return (
     <AppShell
@@ -70,81 +172,14 @@ export default async function OrganizationDashboardPage({
       title="Dashboard"
       workspaceContext={workspaceContext}
     >
-      <section className="grid gap-4 md:grid-cols-3">
-        {overviewCards.map((card) => {
-          const Icon = card.icon;
-
-          return (
-            <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none" key={card.label}>
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-[var(--on-surface-variant)]">
-                      {card.label}
-                    </div>
-                    <div className="mt-3 text-3xl font-bold leading-9 text-[var(--on-surface)]">
-                      {card.value}
-                    </div>
-                    <div className="mt-1 text-sm leading-5 text-[var(--on-surface-variant)]">
-                      {card.detail}
-                    </div>
-                  </div>
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container-highest)] text-[var(--on-surface-variant)]">
-                    <Icon className="size-5" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </section>
-
-      <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4 max-md:flex-col">
-            <div>
-              <CardTitle>Organization overview</CardTitle>
-              <p className="mt-1 text-sm leading-5 text-[var(--on-surface-variant)]">
-                A central view for org-wide activity, health, and runtime adoption.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/workspaces`}>
-                  View workspaces
-                </Link>
-              </Button>
-              <Button asChild size="sm">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/catalog`}>
-                  View catalog
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-[280px_1fr]">
-          <div className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
-                <Activity className="size-4" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold leading-5 text-[var(--on-surface)]">
-                  Overview foundation
-                </div>
-                <div className="text-xs leading-4 text-[var(--on-surface-variant)]">
-                  Ready for org metrics
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="rounded-lg border border-dashed border-[var(--outline-variant)] bg-[var(--surface)] p-4 text-sm leading-5 text-[var(--on-surface-variant)]">
-            This page is the default organization landing area. We can add charts, recent
-            workspace activity, server adoption, and operational alerts here as those data
-            sources are finalized.
-          </div>
-        </CardContent>
-      </Card>
+      <OrganizationDashboard
+        catalogSources={catalogSources}
+        organization={organization}
+        providerCredentials={providerCredentials}
+        resourceLimits={resourceLimits}
+        usage={usage}
+        workspaceDigests={workspaceDigests}
+      />
     </AppShell>
   );
 }

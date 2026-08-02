@@ -206,7 +206,7 @@ export function AppShell({
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[252px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
+      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[252px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:overflow-hidden max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
         <div className="mb-6 px-2 max-lg:mb-3">
           <div className="flex items-center gap-3">
             <BrandMark className="size-8" sizes="32px" />
@@ -219,7 +219,7 @@ export function AppShell({
         </div>
 
         <nav
-          className="flex-1 space-y-1 max-lg:flex max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
+          className="flex-1 space-y-1 max-lg:flex max-lg:max-w-full max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
           aria-label="Primary"
         >
           {primaryNavItems.map((item) => {
