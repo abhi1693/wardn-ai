@@ -7,10 +7,15 @@ import {
   FlaskConical,
   KeyRound,
   Loader2,
+  MessageCircle,
+  Pause,
+  Play,
   Plus,
-  Power,
-  PowerOff,
+  QrCode,
+  RefreshCw,
+  Search,
   Send,
+  Settings2,
   ShieldCheck,
   Smartphone,
   Trash2,
@@ -18,18 +23,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+import { StatusDot } from "@/components/atoms/status-dot";
 import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -50,6 +51,7 @@ import {
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
+  ChatProviderPairingStatusResponse,
   ChatProviderTestMessageResponse,
   SecretHandleRead,
   SecretStoreRead,
@@ -61,12 +63,15 @@ import {
 import {
   workspaceChatProvidersCreate,
   workspaceChatProvidersDelete,
+  workspaceChatProvidersPairingStatus,
+  workspaceChatProvidersRefreshPairingQr,
   workspaceChatProvidersTestMessage,
   workspaceChatProvidersUpdate,
 } from "@/lib/api/generated/workspace-chat-providers/workspace-chat-providers";
 import { cn } from "@/lib/utils";
 
 type ProviderType = "whatsapp_local" | "telegram";
+type ProviderFilter = "active" | "needs_setup" | "all";
 
 type ChatProvidersClientProps = {
   connections: ChatProviderConnectionRead[];
@@ -98,6 +103,9 @@ const providerOptions: ProviderOption[] = [
   },
 ];
 
+const connectedStatuses = new Set(["connected", "waiting_for_scan"]);
+const needsSetupStatuses = new Set(["not_configured", "needs_pairing", "error"]);
+
 function randomSecret() {
   const cryptoValue = globalThis.crypto?.randomUUID?.();
   if (cryptoValue) {
@@ -106,19 +114,30 @@ function randomSecret() {
   return `wardn_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
+function defaultBridgeUserId() {
+  return Date.now().toString().slice(-8);
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-function boolConfig(config: unknown, key: string) {
-  return record(config)[key] === true;
+function boolConfig(config: unknown, ...keys: string[]) {
+  const values = record(config);
+  return keys.some((key) => values[key] === true);
 }
 
-function stringConfig(config: unknown, key: string) {
-  const value = record(config)[key];
-  return typeof value === "string" ? value : "";
+function stringConfig(config: unknown, ...keys: string[]) {
+  const values = record(config);
+  for (const key of keys) {
+    const value = values[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 }
 
 function stringList(value: string) {
@@ -132,10 +151,6 @@ function providerOption(provider: string) {
   return providerOptions.find((option) => option.value === provider) ?? providerOptions[0];
 }
 
-function secretHandleName(handlesById: Map<string, SecretHandleRead>, handleId: string) {
-  return handlesById.get(handleId)?.displayName ?? handleId.slice(0, 8);
-}
-
 function providerWebhookPath(connection: ChatProviderConnectionRead) {
   if (connection.provider === "telegram") {
     return getChatProviderWebhooksTelegramReceiveUrl(connection.id);
@@ -143,19 +158,145 @@ function providerWebhookPath(connection: ChatProviderConnectionRead) {
   return getChatProviderWebhooksWhatsappLocalReceiveUrl(connection.id);
 }
 
-function providerSecretLabels(connection: ChatProviderConnectionRead) {
-  const secretIds = connection.secretHandleIds ?? {};
-  return Object.keys(secretIds).sort();
+function displayDate(value?: string | null) {
+  if (!value) {
+    return "Never";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+  }).format(date);
 }
 
-function providerCounts(connections: ChatProviderConnectionRead[]) {
-  return {
-    active: connections.filter((connection) => connection.isActive).length,
-    telegram: connections.filter((connection) => connection.provider === "telegram").length,
-    total: connections.length,
-    whatsapp: connections.filter((connection) => connection.provider === "whatsapp_local")
-      .length,
-  };
+function displayHost(value: string) {
+  if (!value) {
+    return "Not configured";
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.host;
+  } catch {
+    return value;
+  }
+}
+
+function filterLabel(filter: ProviderFilter) {
+  if (filter === "all") {
+    return "All";
+  }
+  if (filter === "needs_setup") {
+    return "Needs setup";
+  }
+  return "Active";
+}
+
+function statusLabel(
+  connection: ChatProviderConnectionRead,
+  pairing?: ChatProviderPairingStatusResponse
+) {
+  if (!connection.isActive) {
+    return "Paused";
+  }
+  if (connection.provider !== "whatsapp_local") {
+    return "Active";
+  }
+  if (!pairing) {
+    return "Checking";
+  }
+  if (pairing.status === "connected") {
+    return "Connected";
+  }
+  if (pairing.status === "waiting_for_scan") {
+    return "Waiting for scan";
+  }
+  if (pairing.status === "not_configured") {
+    return "Bridge missing";
+  }
+  if (pairing.status === "error") {
+    return "Bridge error";
+  }
+  if (pairing.status === "needs_pairing") {
+    return "Pairing required";
+  }
+  return "Disconnected";
+}
+
+function statusTone(
+  connection: ChatProviderConnectionRead,
+  pairing?: ChatProviderPairingStatusResponse
+) {
+  if (!connection.isActive) {
+    return "neutral" as const;
+  }
+  if (connection.provider !== "whatsapp_local") {
+    return "success" as const;
+  }
+  if (!pairing || pairing.status === "waiting_for_scan") {
+    return "warning" as const;
+  }
+  if (pairing.status === "connected") {
+    return "success" as const;
+  }
+  if (pairing.status === "error" || pairing.status === "not_configured") {
+    return "danger" as const;
+  }
+  return "warning" as const;
+}
+
+function badgeVariant(
+  connection: ChatProviderConnectionRead,
+  pairing?: ChatProviderPairingStatusResponse
+) {
+  const tone = statusTone(connection, pairing);
+  if (tone === "success") {
+    return "success" as const;
+  }
+  if (tone === "danger") {
+    return "destructive" as const;
+  }
+  return "secondary" as const;
+}
+
+function connectionMatchesFilter(
+  connection: ChatProviderConnectionRead,
+  filter: ProviderFilter,
+  pairing?: ChatProviderPairingStatusResponse
+) {
+  if (filter === "all") {
+    return true;
+  }
+  if (filter === "needs_setup") {
+    return (
+      !connection.isActive ||
+      (connection.provider === "whatsapp_local" &&
+        (!pairing || needsSetupStatuses.has(pairing.status)))
+    );
+  }
+  if (!connection.isActive) {
+    return false;
+  }
+  return connection.provider !== "whatsapp_local" || !pairing || connectedStatuses.has(pairing.status);
+}
+
+function providerCounts(
+  connections: ChatProviderConnectionRead[],
+  pairingStatuses: Record<string, ChatProviderPairingStatusResponse>
+) {
+  const whatsapp = connections.filter((connection) => connection.provider === "whatsapp_local");
+  const active = connections.filter((connection) => connection.isActive).length;
+  const connected = whatsapp.filter(
+    (connection) => pairingStatuses[connection.id]?.status === "connected"
+  ).length;
+  const needsSetup = connections.filter((connection) =>
+    connectionMatchesFilter(connection, "needs_setup", pairingStatuses[connection.id])
+  ).length;
+  return { active, connected, needsSetup, total: connections.length, whatsapp: whatsapp.length };
 }
 
 function TestDialog({
@@ -220,9 +361,9 @@ function TestDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Test Provider</DialogTitle>
+          <DialogTitle>Send test message</DialogTitle>
           <DialogDescription>{connection?.name ?? "Workspace provider"}</DialogDescription>
         </DialogHeader>
 
@@ -294,10 +435,7 @@ function TestDialog({
           ) : null}
 
           <DialogFooter>
-            <Button
-              disabled={isSubmitting || text.trim().length === 0}
-              type="submit"
-            >
+            <Button disabled={isSubmitting || text.trim().length === 0} type="submit">
               {isSubmitting ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
@@ -312,48 +450,626 @@ function TestDialog({
   );
 }
 
+function ConnectProviderDialog({
+  activeSecretStores,
+  connectionCount,
+  isCreating,
+  onCreate,
+  onOpenChange,
+  open,
+}: {
+  activeSecretStores: SecretStoreRead[];
+  connectionCount: number;
+  isCreating: boolean;
+  onCreate: (payload: ChatProviderConnectionCreate) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  const [provider, setProvider] = useState<ProviderType>("whatsapp_local");
+  const [name, setName] = useState("Personal WhatsApp");
+  const [bridgeBaseUrl, setBridgeBaseUrl] = useState("http://localhost:8090");
+  const [bridgeUserId, setBridgeUserId] = useState(defaultBridgeUserId);
+  const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
+  const [webhookSecret, setWebhookSecret] = useState(randomSecret);
+  const [botToken, setBotToken] = useState("");
+  const [allowAllSenders, setAllowAllSenders] = useState(true);
+  const [allowedSenderIds, setAllowedSenderIds] = useState("");
+  const [allowedChatIds, setAllowedChatIds] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  function applyProviderDefaults(nextProvider: ProviderType) {
+    setProvider(nextProvider);
+    setName(
+      nextProvider === "telegram"
+        ? "Workspace Telegram"
+        : connectionCount > 0
+          ? `Personal WhatsApp ${connectionCount + 1}`
+          : "Personal WhatsApp"
+    );
+    setAdvancedOpen(false);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedName = name.trim();
+    const normalizedBridgeUserId = bridgeUserId.trim() || defaultBridgeUserId();
+    const secretValues: Record<string, string> = { webhook_secret: webhookSecret.trim() };
+    if (provider === "telegram") {
+      secretValues.bot_token = botToken.trim();
+    } else {
+      secretValues.outbound_secret = webhookSecret.trim();
+    }
+
+    const payload: ChatProviderConnectionCreate =
+      provider === "telegram"
+        ? {
+            config: {
+              allowAllSenders: allowAllSenders,
+              allowedChatIds: stringList(allowedChatIds),
+              allowedSenderIds: stringList(allowedSenderIds),
+              replyOnUnsupportedMessages: false,
+            },
+            displayName: normalizedName,
+            externalId: normalizedBridgeUserId,
+            name: normalizedName,
+            provider,
+            secretStoreId,
+            secretValues,
+          }
+        : {
+            config: {
+              accountName: normalizedBridgeUserId,
+              allowAllSenders: allowAllSenders,
+              allowedChatIds: stringList(allowedChatIds),
+              allowedSenderIds: stringList(allowedSenderIds),
+              bridgeBaseUrl: bridgeBaseUrl.trim(),
+              bridgeUserId: normalizedBridgeUserId,
+              replyOnUnsupportedMessages: false,
+            },
+            displayName: normalizedName,
+            externalId: normalizedBridgeUserId,
+            name: normalizedName,
+            provider,
+            secretStoreId,
+            secretValues,
+          };
+
+    await onCreate(payload);
+    setWebhookSecret(randomSecret());
+    setBotToken("");
+  }
+
+  const canCreate =
+    name.trim().length > 0 &&
+    secretStoreId.length > 0 &&
+    webhookSecret.trim().length > 0 &&
+    (provider !== "telegram" || botToken.trim().length > 0) &&
+    (provider !== "whatsapp_local" || bridgeBaseUrl.trim().length > 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Connect provider</DialogTitle>
+          <DialogDescription>Pair a workspace chat entrypoint.</DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {providerOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  className={cn(
+                    "flex min-h-20 items-start gap-3 rounded-md border bg-card p-3 text-left transition-colors",
+                    provider === option.value
+                      ? "border-ring ring-2 ring-ring/15"
+                      : "border-border hover:border-ring/40"
+                  )}
+                  key={option.value}
+                  onClick={() => applyProviderDefaults(option.value)}
+                  type="button"
+                >
+                  <div className="flex size-8 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                    <Icon className="size-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-foreground">
+                      {option.shortLabel}
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {option.value === "whatsapp_local"
+                        ? "Personal number pairing"
+                        : "Bot token integration"}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="chat-provider-name">Name</Label>
+              <Input
+                id="chat-provider-name"
+                maxLength={100}
+                onChange={(event) => setName(event.target.value)}
+                required
+                value={name}
+              />
+            </div>
+            {provider === "whatsapp_local" ? (
+              <div className="space-y-2">
+                <Label htmlFor="chat-provider-pairing">Pairing</Label>
+                <Input
+                  disabled
+                  id="chat-provider-pairing"
+                  value="WhatsApp Linked Devices QR"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="chat-provider-bot-token">Bot token</Label>
+                <Input
+                  autoComplete="off"
+                  id="chat-provider-bot-token"
+                  onChange={(event) => setBotToken(event.target.value)}
+                  required
+                  type="password"
+                  value={botToken}
+                />
+              </div>
+            )}
+          </div>
+
+          <label className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
+            <input
+              checked={allowAllSenders}
+              className="size-4 accent-primary"
+              onChange={(event) => setAllowAllSenders(event.target.checked)}
+              type="checkbox"
+            />
+            Allow all senders
+          </label>
+
+          {!allowAllSenders ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="chat-provider-senders">Sender IDs</Label>
+                <textarea
+                  className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                  id="chat-provider-senders"
+                  onChange={(event) => setAllowedSenderIds(event.target.value)}
+                  value={allowedSenderIds}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="chat-provider-chats">Chat IDs</Label>
+                <textarea
+                  className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
+                  id="chat-provider-chats"
+                  onChange={(event) => setAllowedChatIds(event.target.value)}
+                  value={allowedChatIds}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rounded-md border border-border">
+            <button
+              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium"
+              onClick={() => setAdvancedOpen((current) => !current)}
+              type="button"
+            >
+              <span className="flex items-center gap-2">
+                <Settings2 className="size-4 text-muted-foreground" />
+                Advanced
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {advancedOpen ? "Hide" : "Show"}
+              </span>
+            </button>
+            {advancedOpen ? (
+              <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="chat-provider-secret-store">Secret backend</Label>
+                  {activeSecretStores.length > 0 ? (
+                    <Select onValueChange={setSecretStoreId} value={secretStoreId}>
+                      <SelectTrigger id="chat-provider-secret-store">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeSecretStores.map((store) => (
+                          <SelectItem key={store.id} value={store.id}>
+                            {store.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input disabled value="Connect a secret backend first" />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="chat-provider-external">
+                    {provider === "whatsapp_local" ? "Bridge user ID" : "External ID"}
+                  </Label>
+                  <Input
+                    id="chat-provider-external"
+                    maxLength={255}
+                    onChange={(event) => setBridgeUserId(event.target.value)}
+                    required
+                    value={bridgeUserId}
+                  />
+                </div>
+                {provider === "whatsapp_local" ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="chat-provider-bridge">WhatsApp gateway URL</Label>
+                    <Input
+                      id="chat-provider-bridge"
+                      maxLength={2048}
+                      onChange={(event) => setBridgeBaseUrl(event.target.value)}
+                      required
+                      value={bridgeBaseUrl}
+                    />
+                  </div>
+                ) : null}
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="chat-provider-webhook-secret">Webhook secret</Label>
+                    <Button
+                      onClick={() => setWebhookSecret(randomSecret())}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <KeyRound className="size-4" />
+                      Generate
+                    </Button>
+                  </div>
+                  <Input
+                    autoComplete="off"
+                    id="chat-provider-webhook-secret"
+                    onChange={(event) => setWebhookSecret(event.target.value)}
+                    required
+                    value={webhookSecret}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {activeSecretStores.length === 0 ? (
+            <AsyncFeedback variant="error">
+              A secret backend is required before creating chat providers.
+            </AsyncFeedback>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              onClick={() => onOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button disabled={!canCreate || isCreating} type="submit">
+              {isCreating ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              {isCreating ? "Creating" : "Create connection"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PairingDialog({
+  connection,
+  onCheck,
+  onOpenChange,
+  onRefresh,
+  open,
+  pairingStatus,
+  busy,
+}: {
+  busy: boolean;
+  connection: ChatProviderConnectionRead | null;
+  onCheck: (connection: ChatProviderConnectionRead) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+  onRefresh: (connection: ChatProviderConnectionRead) => Promise<void>;
+  open: boolean;
+  pairingStatus?: ChatProviderPairingStatusResponse;
+}) {
+  const isConnected = pairingStatus?.status === "connected";
+  const isWaiting = pairingStatus?.status === "waiting_for_scan";
+  const qrPayload = pairingStatus?.qrPayload ?? "";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Connect WhatsApp</DialogTitle>
+          <DialogDescription>{connection?.name ?? "Workspace WhatsApp"}</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="flex min-h-[220px] items-center justify-center rounded-md border border-border bg-muted/30 p-4">
+            {qrPayload ? (
+              <QRCodeSVG
+                className="rounded-sm bg-white p-2"
+                level="M"
+                size={184}
+                value={qrPayload}
+              />
+            ) : (
+              <div className="text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-md border border-border bg-card text-muted-foreground">
+                  {busy ? (
+                    <Loader2 className="size-5 animate-spin" />
+                  ) : (
+                    <QrCode className="size-5" />
+                  )}
+                </div>
+                <div className="mt-3 text-sm font-medium">
+                  {isConnected ? "Connected" : "No QR loaded"}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              {[
+                { label: "Create connection", done: true },
+                { label: "Scan QR", done: isConnected || isWaiting },
+                { label: "Send test", done: isConnected },
+              ].map((step, index) => (
+                <div
+                  className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm"
+                  key={step.label}
+                >
+                  <div
+                    className={cn(
+                      "flex size-6 items-center justify-center rounded-full border text-xs font-semibold",
+                      step.done
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-border bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {index + 1}
+                  </div>
+                  <span>{step.label}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <StatusDot
+                    tone={
+                      pairingStatus?.status === "connected"
+                        ? "success"
+                        : pairingStatus?.status === "error" ||
+                            pairingStatus?.status === "not_configured"
+                          ? "danger"
+                          : "warning"
+                    }
+                  />
+                  <div className="truncate text-sm font-medium">
+                    {pairingStatus ? statusLabel(connection!, pairingStatus) : "Checking"}
+                  </div>
+                </div>
+                <Badge variant={isConnected ? "success" : "secondary"}>
+                  {isConnected ? "Ready" : "Pairing"}
+                </Badge>
+              </div>
+              {pairingStatus?.message ? (
+                <div className="mt-2 text-sm leading-5 text-muted-foreground">
+                  {pairingStatus.message}
+                </div>
+              ) : null}
+              {pairingStatus?.bridgeBaseUrl ? (
+                <div className="mt-3 grid gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Bridge</span>
+                    <span className="truncate text-foreground">
+                      {displayHost(pairingStatus.bridgeBaseUrl)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Session</span>
+                    <span className="truncate text-foreground">{pairingStatus.bridgeUserId}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={!connection || busy}
+                onClick={() => connection && onRefresh(connection)}
+                type="button"
+              >
+                {busy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <QrCode className="size-4" />
+                )}
+                {qrPayload ? "Refresh QR" : "Show QR"}
+              </Button>
+              <Button
+                disabled={!connection || busy}
+                onClick={() => connection && onCheck(connection)}
+                type="button"
+                variant="outline"
+              >
+                <RefreshCw className="size-4" />
+                Check status
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ChatProvidersClient({
   connections,
   organizationId,
-  secretHandles,
   secretStores,
   workspaceId,
 }: ChatProvidersClientProps) {
   const router = useRouter();
-  const counts = useMemo(() => providerCounts(connections), [connections]);
-  const handlesById = useMemo(
-    () => new Map(secretHandles.map((handle) => [handle.id, handle])),
-    [secretHandles]
-  );
   const activeSecretStores = secretStores.filter((store) => store.isActive);
-  const [provider, setProvider] = useState<ProviderType>("whatsapp_local");
-  const [name, setName] = useState("Personal WhatsApp");
-  const [externalId, setExternalId] = useState("personal");
-  const [displayName, setDisplayName] = useState("");
-  const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
-  const [webhookSecret, setWebhookSecret] = useState(randomSecret);
-  const [botToken, setBotToken] = useState("");
-  const [accountName, setAccountName] = useState("personal");
-  const [outboundWebhookUrl, setOutboundWebhookUrl] = useState("");
-  const [allowAllSenders, setAllowAllSenders] = useState(true);
-  const [allowedSenderIds, setAllowedSenderIds] = useState("");
-  const [allowedChatIds, setAllowedChatIds] = useState("");
+  const [filter, setFilter] = useState<ProviderFilter>("active");
+  const [search, setSearch] = useState("");
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const [pairingConnection, setPairingConnection] = useState<ChatProviderConnectionRead | null>(
+    null
+  );
+  const [testConnection, setTestConnection] = useState<ChatProviderConnectionRead | null>(null);
+  const [pairingStatuses, setPairingStatuses] = useState<
+    Record<string, ChatProviderPairingStatusResponse>
+  >({});
   const [isCreating, setIsCreating] = useState(false);
   const [busyConnectionId, setBusyConnectionId] = useState<string | null>(null);
-  const [testConnection, setTestConnection] = useState<ChatProviderConnectionRead | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function applyProviderDefaults(nextProvider: ProviderType) {
-    setProvider(nextProvider);
-    setName(nextProvider === "telegram" ? "Workspace Telegram" : "Personal WhatsApp");
-    setExternalId(nextProvider === "telegram" ? "workspace-bot" : "personal");
-    setAccountName(nextProvider === "telegram" ? "" : "personal");
-    setDisplayName("");
+  const counts = useMemo(
+    () => providerCounts(connections, pairingStatuses),
+    [connections, pairingStatuses]
+  );
+
+  const filteredConnections = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return connections
+      .filter((connection) => {
+        const config = record(connection.config);
+        const bridgeBaseUrl = stringConfig(config, "bridge_base_url", "bridgeBaseUrl");
+        const bridgeUserId = stringConfig(config, "bridge_user_id", "bridgeUserId");
+        const option = providerOption(connection.provider);
+        const matchesQuery =
+          !query ||
+          connection.name.toLowerCase().includes(query) ||
+          connection.externalId.toLowerCase().includes(query) ||
+          option.shortLabel.toLowerCase().includes(query) ||
+          bridgeBaseUrl.toLowerCase().includes(query) ||
+          bridgeUserId.toLowerCase().includes(query);
+        return (
+          matchesQuery &&
+          connectionMatchesFilter(connection, filter, pairingStatuses[connection.id])
+        );
+      })
+      .sort((first, second) => {
+        const firstNeeds = connectionMatchesFilter(
+          first,
+          "needs_setup",
+          pairingStatuses[first.id]
+        );
+        const secondNeeds = connectionMatchesFilter(
+          second,
+          "needs_setup",
+          pairingStatuses[second.id]
+        );
+        if (firstNeeds !== secondNeeds) {
+          return firstNeeds ? -1 : 1;
+        }
+        if (first.isActive !== second.isActive) {
+          return first.isActive ? -1 : 1;
+        }
+        return first.name.localeCompare(second.name);
+      });
+  }, [connections, filter, pairingStatuses, search]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadPairingStatuses() {
+      const whatsappConnections = connections.filter(
+        (connection) => connection.provider === "whatsapp_local"
+      );
+      if (whatsappConnections.length === 0) {
+        return;
+      }
+      const results = await Promise.all(
+        whatsappConnections.map(async (connection) => {
+          try {
+            const status = await workspaceChatProvidersPairingStatus(
+              organizationId,
+              workspaceId,
+              connection.id,
+              { timeoutMs: 15_000 }
+            );
+            return [connection.id, status] as const;
+          } catch {
+            return [
+              connection.id,
+              {
+                ok: false,
+                provider: connection.provider,
+                status: "error" as const,
+                message: "Pairing status could not be loaded.",
+              },
+            ] as const;
+          }
+        })
+      );
+      if (!ignore) {
+        setPairingStatuses((current) => ({
+          ...current,
+          ...Object.fromEntries(results),
+        }));
+      }
+    }
+
+    void loadPairingStatuses();
+    return () => {
+      ignore = true;
+    };
+  }, [connections, organizationId, workspaceId]);
+
+  async function refreshPairingStatus(
+    connection: ChatProviderConnectionRead,
+    refreshQr = false
+  ) {
+    setBusyConnectionId(connection.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const status = refreshQr
+        ? await workspaceChatProvidersRefreshPairingQr(
+            organizationId,
+            workspaceId,
+            connection.id,
+            { timeoutMs: 35_000 }
+          )
+        : await workspaceChatProvidersPairingStatus(
+            organizationId,
+            workspaceId,
+            connection.id,
+            { timeoutMs: 15_000 }
+          );
+      setPairingStatuses((current) => ({ ...current, [connection.id]: status }));
+      if (status.status === "error") {
+        setError(status.message || "WhatsApp bridge status failed.");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Pairing status could not be loaded.");
+    } finally {
+      setBusyConnectionId(null);
+    }
   }
 
-  async function createProvider(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function createProvider(payload: ChatProviderConnectionCreate) {
     if (isCreating) {
       return;
     }
@@ -362,47 +1078,21 @@ export function ChatProvidersClient({
     setNotice(null);
 
     try {
-      const secretValues: Record<string, string> = {
-        webhook_secret: webhookSecret.trim(),
-      };
-      if (provider === "telegram") {
-        secretValues.bot_token = botToken.trim();
-      } else {
-        secretValues.outbound_secret = webhookSecret.trim();
-      }
-
-      const config =
-        provider === "telegram"
-          ? {
-              allowAllSenders: allowAllSenders,
-              allowedChatIds: stringList(allowedChatIds),
-              allowedSenderIds: stringList(allowedSenderIds),
-              replyOnUnsupportedMessages: false,
-            }
-          : {
-              accountName: accountName.trim(),
-              allowAllSenders: allowAllSenders,
-              allowedChatIds: stringList(allowedChatIds),
-              allowedSenderIds: stringList(allowedSenderIds),
-              outboundWebhookUrl: outboundWebhookUrl.trim(),
-              replyOnUnsupportedMessages: false,
-            };
-
-      const payload: ChatProviderConnectionCreate = {
-        config,
-        displayName: displayName.trim(),
-        externalId: externalId.trim(),
-        name: name.trim(),
-        provider,
-        secretStoreId,
-        secretValues,
-      };
-
-      await workspaceChatProvidersCreate(organizationId, workspaceId, payload);
+      const connection = await workspaceChatProvidersCreate(
+        organizationId,
+        workspaceId,
+        payload
+      );
       setNotice("Provider connection created.");
-      setWebhookSecret(randomSecret());
-      setBotToken("");
       router.refresh();
+      if (connection.provider === "whatsapp_local") {
+        setPairingConnection(connection);
+        setPairingOpen(true);
+        setConnectOpen(false);
+        await refreshPairingStatus(connection, true);
+      } else {
+        setConnectOpen(false);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Provider connection could not be saved.");
     } finally {
@@ -434,6 +1124,11 @@ export function ChatProvidersClient({
     setNotice(null);
     try {
       await workspaceChatProvidersDelete(organizationId, workspaceId, connection.id);
+      setPairingStatuses((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
       router.refresh();
     } catch (caught) {
       setError(
@@ -453,39 +1148,70 @@ export function ChatProvidersClient({
     }
   }
 
-  const canCreate =
-    name.trim().length > 0 &&
-    externalId.trim().length > 0 &&
-    secretStoreId.length > 0 &&
-    webhookSecret.trim().length > 0 &&
-    (provider !== "telegram" || botToken.trim().length > 0);
+  function openPairing(connection: ChatProviderConnectionRead, refreshQr = false) {
+    setPairingConnection(connection);
+    setPairingOpen(true);
+    void refreshPairingStatus(connection, refreshQr);
+  }
+
+  const summaryItems = [
+    { label: "total", value: counts.total },
+    { label: "active", value: counts.active },
+    { label: "connected", value: counts.connected },
+    { label: "needs setup", value: counts.needsSetup },
+    { label: "WhatsApp", value: counts.whatsapp },
+  ];
 
   return (
-    <div className="space-y-6">
-      <section className="grid gap-3 md:grid-cols-4">
-        {[
-          { label: "Providers", value: counts.total, icon: Webhook },
-          { label: "Active", value: counts.active, icon: Power },
-          { label: "WhatsApp", value: counts.whatsapp, icon: Smartphone },
-          { label: "Telegram", value: counts.telegram, icon: Bot },
-        ].map((metric) => {
-          const Icon = metric.icon;
-          return (
-            <div
-              className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
-              key={metric.label}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-muted-foreground">
-                  {metric.label}
-                </div>
-                <Icon className="size-4 text-muted-foreground" />
-              </div>
-              <div className="mt-3 text-2xl font-semibold">{metric.value}</div>
-            </div>
-          );
-        })}
-      </section>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold leading-5 text-foreground">Chat providers</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {summaryItems.map((item) => (
+              <span
+                className="inline-flex h-6 items-center gap-1 rounded-sm border border-border bg-muted/60 px-2"
+                key={item.label}
+              >
+                <span className="font-semibold text-foreground">
+                  {item.value.toLocaleString("en-US")}
+                </span>
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 sm:w-[320px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search providers"
+              type="search"
+              value={search}
+            />
+          </div>
+          <div className="flex rounded-md border border-border bg-card p-1">
+            {(["active", "needs_setup", "all"] as ProviderFilter[]).map((item) => (
+              <Button
+                className="h-7 px-2 text-xs"
+                key={item}
+                onClick={() => setFilter(item)}
+                size="sm"
+                type="button"
+                variant={filter === item ? "secondary" : "ghost"}
+              >
+                {filterLabel(item)}
+              </Button>
+            ))}
+          </div>
+          <Button onClick={() => setConnectOpen(true)} type="button">
+            <Plus className="size-4" />
+            Connect provider
+          </Button>
+        </div>
+      </div>
 
       {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
       {notice ? (
@@ -495,336 +1221,218 @@ export function ChatProvidersClient({
         </AsyncFeedback>
       ) : null}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <CardTitle>Create Provider</CardTitle>
-                <CardDescription>Workspace-scoped chat entrypoint.</CardDescription>
-              </div>
-              <div className="flex size-10 items-center justify-center rounded-md bg-muted text-primary">
-                <Plus className="size-5" />
-              </div>
+      {connections.length === 0 ? (
+        <Card className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center">
+          <div className="flex size-11 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+            <Smartphone className="size-5" />
+          </div>
+          <div>
+            <div className="font-medium text-foreground">Connect your first WhatsApp number</div>
+            <div className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+              Pair a personal WhatsApp linked device to this workspace agent.
             </div>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-5" onSubmit={createProvider}>
-              <div className="grid grid-cols-2 gap-2">
-                {providerOptions.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      className={cn(
-                        "flex min-h-20 flex-col justify-between rounded-md border bg-card p-3 text-left text-sm transition-colors",
-                        provider === option.value
-                          ? "border-ring ring-2 ring-ring/15"
-                          : "border-border hover:border-ring/40"
-                      )}
-                      key={option.value}
-                      onClick={() => applyProviderDefaults(option.value)}
-                      type="button"
-                    >
-                      <Icon className="size-4 text-muted-foreground" />
-                      <span className="font-medium">{option.shortLabel}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="chat-provider-name">Name</Label>
-                  <Input
-                    id="chat-provider-name"
-                    maxLength={100}
-                    onChange={(event) => setName(event.target.value)}
-                    required
-                    value={name}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="chat-provider-external">External ID</Label>
-                  <Input
-                    id="chat-provider-external"
-                    maxLength={255}
-                    onChange={(event) => setExternalId(event.target.value)}
-                    required
-                    value={externalId}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="chat-provider-secret-store">Secret backend</Label>
-                {activeSecretStores.length > 0 ? (
-                  <Select onValueChange={setSecretStoreId} value={secretStoreId}>
-                    <SelectTrigger id="chat-provider-secret-store">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeSecretStores.map((store) => (
-                        <SelectItem key={store.id} value={store.id}>
-                          {store.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input disabled value="Connect a secret backend first" />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="chat-provider-webhook-secret">Webhook secret</Label>
-                  <Button
-                    onClick={() => setWebhookSecret(randomSecret())}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <KeyRound className="size-4" />
-                    Generate
-                  </Button>
-                </div>
-                <Input
-                  autoComplete="off"
-                  id="chat-provider-webhook-secret"
-                  onChange={(event) => setWebhookSecret(event.target.value)}
-                  required
-                  value={webhookSecret}
-                />
-              </div>
-
-              {provider === "telegram" ? (
-                <div className="space-y-2">
-                  <Label htmlFor="chat-provider-bot-token">Bot token</Label>
-                  <Input
-                    autoComplete="off"
-                    id="chat-provider-bot-token"
-                    onChange={(event) => setBotToken(event.target.value)}
-                    required
-                    type="password"
-                    value={botToken}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="chat-provider-account">Account name</Label>
-                    <Input
-                      id="chat-provider-account"
-                      maxLength={100}
-                      onChange={(event) => setAccountName(event.target.value)}
-                      value={accountName}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="chat-provider-outbound-url">Outbound bridge URL</Label>
-                    <Input
-                      id="chat-provider-outbound-url"
-                      maxLength={2048}
-                      onChange={(event) => setOutboundWebhookUrl(event.target.value)}
-                      placeholder="http://localhost:8787/send"
-                      value={outboundWebhookUrl}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <label className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
-                <input
-                  checked={allowAllSenders}
-                  className="size-4 accent-primary"
-                  onChange={(event) => setAllowAllSenders(event.target.checked)}
-                  type="checkbox"
-                />
-                Allow all senders
-              </label>
-
-              {!allowAllSenders ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="chat-provider-senders">Sender IDs</Label>
-                    <textarea
-                      className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                      id="chat-provider-senders"
-                      onChange={(event) => setAllowedSenderIds(event.target.value)}
-                      value={allowedSenderIds}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="chat-provider-chats">Chat IDs</Label>
-                    <textarea
-                      className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                      id="chat-provider-chats"
-                      onChange={(event) => setAllowedChatIds(event.target.value)}
-                      value={allowedChatIds}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="flex justify-end">
-                <Button disabled={!canCreate || isCreating} type="submit">
-                  {isCreating ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Plus className="size-4" />
-                  )}
-                  {isCreating ? "Creating" : "Create provider"}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
+          </div>
+          <Button onClick={() => setConnectOpen(true)} size="sm" type="button">
+            <Plus className="size-4" />
+            Connect WhatsApp
+          </Button>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Bot className="size-3.5" />
+            Telegram bot connections are available from the provider picker.
+          </div>
         </Card>
+      ) : filteredConnections.length === 0 ? (
+        <Card className="flex min-h-60 flex-col items-center justify-center gap-3 p-8 text-center">
+          <div className="flex size-10 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+            <Search className="size-5" />
+          </div>
+          <div>
+            <div className="font-medium text-foreground">No providers in view</div>
+            <div className="mt-1 text-sm text-muted-foreground">No matching provider records.</div>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredConnections.map((connection) => {
+            const option = providerOption(connection.provider);
+            const Icon = option.icon;
+            const config = record(connection.config);
+            const pairingStatus = pairingStatuses[connection.id];
+            const bridgeBaseUrl = stringConfig(config, "bridge_base_url", "bridgeBaseUrl");
+            const bridgeUserId =
+              stringConfig(config, "bridge_user_id", "bridgeUserId", "account_name", "accountName") ||
+              connection.externalId;
+            const isBusy = busyConnectionId === connection.id;
+            const allowAllSenders = boolConfig(
+              config,
+              "allow_all_senders",
+              "allowAllSenders"
+            );
 
-        <section className="space-y-3">
-          {connections.length > 0 ? (
-            connections.map((connection) => {
-              const option = providerOption(connection.provider);
-              const Icon = option.icon;
-              const config = record(connection.config);
-              const secretLabels = providerSecretLabels(connection);
-              return (
-                <article
-                  className="rounded-md border border-border bg-card p-5 shadow-[var(--shadow-card)]"
-                  key={connection.id}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex size-9 items-center justify-center rounded-md bg-muted text-primary">
-                          <Icon className="size-4" />
-                        </div>
-                        <div>
-                          <h2 className="truncate text-base font-semibold">
-                            {connection.name}
-                          </h2>
-                          <div className="mt-0.5 text-xs text-muted-foreground">
-                            {option.label} / {connection.externalId}
-                          </div>
-                        </div>
+            return (
+              <Card
+                className="flex min-h-[268px] flex-col overflow-hidden transition-colors hover:border-ring/40 hover:bg-muted/20"
+                key={connection.id}
+              >
+                <CardHeader className="border-b-0 pb-0">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <StatusDot tone={statusTone(connection, pairingStatus)} />
+                        <h3 className="truncate text-sm font-semibold leading-5 text-foreground">
+                          {connection.name}
+                        </h3>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant={connection.isActive ? "success" : "secondary"}>
-                          {connection.isActive ? "Active" : "Inactive"}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge variant={badgeVariant(connection, pairingStatus)}>
+                          {statusLabel(connection, pairingStatus)}
                         </Badge>
-                        <Badge variant="outline">
-                          {boolConfig(config, "allow_all_senders") ||
-                          boolConfig(config, "allowAllSenders")
-                            ? "All senders"
-                            : "Restricted"}
-                        </Badge>
-                        {connection.provider === "whatsapp_local" &&
-                        stringConfig(config, "outbound_webhook_url") ? (
-                          <Badge variant="outline">Outbound bridge</Badge>
-                        ) : null}
+                        <Badge variant="outline">{option.shortLabel}</Badge>
                       </div>
                     </div>
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                      <Icon className="size-4" />
+                    </div>
+                  </div>
+                </CardHeader>
 
-                    <div className="flex flex-wrap gap-2">
+                <CardContent className="flex flex-1 flex-col p-4 pt-3">
+                  <div className="grid gap-3 border-y border-border/80 py-3">
+                    <div className="flex min-w-0 items-center gap-3 text-sm">
+                      <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                        <div className="truncate text-xs text-muted-foreground">Session</div>
+                        <div className="truncate text-sm font-medium">
+                          {pairingStatus?.phoneNumber || bridgeUserId}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3 text-sm">
+                      <Webhook className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                        <div className="truncate text-xs text-muted-foreground">Bridge</div>
+                        <div className="truncate text-sm font-medium">
+                          {connection.provider === "whatsapp_local"
+                            ? displayHost(bridgeBaseUrl)
+                            : "Telegram API"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3 text-sm">
+                      <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                        <div className="truncate text-xs text-muted-foreground">Access</div>
+                        <div className="truncate text-sm font-medium">
+                          {allowAllSenders ? "All senders" : "Restricted"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3 text-sm">
+                      <RefreshCw className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                        <div className="truncate text-xs text-muted-foreground">Updated</div>
+                        <div className="truncate text-sm font-medium">
+                          {displayDate(connection.updatedAt)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+                    {connection.provider === "whatsapp_local" ? (
                       <Button
-                        aria-label={`Test ${connection.name}`}
-                        onClick={() => setTestConnection(connection)}
+                        disabled={isBusy}
+                        onClick={() => openPairing(connection, !pairingStatus?.qrPayload)}
                         size="sm"
                         type="button"
                         variant="outline"
                       >
-                        <FlaskConical className="size-4" />
-                        Test
-                      </Button>
-                      <Button
-                        aria-label={`Copy webhook URL for ${connection.name}`}
-                        onClick={() => copyWebhook(connection)}
-                        size="icon"
-                        type="button"
-                        variant="outline"
-                      >
-                        <Copy className="size-4" />
-                      </Button>
-                      <Button
-                        aria-label={
-                          connection.isActive
-                            ? `Deactivate ${connection.name}`
-                            : `Activate ${connection.name}`
-                        }
-                        disabled={busyConnectionId === connection.id}
-                        onClick={() => toggleConnection(connection)}
-                        size="icon"
-                        type="button"
-                        variant="outline"
-                      >
-                        {busyConnectionId === connection.id ? (
+                        {isBusy ? (
                           <Loader2 className="size-4 animate-spin" />
-                        ) : connection.isActive ? (
-                          <PowerOff className="size-4" />
                         ) : (
-                          <Power className="size-4" />
+                          <QrCode className="size-4" />
                         )}
+                        Open QR
                       </Button>
-                      <Button
-                        aria-label={`Delete ${connection.name}`}
-                        disabled={busyConnectionId === connection.id}
-                        onClick={() => deleteConnection(connection)}
-                        size="icon"
-                        type="button"
-                        variant="outline"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
+                    ) : null}
+                    <Button
+                      onClick={() => setTestConnection(connection)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <FlaskConical className="size-4" />
+                      Test
+                    </Button>
+                    <Button
+                      aria-label={`Copy webhook URL for ${connection.name}`}
+                      onClick={() => copyWebhook(connection)}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Copy className="size-4" />
+                    </Button>
+                    <Button
+                      aria-label={
+                        connection.isActive
+                          ? `Pause ${connection.name}`
+                          : `Resume ${connection.name}`
+                      }
+                      disabled={isBusy}
+                      onClick={() => toggleConnection(connection)}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isBusy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : connection.isActive ? (
+                        <Pause className="size-4" />
+                      ) : (
+                        <Play className="size-4" />
+                      )}
+                    </Button>
+                    <Button
+                      aria-label={`Delete ${connection.name}`}
+                      disabled={isBusy}
+                      onClick={() => deleteConnection(connection)}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
                   </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
-                  <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.8fr)]">
-                    <div className="rounded-md border border-border bg-muted/30 p-3">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                        <Webhook className="size-3.5" />
-                        Webhook
-                      </div>
-                      <code className="block break-all text-xs text-foreground">
-                        {providerWebhookPath(connection)}
-                      </code>
-                    </div>
-                    <div className="rounded-md border border-border bg-muted/30 p-3">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                        <ShieldCheck className="size-3.5" />
-                        Secrets
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {secretLabels.length > 0 ? (
-                          secretLabels.map((label) => {
-                            const handleId = connection.secretHandleIds?.[label] ?? "";
-                            return (
-                              <Badge key={label} variant="outline">
-                                {label}: {secretHandleName(handlesById, handleId)}
-                              </Badge>
-                            );
-                          })
-                        ) : (
-                          <span className="text-xs text-muted-foreground">None</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </article>
-              );
-            })
-          ) : (
-            <div className="rounded-md border border-dashed border-border bg-card p-10 text-center">
-              <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-md bg-muted text-primary">
-                <Webhook className="size-5" />
-              </div>
-              <h2 className="text-base font-semibold">No providers</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                Create a workspace provider to test chat from another app.
-              </p>
-            </div>
-          )}
-        </section>
-      </div>
-
+      <ConnectProviderDialog
+        activeSecretStores={activeSecretStores}
+        connectionCount={connections.length}
+        isCreating={isCreating}
+        onCreate={createProvider}
+        onOpenChange={setConnectOpen}
+        open={connectOpen}
+      />
+      <PairingDialog
+        busy={Boolean(pairingConnection && busyConnectionId === pairingConnection.id)}
+        connection={pairingConnection}
+        onCheck={(connection) => refreshPairingStatus(connection)}
+        onOpenChange={(open) => {
+          setPairingOpen(open);
+          if (!open) {
+            setPairingConnection(null);
+          }
+        }}
+        onRefresh={(connection) => refreshPairingStatus(connection, true)}
+        open={pairingOpen}
+        pairingStatus={pairingConnection ? pairingStatuses[pairingConnection.id] : undefined}
+      />
       <TestDialog
         connection={testConnection}
         onOpenChange={(open) => {

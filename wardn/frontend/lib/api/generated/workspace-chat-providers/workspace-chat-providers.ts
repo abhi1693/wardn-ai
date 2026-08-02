@@ -9,6 +9,7 @@ import type {
   ChatProviderConnectionListResponse,
   ChatProviderConnectionRead,
   ChatProviderConnectionUpdate,
+  ChatProviderPairingStatusResponse,
   ChatProviderTestMessageRequest,
   ChatProviderTestMessageResponse
 } from '../model';
@@ -144,6 +145,60 @@ export const workspaceChatProvidersUpdate = async (organizationId: string,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(chatProviderConnectionUpdate)
+  }
+);}
+
+
+export const getWorkspaceChatProvidersPairingStatusUrl = (organizationId: string,
+    workspaceId: string,
+    connectionId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/chat-providers/${connectionId}/pairing`
+}
+
+/**
+ * @summary Get Workspace Chat Provider Pairing Status Route
+ */
+export const workspaceChatProvidersPairingStatus = async (organizationId: string,
+    workspaceId: string,
+    connectionId: string, options?: Parameters<typeof apiRequest>[1]): Promise<ChatProviderPairingStatusResponse> => {
+
+  return apiRequest<ChatProviderPairingStatusResponse>(getWorkspaceChatProvidersPairingStatusUrl(organizationId,workspaceId,connectionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export const getWorkspaceChatProvidersRefreshPairingQrUrl = (organizationId: string,
+    workspaceId: string,
+    connectionId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/chat-providers/${connectionId}/pairing/refresh`
+}
+
+/**
+ * @summary Refresh Workspace Chat Provider Pairing Qr Route
+ */
+export const workspaceChatProvidersRefreshPairingQr = async (organizationId: string,
+    workspaceId: string,
+    connectionId: string, options?: Parameters<typeof apiRequest>[1]): Promise<ChatProviderPairingStatusResponse> => {
+
+  return apiRequest<ChatProviderPairingStatusResponse>(getWorkspaceChatProvidersRefreshPairingQrUrl(organizationId,workspaceId,connectionId),
+  {
+    ...options,
+    method: 'POST'
+
+
   }
 );}
 

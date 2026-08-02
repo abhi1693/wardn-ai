@@ -35,6 +35,7 @@ from app.modules.chat_providers.schemas import (
     ChatProviderConnectionListResponse,
     ChatProviderConnectionRead,
     ChatProviderConnectionUpdate,
+    ChatProviderPairingStatusResponse,
     ChatProviderTestMessageRequest,
     ChatProviderTestMessageResponse,
     ChatProviderWebhookResponse,
@@ -72,6 +73,23 @@ CHAT_PROVIDER_DUPLICATE_CONSTRAINTS = {
 PROVIDER_ASSISTANT_EMPTY_REPLY = (
     "I processed that request, but there was no text response to send back here."
 )
+WHATSAPP_BRIDGE_STATUS_CONNECTED = {"connected", "open", "ready", "registered", "logged_in"}
+WHATSAPP_BRIDGE_STATUS_WAITING = {
+    "connecting",
+    "pairing",
+    "qr",
+    "scan",
+    "waiting",
+    "waiting_for_scan",
+}
+WHATSAPP_BRIDGE_STATUS_DISCONNECTED = {
+    "closed",
+    "disconnected",
+    "logged_out",
+    "logout",
+    "not_connected",
+    "unpaired",
+}
 
 
 @dataclass(frozen=True)
@@ -92,6 +110,12 @@ class ProviderUnsupportedMessage:
     external_user_display_name: str
     message_type: str
     raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class WhatsAppBridgeTarget:
+    base_url: str
+    user_id: str
 
 
 def provider_config_model(
@@ -119,6 +143,249 @@ def public_connection_config(connection: ChatProviderConnection) -> dict[str, An
 
 def normalized_config(connection: ChatProviderConnection) -> dict[str, Any]:
     return normalize_connection_config(connection.provider, dict(connection.config or {}))
+
+
+def whatsapp_bridge_target(connection: ChatProviderConnection) -> WhatsAppBridgeTarget | None:
+    if connection.provider != PROVIDER_WHATSAPP_LOCAL:
+        return None
+    config = WhatsAppLocalProviderConfig.model_validate(connection.config or {})
+    if not config.bridge_base_url:
+        return None
+    return WhatsAppBridgeTarget(
+        base_url=config.bridge_base_url.rstrip("/"),
+        user_id=config.bridge_user_id or config.account_name or connection.external_id,
+    )
+
+
+def whatsapp_bridge_user_value(user_id: str) -> int | str:
+    return int(user_id) if user_id.isdigit() else user_id
+
+
+def whatsapp_bridge_url(target: WhatsAppBridgeTarget, path: str) -> str:
+    return f"{target.base_url}/{path.lstrip('/')}"
+
+
+def text_payload_field(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def nested_payload(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def bridge_status_from_payload(payload: dict[str, Any]) -> tuple[str, str, str]:
+    status_text = text_payload_field(
+        payload,
+        "status",
+        "state",
+        "connection",
+        "connectionState",
+        "connection_state",
+    ).lower()
+    session = nested_payload(payload, "session", "account")
+    if not status_text and session:
+        status_text = text_payload_field(
+            session,
+            "status",
+            "state",
+            "connection",
+            "connectionState",
+            "connection_state",
+        ).lower()
+
+    connected = payload.get("connected") is True or session.get("connected") is True
+    phone_number = text_payload_field(
+        payload,
+        "phoneNumber",
+        "phone_number",
+        "phone",
+        "jid",
+        "userJid",
+        "user_jid",
+    ) or text_payload_field(
+        session,
+        "phoneNumber",
+        "phone_number",
+        "phone",
+        "jid",
+        "userJid",
+        "user_jid",
+    )
+
+    if connected or status_text in WHATSAPP_BRIDGE_STATUS_CONNECTED:
+        return "connected", "WhatsApp session is connected.", phone_number
+    if status_text in WHATSAPP_BRIDGE_STATUS_WAITING:
+        return "waiting_for_scan", "Scan the QR code from WhatsApp Linked Devices.", phone_number
+    if status_text in WHATSAPP_BRIDGE_STATUS_DISCONNECTED:
+        return "needs_pairing", "WhatsApp session needs pairing.", phone_number
+    if not payload:
+        return "needs_pairing", "WhatsApp session has not reported status yet.", ""
+    return "disconnected", "WhatsApp bridge is reachable but not connected.", phone_number
+
+
+def qr_payload_from_bridge_data(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(payload, str):
+        return payload.strip()
+    if not isinstance(payload, dict):
+        return ""
+    return text_payload_field(
+        payload,
+        "qr",
+        "qrCode",
+        "qr_code",
+        "code",
+        "payload",
+        "data",
+    )
+
+
+async def request_whatsapp_bridge_status(
+    target: WhatsAppBridgeTarget,
+) -> tuple[dict[str, Any], str]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            whatsapp_bridge_url(target, "/sessions/status"),
+            params={"user_id": whatsapp_bridge_user_value(target.user_id)},
+        )
+    payload = response_json(response)
+    if response.status_code >= 400:
+        return payload, f"WhatsApp bridge status failed with HTTP {response.status_code}."
+    return payload, ""
+
+
+async def create_whatsapp_bridge_session(target: WhatsAppBridgeTarget) -> str:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            whatsapp_bridge_url(target, "/sessions"),
+            json={"user_id": whatsapp_bridge_user_value(target.user_id)},
+        )
+    if response.status_code >= 400 and response.status_code not in {409}:
+        return f"WhatsApp bridge session create failed with HTTP {response.status_code}."
+    return ""
+
+
+async def request_whatsapp_bridge_qr(target: WhatsAppBridgeTarget) -> tuple[str, str]:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        async with client.stream(
+            "GET",
+            whatsapp_bridge_url(target, "/sessions/qr"),
+            params={"user_id": whatsapp_bridge_user_value(target.user_id)},
+        ) as response:
+            if response.status_code >= 400:
+                return "", f"WhatsApp bridge QR failed with HTTP {response.status_code}."
+            data_lines: list[str] = []
+            async for line in response.aiter_lines():
+                if not line:
+                    if data_lines:
+                        break
+                    continue
+                if line.startswith("data:"):
+                    data_lines.append(line.removeprefix("data:").strip())
+                elif not line.startswith("event:") and not line.startswith(":"):
+                    data_lines.append(line.strip())
+                if data_lines:
+                    payload = qr_payload_from_bridge_data("\n".join(data_lines))
+                    if payload:
+                        return payload, ""
+    return "", "WhatsApp bridge did not return a QR code."
+
+
+def whatsapp_pairing_not_configured(connection: ChatProviderConnection) -> (
+    ChatProviderPairingStatusResponse
+):
+    return ChatProviderPairingStatusResponse(
+        ok=False,
+        provider=connection.provider,
+        status="not_configured",
+        message="Configure a local WhatsApp bridge URL in advanced settings.",
+    )
+
+
+def whatsapp_pairing_unsupported(connection: ChatProviderConnection) -> (
+    ChatProviderPairingStatusResponse
+):
+    return ChatProviderPairingStatusResponse(
+        ok=False,
+        provider=connection.provider,
+        status="unsupported",
+        message=f"{provider_display_name(connection.provider)} does not support QR pairing.",
+    )
+
+
+async def whatsapp_pairing_response(
+    connection: ChatProviderConnection,
+    *,
+    refresh_qr: bool = False,
+) -> ChatProviderPairingStatusResponse:
+    if connection.provider != PROVIDER_WHATSAPP_LOCAL:
+        return whatsapp_pairing_unsupported(connection)
+    target = whatsapp_bridge_target(connection)
+    if target is None:
+        return whatsapp_pairing_not_configured(connection)
+
+    qr_payload = ""
+    create_message = ""
+    if refresh_qr:
+        try:
+            create_message = await create_whatsapp_bridge_session(target)
+            qr_payload, qr_message = await request_whatsapp_bridge_qr(target)
+        except httpx.RequestError as exc:
+            return ChatProviderPairingStatusResponse(
+                ok=False,
+                provider=connection.provider,
+                status="error",
+                message=f"WhatsApp bridge is unreachable: {exc}",
+                bridgeBaseUrl=target.base_url,
+                bridgeUserId=target.user_id,
+            )
+        if qr_message and not create_message:
+            create_message = qr_message
+
+    try:
+        raw_status, status_message = await request_whatsapp_bridge_status(target)
+    except httpx.RequestError as exc:
+        return ChatProviderPairingStatusResponse(
+            ok=False,
+            provider=connection.provider,
+            status="error",
+            message=f"WhatsApp bridge is unreachable: {exc}",
+            bridgeBaseUrl=target.base_url,
+            bridgeUserId=target.user_id,
+        )
+
+    status_value, default_message, phone_number = bridge_status_from_payload(raw_status)
+    if qr_payload and status_value != "connected":
+        status_value = "waiting_for_scan"
+    message = create_message or status_message or default_message
+    return ChatProviderPairingStatusResponse(
+        ok=status_value in {"connected", "waiting_for_scan", "needs_pairing", "disconnected"},
+        provider=connection.provider,
+        status=status_value,
+        message=message,
+        bridgeBaseUrl=target.base_url,
+        bridgeUserId=target.user_id,
+        qrPayload=qr_payload,
+        phoneNumber=phone_number,
+        rawStatus=raw_status,
+    )
 
 
 def sender_allowed(connection: ChatProviderConnection, message: ProviderTextMessage) -> bool:
@@ -536,6 +803,59 @@ async def delete_workspace_chat_provider_connection(
     await queue_managed_secret_cleanup(session, managed_secret_ids)
     await session.delete(connection)
     await session.flush()
+
+
+async def workspace_chat_provider_connection_for_admin(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+) -> ChatProviderConnection:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    connection = await repository.get_connection(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection_id,
+    )
+    if connection is None:
+        raise ChatProviderConnectionNotFoundError("chat provider connection not found")
+    return connection
+
+
+async def get_workspace_chat_provider_pairing_status(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+) -> ChatProviderPairingStatusResponse:
+    connection = await workspace_chat_provider_connection_for_admin(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        connection_id,
+    )
+    return await whatsapp_pairing_response(connection)
+
+
+async def refresh_workspace_chat_provider_pairing_qr(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+) -> ChatProviderPairingStatusResponse:
+    connection = await workspace_chat_provider_connection_for_admin(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        connection_id,
+    )
+    return await whatsapp_pairing_response(connection, refresh_qr=True)
 
 
 async def test_workspace_chat_provider_connection(
@@ -1236,7 +1556,8 @@ async def send_whatsapp_local_text_message(
     reply_to_message_id: str = "",
 ) -> dict[str, Any]:
     config = WhatsAppLocalProviderConfig.model_validate(connection.config or {})
-    if not config.outbound_webhook_url:
+    target = whatsapp_bridge_target(connection)
+    if target is None and not config.outbound_webhook_url:
         raise ChatProviderDeliveryError("WhatsApp local outbound webhook URL is not configured")
     secret_handle_id = await connection_secret_handle_id(
         session,
@@ -1252,6 +1573,26 @@ async def send_whatsapp_local_text_message(
         secret_handle_id,
         workspace_id=connection.workspace_id,
     )
+    if target is not None:
+        payload = whatsapp_local.bridge_text_payload(
+            user_id=whatsapp_bridge_user_value(target.user_id),
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=reply_to_message_id,
+        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                whatsapp_bridge_url(target, "/messages/send"),
+                headers={"X-Wardn-Chat-Provider-Secret": secret.value},
+                json=payload,
+            )
+        response_payload = response_json(response)
+        if response.status_code >= 400:
+            raise ChatProviderDeliveryError(
+                f"WhatsApp local bridge delivery failed with HTTP {response.status_code}"
+            )
+        return response_payload
+
     payload = whatsapp_local.outbound_text_payload(
         connection_id=str(connection.id),
         chat_id=chat_id,

@@ -155,6 +155,14 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/chat-providers/{connection_id}/pairing"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/chat-providers/{connection_id}/pairing/refresh"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/chat-providers/{connection_id}/test-message"
             ),
             (

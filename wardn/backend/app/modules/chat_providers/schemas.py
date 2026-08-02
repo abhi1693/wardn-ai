@@ -23,13 +23,15 @@ class TelegramProviderConfig(APIModel):
 
 class WhatsAppLocalProviderConfig(APIModel):
     account_name: str = Field(default="", max_length=100)
+    bridge_base_url: str = Field(default="", max_length=2048)
+    bridge_user_id: str = Field(default="", max_length=255)
     outbound_webhook_url: str = Field(default="", max_length=2048)
     reply_on_unsupported_messages: bool = False
     allow_all_senders: bool = False
     allowed_sender_ids: list[str] = Field(default_factory=list)
     allowed_chat_ids: list[str] = Field(default_factory=list)
 
-    @field_validator("account_name", "outbound_webhook_url")
+    @field_validator("account_name", "bridge_base_url", "bridge_user_id", "outbound_webhook_url")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return value.strip()
@@ -104,6 +106,27 @@ class ChatProviderConnectionRead(APIModel):
 
 class ChatProviderConnectionListResponse(APIModel):
     connections: list[ChatProviderConnectionRead]
+
+
+class ChatProviderPairingStatusResponse(APIModel):
+    ok: bool
+    provider: str
+    status: Literal[
+        "unsupported",
+        "not_configured",
+        "needs_pairing",
+        "waiting_for_scan",
+        "connected",
+        "disconnected",
+        "error",
+    ]
+    message: str = ""
+    bridge_base_url: str = ""
+    bridge_user_id: str = ""
+    qr_payload: str = ""
+    qr_expires_at: datetime | None = None
+    phone_number: str = ""
+    raw_status: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatProviderWebhookResponse(APIModel):

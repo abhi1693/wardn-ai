@@ -100,6 +100,23 @@ def outbound_text_payload(
     return payload
 
 
+def bridge_text_payload(
+    *,
+    user_id: int | str,
+    chat_id: str,
+    text: str,
+    reply_to_message_id: str = "",
+) -> dict[str, Any]:
+    payload = {
+        "user_id": user_id,
+        "chat_jid": chat_id,
+        "text": text.strip(),
+    }
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = reply_to_message_id
+    return payload
+
+
 def response_message_id(payload: dict[str, Any]) -> str:
     direct = string_field(payload, "messageId", "message_id", "id")
     if direct:

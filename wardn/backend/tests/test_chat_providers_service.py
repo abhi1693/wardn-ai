@@ -79,6 +79,24 @@ def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProv
     )
 
 
+def test_qr_payload_from_bridge_data_accepts_sse_json() -> None:
+    assert (
+        service.qr_payload_from_bridge_data('{"qr":"2@abcd,1234"}')
+        == "2@abcd,1234"
+    )
+    assert service.qr_payload_from_bridge_data("2@plain") == "2@plain"
+
+
+def test_bridge_status_from_payload_normalizes_connected_state() -> None:
+    status, message, phone_number = service.bridge_status_from_payload(
+        {"connected": True, "phone_number": "+15551234567"}
+    )
+
+    assert status == "connected"
+    assert message == "WhatsApp session is connected."
+    assert phone_number == "+15551234567"
+
+
 @pytest.mark.asyncio
 async def test_create_connection_writes_secret_values_and_attaches_handles(monkeypatch) -> None:
     organization_id = uuid4()
