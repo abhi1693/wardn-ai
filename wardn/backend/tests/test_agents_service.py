@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -378,6 +379,84 @@ async def test_persisted_agent_chat_stream_emits_ui_message_chunks_and_persists_
 
 
 @pytest.mark.asyncio
+async def test_persisted_agent_chat_stream_persists_tool_progress_steps(
+    monkeypatch,
+) -> None:
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        created_by_id=uuid4(),
+        title="Chat",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=conversation.organization_id,
+        workspace_id=conversation.workspace_id,
+        agent_id=conversation.agent_id,
+        conversation_id=conversation.id,
+        trigger_type="chat",
+        status="running",
+    )
+    steps: list[dict] = []
+    finished: list[dict] = []
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def append_conversation_message(*args, **kwargs):
+        return None
+
+    async def finish_agent_run(*args, **kwargs):
+        finished.append(kwargs)
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def provider_stream():
+        yield service.AgentChatToolActivityEvent(
+            id="tool-call-1",
+            tool_name="gsc_sites",
+            status="running",
+            message="Waiting for runtime result.",
+            progress_token="agent-tool:call-1",
+        )
+        yield service.AgentChatTextEvent(text="Done")
+
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+
+    chunks = ui_stream_chunks(
+        [
+            chunk
+            async for chunk in service.persisted_agent_chat_stream(
+                conversation,
+                provider_stream(),
+                agent_run,
+                session_factory=fake_session_factory(FakeSession()),
+            )
+        ]
+    )
+
+    assert any(chunk["type"] == "data-tool-activity" for chunk in chunks)
+    assert steps[0]["step_type"] == "tool_progress"
+    assert steps[0]["status"] == "running"
+    assert steps[0]["title"] == "gsc_sites"
+    assert steps[0]["payload"]["message"] == "Waiting for runtime result."
+    assert steps[0]["payload"]["progressToken"] == "[redacted]"
+    assert steps[-1]["step_type"] == "model_output"
+    assert finished == [{"status": "succeeded", "error": ""}]
+
+
+@pytest.mark.asyncio
 async def test_persisted_agent_chat_stream_emits_reasoning_summary_parts(
     monkeypatch,
 ) -> None:
@@ -699,6 +778,76 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     assert steps[-1]["step_type"] == "model_output"
     assert finished == [{"status": "succeeded", "error": ""}]
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_agent_runs_includes_usage_and_provider_trigger(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    conversation_id = uuid4()
+    run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=uuid4(),
+        conversation_id=conversation_id,
+        triggered_by_id=uuid4(),
+        trigger_type="chat",
+        status="succeeded",
+        started_at=datetime(2026, 8, 2, 19, 43, tzinfo=UTC),
+        finished_at=datetime(2026, 8, 2, 19, 44, tzinfo=UTC),
+        error="",
+        created_at=datetime(2026, 8, 2, 19, 43, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 2, 19, 44, tzinfo=UTC),
+    )
+    usage = SimpleNamespace(
+        input_tokens=123,
+        output_tokens=45,
+        total_tokens=168,
+        cost_usd="0.00042",
+        tool_calls=3,
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None
+
+    async def list_agent_runs(*args, **kwargs):
+        return [run]
+
+    async def agent_run_usage_summaries(*args, **kwargs):
+        return {run.id: usage}
+
+    async def list_chat_provider_triggers_by_conversation(*args, **kwargs):
+        return {conversation_id: "whatsapp_local"}
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.repository, "list_agent_runs", list_agent_runs)
+    monkeypatch.setattr(
+        service.observability_service,
+        "agent_run_usage_summaries",
+        agent_run_usage_summaries,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_chat_provider_triggers_by_conversation",
+        list_chat_provider_triggers_by_conversation,
+    )
+
+    response = await service.list_workspace_agent_runs(
+        FakeSession(),
+        User(id=uuid4(), email="owner@example.com"),
+        organization_id,
+        workspace_id,
+    )
+
+    assert len(response.runs) == 1
+    assert response.runs[0].trigger_type == "whatsapp"
+    assert response.runs[0].input_tokens == 123
+    assert response.runs[0].output_tokens == 45
+    assert response.runs[0].total_tokens == 168
+    assert response.runs[0].tool_calls == 3
 
 
 def test_conversation_id_from_payload_only_accepts_canonical_wardn_uuids() -> None:
@@ -1361,6 +1510,7 @@ async def test_stream_agent_chat_preflight_block_uses_cached_tools_before_refres
     )
     assert [step["step_type"] for step in steps] == [
         "model_input",
+        "tool_result",
         "tool_result",
         "model_output",
     ]
@@ -2353,6 +2503,93 @@ async def test_stream_chatgpt_codex_exposes_dynamic_tools_instead_of_concrete_mc
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_chatgpt_codex_times_out_when_provider_stalls(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider=service.OPENAI_CHATGPT_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_metadata={"accountId": "account-1"},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    sent_bodies: list[dict] = []
+    usage_statuses: list[str] = []
+
+    class FakeWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            sent_bodies.append(json.loads(message))
+
+        async def __anext__(self):
+            await asyncio.sleep(0.05)
+            return json.dumps({"type": "response.created"})
+
+    def websocket_connect(*args, **kwargs):
+        return FakeWebSocket()
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        usage_statuses.append(kwargs["status"])
+
+    monkeypatch.setattr(chat_orchestrator, "websocket_connect", websocket_connect)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "agent_chat_websocket_response_timeout_seconds",
+        lambda: 0.01,
+    )
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+
+    with pytest.raises(service.AgentChatProviderError, match="did not send a response"):
+        [
+            event
+            async for event in service.stream_chatgpt_codex_response_text(
+                agent,
+                credential,
+                session_factory=fake_session_factory(FakeSession()),
+                headers={"Authorization": "Bearer token"},
+                messages=[
+                    AgentChatMessage(role="user", parts=[{"type": "text", "text": "hello"}])
+                ],
+                tools={},
+            )
+        ]
+
+    assert len(sent_bodies) == 1
+    assert usage_statuses == ["failed"]
 
 
 @pytest.mark.asyncio

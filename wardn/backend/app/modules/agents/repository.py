@@ -16,6 +16,7 @@ from app.modules.agents.models import (
     ConversationMessage,
     WorkspaceConversation,
 )
+from app.modules.chat_providers.models import ChatProviderConnection, ChatProviderThread
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -465,9 +466,12 @@ async def append_agent_run_step(
     payload: dict | None = None,
     mcp_tool_invocation_id: uuid.UUID | None = None,
 ) -> AgentRunStep:
-    await session.execute(
-        select(AgentRun.id).where(AgentRun.id == agent_run_id).with_for_update()
+    result = await session.execute(
+        select(AgentRun).where(AgentRun.id == agent_run_id).with_for_update()
     )
+    agent_run = result.scalar_one_or_none()
+    if agent_run is not None:
+        agent_run.updated_at = datetime.now(UTC)
     result = await session.execute(
         select(func.max(AgentRunStep.sequence)).where(AgentRunStep.agent_run_id == agent_run_id)
     )
@@ -607,6 +611,28 @@ async def list_agent_run_steps(
         .order_by(AgentRunStep.sequence.asc())
     )
     return list(result.scalars().all())
+
+
+async def list_chat_provider_triggers_by_conversation(
+    session: AsyncSession,
+    *,
+    conversation_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, str]:
+    if not conversation_ids:
+        return {}
+    result = await session.execute(
+        select(ChatProviderThread.conversation_id, ChatProviderConnection.provider)
+        .join(
+            ChatProviderConnection,
+            ChatProviderConnection.id == ChatProviderThread.connection_id,
+        )
+        .where(ChatProviderThread.conversation_id.in_(conversation_ids))
+    )
+    return {
+        conversation_id: provider
+        for conversation_id, provider in result.all()
+        if conversation_id is not None
+    }
 
 
 async def list_workspace_available_tools(

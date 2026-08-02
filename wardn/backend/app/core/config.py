@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     chat_provider_event_worker_retry_base_seconds: float = Field(default=2.0, gt=0, le=300)
     chat_provider_event_worker_retry_max_seconds: float = Field(default=30.0, gt=0, le=600)
     chat_provider_whatsapp_bridge_base_url: str = Field(default="", max_length=2048)
+    agent_chat_websocket_response_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        le=3600,
+    )
     outbound_http_allow_http: bool = False
     outbound_http_allowed_ports: list[int] = [443]
     outbound_http_private_host_allowlist: list[str] = []

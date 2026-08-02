@@ -67,6 +67,16 @@ function metricValue(value?: number | null) {
   return new Intl.NumberFormat("en-US").format(value ?? 0);
 }
 
+function triggerLabel(triggerType: string) {
+  const labels: Record<string, string> = {
+    chat: "Chat",
+    telegram: "Telegram",
+    whatsapp: "WhatsApp",
+    whatsapp_local: "WhatsApp",
+  };
+  return labels[triggerType] ?? triggerType;
+}
+
 function runHref(organizationId: string, workspaceId: string, runId: string) {
   return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
@@ -185,7 +195,7 @@ export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
                     <TableCell>
                       <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
                     </TableCell>
-                    <TableCell>{run.triggerType}</TableCell>
+                    <TableCell>{triggerLabel(run.triggerType)}</TableCell>
                     <TableCell>{metricValue(run.toolCalls)}</TableCell>
                     <TableCell>{metricValue(run.totalTokens)}</TableCell>
                     <TableCell>

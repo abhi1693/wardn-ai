@@ -159,6 +159,21 @@ async def llm_usage_totals(
     return result.one()
 
 
+async def llm_usage_totals_by_agent_run(
+    session: AsyncSession,
+    *,
+    agent_run_ids: list[UUID],
+):
+    if not agent_run_ids:
+        return []
+    result = await session.execute(
+        select(LLMUsageRecord.agent_run_id, *llm_usage_aggregate_columns())
+        .where(LLMUsageRecord.agent_run_id.in_(agent_run_ids))
+        .group_by(LLMUsageRecord.agent_run_id)
+    )
+    return list(result.all())
+
+
 async def mcp_tool_call_count(
     session: AsyncSession,
     *,
@@ -178,6 +193,21 @@ async def mcp_tool_call_count(
         )
     )
     return int(result.scalar_one() or 0)
+
+
+async def mcp_tool_call_counts_by_agent_run(
+    session: AsyncSession,
+    *,
+    agent_run_ids: list[UUID],
+):
+    if not agent_run_ids:
+        return []
+    result = await session.execute(
+        select(MCPToolInvocation.agent_run_id, func.count(MCPToolInvocation.id).label("tool_calls"))
+        .where(MCPToolInvocation.agent_run_id.in_(agent_run_ids))
+        .group_by(MCPToolInvocation.agent_run_id)
+    )
+    return list(result.all())
 
 
 async def organization_dashboard_control_counts(

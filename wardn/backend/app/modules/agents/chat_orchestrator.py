@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import InvalidStatus, WebSocketException
 
+from app.core.config import get_settings
 from app.modules.agents import repository
 from app.modules.agents.conversations import AgentSessionFactory, agent_stream_unit_of_work
 from app.modules.agents.dynamic_tools import (
@@ -303,15 +305,21 @@ async def persisted_agent_chat_stream(
                 "data": data,
             }
             activity_parts[event.id] = activity_part
-            is_progress_update = event.progress is not None or event.message is not None
-            if agent_run is not None and not is_progress_update:
+            is_progress_update = event.status == "running" and (
+                event.progress is not None or event.message is not None
+            )
+            if agent_run is not None:
                 async with agent_stream_unit_of_work(session_factory) as session:
                     await repository.append_agent_run_step(
                         session,
                         agent_run_id=agent_run.id,
-                        step_type="tool_call"
-                        if event.status == "running"
-                        else "tool_result",
+                        step_type=(
+                            "tool_progress"
+                            if is_progress_update
+                            else "tool_call"
+                            if event.status == "running"
+                            else "tool_result"
+                        ),
                         status=event.status,
                         title=event.tool_name,
                         payload=sanitize_run_payload(data),
@@ -828,6 +836,7 @@ async def stream_chatgpt_codex_response_text(
                 organization_id=organization_id,
                 workspace_id=workspace_id,
             )
+            response_timeout_seconds = agent_chat_websocket_response_timeout_seconds()
 
             for _round_index in range(max_tool_rounds):
                 body = chatgpt_codex_request_body(
@@ -851,7 +860,11 @@ async def stream_chatgpt_codex_response_text(
 
                 try:
                     await websocket.send(json.dumps(body, separators=(",", ":")))
-                    async for raw_message in websocket:
+                    while True:
+                        raw_message = await receive_chatgpt_codex_websocket_message(
+                            websocket,
+                            timeout_seconds=response_timeout_seconds,
+                        )
                         if isinstance(raw_message, bytes):
                             raw_message = raw_message.decode("utf-8", errors="replace")
                         try:
@@ -975,6 +988,35 @@ async def stream_chatgpt_codex_response_text(
         raise AgentChatProviderError(f"LLM provider websocket failed: {exc}") from exc
     except TimeoutError as exc:
         raise AgentChatProviderError("LLM provider websocket timed out") from exc
+
+
+def agent_chat_websocket_response_timeout_seconds() -> float:
+    return float(get_settings().agent_chat_websocket_response_timeout_seconds)
+
+
+async def receive_chatgpt_codex_websocket_message(
+    websocket,
+    *,
+    timeout_seconds: float,
+):
+    try:
+        recv = getattr(websocket, "recv", None)
+        if callable(recv):
+            return await asyncio.wait_for(recv(), timeout=timeout_seconds)
+        iterator = getattr(websocket, "_wardn_message_iterator", None)
+        if iterator is None:
+            iterator_factory = getattr(websocket, "__aiter__", None)
+            iterator = iterator_factory() if callable(iterator_factory) else websocket
+            try:
+                websocket._wardn_message_iterator = iterator
+            except (AttributeError, TypeError):
+                pass
+        return await asyncio.wait_for(iterator.__anext__(), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        raise AgentChatProviderError(
+            "LLM provider websocket did not send a response within "
+            f"{timeout_seconds:g} seconds"
+        ) from exc
 
 
 async def execute_agent_skill_tool_call_stream(

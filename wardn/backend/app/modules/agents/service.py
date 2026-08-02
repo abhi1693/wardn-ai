@@ -1146,7 +1146,28 @@ async def list_workspace_agent_runs(
         organization_id=organization_id,
         workspace_id=workspace_id,
     )
-    return AgentRunListResponse(runs=[agent_run_response(agent_run) for agent_run in runs])
+    usage_summaries = await observability_service.agent_run_usage_summaries(
+        session,
+        agent_run_ids=[agent_run.id for agent_run in runs],
+    )
+    provider_triggers = await repository.list_chat_provider_triggers_by_conversation(
+        session,
+        conversation_ids=[
+            agent_run.conversation_id
+            for agent_run in runs
+            if agent_run.conversation_id is not None
+        ],
+    )
+    return AgentRunListResponse(
+        runs=[
+            agent_run_response(
+                agent_run,
+                usage_summaries.get(agent_run.id),
+                trigger_type=response_trigger_type(agent_run, provider_triggers),
+            )
+            for agent_run in runs
+        ]
+    )
 
 
 async def get_workspace_agent_run(
@@ -1174,15 +1195,36 @@ async def get_workspace_agent_run(
         session,
         agent_run_id=agent_run.id,
     )
+    provider_triggers = await repository.list_chat_provider_triggers_by_conversation(
+        session,
+        conversation_ids=[agent_run.conversation_id] if agent_run.conversation_id else [],
+    )
     return AgentRunDetailResponse(
         run=agent_run_response(
             agent_run,
             usage_summary,
             trace_id=trace_id,
             span_id=span_id,
+            trigger_type=response_trigger_type(agent_run, provider_triggers),
         ),
         steps=[agent_run_step_response(step) for step in steps],
     )
+
+
+def normalize_agent_run_trigger_type(trigger_type: str) -> str:
+    if trigger_type == "whatsapp_local":
+        return "whatsapp"
+    return trigger_type
+
+
+def response_trigger_type(
+    agent_run,
+    provider_triggers: dict[uuid.UUID, str],
+) -> str:
+    trigger_type = agent_run.trigger_type
+    if trigger_type == "chat" and agent_run.conversation_id is not None:
+        trigger_type = provider_triggers.get(agent_run.conversation_id, trigger_type)
+    return normalize_agent_run_trigger_type(trigger_type)
 
 
 def available_tool_response(
@@ -1341,6 +1383,7 @@ async def stream_agent_chat(
     workspace_id: uuid.UUID | None = None,
     *,
     session_factory: AgentSessionFactory | None = None,
+    trigger_type: str = "chat",
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
         session,
@@ -1372,7 +1415,7 @@ async def stream_agent_chat(
         agent_id=agent.id,
         conversation_id=conversation.id if conversation is not None else None,
         triggered_by_id=user.id,
-        trigger_type="chat",
+        trigger_type=trigger_type,
     )
     latest_message = latest_user_message(payload.messages)
     await repository.append_agent_run_step(

@@ -117,6 +117,7 @@ def agent_run_response(
     *,
     trace_id: str = "",
     span_id: str = "",
+    trigger_type: str | None = None,
 ) -> AgentRunRead:
     return AgentRunRead(
         id=agent_run.id,
@@ -125,7 +126,7 @@ def agent_run_response(
         agentId=agent_run.agent_id,
         conversationId=agent_run.conversation_id,
         triggeredById=agent_run.triggered_by_id,
-        triggerType=agent_run.trigger_type,
+        triggerType=trigger_type or agent_run.trigger_type,
         status=agent_run.status,
         inputTokens=usage_summary.input_tokens if usage_summary is not None else 0,
         outputTokens=usage_summary.output_tokens if usage_summary is not None else 0,

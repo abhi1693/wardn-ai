@@ -1371,6 +1371,49 @@ async def agent_run_usage_summary(
     return usage_totals_response(totals_row, tool_calls=total_tool_calls)
 
 
+async def agent_run_usage_summaries(
+    session: AsyncSession,
+    *,
+    agent_run_ids: list[UUID],
+) -> dict[UUID, UsageSummaryTotals]:
+    if not agent_run_ids:
+        return {}
+    llm_rows = await repository.llm_usage_totals_by_agent_run(
+        session,
+        agent_run_ids=agent_run_ids,
+    )
+    tool_rows = await repository.mcp_tool_call_counts_by_agent_run(
+        session,
+        agent_run_ids=agent_run_ids,
+    )
+    llm_by_run = {
+        row_value(row, "agent_run_id"): row
+        for row in llm_rows
+        if row_value(row, "agent_run_id") is not None
+    }
+    tool_calls_by_run = {
+        row_value(row, "agent_run_id"): int(row_value(row, "tool_calls", 0))
+        for row in tool_rows
+        if row_value(row, "agent_run_id") is not None
+    }
+    empty_totals = {
+        "requests": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "running": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": Decimal("0"),
+    }
+    return {
+        agent_run_id: usage_totals_response(
+            llm_by_run.get(agent_run_id, empty_totals),
+            tool_calls=tool_calls_by_run.get(agent_run_id, 0),
+        )
+        for agent_run_id in agent_run_ids
+    }
+
+
 async def agent_run_trace_ids(
     session: AsyncSession,
     *,
