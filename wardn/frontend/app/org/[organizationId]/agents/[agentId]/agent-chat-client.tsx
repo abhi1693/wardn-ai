@@ -13,7 +13,6 @@ import {
   KeyRound,
   ListTree,
   Loader2,
-  MessageSquare,
   Network,
   PanelRight,
   Pencil,
@@ -26,6 +25,7 @@ import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import {
   type FormEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -85,6 +85,18 @@ type ChatStatProps = {
   label: string;
   tone?: "danger" | "info" | "neutral" | "success" | "warning";
   value: string;
+};
+
+type ChatComposerProps = {
+  agent: AgentRead;
+  input: string;
+  isRunning: boolean;
+  onInputChange: (value: string) => void;
+  onStop: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  serverLabel: string;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  toolLabel: string;
 };
 
 const toneClassNames: Record<NonNullable<ChatStatProps["tone"]>, string> = {
@@ -284,6 +296,68 @@ function ContextPanel({
   );
 }
 
+function ChatComposer({
+  agent,
+  input,
+  isRunning,
+  onInputChange,
+  onStop,
+  onSubmit,
+  serverLabel,
+  textareaRef,
+  toolLabel,
+}: ChatComposerProps) {
+  return (
+    <form
+      className="w-full overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-float)] transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-sky-100"
+      onSubmit={onSubmit}
+    >
+      <div className="flex items-end gap-2 p-2">
+        <textarea
+          className="max-h-44 min-h-14 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+          disabled={isRunning}
+          onChange={(event) => onInputChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && isRunning) {
+              event.preventDefault();
+              onStop();
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder="Message this workspace"
+          ref={textareaRef}
+          value={input}
+        />
+        {isRunning ? (
+          <Button
+            aria-label="Stop response"
+            onClick={onStop}
+            size="icon"
+            type="button"
+            variant="secondary"
+          >
+            <Square className="size-4" />
+          </Button>
+        ) : (
+          <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
+            <Send className="size-4" />
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+        <Badge className="font-mono" variant="outline">
+          {agent.modelName || "No model"}
+        </Badge>
+        <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>{serverLabel}</Badge>
+        <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>{toolLabel}</Badge>
+      </div>
+    </form>
+  );
+}
+
 export function AgentChatClient({
   agent,
   conversation = null,
@@ -322,6 +396,7 @@ export function AgentChatClient({
   const toolLabel = `${agent.toolCount} ${pluralize(agent.toolCount, "tool")}`;
   const conversationTitle = conversation?.title?.trim() || "New conversation";
   const messageCount = messages.filter((message) => message.role !== "system").length;
+  const isEmptyConversation = messages.length === 0 && !error && status !== "submitted";
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -452,267 +527,213 @@ export function AgentChatClient({
   }, [input]);
 
   return (
-    <div className="grid h-full min-h-0 w-full overflow-hidden bg-background text-foreground xl:grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="hidden min-h-0 border-r border-border bg-sidebar/70 p-4 xl:block">
-        <ContextPanel
-          agent={agent}
-          connectionsPath={connectionsPath}
-          credentials={credentials}
-          editPath={editPath}
-          runsPath={runsPath}
-        />
-      </aside>
-
-      <div className="flex min-h-0 min-w-0 flex-col">
-        <header className="shrink-0 border-b border-border bg-card/95 px-5 py-3 shadow-[var(--shadow-card)] backdrop-blur">
-          <div className="flex min-w-0 items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <MessageSquare className="size-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <h2 className="truncate text-base font-semibold leading-6">
-                    {conversationTitle}
-                  </h2>
-                  <StatusBadge agent={agent} />
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="truncate">{agent.name}</span>
-                  <span className="text-border">/</span>
-                  <span>{messageCount} {pluralize(messageCount, "message")}</span>
-                  <span className="text-border">/</span>
-                  <span>{serverLabel}</span>
-                  <span className="text-border">/</span>
-                  <span>{toolLabel}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Button asChild className="max-md:hidden" size="sm" variant="outline">
-                <Link href={runsPath}>
-                  <ListTree className="size-4" />
-                  Runs
-                </Link>
-              </Button>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button size="sm" type="button" variant="outline">
-                    <PanelRight className="size-4" />
-                    Context
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
-                  <DialogHeader className="border-b border-border px-5 py-4">
-                    <DialogTitle>{agent.name}</DialogTitle>
-                    <DialogDescription>Workspace chat context</DialogDescription>
-                  </DialogHeader>
-                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                    <ContextPanel
-                      agent={agent}
-                      connectionsPath={connectionsPath}
-                      credentials={credentials}
-                      editPath={editPath}
-                      runsPath={runsPath}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
+    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
+      <div className="absolute right-5 top-4 z-10 flex shrink-0 items-center gap-2">
+        {!isEmptyConversation ? (
+          <div className="mr-1 hidden max-w-[360px] items-center gap-2 rounded-md border border-border bg-card/85 px-3 py-1.5 text-xs text-muted-foreground shadow-[var(--shadow-card)] backdrop-blur lg:flex">
+            <span className="truncate font-medium text-foreground">{conversationTitle}</span>
+            <span className="text-border">/</span>
+            <span>{messageCount} {pluralize(messageCount, "message")}</span>
           </div>
-        </header>
+        ) : null}
+        <Button asChild className="max-md:hidden" size="sm" variant="outline">
+          <Link href={runsPath}>
+            <ListTree className="size-4" />
+            Runs
+          </Link>
+        </Button>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button size="sm" type="button" variant="outline">
+              <PanelRight className="size-4" />
+              Context
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
+            <DialogHeader className="border-b border-border px-5 py-4">
+              <DialogTitle>{agent.name}</DialogTitle>
+              <DialogDescription>Workspace chat context</DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <ContextPanel
+                agent={agent}
+                connectionsPath={connectionsPath}
+                credentials={credentials}
+                editPath={editPath}
+                runsPath={runsPath}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
 
+      <div
+        className="min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,var(--surface-bright)_0%,var(--background)_54%,var(--surface)_100%)]"
+        ref={transcriptViewportRef}
+      >
         <div
-          className="min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,var(--surface-bright)_0%,var(--background)_52%,var(--surface)_100%)]"
-          ref={transcriptViewportRef}
+          className={cn(
+            "mx-auto flex w-full max-w-4xl flex-col px-5 md:px-8",
+            isEmptyConversation ? "min-h-full justify-center py-12" : "gap-6 py-8 pt-20"
+          )}
         >
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8 md:px-8">
-            {messages.length === 0 ? (
-              <div className="mx-auto flex min-h-[min(560px,calc(100dvh-18rem))] w-full max-w-3xl flex-col items-center justify-center text-center">
-                <div className="mb-4 flex size-12 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
-                  <Bot className="size-6" />
-                </div>
-                <h2 className="text-2xl font-semibold leading-8 text-foreground">
-                  Start with {agent.name}
-                </h2>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                  {agent.modelName || "Model not selected"} · {serverLabel} · {toolLabel}
-                </p>
-                <div className="mt-6 grid w-full gap-3 sm:grid-cols-3">
-                  {promptSuggestions.map((suggestion) => (
-                    <button
-                      className="min-h-24 rounded-md border border-border bg-card px-4 py-3 text-left text-sm leading-5 shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/35"
-                      key={suggestion}
-                      onClick={() => setSuggestion(suggestion)}
-                      type="button"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
+          {isEmptyConversation ? (
+            <div className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
+              <div className="mb-5 flex size-11 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
+                <Bot className="size-5" />
               </div>
-            ) : (
-              messages.map((message) => {
-                const text = messageText(message.parts);
-                const activities = toolActivities(message.parts);
-                const summaries = reasoningSummaries(message.parts);
-                const isUser = message.role === "user";
-                if (!text && activities.length === 0 && summaries.length === 0) {
-                  return null;
-                }
-                const agentRunId = agentRunIdFromMessage(message);
-                const traceHref = agentRunId
-                  ? `${workspaceBasePath}/agent-runs/${agentRunId}`
-                  : undefined;
-                return (
-                  <article
-                    className={cn("group flex", isUser ? "justify-end" : "justify-start")}
-                    key={message.id}
+              <h2 className="text-2xl font-semibold leading-8 text-foreground">
+                How can I help with this workspace?
+              </h2>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                {agent.name} is using {agent.modelName || "no selected model"} with {serverLabel}
+                and {toolLabel} available.
+              </p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                {promptSuggestions.map((suggestion) => (
+                  <button
+                    className="min-h-8 rounded-full border border-border bg-card px-3 py-1.5 text-sm leading-5 shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/35"
+                    key={suggestion}
+                    onClick={() => setSuggestion(suggestion)}
+                    type="button"
                   >
-                    <div
-                      className={cn(
-                        "flex max-w-[min(100%,820px)] gap-3",
-                        isUser ? "flex-row-reverse" : "w-full"
-                      )}
-                    >
-                      <MessageAvatar role={message.role} />
-                      <div className={cn("min-w-0", isUser ? "max-w-[720px]" : "flex-1")}>
-                        <div
-                          className={cn(
-                            "mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground",
-                            isUser && "justify-end"
-                          )}
-                        >
-                          <MessageLabel role={message.role} />
-                          {!isUser && traceHref ? (
-                            <Link
-                              className="inline-flex items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              href={traceHref}
-                            >
-                              <ListTree className="size-3" />
-                              Trace
-                            </Link>
-                          ) : null}
-                        </div>
-                        <div
-                          className={cn(
-                            "overflow-hidden rounded-md border px-4 py-3 text-sm leading-6 shadow-[var(--shadow-card)]",
-                            isUser
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border bg-card"
-                          )}
-                        >
-                          {!isUser ? (
-                            <ToolActivity
-                              activities={activities}
-                              approvalDecisions={approvalDecisions}
-                              onDecideApproval={decideToolApproval}
-                              summaries={summaries}
-                            />
-                          ) : null}
-                          {text ? <MessageMarkdown role={message.role} text={text} /> : null}
-                        </div>
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 w-full max-w-2xl">
+                <ChatComposer
+                  agent={agent}
+                  input={input}
+                  isRunning={isRunning}
+                  onInputChange={setInput}
+                  onStop={stop}
+                  onSubmit={submitMessage}
+                  serverLabel={serverLabel}
+                  textareaRef={textareaRef}
+                  toolLabel={toolLabel}
+                />
+              </div>
+            </div>
+          ) : (
+            messages.map((message) => {
+              const text = messageText(message.parts);
+              const activities = toolActivities(message.parts);
+              const summaries = reasoningSummaries(message.parts);
+              const isUser = message.role === "user";
+              if (!text && activities.length === 0 && summaries.length === 0) {
+                return null;
+              }
+              const agentRunId = agentRunIdFromMessage(message);
+              const traceHref = agentRunId
+                ? `${workspaceBasePath}/agent-runs/${agentRunId}`
+                : undefined;
+              return (
+                <article
+                  className={cn("group flex", isUser ? "justify-end" : "justify-start")}
+                  key={message.id}
+                >
+                  <div
+                    className={cn(
+                      "flex max-w-[min(100%,820px)] gap-3",
+                      isUser ? "flex-row-reverse" : "w-full"
+                    )}
+                  >
+                    <MessageAvatar role={message.role} />
+                    <div className={cn("min-w-0", isUser ? "max-w-[720px]" : "flex-1")}>
+                      <div
+                        className={cn(
+                          "mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground",
+                          isUser && "justify-end"
+                        )}
+                      >
+                        <MessageLabel role={message.role} />
+                        {!isUser && traceHref ? (
+                          <Link
+                            className="inline-flex items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            href={traceHref}
+                          >
+                            <ListTree className="size-3" />
+                            Trace
+                          </Link>
+                        ) : null}
+                      </div>
+                      <div
+                        className={cn(
+                          "overflow-hidden rounded-md border px-4 py-3 text-sm leading-6 shadow-[var(--shadow-card)]",
+                          isUser
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-card"
+                        )}
+                      >
+                        {!isUser ? (
+                          <ToolActivity
+                            activities={activities}
+                            approvalDecisions={approvalDecisions}
+                            onDecideApproval={decideToolApproval}
+                            summaries={summaries}
+                          />
+                        ) : null}
+                        {text ? <MessageMarkdown role={message.role} text={text} /> : null}
                       </div>
                     </div>
-                  </article>
-                );
-              })
-            )}
+                  </div>
+                </article>
+              );
+            })
+          )}
 
-            {status === "submitted" ? (
-              <div aria-live="polite" className="flex items-start gap-3" role="status">
-                <MessageAvatar role="assistant" />
-                <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-[var(--shadow-card)]">
-                  <Loader2 className="size-4 animate-spin" />
-                  Thinking
-                </div>
+          {status === "submitted" ? (
+            <div aria-live="polite" className="flex items-start gap-3" role="status">
+              <MessageAvatar role="assistant" />
+              <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-[var(--shadow-card)]">
+                <Loader2 className="size-4 animate-spin" />
+                Thinking
               </div>
-            ) : null}
-
-            {error ? (
-              <AsyncFeedback className="flex items-center justify-between gap-3" variant="error">
-                <span>{error.message}</span>
-                <Button
-                  className="h-8 border-red-200 bg-white px-3 text-xs text-red-700 hover:bg-red-50"
-                  disabled={!lastSubmittedText || isRunning}
-                  onClick={retryLastMessage}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Retry
-                </Button>
-              </AsyncFeedback>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="shrink-0 border-t border-border bg-card/95 px-4 py-3 backdrop-blur md:px-6">
-          {!agent.isActive ? (
-            <div className="mx-auto mb-3 flex max-w-4xl items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <AlertTriangle className="size-4 shrink-0" />
-              This agent is inactive.
             </div>
           ) : null}
-          <form
-            className="mx-auto w-full max-w-4xl overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-float)] transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-sky-100"
-            onSubmit={submitMessage}
-          >
-            <div className="border-b border-border bg-muted/35 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge className="font-mono" variant="outline">
-                  {agent.modelName || "No model"}
-                </Badge>
-                <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
-                  {serverLabel}
-                </Badge>
-                <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
-                  {toolLabel}
-                </Badge>
-                <Badge className="max-w-full truncate" variant="outline">
-                  {credentialLabel(credentials, agent.providerCredentialId)}
-                </Badge>
-              </div>
-            </div>
-            <div className="flex items-end gap-2 p-2">
-              <textarea
-                className="max-h-44 min-h-14 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-                disabled={isRunning}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape" && isRunning) {
-                    event.preventDefault();
-                    stop();
-                  }
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                placeholder="Message this workspace"
-                ref={textareaRef}
-                value={input}
-              />
-              {isRunning ? (
-                <Button
-                  aria-label="Stop response"
-                  onClick={stop}
-                  size="icon"
-                  type="button"
-                  variant="secondary"
-                >
-                  <Square className="size-4" />
-                </Button>
-              ) : (
-                <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
-                  <Send className="size-4" />
-                </Button>
-              )}
-            </div>
-          </form>
+
+          {error ? (
+            <AsyncFeedback className="flex items-center justify-between gap-3" variant="error">
+              <span>{error.message}</span>
+              <Button
+                className="h-8 border-red-200 bg-white px-3 text-xs text-red-700 hover:bg-red-50"
+                disabled={!lastSubmittedText || isRunning}
+                onClick={retryLastMessage}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Retry
+              </Button>
+            </AsyncFeedback>
+          ) : null}
         </div>
       </div>
+
+      {!isEmptyConversation ? (
+      <div className="shrink-0 border-t border-border bg-card/95 px-4 py-3 backdrop-blur md:px-6">
+        {!agent.isActive ? (
+          <div className="mx-auto mb-3 flex max-w-4xl items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <AlertTriangle className="size-4 shrink-0" />
+            This agent is inactive.
+          </div>
+        ) : null}
+        <div className="mx-auto w-full max-w-4xl">
+          <ChatComposer
+            agent={agent}
+            input={input}
+            isRunning={isRunning}
+            onInputChange={setInput}
+            onStop={stop}
+            onSubmit={submitMessage}
+            serverLabel={serverLabel}
+            textareaRef={textareaRef}
+            toolLabel={toolLabel}
+          />
+        </div>
+      </div>
+      ) : null}
     </div>
   );
 }
