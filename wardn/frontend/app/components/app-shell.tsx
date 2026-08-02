@@ -1,15 +1,23 @@
 import {
+  Activity,
+  BadgeDollarSign,
   BookOpen,
+  Bot,
   Boxes,
+  BarChart3,
+  Gauge,
   Home,
+  KeyRound,
   ListTree,
   MessageSquare,
   PlugZap,
   Replace,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -19,54 +27,143 @@ import type { WorkspaceContext } from "@/lib/workspace-types";
 import { BrandMark } from "./brand-mark";
 import { LogoutButton } from "./logout-button";
 
-function organizationNavItems(workspaceContext?: WorkspaceContext) {
+type AppShellActive =
+  | "dashboard"
+  | "org-dashboard"
+  | "workspaces"
+  | "organizations"
+  | "organization-settings"
+  | "workspace-settings"
+  | "workspace-dashboard"
+  | "workspace-chat"
+  | "workspace-runs"
+  | "workspace-skills"
+  | "workspace-observability"
+  | "catalog"
+  | "llm-credentials"
+  | "llm-pricing"
+  | "usage"
+  | "secret-backends"
+  | "workspace-guardrails"
+  | "agents"
+  | "workspace-agents"
+  | "agent-tokens"
+  | "limits"
+  | "runtime"
+  | "install";
+
+type NavigationItem = {
+  activeKey: AppShellActive;
+  activeKeys?: AppShellActive[];
+  href: string;
+  icon: LucideIcon;
+  label: string;
+};
+
+type NavigationSection = {
+  items: NavigationItem[];
+  label: string;
+};
+
+function organizationNavSections(workspaceContext?: WorkspaceContext): NavigationSection[] {
   const organizationId = workspaceContext?.selectedOrganization?.id;
-  return [
+  const organizationBasePath = organizationId
+    ? `/org/${encodeURIComponent(organizationId)}`
+    : "/org";
+  const organizationSettingsPath = organizationId
+    ? `/organizations/${encodeURIComponent(organizationId)}/settings`
+    : "/org";
+  const sections: NavigationSection[] = [
     {
-      label: "Dashboard",
-      href: organizationId ? `/org/${organizationId}/dashboard` : "/org",
-      activeKey: "org-dashboard",
-      icon: Home,
+      label: "Organization",
+      items: [
+        {
+          label: "Dashboard",
+          href: organizationId ? `${organizationBasePath}/dashboard` : "/org",
+          activeKey: "org-dashboard",
+          icon: Home,
+        },
+        {
+          label: "Workspaces",
+          href: organizationId ? `${organizationBasePath}/workspaces` : "/org",
+          activeKey: "workspaces",
+          icon: Boxes,
+        },
+        {
+          label: "Catalog",
+          href: organizationId ? `${organizationBasePath}/catalog` : "/org",
+          activeKey: "catalog",
+          icon: BookOpen,
+        },
+      ],
     },
-    {
-      label: "Workspaces",
-      href: organizationId ? `/org/${organizationId}/workspaces` : "/org",
-      activeKey: "workspaces",
-      icon: Boxes,
-    },
-    {
-      label: "Catalog",
-      href: organizationId ? `/org/${organizationId}/catalog` : "/org",
-      activeKey: "catalog",
-      icon: BookOpen,
-    },
-    ...(organizationId
-      ? [
+  ];
+
+  if (organizationId) {
+    sections.push(
+      {
+        label: "Settings",
+        items: [
           {
-            label: "Settings",
-            href: `/organizations/${organizationId}/settings`,
+            label: "Profile",
+            href: organizationSettingsPath,
             activeKey: "organization-settings",
-            activeKeys: [
-              "organization-settings",
-              "llm-credentials",
-              "llm-pricing",
-              "usage",
-              "agent-tokens",
-              "limits",
-              "secret-backends",
-            ],
             icon: Settings,
           },
-        ]
-      : []),
-  ];
+          {
+            label: "Usage",
+            href: `${organizationBasePath}/usage`,
+            activeKey: "usage",
+            icon: BarChart3,
+          },
+        ],
+      },
+      {
+        label: "Controls",
+        items: [
+          {
+            label: "LLM Credentials",
+            href: `${organizationBasePath}/llm-credentials`,
+            activeKey: "llm-credentials",
+            icon: PlugZap,
+          },
+          {
+            label: "Model Pricing",
+            href: `${organizationBasePath}/llm-pricing`,
+            activeKey: "llm-pricing",
+            icon: BadgeDollarSign,
+          },
+          {
+            label: "Agent Tokens",
+            href: `${organizationBasePath}/tokens`,
+            activeKey: "agent-tokens",
+            icon: KeyRound,
+          },
+          {
+            label: "Limits",
+            href: `${organizationBasePath}/limits`,
+            activeKey: "limits",
+            icon: SlidersHorizontal,
+          },
+          {
+            label: "Secret Backends",
+            href: `${organizationBasePath}/secret-backends`,
+            activeKey: "secret-backends",
+            icon: ShieldCheck,
+          },
+        ],
+      }
+    );
+  }
+
+  return sections;
 }
 
-function workspaceNavItems(workspaceContext?: WorkspaceContext) {
+function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSection[] {
   const organizationId = workspaceContext?.selectedOrganization?.id;
   const workspaceId = workspaceContext?.selectedWorkspace?.id;
   if (!organizationId || !workspaceId) {
-    return organizationNavItems(workspaceContext);
+    return organizationNavSections(workspaceContext);
   }
 
   const workspaceBasePath = `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
@@ -75,78 +172,102 @@ function workspaceNavItems(workspaceContext?: WorkspaceContext) {
 
   return [
     {
-      label: "Chat",
-      href: `${workspaceBasePath}/chat`,
-      activeKey: "workspace-chat",
-      icon: MessageSquare,
-    },
-    {
-      label: "Connections",
-      href: `${workspaceBasePath}/install`,
-      activeKey: "install",
-      icon: PlugZap,
-    },
-    {
-      label: "Skills",
-      href: `${workspaceBasePath}/skills`,
-      activeKey: "workspace-skills",
-      icon: Sparkles,
-    },
-    {
-      label: "Access",
-      href: `${workspaceBasePath}/guardrails`,
-      activeKey: "workspace-guardrails",
-      icon: ShieldCheck,
-    },
-    {
-      label: "Runs",
-      href: `${workspaceBasePath}/agent-runs`,
-      activeKey: "workspace-runs",
-      icon: ListTree,
-    },
-    {
-      label: "Settings",
-      href: `/organizations/${encodeURIComponent(
-        organizationId
-      )}/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-      activeKey: "workspace-settings",
-      activeKeys: [
-        "workspace-settings",
-        "workspace-dashboard",
-        "workspace-agents",
-        "runtime",
-        "workspace-observability",
+      label: "Workspace",
+      items: [
+        {
+          label: "Dashboard",
+          href: `${workspaceBasePath}/dashboard`,
+          activeKey: "workspace-dashboard",
+          icon: Home,
+        },
+        {
+          label: "Chat",
+          href: `${workspaceBasePath}/chat`,
+          activeKey: "workspace-chat",
+          icon: MessageSquare,
+        },
+        {
+          label: "Connections",
+          href: `${workspaceBasePath}/install`,
+          activeKey: "install",
+          icon: PlugZap,
+        },
+        {
+          label: "Skills",
+          href: `${workspaceBasePath}/skills`,
+          activeKey: "workspace-skills",
+          icon: Sparkles,
+        },
+        {
+          label: "Access",
+          href: `${workspaceBasePath}/guardrails`,
+          activeKey: "workspace-guardrails",
+          icon: ShieldCheck,
+        },
+        {
+          label: "Runs",
+          href: `${workspaceBasePath}/agent-runs`,
+          activeKey: "workspace-runs",
+          icon: ListTree,
+        },
       ],
-      icon: Settings,
+    },
+    {
+      label: "Manage",
+      items: [
+        {
+          label: "Agents",
+          href: `${workspaceBasePath}/agents`,
+          activeKey: "workspace-agents",
+          activeKeys: ["agents"],
+          icon: Bot,
+        },
+        {
+          label: "Runtime",
+          href: `${workspaceBasePath}/runtime`,
+          activeKey: "runtime",
+          icon: Activity,
+        },
+        {
+          label: "Observability",
+          href: `${workspaceBasePath}/observability`,
+          activeKey: "workspace-observability",
+          icon: Gauge,
+        },
+        {
+          label: "Settings",
+          href: `/organizations/${encodeURIComponent(
+            organizationId
+          )}/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+          activeKey: "workspace-settings",
+          icon: Settings,
+        },
+      ],
+    },
+    {
+      label: "Organization",
+      items: [
+        {
+          label: "Admin",
+          href: `/organizations/${encodeURIComponent(organizationId)}/settings`,
+          activeKey: "organization-settings",
+          activeKeys: [
+            "llm-credentials",
+            "llm-pricing",
+            "usage",
+            "agent-tokens",
+            "limits",
+            "secret-backends",
+          ],
+          icon: Settings,
+        },
+      ],
     },
   ];
 }
 
 type AppShellProps = {
-  active:
-    | "dashboard"
-    | "org-dashboard"
-    | "workspaces"
-    | "organizations"
-    | "organization-settings"
-    | "workspace-settings"
-    | "workspace-dashboard"
-    | "workspace-chat"
-    | "workspace-runs"
-    | "workspace-skills"
-    | "workspace-observability"
-    | "catalog"
-    | "llm-credentials"
-    | "llm-pricing"
-    | "usage"
-    | "secret-backends"
-    | "workspace-guardrails"
-    | "agents"
-    | "workspace-agents"
-    | "agent-tokens"
-    | "limits"
-    | "runtime"
-    | "install";
+  active: AppShellActive;
   eyebrow: string;
   title: string;
   actions?: ReactNode;
@@ -178,15 +299,19 @@ export function AppShell({
     active === "workspace-observability" ||
     active === "workspace-guardrails" ||
     active === "workspace-agents" ||
+    active === "agents" ||
     active === "workspace-settings";
-  const navigationItems = isWorkspaceScope
-    ? workspaceNavItems(workspaceContext)
-    : organizationNavItems(workspaceContext);
+  const navigationSections = isWorkspaceScope
+    ? workspaceNavSections(workspaceContext)
+    : organizationNavSections(workspaceContext);
   const selectedOrganization = workspaceContext?.selectedOrganization;
   const selectedWorkspace = workspaceContext?.selectedWorkspace;
-  const primaryNavItems = navigationItems.map((item) => ({
-    ...item,
-    active: item.activeKey === active || item.activeKeys?.includes(active),
+  const primaryNavSections = navigationSections.map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({
+      ...item,
+      active: item.activeKey === active || item.activeKeys?.includes(active),
+    })),
   }));
   const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
   const showBreadcrumbParent = breadcrumbLabel !== title;
@@ -219,27 +344,42 @@ export function AppShell({
         </div>
 
         <nav
-          className="flex-1 space-y-1 max-lg:flex max-lg:max-w-full max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:pb-1"
+          className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1 max-lg:flex max-lg:max-w-full max-lg:gap-2 max-lg:space-y-0 max-lg:overflow-x-auto max-lg:overflow-y-hidden max-lg:pb-1 max-lg:pr-0"
           aria-label="Primary"
         >
-          {primaryNavItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Link
+          {primaryNavSections.map((section, sectionIndex) => (
+            <div
+              className="space-y-1 max-lg:flex max-lg:min-w-fit max-lg:gap-2 max-lg:space-y-0"
+              key={section.label}
+            >
+              <div
                 className={cn(
-                  "relative flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors active:bg-muted max-lg:min-w-fit",
-                  "hover:bg-muted hover:text-foreground",
-                  item.active &&
-                    "border border-[#d9e6ff] bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[var(--shadow-card)] before:absolute before:left-1 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-ring before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  "px-3 pb-1 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground max-lg:hidden",
+                  sectionIndex === 0 ? "pt-0" : "pt-1"
                 )}
-                href={item.href}
-                key={item.label}
               >
-                <Icon className="size-4" />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+                {section.label}
+              </div>
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    className={cn(
+                      "relative flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors active:bg-muted max-lg:min-w-fit",
+                      "hover:bg-muted hover:text-foreground",
+                      item.active &&
+                        "border border-[#d9e6ff] bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[var(--shadow-card)] before:absolute before:left-1 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-ring before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    )}
+                    href={item.href}
+                    key={item.label}
+                  >
+                    <Icon className="size-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="mt-auto border-t border-border pt-4 max-lg:hidden">
