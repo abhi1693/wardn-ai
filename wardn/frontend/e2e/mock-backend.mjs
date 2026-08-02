@@ -421,6 +421,24 @@ async function handle(request) {
   if (request.method === "GET" && url.pathname === "/api/v1/auth/me") {
     return json({ id: "user-1", email: "owner@example.com", isSuperuser: true });
   }
+  const agentApprovalMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/([^/]+)\/workspaces\/([^/]+)\/agents\/([^/]+)\/tool-approvals\/([^/]+)$/
+  );
+  if (
+    request.method === "POST" &&
+    agentApprovalMatch?.[1] === organization.id &&
+    agentApprovalMatch[2] === workspace.id
+  ) {
+    const denied = body.decision === "deny";
+    return json({
+      approvalId: agentApprovalMatch[4],
+      assistantMessage: null,
+      error: denied ? "Denied by user." : "",
+      result: denied ? "" : "namespace/default",
+      status: denied ? "denied" : "completed",
+      toolName: "namespace_list",
+    });
+  }
   if (url.pathname === "/api/v1/auth/api-tokens") {
     if (request.method === "GET") {
       return json({ tokens: state.tokens });
