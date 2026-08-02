@@ -1,13 +1,15 @@
-import argparse
 import asyncio
 import logging
 import sys
 from contextlib import suppress
+from types import SimpleNamespace
+from typing import Annotated
 
+import typer
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.core.config import Settings, get_settings
 from app.modules.mcp_registry.job_handlers import build_job_handlers
 from app.modules.mcp_registry.job_worker import (
@@ -23,22 +25,6 @@ from app.modules.secrets.cleanup_worker import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def configure_runmcpjobs_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--once", action="store_true", help="Process at most one job and exit.")
-    parser.add_argument(
-        "--worker-id",
-        default="",
-        help="Stable worker identifier for logs and leases.",
-    )
-    parser.add_argument(
-        "--poll-interval",
-        type=float,
-        default=None,
-        help="Seconds to wait when no work is available.",
-    )
-    parser.add_argument("--verbose", action="store_true", help="Show detailed worker logs.")
 
 
 def configure_command_logging(*, verbose: bool) -> None:
@@ -72,7 +58,7 @@ def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float
         )
 
 
-async def run_mcp_jobs_from_args(args: argparse.Namespace) -> int:
+async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
     settings = get_settings()
     poll_interval_seconds = (
         settings.mcp_job_worker_poll_interval_seconds
@@ -132,7 +118,7 @@ async def run_mcp_jobs_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_runmcpjobs(args: argparse.Namespace) -> int:
+def handle_runmcpjobs(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(run_mcp_jobs_from_args(args))
@@ -142,10 +128,32 @@ def handle_runmcpjobs(args: argparse.Namespace) -> int:
         return 1
 
 
-def register_mcp_job_commands(registry: CommandRegistry) -> None:
-    registry.register(
-        "runmcpjobs",
-        "Run durable MCP installation and synchronization jobs.",
-        configure_runmcpjobs_parser,
-        handle_runmcpjobs,
+def runmcpjobs_command(
+    once: Annotated[bool, typer.Option("--once", help="Process at most one job and exit.")] = False,
+    worker_id: Annotated[
+        str,
+        typer.Option(help="Stable worker identifier for logs and leases."),
+    ] = "",
+    poll_interval: Annotated[
+        float | None,
+        typer.Option(help="Seconds to wait when no work is available."),
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show detailed worker logs.")] = False,
+) -> None:
+    exit_with_code(
+        handle_runmcpjobs(
+            SimpleNamespace(
+                once=once,
+                worker_id=worker_id,
+                poll_interval=poll_interval,
+                verbose=verbose,
+            )
+        )
     )
+
+
+def register_mcp_job_commands(app: typer.Typer) -> None:
+    app.command(
+        "runmcpjobs",
+        help="Run durable MCP installation and synchronization jobs.",
+    )(runmcpjobs_command)

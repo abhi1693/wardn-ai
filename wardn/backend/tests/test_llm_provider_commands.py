@@ -1,4 +1,3 @@
-from argparse import Namespace
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -111,7 +110,7 @@ async def test_connect_chatgpt_writes_tokens_and_creates_handle_credential(monke
     monkeypatch.setattr(commands, "chatgpt_oauth_metadata", lambda _token: {"accountId": "acct"})
 
     await commands.connect_chatgpt_from_args(
-        Namespace(
+        SimpleNamespace(
             organization_id=str(organization_id),
             credential_id="",
             user_email=user.email,
@@ -236,7 +235,7 @@ async def test_connect_chatgpt_reconnects_existing_credential(monkeypatch) -> No
     )
 
     await commands.connect_chatgpt_from_args(
-        Namespace(
+        SimpleNamespace(
             organization_id=str(organization_id),
             credential_id=str(credential_id),
             user_email=user.email,

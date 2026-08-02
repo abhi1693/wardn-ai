@@ -1,13 +1,14 @@
-import argparse
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
+from typer.testing import CliRunner
 
-from app.commands.registry import CommandRegistry
+from app.commands import create_app
 from app.modules.users import commands
 
 
-def make_args(**overrides) -> argparse.Namespace:
+def make_args(**overrides) -> SimpleNamespace:
     values = {
         "email": "admin@example.com",
         "first_name": "Ada",
@@ -16,20 +17,37 @@ def make_args(**overrides) -> argparse.Namespace:
         "no_input": True,
     }
     values.update(overrides)
-    return argparse.Namespace(**values)
+    return SimpleNamespace(**values)
 
 
-def test_register_user_commands_adds_createsuperuser() -> None:
-    registry = CommandRegistry()
-    commands.register_user_commands(registry)
+def test_createsuperuser_cli_passes_typed_options(monkeypatch) -> None:
+    captured = {}
 
-    parser = registry.build_parser()
-    args = parser.parse_args(
-        ["createsuperuser", "--email", "admin@example.com", "--password", "pass"]
+    def handle(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(commands, "handle_createsuperuser", handle)
+    result = CliRunner().invoke(
+        create_app(),
+        [
+            "createsuperuser",
+            "--email",
+            "admin@example.com",
+            "--password",
+            "pass",
+            "--no-input",
+        ],
     )
 
-    assert args.command == "createsuperuser"
-    assert args.handler == commands.handle_createsuperuser
+    assert result.exit_code == 0
+    assert captured["args"] == SimpleNamespace(
+        email="admin@example.com",
+        first_name="",
+        last_name="",
+        password="pass",
+        no_input=True,
+    )
 
 
 def test_handle_createsuperuser_reports_missing_no_input_fields(capsys) -> None:

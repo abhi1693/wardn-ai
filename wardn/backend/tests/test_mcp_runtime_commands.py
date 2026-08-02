@@ -1,24 +1,33 @@
-import argparse
+from types import SimpleNamespace
 
-from app.commands.registry import CommandRegistry
+from typer.testing import CliRunner
+
+from app.commands import create_app
 from app.modules.mcp_runtime import commands
 
 
-def test_register_mcp_runtime_commands_adds_reaper_command() -> None:
-    registry = CommandRegistry()
-    commands.register_mcp_runtime_commands(registry)
+def test_reapmcpruntimes_cli_passes_typed_options(monkeypatch) -> None:
+    captured = []
 
-    parser = registry.build_parser()
-    args = parser.parse_args(["reapmcpruntimes", "--limit", "25"])
+    def handle(args):
+        captured.append(args)
+        return 0
 
-    assert args.command == "reapmcpruntimes"
-    assert args.handler == commands.handle_reapmcpruntimes
-    assert args.limit == 25
-    assert args.event_retention_days is None
-    assert args.invocation_retention_days is None
-    assert args.verbose is False
+    monkeypatch.setattr(commands, "handle_reapmcpruntimes", handle)
+    runner = CliRunner()
 
-    args = parser.parse_args(
+    result = runner.invoke(create_app(), ["reapmcpruntimes", "--limit", "25"])
+
+    assert result.exit_code == 0
+    assert captured[-1] == SimpleNamespace(
+        limit=25,
+        event_retention_days=None,
+        invocation_retention_days=None,
+        verbose=False,
+    )
+
+    result = runner.invoke(
+        create_app(),
         [
             "reapmcpruntimes",
             "--limit",
@@ -29,13 +38,14 @@ def test_register_mcp_runtime_commands_adds_reaper_command() -> None:
             "30",
         ]
     )
-    assert args.event_retention_days == 7
-    assert args.invocation_retention_days == 30
+    assert result.exit_code == 0
+    assert captured[-1].event_retention_days == 7
+    assert captured[-1].invocation_retention_days == 30
 
 
 def test_handle_reapmcpruntimes_rejects_invalid_limit(capsys) -> None:
     result = commands.handle_reapmcpruntimes(
-        argparse.Namespace(limit=0, verbose=False)
+        SimpleNamespace(limit=0, verbose=False)
     )
 
     captured = capsys.readouterr()
@@ -45,7 +55,7 @@ def test_handle_reapmcpruntimes_rejects_invalid_limit(capsys) -> None:
 
 def test_handle_reapmcpruntimes_rejects_invalid_event_retention(capsys) -> None:
     result = commands.handle_reapmcpruntimes(
-        argparse.Namespace(
+        SimpleNamespace(
             limit=10,
             event_retention_days=-1,
             invocation_retention_days=None,
@@ -60,7 +70,7 @@ def test_handle_reapmcpruntimes_rejects_invalid_event_retention(capsys) -> None:
 
 def test_handle_reapmcpruntimes_rejects_invalid_invocation_retention(capsys) -> None:
     result = commands.handle_reapmcpruntimes(
-        argparse.Namespace(
+        SimpleNamespace(
             limit=10,
             event_retention_days=None,
             invocation_retention_days=-1,

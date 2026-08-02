@@ -1,13 +1,14 @@
-import argparse
 import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from typer.testing import CliRunner
 
-from app.commands.registry import CommandRegistry
+from app.commands import create_app
 from app.core.config import Settings
 from app.modules.mcp_registry import job_commands, job_repository, job_worker
 from app.modules.mcp_registry.models import MCPOperationJob
@@ -310,21 +311,25 @@ def test_worker_settings_require_container_isolation_outside_local() -> None:
     job_commands.validate_worker_settings(settings, poll_interval_seconds=2)
 
 
-def test_register_mcp_job_command() -> None:
-    registry = CommandRegistry()
-    job_commands.register_mcp_job_commands(registry)
+def test_runmcpjobs_cli_passes_typed_options(monkeypatch) -> None:
+    captured = {}
 
-    args = registry.build_parser().parse_args(
-        ["runmcpjobs", "--once", "--worker-id", "worker-1", "--poll-interval", "3"]
+    def handle(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(job_commands, "handle_runmcpjobs", handle)
+    result = CliRunner().invoke(
+        create_app(),
+        ["runmcpjobs", "--once", "--worker-id", "worker-1", "--poll-interval", "3"],
     )
 
-    assert args == argparse.Namespace(
-        command="runmcpjobs",
+    assert result.exit_code == 0
+    assert captured["args"] == SimpleNamespace(
         once=True,
         worker_id="worker-1",
         poll_interval=3.0,
         verbose=False,
-        handler=job_commands.handle_runmcpjobs,
     )
 
 
@@ -350,7 +355,7 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
     monkeypatch.setattr(job_commands, "run_cleanup_worker_once", clean_secret)
 
     result = await job_commands.run_mcp_jobs_from_args(
-        argparse.Namespace(
+        SimpleNamespace(
             once=True,
             worker_id="worker-1",
             poll_interval=3.0,
@@ -401,7 +406,7 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
     monkeypatch.setattr(job_commands, "stop_runtime_reaper", stop_runtime_reaper)
     monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
 
-    args = argparse.Namespace(
+    args = SimpleNamespace(
         once=False,
         worker_id="worker-1",
         poll_interval=3.0,

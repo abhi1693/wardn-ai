@@ -1,11 +1,12 @@
-import argparse
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from typer.testing import CliRunner
 
-from app.commands.registry import CommandRegistry
+from app.commands import create_app
 from app.modules.secrets import cleanup_worker, commands, managed_repository
 from app.modules.secrets.models import ManagedSecret, SecretStore
 
@@ -135,19 +136,23 @@ async def test_cleanup_deletes_external_path_before_database_state(monkeypatch) 
     assert all(session.committed for session in factory.sessions)
 
 
-def test_register_secret_cleanup_command() -> None:
-    registry = CommandRegistry()
-    commands.register_secret_commands(registry)
+def test_secret_cleanup_cli_passes_typed_options(monkeypatch) -> None:
+    captured = {}
 
-    args = registry.build_parser().parse_args(
-        ["runsecretcleanup", "--once", "--worker-id", "worker-1", "--poll-interval", "3"]
+    def handle(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(commands, "handle_runsecretcleanup", handle)
+    result = CliRunner().invoke(
+        create_app(),
+        ["runsecretcleanup", "--once", "--worker-id", "worker-1", "--poll-interval", "3"],
     )
 
-    assert args == argparse.Namespace(
-        command="runsecretcleanup",
+    assert result.exit_code == 0
+    assert captured["args"] == SimpleNamespace(
         once=True,
         worker_id="worker-1",
         poll_interval=3.0,
         verbose=False,
-        handler=commands.handle_runsecretcleanup,
     )

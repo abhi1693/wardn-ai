@@ -1,17 +1,20 @@
-import argparse
 import asyncio
 import queue
 import sys
 import threading
 import webbrowser
+from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from types import SimpleNamespace
+from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
+import typer
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.db.session import AsyncSessionLocal
 from app.modules.llm_providers import repository as llm_repository
 from app.modules.llm_providers.exceptions import (
@@ -55,56 +58,15 @@ CALLBACK_PATH = "/auth/callback"
 REDIRECT_URI = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}{CALLBACK_PATH}"
 
 
-def configure_connectchatgpt_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--organization-id", required=True, help="Organization UUID.")
-    parser.add_argument(
-        "--credential-id",
-        default="",
-        help="Existing ChatGPT credential UUID to reconnect.",
-    )
-    parser.add_argument("--user-email", default="", help="Wardn user email to own the credential.")
-    parser.add_argument("--user-id", default="", help="Wardn user UUID to own the credential.")
-    parser.add_argument("--name", default="OpenAI ChatGPT", help="Credential name.")
-    parser.add_argument(
-        "--visibility",
-        choices=("organization", "workspace", "user"),
-        default="organization",
-        help="Credential visibility.",
-    )
-    parser.add_argument("--workspace-id", default="", help="Workspace UUID for workspace scope.")
-    parser.add_argument(
-        "--secret-store-id",
-        default="",
-        help="Secret store UUID where ChatGPT OAuth tokens will be written.",
-    )
-    parser.add_argument(
-        "--secret-path",
-        default="",
-        help=(
-            "External secret path for the OAuth token document. Defaults to a generated "
-            "wardn/orgs/<org>/.../chatgpt/<uuid> path."
-        ),
-    )
-    parser.add_argument(
-        "--flow",
-        choices=("device", "loopback"),
-        default="device",
-        help=(
-            "OAuth login flow. Device works from containers; loopback requires "
-            "local browser access."
-        ),
-    )
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Print the login URL without opening a browser.",
-    )
-    parser.add_argument(
-        "--timeout-seconds",
-        type=int,
-        default=15 * 60,
-        help="Seconds to wait for ChatGPT authorization.",
-    )
+class CredentialVisibility(StrEnum):
+    organization = "organization"
+    workspace = "workspace"
+    user = "user"
+
+
+class ChatGPTOAuthFlow(StrEnum):
+    device = "device"
+    loopback = "loopback"
 
 
 def oauth_success_html() -> bytes:
@@ -161,7 +123,7 @@ def start_callback_server(state: str, result_queue: queue.Queue[str]) -> HTTPSer
     return HTTPServer((CALLBACK_HOST, CALLBACK_PORT), CallbackHandler)
 
 
-async def get_chatgpt_device_oauth_tokens(args: argparse.Namespace) -> dict:
+async def get_chatgpt_device_oauth_tokens(args: SimpleNamespace) -> dict:
     device_code = await request_chatgpt_device_code()
     print("Open this URL to connect ChatGPT:")
     print(device_code.verification_url)
@@ -183,7 +145,7 @@ async def get_chatgpt_device_oauth_tokens(args: argparse.Namespace) -> dict:
     raise TimeoutError
 
 
-async def get_chatgpt_loopback_oauth_tokens(args: argparse.Namespace) -> dict:
+async def get_chatgpt_loopback_oauth_tokens(args: SimpleNamespace) -> dict:
     verifier, challenge = generate_pkce_pair()
     state = generate_oauth_state()
     authorization_url = build_chatgpt_authorization_url(
@@ -264,7 +226,7 @@ def handle_display_name(name: str, suffix: str, run_id: str) -> str:
     return f"{base[: 100 - len(suffix_with_space)].rstrip()}{suffix_with_space}"
 
 
-async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
+async def connect_chatgpt_from_args(args: SimpleNamespace) -> None:
     organization_id = UUID(args.organization_id)
     workspace_id = UUID(args.workspace_id) if args.workspace_id else None
     credential_id = UUID(args.credential_id) if args.credential_id else None
@@ -457,7 +419,8 @@ async def connect_chatgpt_from_args(args: argparse.Namespace) -> None:
         print(f"ChatGPT tokens written to secret store path: {external_ref}")
         print(f"ChatGPT credential connected: {credential.name} ({credential.id})")
 
-def handle_connectchatgpt(args: argparse.Namespace) -> int:
+
+def handle_connectchatgpt(args: SimpleNamespace) -> int:
     try:
         asyncio.run(connect_chatgpt_from_args(args))
     except queue.Empty:
@@ -492,10 +455,82 @@ def handle_connectchatgpt(args: argparse.Namespace) -> int:
     return 0
 
 
-def register_llm_provider_commands(registry: CommandRegistry) -> None:
-    registry.register(
-        "connectchatgpt",
-        "Connect an OpenAI ChatGPT OAuth credential using a device code.",
-        configure_connectchatgpt_parser,
-        handle_connectchatgpt,
+def connectchatgpt_command(
+    organization_id: Annotated[str, typer.Option(help="Organization UUID.")],
+    credential_id: Annotated[
+        str,
+        typer.Option(help="Existing ChatGPT credential UUID to reconnect."),
+    ] = "",
+    user_email: Annotated[
+        str,
+        typer.Option(help="Wardn user email to own the credential."),
+    ] = "",
+    user_id: Annotated[
+        str,
+        typer.Option(help="Wardn user UUID to own the credential."),
+    ] = "",
+    name: Annotated[str, typer.Option(help="Credential name.")] = "OpenAI ChatGPT",
+    visibility: Annotated[
+        CredentialVisibility,
+        typer.Option(help="Credential visibility."),
+    ] = CredentialVisibility.organization,
+    workspace_id: Annotated[
+        str,
+        typer.Option(help="Workspace UUID for workspace scope."),
+    ] = "",
+    secret_store_id: Annotated[
+        str,
+        typer.Option(help="Secret store UUID where ChatGPT OAuth tokens will be written."),
+    ] = "",
+    secret_path: Annotated[
+        str,
+        typer.Option(
+            help=(
+                "External secret path for the OAuth token document. Defaults to a generated "
+                "wardn/orgs/<org>/.../chatgpt/<uuid> path."
+            )
+        ),
+    ] = "",
+    flow: Annotated[
+        ChatGPTOAuthFlow,
+        typer.Option(
+            help=(
+                "OAuth login flow. Device works from containers; loopback requires local "
+                "browser access."
+            )
+        ),
+    ] = ChatGPTOAuthFlow.device,
+    no_browser: Annotated[
+        bool,
+        typer.Option("--no-browser", help="Print the login URL without opening a browser."),
+    ] = False,
+    timeout_seconds: Annotated[
+        int,
+        typer.Option(help="Seconds to wait for ChatGPT authorization."),
+    ] = 15 * 60,
+) -> None:
+    exit_with_code(
+        handle_connectchatgpt(
+            SimpleNamespace(
+                organization_id=organization_id,
+                credential_id=credential_id,
+                user_email=user_email,
+                user_id=user_id,
+                name=name,
+                visibility=visibility.value,
+                workspace_id=workspace_id,
+                secret_store_id=secret_store_id,
+                secret_path=secret_path,
+                flow=flow.value,
+                no_browser=no_browser,
+                timeout_seconds=timeout_seconds,
+            )
+        )
     )
+
+
+def register_llm_provider_commands(app: typer.Typer) -> None:
+    app.command(
+        "connectchatgpt",
+        help="Connect an OpenAI ChatGPT OAuth credential using a device code.",
+    )(connectchatgpt_command)

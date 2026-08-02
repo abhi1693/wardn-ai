@@ -1,43 +1,16 @@
-import argparse
 import asyncio
 import logging
 import sys
+from types import SimpleNamespace
+from typing import Annotated
 
+import typer
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.modules.mcp_runtime.reaper import run_runtime_reaper_once
 
 logger = logging.getLogger(__name__)
-
-
-def configure_reapmcpruntimes_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=100,
-        help="Maximum number of expired runtime sessions to stop.",
-    )
-    parser.add_argument(
-        "--event-retention-days",
-        type=int,
-        default=None,
-        help="Delete runtime events older than this many days. Use 0 to disable event cleanup.",
-    )
-    parser.add_argument(
-        "--invocation-retention-days",
-        type=int,
-        default=None,
-        help=(
-            "Delete runtime tool invocations older than this many days. "
-            "Use 0 to disable invocation cleanup."
-        ),
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Show detailed runtime reaper logs.",
-    )
 
 
 def configure_command_logging(*, verbose: bool) -> None:
@@ -52,7 +25,7 @@ def configure_command_logging(*, verbose: bool) -> None:
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
 
-async def reap_mcp_runtimes_from_args(args: argparse.Namespace) -> int:
+async def reap_mcp_runtimes_from_args(args: SimpleNamespace) -> int:
     if args.limit < 1:
         raise ValueError("--limit must be greater than 0")
     if args.event_retention_days is not None and args.event_retention_days < 0:
@@ -84,7 +57,7 @@ async def reap_mcp_runtimes_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_reapmcpruntimes(args: argparse.Namespace) -> int:
+def handle_reapmcpruntimes(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(reap_mcp_runtimes_from_args(args))
@@ -101,10 +74,45 @@ def handle_reapmcpruntimes(args: argparse.Namespace) -> int:
         return 1
 
 
-def register_mcp_runtime_commands(registry: CommandRegistry) -> None:
-    registry.register(
-        "reapmcpruntimes",
-        "Stop expired MCP runtime sessions.",
-        configure_reapmcpruntimes_parser,
-        handle_reapmcpruntimes,
+def reapmcpruntimes_command(
+    limit: Annotated[
+        int,
+        typer.Option(help="Maximum number of expired runtime sessions to stop."),
+    ] = 100,
+    event_retention_days: Annotated[
+        int | None,
+        typer.Option(
+            help="Delete runtime events older than this many days. Use 0 to disable event cleanup."
+        ),
+    ] = None,
+    invocation_retention_days: Annotated[
+        int | None,
+        typer.Option(
+            help=(
+                "Delete runtime tool invocations older than this many days. "
+                "Use 0 to disable invocation cleanup."
+            )
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", help="Show detailed runtime reaper logs."),
+    ] = False,
+) -> None:
+    exit_with_code(
+        handle_reapmcpruntimes(
+            SimpleNamespace(
+                limit=limit,
+                event_retention_days=event_retention_days,
+                invocation_retention_days=invocation_retention_days,
+                verbose=verbose,
+            )
+        )
     )
+
+
+def register_mcp_runtime_commands(app: typer.Typer) -> None:
+    app.command(
+        "reapmcpruntimes",
+        help="Stop expired MCP runtime sessions.",
+    )(reapmcpruntimes_command)

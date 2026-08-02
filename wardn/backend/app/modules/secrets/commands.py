@@ -1,11 +1,13 @@
-import argparse
 import asyncio
 import logging
 import sys
+from types import SimpleNamespace
+from typing import Annotated
 
+import typer
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.core.config import Settings, get_settings
 from app.modules.secrets.cleanup_worker import (
     default_worker_id,
@@ -14,18 +16,6 @@ from app.modules.secrets.cleanup_worker import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def configure_runsecretcleanup_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--once", action="store_true", help="Process at most one cleanup and exit.")
-    parser.add_argument("--worker-id", default="", help="Stable worker identifier for leases.")
-    parser.add_argument(
-        "--poll-interval",
-        type=float,
-        default=None,
-        help="Seconds to wait when no cleanup is available.",
-    )
-    parser.add_argument("--verbose", action="store_true", help="Show detailed worker logs.")
 
 
 def configure_command_logging(*, verbose: bool) -> None:
@@ -50,7 +40,7 @@ def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float
         raise ValueError("secret cleanup worker retry base must not exceed its maximum")
 
 
-async def run_secret_cleanup_from_args(args: argparse.Namespace) -> int:
+async def run_secret_cleanup_from_args(args: SimpleNamespace) -> int:
     settings = get_settings()
     poll_interval_seconds = (
         settings.secret_cleanup_worker_poll_interval_seconds
@@ -75,7 +65,7 @@ async def run_secret_cleanup_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_runsecretcleanup(args: argparse.Namespace) -> int:
+def handle_runsecretcleanup(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(run_secret_cleanup_from_args(args))
@@ -85,10 +75,32 @@ def handle_runsecretcleanup(args: argparse.Namespace) -> int:
         return 1
 
 
-def register_secret_commands(registry: CommandRegistry) -> None:
-    registry.register(
-        "runsecretcleanup",
-        "Run durable cleanup for Wardn-managed external secrets.",
-        configure_runsecretcleanup_parser,
-        handle_runsecretcleanup,
+def runsecretcleanup_command(
+    once: Annotated[
+        bool,
+        typer.Option("--once", help="Process at most one cleanup and exit."),
+    ] = False,
+    worker_id: Annotated[str, typer.Option(help="Stable worker identifier for leases.")] = "",
+    poll_interval: Annotated[
+        float | None,
+        typer.Option(help="Seconds to wait when no cleanup is available."),
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show detailed worker logs.")] = False,
+) -> None:
+    exit_with_code(
+        handle_runsecretcleanup(
+            SimpleNamespace(
+                once=once,
+                worker_id=worker_id,
+                poll_interval=poll_interval,
+                verbose=verbose,
+            )
+        )
     )
+
+
+def register_secret_commands(app: typer.Typer) -> None:
+    app.command(
+        "runsecretcleanup",
+        help="Run durable cleanup for Wardn-managed external secrets.",
+    )(runsecretcleanup_command)

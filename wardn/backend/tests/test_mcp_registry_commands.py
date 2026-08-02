@@ -1,21 +1,26 @@
-import argparse
 import json
 import logging
 import threading
+from types import SimpleNamespace
 
-from app.commands.registry import CommandRegistry
+from typer.testing import CliRunner
+
+from app.commands import create_app
 from app.modules.mcp_registry import commands
 
 
-def test_register_mcp_registry_commands_adds_sync_command() -> None:
-    registry = CommandRegistry()
-    commands.register_mcp_registry_commands(registry)
+def test_syncmcpregistry_cli_passes_default_options(monkeypatch) -> None:
+    captured = {}
 
-    parser = registry.build_parser()
-    args = parser.parse_args(["syncmcpregistry"])
+    def handle(args):
+        captured["args"] = args
+        return 0
 
-    assert args.command == "syncmcpregistry"
-    assert args.handler == commands.handle_syncmcpregistry
+    monkeypatch.setattr(commands, "handle_syncmcpregistry", handle)
+    result = CliRunner().invoke(create_app(), ["syncmcpregistry"])
+
+    assert result.exit_code == 0
+    args = captured["args"]
     assert args.file is None
     assert args.source_url == commands.DEFAULT_REGISTRY_URL
     assert args.source == "official"
@@ -26,12 +31,16 @@ def test_register_mcp_registry_commands_adds_sync_command() -> None:
     assert args.verbose is False
 
 
-def test_register_mcp_registry_commands_adds_pulsemcp_sync_options() -> None:
-    registry = CommandRegistry()
-    commands.register_mcp_registry_commands(registry)
+def test_syncmcpregistry_cli_passes_pulsemcp_options(monkeypatch) -> None:
+    captured = {}
 
-    parser = registry.build_parser()
-    args = parser.parse_args(
+    def handle(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(commands, "handle_syncmcpregistry", handle)
+    result = CliRunner().invoke(
+        create_app(),
         [
             "syncmcpregistry",
             "--source",
@@ -49,6 +58,8 @@ def test_register_mcp_registry_commands_adds_pulsemcp_sync_options() -> None:
         ]
     )
 
+    assert result.exit_code == 0
+    args = captured["args"]
     assert args.source == "pulsemcp"
     assert args.api_key == "secret-key"
     assert args.tenant_id == "tenant-1"
@@ -58,30 +69,37 @@ def test_register_mcp_registry_commands_adds_pulsemcp_sync_options() -> None:
     assert args.updated_since == "2026-06-22T00:00:00Z"
 
 
-def test_register_mcp_registry_commands_adds_refresh_tools_command() -> None:
-    registry = CommandRegistry()
-    commands.register_mcp_registry_commands(registry)
+def test_refreshmcptools_cli_passes_server_option(monkeypatch) -> None:
+    captured = {}
 
-    parser = registry.build_parser()
-    args = parser.parse_args(
-        ["refreshmcptools", "--server", "io.github.example/weather"]
+    def handle(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(commands, "handle_refreshmcptools", handle)
+    result = CliRunner().invoke(
+        create_app(),
+        ["refreshmcptools", "--server", "io.github.example/weather"],
     )
 
-    assert args.command == "refreshmcptools"
-    assert args.handler == commands.handle_refreshmcptools
+    assert result.exit_code == 0
+    args = captured["args"]
     assert args.server == "io.github.example/weather"
     assert args.verbose is False
 
 
-def test_register_mcp_registry_commands_adds_curated_server_command() -> None:
-    registry = CommandRegistry()
-    commands.register_mcp_registry_commands(registry)
+def test_addmcpserver_cli_passes_curated_server_argument(monkeypatch) -> None:
+    captured = {}
 
-    parser = registry.build_parser()
-    args = parser.parse_args(["addmcpserver", "grafana"])
+    def handle(args):
+        captured["args"] = args
+        return 0
 
-    assert args.command == "addmcpserver"
-    assert args.handler == commands.handle_addmcpserver
+    monkeypatch.setattr(commands, "handle_addmcpserver", handle)
+    result = CliRunner().invoke(create_app(), ["addmcpserver", "grafana"])
+
+    assert result.exit_code == 0
+    args = captured["args"]
     assert args.server == "grafana"
     assert args.verbose is False
 
@@ -948,7 +966,7 @@ def test_load_supported_servers_from_registry_url_follows_cursor(monkeypatch, ca
 
 def test_handle_syncmcpregistry_reports_missing_file(capsys) -> None:
     result = commands.handle_syncmcpregistry(
-        argparse.Namespace(
+        SimpleNamespace(
             file="/tmp/wardn-missing-supported-servers.json",
             source_url=commands.DEFAULT_REGISTRY_URL,
             limit=commands.DEFAULT_REGISTRY_LIMIT,

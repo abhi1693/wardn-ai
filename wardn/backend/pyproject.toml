@@ -23,6 +23,7 @@ dependencies = [
   "uvicorn[standard]>=0.32.0",
   "websockets>=16.0",
   "joserfc>=1.7.2",
+  "typer>=0.27.0",
 ]
 
 [project.optional-dependencies]

@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import json
 import logging
@@ -6,16 +5,20 @@ import os
 import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from enum import StrEnum
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Annotated
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request
 from uuid import UUID
 
+import typer
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.core.outbound_http import open_outbound_request
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -94,112 +97,10 @@ CURATED_SERVERS = {
 logger = logging.getLogger(__name__)
 
 
-def configure_syncmcpregistry_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--file",
-        default=None,
-        help="Path to a JSON file containing supported MCP server definitions.",
-    )
-    parser.add_argument(
-        "--source-url",
-        default=DEFAULT_REGISTRY_URL,
-        help="MCP registry servers endpoint to sync from.",
-    )
-    parser.add_argument(
-        "--source",
-        choices=("official", "pulsemcp", "custom"),
-        default="official",
-        help="Registry source type. Use pulsemcp to apply PulseMCP defaults and auth headers.",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=None,
-        help=(
-            "API key for authenticated registry sources such as PulseMCP. "
-            "Defaults to WARDN_PULSEMCP_API_KEY."
-        ),
-    )
-    parser.add_argument(
-        "--tenant-id",
-        default=None,
-        help="Tenant ID for PulseMCP. Defaults to WARDN_PULSEMCP_TENANT_ID.",
-    )
-    parser.add_argument(
-        "--organization-id",
-        default=None,
-        help="Organization UUID to sync into. Defaults to Wardn's default organization.",
-    )
-    parser.add_argument(
-        "--updated-since",
-        default=None,
-        help="RFC3339 timestamp for incremental registry sync.",
-    )
-    parser.add_argument(
-        "--latest-only",
-        action="store_true",
-        help="Request only each server's latest version with version=latest.",
-    )
-    parser.add_argument(
-        "--readme-descriptions",
-        action="store_true",
-        help="Use GitHub repository README content as synced server descriptions.",
-    )
-    parser.add_argument(
-        "--github-token",
-        default=None,
-        help=(
-            "GitHub token for README enrichment. "
-            "Defaults to WARDN_GITHUB_TOKEN or GITHUB_TOKEN."
-        ),
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=DEFAULT_REGISTRY_LIMIT,
-        help="Number of server versions to request per registry page.",
-    )
-    parser.add_argument(
-        "--max-pages",
-        type=int,
-        default=None,
-        help="Maximum number of registry pages to fetch.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Load and validate server entries without writing to the database.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Show page-level registry sync details.",
-    )
-
-
-def configure_refreshmcptools_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--server",
-        required=True,
-        help="Canonical enabled MCP server name to refresh tools for.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Show detailed refresh logs.",
-    )
-
-
-def configure_addmcpserver_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "server",
-        choices=sorted(CURATED_SERVERS),
-        help="Curated supported MCP server to add.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Show detailed add logs.",
-    )
+class RegistrySource(StrEnum):
+    official = "official"
+    pulsemcp = "pulsemcp"
+    custom = "custom"
 
 
 def configure_command_logging(*, verbose: bool) -> None:
@@ -851,7 +752,7 @@ def load_supported_servers_from_registry_url(
     return servers
 
 
-async def sync_mcp_registry_from_args(args: argparse.Namespace) -> int:
+async def sync_mcp_registry_from_args(args: SimpleNamespace) -> int:
     if args.file:
         source = str(args.file)
         logger.info("Starting MCP registry sync from file.")
@@ -905,7 +806,7 @@ async def sync_mcp_registry_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_syncmcpregistry(args: argparse.Namespace) -> int:
+def handle_syncmcpregistry(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(sync_mcp_registry_from_args(args))
@@ -928,7 +829,7 @@ def handle_syncmcpregistry(args: argparse.Namespace) -> int:
         return 1
 
 
-async def refresh_mcp_tools_from_args(args: argparse.Namespace) -> int:
+async def refresh_mcp_tools_from_args(args: SimpleNamespace) -> int:
     server_name = str(args.server or "").strip()
     if not server_name:
         raise ValueError("--server is required")
@@ -950,7 +851,7 @@ async def refresh_mcp_tools_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_refreshmcptools(args: argparse.Namespace) -> int:
+def handle_refreshmcptools(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(refresh_mcp_tools_from_args(args))
@@ -967,7 +868,9 @@ def handle_refreshmcptools(args: argparse.Namespace) -> int:
         return 1
 
 
-async def add_mcp_server_from_args(args: argparse.Namespace) -> int:
+async def add_mcp_server_from_args(args: SimpleNamespace) -> int:
+    if args.server not in CURATED_SERVERS:
+        raise ValueError(f"unknown curated MCP server: {args.server}")
     payload = MCPServerCreate.model_validate(CURATED_SERVERS[args.server])
     logger.info("Adding curated MCP server %s.", payload.name)
     async with AsyncSessionLocal() as session:
@@ -978,7 +881,7 @@ async def add_mcp_server_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_addmcpserver(args: argparse.Namespace) -> int:
+def handle_addmcpserver(args: SimpleNamespace) -> int:
     configure_command_logging(verbose=args.verbose)
     try:
         return asyncio.run(add_mcp_server_from_args(args))
@@ -995,22 +898,144 @@ def handle_addmcpserver(args: argparse.Namespace) -> int:
         return 1
 
 
-def register_mcp_registry_commands(registry: CommandRegistry) -> None:
-    registry.register(
+def syncmcpregistry_command(
+    file: Annotated[
+        str | None,
+        typer.Option(help="Path to a JSON file containing supported MCP server definitions."),
+    ] = None,
+    source_url: Annotated[
+        str,
+        typer.Option(help="MCP registry servers endpoint to sync from."),
+    ] = DEFAULT_REGISTRY_URL,
+    source: Annotated[
+        RegistrySource,
+        typer.Option(
+            help="Registry source type. Use pulsemcp to apply PulseMCP defaults and auth headers."
+        ),
+    ] = RegistrySource.official,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "API key for authenticated registry sources such as PulseMCP. "
+                "Defaults to WARDN_PULSEMCP_API_KEY."
+            )
+        ),
+    ] = None,
+    tenant_id: Annotated[
+        str | None,
+        typer.Option(help="Tenant ID for PulseMCP. Defaults to WARDN_PULSEMCP_TENANT_ID."),
+    ] = None,
+    organization_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Organization UUID to sync into. Defaults to Wardn's default organization."
+        ),
+    ] = None,
+    updated_since: Annotated[
+        str | None,
+        typer.Option(help="RFC3339 timestamp for incremental registry sync."),
+    ] = None,
+    latest_only: Annotated[
+        bool,
+        typer.Option("--latest-only", help="Request only each server's latest version."),
+    ] = False,
+    readme_descriptions: Annotated[
+        bool,
+        typer.Option(
+            "--readme-descriptions",
+            help="Use GitHub repository README content as synced server descriptions.",
+        ),
+    ] = False,
+    github_token: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "GitHub token for README enrichment. "
+                "Defaults to WARDN_GITHUB_TOKEN or GITHUB_TOKEN."
+            )
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(help="Number of server versions to request per registry page."),
+    ] = DEFAULT_REGISTRY_LIMIT,
+    max_pages: Annotated[
+        int | None,
+        typer.Option(help="Maximum number of registry pages to fetch."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Load and validate server entries without writing."),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", help="Show page-level registry sync details."),
+    ] = False,
+) -> None:
+    exit_with_code(
+        handle_syncmcpregistry(
+            SimpleNamespace(
+                file=file,
+                source_url=source_url,
+                source=source.value,
+                api_key=api_key,
+                tenant_id=tenant_id,
+                organization_id=organization_id,
+                updated_since=updated_since,
+                latest_only=latest_only,
+                readme_descriptions=readme_descriptions,
+                github_token=github_token,
+                limit=limit,
+                max_pages=max_pages,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
+        )
+    )
+
+
+def refreshmcptools_command(
+    server: Annotated[
+        str,
+        typer.Option(help="Canonical enabled MCP server name to refresh tools for."),
+    ],
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show detailed refresh logs.")] = False,
+) -> None:
+    exit_with_code(
+        handle_refreshmcptools(
+            SimpleNamespace(
+                server=server,
+                verbose=verbose,
+            )
+        )
+    )
+
+
+def addmcpserver_command(
+    server: Annotated[str, typer.Argument(help="Curated supported MCP server to add.")],
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show detailed add logs.")] = False,
+) -> None:
+    exit_with_code(
+        handle_addmcpserver(
+            SimpleNamespace(
+                server=server,
+                verbose=verbose,
+            )
+        )
+    )
+
+
+def register_mcp_registry_commands(app: typer.Typer) -> None:
+    app.command(
         "syncmcpregistry",
-        "Sync supported MCP servers from the official registry.",
-        configure_syncmcpregistry_parser,
-        handle_syncmcpregistry,
-    )
-    registry.register(
+        help="Sync supported MCP servers from the official registry.",
+    )(syncmcpregistry_command)
+    app.command(
         "refreshmcptools",
-        "Refresh cached MCP tool schemas for one enabled server.",
-        configure_refreshmcptools_parser,
-        handle_refreshmcptools,
-    )
-    registry.register(
+        help="Refresh cached MCP tool schemas for one enabled server.",
+    )(refreshmcptools_command)
+    app.command(
         "addmcpserver",
-        "Add one curated supported MCP server to the catalog.",
-        configure_addmcpserver_parser,
-        handle_addmcpserver,
-    )
+        help="Add one curated supported MCP server to the catalog.",
+    )(addmcpserver_command)

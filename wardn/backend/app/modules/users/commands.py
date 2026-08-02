@@ -1,31 +1,18 @@
-import argparse
 import asyncio
 import getpass
 import sys
+from types import SimpleNamespace
+from typing import Annotated
 
+import typer
 from pydantic import SecretStr, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.commands.registry import CommandRegistry
+from app.cli_utils import exit_with_code
 from app.db.session import AsyncSessionLocal
 from app.modules.users.exceptions import DuplicateUserError
 from app.modules.users.schemas import UserCreate
 from app.modules.users.service import create_user
-
-
-def configure_createsuperuser_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--email", help="Email address for the superuser.")
-    parser.add_argument("--first-name", default="", help="First name for the superuser.")
-    parser.add_argument("--last-name", default="", help="Last name for the superuser.")
-    parser.add_argument(
-        "--password",
-        help="Password for non-interactive use. Prefer interactive entry locally.",
-    )
-    parser.add_argument(
-        "--no-input",
-        action="store_true",
-        help="Do not prompt. Requires --email and --password.",
-    )
 
 
 def prompt_value(label: str, default: str | None = None) -> str:
@@ -42,7 +29,7 @@ def prompt_password() -> str:
     return password
 
 
-async def create_superuser_from_args(args: argparse.Namespace) -> None:
+async def create_superuser_from_args(args: SimpleNamespace) -> None:
     email = args.email
     first_name = args.first_name
     last_name = args.last_name
@@ -76,7 +63,7 @@ async def create_superuser_from_args(args: argparse.Namespace) -> None:
         print(f"Superuser created: {user.email}")
 
 
-def handle_createsuperuser(args: argparse.Namespace) -> int:
+def handle_createsuperuser(args: SimpleNamespace) -> int:
     try:
         asyncio.run(create_superuser_from_args(args))
     except (DuplicateUserError, ValidationError, ValueError) as exc:
@@ -91,10 +78,34 @@ def handle_createsuperuser(args: argparse.Namespace) -> int:
     return 0
 
 
-def register_user_commands(registry: CommandRegistry) -> None:
-    registry.register(
-        "createsuperuser",
-        "Create a local superuser account.",
-        configure_createsuperuser_parser,
-        handle_createsuperuser,
+def createsuperuser_command(
+    email: Annotated[str | None, typer.Option(help="Email address for the superuser.")] = None,
+    first_name: Annotated[str, typer.Option(help="First name for the superuser.")] = "",
+    last_name: Annotated[str, typer.Option(help="Last name for the superuser.")] = "",
+    password: Annotated[
+        str | None,
+        typer.Option(help="Password for non-interactive use. Prefer interactive entry locally."),
+    ] = None,
+    no_input: Annotated[
+        bool,
+        typer.Option("--no-input", help="Do not prompt. Requires --email and --password."),
+    ] = False,
+) -> None:
+    exit_with_code(
+        handle_createsuperuser(
+            SimpleNamespace(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                password=password,
+                no_input=no_input,
+            )
+        )
     )
+
+
+def register_user_commands(app: typer.Typer) -> None:
+    app.command(
+        "createsuperuser",
+        help="Create a local superuser account.",
+    )(createsuperuser_command)
