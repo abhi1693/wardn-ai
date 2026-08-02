@@ -31,7 +31,6 @@ type AppShellActive =
   | "dashboard"
   | "org-dashboard"
   | "workspaces"
-  | "workspaces-dashboard"
   | "organizations"
   | "organization-settings"
   | "workspace-settings"
@@ -89,12 +88,6 @@ function organizationNavSections(workspaceContext?: WorkspaceContext): Navigatio
           href: organizationId ? `${organizationBasePath}/workspaces` : "/org",
           activeKey: "workspaces",
           icon: Boxes,
-        },
-        {
-          label: "Workspace Dashboard",
-          href: organizationId ? `${organizationBasePath}/workspaces/dashboard` : "/org",
-          activeKey: "workspaces-dashboard",
-          icon: BarChart3,
         },
         {
           label: "Catalog",

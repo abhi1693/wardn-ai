@@ -29,11 +29,6 @@ export default async function OrganizationWorkspacesPage({
       actions={
         <>
           <Button asChild size="sm" variant="outline">
-            <Link href={`/org/${encodeURIComponent(organization.id)}/workspaces/dashboard`}>
-              Dashboard
-            </Link>
-          </Button>
-          <Button asChild size="sm" variant="outline">
             <Link href="/org">Change organization</Link>
           </Button>
           <Button asChild size="sm">

@@ -1,4 +1,5 @@
-import { redirect } from "next/navigation";
+import { getWorkspaceContext } from "@/lib/workspace-context";
+import { WorkspaceDashboardView } from "@/app/workspace/workspace-dashboard-view";
 
 type WorkspaceDashboardPageProps = {
   params: Promise<{
@@ -9,10 +10,7 @@ type WorkspaceDashboardPageProps = {
 
 export default async function WorkspaceDashboardPage({ params }: WorkspaceDashboardPageProps) {
   const { organizationId, workspaceId } = await params;
+  const workspaceContext = await getWorkspaceContext({ organizationId, workspaceId });
 
-  redirect(
-    `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-      workspaceId
-    )}/chat`
-  );
+  return <WorkspaceDashboardView workspaceContext={workspaceContext} />;
 }
