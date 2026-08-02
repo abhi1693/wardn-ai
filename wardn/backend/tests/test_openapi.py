@@ -22,6 +22,8 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/auth/oidc/login",
         "/api/v1/health/live",
         "/api/v1/health/ready",
+        "/api/v1/chat-providers/telegram/{connection_id}/webhook",
+        "/api/v1/chat-providers/whatsapp-local/{connection_id}/webhook",
         "/api/v1/limits",
         "/api/v1/limits/budgets",
         "/api/v1/limits/budgets/{budget_id}",
@@ -143,6 +145,14 @@ def test_openapi_exposes_expected_paths() -> None:
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}/tool-approvals/{approval_id}"
         ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/chat-providers"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/chat-providers/{connection_id}"
+            ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/skills"
@@ -567,6 +577,57 @@ def test_workspace_agents_openapi_contract() -> None:
     }
     assert chat["post"]["responses"]["502"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ErrorResponse"
+    }
+
+
+def test_workspace_chat_providers_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    connections = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/chat-providers"
+        )
+    ]
+    connection = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/chat-providers/{connection_id}"
+        )
+    ]
+    telegram_webhook = schema["paths"][
+        "/api/v1/chat-providers/telegram/{connection_id}/webhook"
+    ]
+    whatsapp_local_webhook = schema["paths"][
+        "/api/v1/chat-providers/whatsapp-local/{connection_id}/webhook"
+    ]
+
+    assert connections["get"]["operationId"] == "workspace_chat_providers_list"
+    assert connections["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ChatProviderConnectionListResponse"
+    }
+    assert connections["post"]["operationId"] == "workspace_chat_providers_create"
+    assert connections["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ChatProviderConnectionCreate"
+    }
+    assert connections["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ChatProviderConnectionRead"
+    }
+    assert connection["get"]["operationId"] == "workspace_chat_providers_get"
+    assert connection["patch"]["operationId"] == "workspace_chat_providers_update"
+    assert connection["delete"]["operationId"] == "workspace_chat_providers_delete"
+    assert telegram_webhook["post"]["operationId"] == "chat_provider_webhooks_telegram_receive"
+    assert whatsapp_local_webhook["post"]["operationId"] == (
+        "chat_provider_webhooks_whatsapp_local_receive"
+    )
+    assert telegram_webhook["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {
+        "$ref": "#/components/schemas/ChatProviderWebhookResponse"
+    }
+    assert whatsapp_local_webhook["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {
+        "$ref": "#/components/schemas/ChatProviderWebhookResponse"
     }
 
 

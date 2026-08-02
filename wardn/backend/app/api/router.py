@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from app.modules.agents.router import workspace_router as workspace_agents_router
 from app.modules.agents.router import workspace_runs_router as workspace_agent_runs_router
 from app.modules.agents.router import workspace_skills_router
+from app.modules.chat_providers.router import webhook_router as chat_provider_webhook_router
+from app.modules.chat_providers.router import workspace_router as workspace_chat_providers_router
 from app.modules.guardrails.router import workspace_router as workspace_guardrails_router
 from app.modules.guardrails.router import (
     workspace_settings_router as workspace_guardrail_settings_router,
@@ -45,6 +47,8 @@ api_router.include_router(workspace_observability_router)
 api_router.include_router(workspace_agents_router)
 api_router.include_router(workspace_agent_runs_router)
 api_router.include_router(workspace_skills_router)
+api_router.include_router(workspace_chat_providers_router)
+api_router.include_router(chat_provider_webhook_router)
 api_router.include_router(organization_catalog_router)
 api_router.include_router(organization_mcp_registry_router)
 api_router.include_router(workspace_mcp_registry_router)

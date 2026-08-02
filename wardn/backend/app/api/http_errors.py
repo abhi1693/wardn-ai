@@ -20,6 +20,13 @@ from app.modules.agents.exceptions import (
     InvalidAgentToolAssignmentError,
 )
 from app.modules.agents.types import AgentChatProviderError
+from app.modules.chat_providers.exceptions import (
+    ChatProviderConnectionNotFoundError,
+    ChatProviderDeliveryError,
+    ChatProviderWebhookAuthError,
+    DuplicateChatProviderConnectionError,
+    InvalidChatProviderConnectionError,
+)
 from app.modules.guardrails.exceptions import (
     DuplicateGuardrailPolicyError,
     GuardrailPolicyNotFoundError,
@@ -123,6 +130,11 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     DuplicateAgentError: _definition(409, "agent_already_exists"),
     InvalidAgentScopeError: _definition(400, "invalid_agent_scope"),
     InvalidAgentToolAssignmentError: _definition(400, "invalid_agent_tool_assignment"),
+    ChatProviderConnectionNotFoundError: _definition(404, "chat_provider_not_found"),
+    DuplicateChatProviderConnectionError: _definition(409, "chat_provider_already_exists"),
+    InvalidChatProviderConnectionError: _definition(400, "invalid_chat_provider"),
+    ChatProviderWebhookAuthError: _definition(403, "chat_provider_webhook_auth_failed"),
+    ChatProviderDeliveryError: _definition(502, "chat_provider_delivery_failed"),
     LLMProviderCredentialNotFoundError: _definition(404, "llm_credential_not_found"),
     DuplicateLLMProviderCredentialError: _definition(409, "llm_credential_already_exists"),
     InvalidLLMProviderCredentialScopeError: _definition(400, "invalid_llm_credential_scope"),

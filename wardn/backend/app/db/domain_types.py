@@ -29,6 +29,26 @@ class ConversationRole(StrEnum):
     ASSISTANT = "assistant"
 
 
+class ChatProviderType(StrEnum):
+    TELEGRAM = "telegram"
+    WHATSAPP_LOCAL = "whatsapp_local"
+
+
+class ChatProviderEventDirection(StrEnum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+    STATUS = "status"
+
+
+class ChatProviderEventStatus(StrEnum):
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    IGNORED = "ignored"
+    FAILED = "failed"
+    SENT = "sent"
+
+
 class LLMProviderVisibility(StrEnum):
     ORGANIZATION = "organization"
     WORKSPACE = "workspace"

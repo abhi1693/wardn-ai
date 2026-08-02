@@ -1,5 +1,10 @@
 from app.db.domain_types import AgentScope, MCPOperationJobStatus, MembershipRole
 from app.modules.agents.models import Agent, ConversationMessage
+from app.modules.chat_providers.models import (
+    ChatProviderConnection,
+    ChatProviderConnectionSecret,
+    ChatProviderEvent,
+)
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.mcp_registry.models import (
     MCPCatalogSource,
@@ -40,6 +45,22 @@ def test_scoped_domain_models_declare_database_invariants() -> None:
     assert "ck_workspace_memberships_role" in constraint_names(WorkspaceMembership)
     assert {"ck_agents_scope", "ck_agents_scope_workspace"} <= constraint_names(Agent)
     assert "ck_conversation_messages_role" in constraint_names(ConversationMessage)
+    assert {
+        "ck_chat_provider_connections_provider",
+        "ck_chat_provider_connections_name",
+        "ck_chat_provider_connections_external_id",
+    } <= constraint_names(ChatProviderConnection)
+    assert "ck_chat_provider_connection_secrets_purpose" in constraint_names(
+        ChatProviderConnectionSecret
+    )
+    assert {
+        "ck_chat_provider_events_direction",
+        "ck_chat_provider_events_status",
+        "ck_chat_provider_events_external_event_id",
+    } <= constraint_names(ChatProviderEvent)
+    assert {
+        "fk_chat_provider_connection_secrets_secret_handle": "RESTRICT",
+    }.items() <= foreign_key_delete_actions(ChatProviderConnectionSecret).items()
     assert {
         "ck_llm_provider_credentials_visibility",
         "ck_llm_provider_credentials_visibility_scope",
