@@ -111,11 +111,11 @@ export function CatalogSourceForm({
   }
 
   return (
-    <Card className="max-w-3xl">
+    <Card className="max-w-4xl overflow-hidden shadow-[var(--shadow-card)]">
       <CardHeader>
         <CardTitle>{mode === "edit" ? "Edit catalog source" : "New catalog source"}</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="p-4">
         {error ? (
           <AsyncFeedback className="mb-4" variant="error">{error}</AsyncFeedback>
         ) : null}
@@ -133,7 +133,7 @@ export function CatalogSourceForm({
             <div className="space-y-2">
               <Label htmlFor="catalog-provider">Provider</Label>
               <div
-                className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+                className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
                 id="catalog-provider"
               >
                 {wardnHubCatalogProvider.label}
@@ -200,7 +200,7 @@ export function CatalogSourceForm({
                 </SelectContent>
               </Select>
             </div>
-            <label className="flex min-h-10 items-center gap-3 self-end rounded-md border px-3 py-2 text-sm">
+            <label className="flex min-h-9 items-center gap-3 self-end rounded-md border border-input bg-card px-3 py-2 text-sm shadow-[var(--shadow-card)]">
               <input
                 checked={isEnabled}
                 className="size-4"

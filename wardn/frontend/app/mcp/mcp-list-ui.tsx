@@ -65,12 +65,12 @@ export function FeedbackMessages({ error, notice }: FeedbackMessagesProps) {
   return (
     <>
       {error ? (
-        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="error">
+        <AsyncFeedback className="mb-4 rounded-md px-4 py-3" variant="error">
           {error}
         </AsyncFeedback>
       ) : null}
       {notice ? (
-        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="success">
+        <AsyncFeedback className="mb-4 rounded-md px-4 py-3" variant="success">
           {notice}
         </AsyncFeedback>
       ) : null}
@@ -87,7 +87,7 @@ export function McpTableCard({ children, className }: McpTableCardProps) {
   return (
     <Card
       className={cn(
-        "overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-[var(--shadow-card)]",
+        "overflow-hidden rounded-md border-border bg-card shadow-[var(--shadow-card)]",
         className
       )}
     >
@@ -146,7 +146,7 @@ export function ServerIdentityCell({ href, iconUrl, name, title }: ServerIdentit
         >
           {title}
         </Link>
-        <div className="mt-0.5 break-all text-[11px] text-[var(--on-surface-variant)]">
+        <div className="mt-0.5 break-all text-[11px] text-muted-foreground">
           {name}
         </div>
       </div>

@@ -206,8 +206,8 @@ export function AppShell({
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[252px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:overflow-hidden max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
-        <div className="mb-6 px-2 max-lg:mb-3">
+      <aside className="fixed left-0 top-0 z-50 flex h-screen w-[260px] flex-col border-r border-border bg-sidebar px-3 py-4 text-sidebar-foreground max-lg:static max-lg:h-auto max-lg:w-full max-lg:overflow-hidden max-lg:border-b max-lg:border-r-0 max-lg:px-4 max-lg:py-3">
+        <div className="mb-5 px-2 max-lg:mb-3">
           <div className="flex items-center gap-3">
             <BrandMark className="size-8" sizes="32px" />
             <div className="min-w-0">
@@ -227,10 +227,10 @@ export function AppShell({
             return (
               <Link
                 className={cn(
-                  "flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors active:bg-muted max-lg:min-w-fit",
+                  "relative flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors active:bg-muted max-lg:min-w-fit",
                   "hover:bg-muted hover:text-foreground",
                   item.active &&
-                    "border border-[#d9e6ff] bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[var(--shadow-card)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    "border border-[#d9e6ff] bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[var(--shadow-card)] before:absolute before:left-1 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-ring before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
                 href={item.href}
                 key={item.label}
@@ -250,7 +250,7 @@ export function AppShell({
             <Replace className="size-4" />
             {contextSwitchLabel}
           </Link>
-          <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+          <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-[var(--shadow-card)]">
             <div className="flex size-7 items-center justify-center rounded-md border border-border bg-muted text-xs font-semibold text-foreground">
               {contextTitle.slice(0, 1).toUpperCase()}
             </div>
@@ -268,11 +268,11 @@ export function AppShell({
 
       <section
         className={cn(
-          "min-h-screen min-w-0 bg-background pl-[252px] max-lg:pl-0",
+          "min-h-screen min-w-0 bg-background pl-[260px] max-lg:pl-0",
           sectionClassName
         )}
       >
-        <header className="fixed right-0 top-0 z-40 flex h-14 w-[calc(100%-252px)] items-center border-b border-border bg-card/95 backdrop-blur max-lg:static max-lg:w-full">
+        <header className="fixed right-0 top-0 z-40 flex h-14 w-[calc(100%-260px)] items-center border-b border-border bg-card/90 backdrop-blur max-lg:static max-lg:w-full">
           <div className="flex w-full items-center justify-between gap-4 px-6 max-md:px-4">
             <div className="flex min-w-0 items-center gap-4">
               {showBreadcrumbParent ? (

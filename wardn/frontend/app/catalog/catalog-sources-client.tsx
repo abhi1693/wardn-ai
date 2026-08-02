@@ -1,21 +1,26 @@
 "use client";
 
-import { CheckCircle2, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import Link from "next/link";
-import { useState } from "react";
-
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  ExternalLink,
+  Globe2,
+  KeyRound,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+
+import { StatusDot } from "@/components/atoms/status-dot";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { AsyncFeedback } from "@/components/ui/async-feedback";
+import { Input } from "@/components/ui/input";
 import type { MCPOperationJobRead } from "@/lib/api/generated/model";
 import {
   organizationMcpCatalogDeleteSource,
@@ -39,6 +44,8 @@ type CatalogSyncResult = {
   syncedCount: number;
 };
 
+type SourceFilter = "active" | "all" | "issues" | "paused";
+
 function providerLabel(provider: string) {
   if (provider === "wardn_hub") {
     return "Wardn Hub";
@@ -49,20 +56,95 @@ function providerLabel(provider: string) {
   return "Custom";
 }
 
+function syncModeLabel(syncMode: string) {
+  if (syncMode === "all_versions") {
+    return "All versions";
+  }
+  if (syncMode === "latest_only") {
+    return "Latest only";
+  }
+  return syncMode || "Default";
+}
+
 function displayDate(value?: string | null) {
   if (!value) {
-    return "Never";
+    return "Never synced";
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "Never";
+    return "Never synced";
   }
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
+  return new Intl.DateTimeFormat("en-US", {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    month: "short",
+    timeZone: "UTC",
   }).format(date);
+}
+
+function displayHost(value: string) {
+  try {
+    return new URL(value).host;
+  } catch {
+    return value;
+  }
+}
+
+function sourceTone(source: MCPCatalogSource) {
+  if (source.lastError) {
+    return "danger" as const;
+  }
+  if (!source.isEnabled) {
+    return "neutral" as const;
+  }
+  if (sourceNeedsToken(source)) {
+    return "warning" as const;
+  }
+  return "success" as const;
+}
+
+function sourceNeedsToken(source: MCPCatalogSource) {
+  return source.provider === "wardn_hub" && !source.hasAuthToken;
+}
+
+function sourceStatusLabel(source: MCPCatalogSource) {
+  if (source.lastError) {
+    return "Issue";
+  }
+  if (!source.isEnabled) {
+    return "Paused";
+  }
+  if (sourceNeedsToken(source)) {
+    return "Needs token";
+  }
+  return "Active";
+}
+
+function sourceMatchesFilter(source: MCPCatalogSource, filter: SourceFilter) {
+  if (filter === "all") {
+    return true;
+  }
+  if (filter === "active") {
+    return source.isEnabled && !source.lastError && !sourceNeedsToken(source);
+  }
+  if (filter === "issues") {
+    return Boolean(source.lastError || sourceNeedsToken(source));
+  }
+  return !source.isEnabled;
+}
+
+function filterLabel(filter: SourceFilter) {
+  if (filter === "all") {
+    return "All";
+  }
+  if (filter === "active") {
+    return "Active";
+  }
+  if (filter === "issues") {
+    return "Issues";
+  }
+  return "Paused";
 }
 
 export function CatalogSourcesClient({
@@ -73,8 +155,41 @@ export function CatalogSourcesClient({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [filter, setFilter] = useState<SourceFilter>("active");
+  const [search, setSearch] = useState("");
   const { waitForJob } = useOperationJobPoller();
-  const sourceCount = sources.length;
+
+  const filteredSources = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return sources
+      .filter((source) => {
+        const matchesQuery =
+          !query ||
+          source.name.toLowerCase().includes(query) ||
+          source.baseUrl.toLowerCase().includes(query) ||
+          providerLabel(source.provider).toLowerCase().includes(query);
+        return matchesQuery && sourceMatchesFilter(source, filter);
+      })
+      .sort((first, second) => {
+        if (first.lastError && !second.lastError) {
+          return -1;
+        }
+        if (!first.lastError && second.lastError) {
+          return 1;
+        }
+        if (first.isEnabled !== second.isEnabled) {
+          return first.isEnabled ? -1 : 1;
+        }
+        return first.name.localeCompare(second.name);
+      });
+  }, [filter, search, sources]);
+
+  const activeCount = sources.filter(
+    (source) => source.isEnabled && !source.lastError && !sourceNeedsToken(source)
+  ).length;
+  const issueCount = sources.filter((source) => source.lastError || sourceNeedsToken(source)).length;
+  const pausedCount = sources.filter((source) => !source.isEnabled).length;
+  const neverSyncedCount = sources.filter((source) => !source.lastSuccessAt).length;
 
   async function syncSource(source: MCPCatalogSource) {
     setBusyId(source.id);
@@ -129,6 +244,201 @@ export function CatalogSourcesClient({
 
   return (
     <div className="space-y-4">
+      <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+        <div className="flex flex-col gap-4 border-b border-border/80 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-5 text-foreground">
+              Catalog sources
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <span>{sources.length.toLocaleString("en-US")} total</span>
+              <span>{activeCount.toLocaleString("en-US")} active</span>
+              <span>{issueCount.toLocaleString("en-US")} issues</span>
+              <span>{pausedCount.toLocaleString("en-US")} paused</span>
+              <span>{neverSyncedCount.toLocaleString("en-US")} never synced</span>
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative min-w-0 sm:w-[320px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search sources"
+                type="search"
+                value={search}
+              />
+            </div>
+            <div className="flex rounded-md border border-border bg-card p-1">
+              {(["active", "issues", "paused", "all"] as SourceFilter[]).map((item) => (
+                <Button
+                  className="h-7 px-2 text-xs"
+                  key={item}
+                  onClick={() => setFilter(item)}
+                  size="sm"
+                  type="button"
+                  variant={filter === item ? "secondary" : "ghost"}
+                >
+                  {filterLabel(item)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-0 divide-y divide-border/80">
+          {filteredSources.length === 0 ? (
+            <div className="flex min-h-48 flex-col items-center justify-center gap-3 p-8 text-center">
+              <div className="flex size-10 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                <Globe2 className="size-5" />
+              </div>
+              <div>
+                <div className="font-medium text-foreground">No catalog sources in view</div>
+                <div className="mt-1 text-sm text-muted-foreground">No matching source feeds.</div>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/org/${encodeURIComponent(organizationId)}/catalog/new`}>
+                  Add source
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            filteredSources.map((source) => {
+              const tone = sourceTone(source);
+              const isBusy = busyId === source.id;
+              return (
+                <article
+                  className="grid gap-4 p-4 transition-colors hover:bg-muted/40 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)_auto]"
+                  key={source.id}
+                >
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <StatusDot tone={tone} />
+                      <h3 className="truncate text-sm font-semibold leading-5 text-foreground">
+                        {source.name}
+                      </h3>
+                      <Badge
+                        variant={
+                          tone === "danger"
+                            ? "destructive"
+                            : tone === "success"
+                              ? "success"
+                              : "secondary"
+                        }
+                      >
+                        {sourceStatusLabel(source)}
+                      </Badge>
+                      <Badge variant="outline">{providerLabel(source.provider)}</Badge>
+                    </div>
+                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                      <span className="truncate">{displayHost(source.baseUrl)}</span>
+                      <a
+                        className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                        href={source.baseUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Open
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                    </div>
+                    {source.lastError ? (
+                      <div className="mt-3 flex max-w-3xl items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm leading-5 text-red-700">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                        <span className="min-w-0 break-words">{source.lastError}</span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Clock3 className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs text-muted-foreground">Last sync</div>
+                        <div className="truncate text-sm font-medium">
+                          {displayDate(source.lastSuccessAt)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <RefreshCw className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs text-muted-foreground">Sync mode</div>
+                        <div className="truncate text-sm font-medium">
+                          {syncModeLabel(source.syncMode)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs text-muted-foreground">Auth token</div>
+                        <div className="truncate text-sm font-medium">
+                          {source.hasAuthToken ? "Configured" : "Missing"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-start gap-2 xl:justify-end">
+                    <Button
+                      aria-label={`Sync ${source.name}`}
+                      disabled={busyId !== null || !source.isEnabled}
+                      onClick={() => syncSource(source)}
+                      size="icon"
+                      title="Sync"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isBusy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-4" />
+                      )}
+                    </Button>
+                    {busyId !== null ? (
+                      <Button
+                        aria-label={`Edit ${source.name}`}
+                        disabled
+                        size="icon"
+                        title="Edit"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                    ) : (
+                      <Button asChild size="icon" variant="outline">
+                        <Link
+                          aria-label={`Edit ${source.name}`}
+                          href={`/org/${encodeURIComponent(
+                            organizationId
+                          )}/catalog/edit/${encodeURIComponent(source.id)}`}
+                          title="Edit"
+                        >
+                          <Pencil className="size-4" />
+                        </Link>
+                      </Button>
+                    )}
+                    <Button
+                      aria-label={`Delete ${source.name}`}
+                      disabled={busyId !== null}
+                      onClick={() => deleteSource(source)}
+                      size="icon"
+                      title="Delete"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
+
       {error ? (
         <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
@@ -138,116 +448,6 @@ export function CatalogSourcesClient({
           {notice}
         </AsyncFeedback>
       ) : null}
-
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex h-11 items-center justify-end border-b px-3 text-sm text-muted-foreground">
-            <span aria-live="polite">
-              Total: <span className="font-medium text-foreground">{sourceCount.toLocaleString("en")}</span>
-            </span>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>URL</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Last sync</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-40 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sourceCount === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                    No catalog sources
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sources.map((source) => (
-                  <TableRow key={source.id}>
-                    <TableCell>
-                      <div className="font-medium">{source.name}</div>
-                      {source.lastError ? (
-                        <div className="mt-1 max-w-72 truncate text-xs text-red-700">
-                          {source.lastError}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <span className="block max-w-80 truncate text-sm">{source.baseUrl}</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{providerLabel(source.provider)}</Badge>
-                    </TableCell>
-                    <TableCell>{displayDate(source.lastSuccessAt)}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant={source.isEnabled ? "success" : "outline"}>
-                          {source.isEnabled ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          aria-label={`Sync ${source.name}`}
-                          disabled={busyId !== null || !source.isEnabled}
-                          onClick={() => syncSource(source)}
-                          size="icon"
-                          title="Sync"
-                          type="button"
-                          variant="outline"
-                        >
-                          {busyId === source.id ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="size-4" />
-                          )}
-                        </Button>
-                        {busyId !== null ? (
-                          <Button
-                            aria-label={`Edit ${source.name}`}
-                            disabled
-                            size="icon"
-                            title="Edit"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                        ) : (
-                          <Button asChild size="icon" variant="outline">
-                            <Link
-                              aria-label={`Edit ${source.name}`}
-                              href={`/org/${organizationId}/catalog/edit/${source.id}`}
-                              title="Edit"
-                            >
-                              <Pencil className="size-4" />
-                            </Link>
-                          </Button>
-                        )}
-                        <Button
-                          aria-label={`Delete ${source.name}`}
-                          disabled={busyId !== null}
-                          onClick={() => deleteSource(source)}
-                          size="icon"
-                          title="Delete"
-                          type="button"
-                          variant="outline"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
     </div>
   );
 }

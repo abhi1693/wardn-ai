@@ -258,7 +258,7 @@ export function CatalogListClient({
   const pageEnd = previousCursors.length * PAGE_SIZE + servers.length;
   const paginationControls = (
     <div className="mt-6 flex flex-wrap items-center justify-between gap-3 px-2 text-sm">
-      <div className="text-[var(--on-surface-variant)]">
+      <div className="text-muted-foreground">
         {servers.length > 0 ? (
           <>
             Showing {pageStart}-{pageEnd}
@@ -279,7 +279,7 @@ export function CatalogListClient({
           <ChevronLeft className="size-4" />
           Previous
         </Button>
-        <div className="min-w-16 text-center text-sm font-medium text-[var(--on-surface-variant)]">
+        <div className="min-w-16 text-center text-sm font-medium text-muted-foreground">
           Page {pageNumber}
         </div>
         <Button
@@ -298,15 +298,15 @@ export function CatalogListClient({
 
   return (
     <div>
-      <div className="mb-6 rounded-lg border border-[var(--outline-variant)] bg-white p-6">
+      <div className="mb-4 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
         <div className="flex flex-col gap-4">
-          <Label className="text-[var(--on-surface-variant)]" htmlFor="registry-search">
+          <Label className="text-muted-foreground" htmlFor="registry-search">
             Search
           </Label>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--outline)]" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              className="h-10 rounded border-[var(--outline-variant)] bg-white pl-9 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+              className="pl-9"
               id="registry-search"
               onChange={(event) => setSearch(event.target.value)}
               onKeyDown={(event) => {
@@ -324,23 +324,23 @@ export function CatalogListClient({
 
       <FeedbackMessages error={error} notice={notice} />
 
-      <McpTableCard className="rounded-t-none border-t-0">
+      <McpTableCard>
           <Table>
             <TableHeader>
-              <TableRow className="border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-low)]">
-                <TableHead className="min-w-[360px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+              <TableRow>
+                <TableHead className="min-w-[360px]">
                   Server Name
                 </TableHead>
-                <TableHead className="w-[260px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                <TableHead className="w-[260px]">
                   Runtime
                 </TableHead>
-                <TableHead className="w-[150px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                <TableHead className="w-[150px]">
                   Version
                 </TableHead>
-                <TableHead className="w-[150px] bg-transparent px-6 py-4 text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                <TableHead className="w-[150px]">
                   Workspace servers
                 </TableHead>
-                <TableHead className="w-[180px] bg-transparent px-6 py-4 text-right text-xs font-medium uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+                <TableHead className="w-[180px] text-right">
                   Actions
                 </TableHead>
               </TableRow>
@@ -348,7 +348,7 @@ export function CatalogListClient({
             <TableBody>
               {servers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-[var(--on-surface-variant)]">
+                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
                     {isLoading
                       ? "Loading catalog entries"
                       : "No supported MCP servers are registered yet"}
@@ -364,10 +364,10 @@ export function CatalogListClient({
                   const runtimes = deliveryTargets(entry);
                   return (
                     <TableRow
-                      className="border-b border-[var(--outline-variant)] transition-colors hover:bg-[var(--surface-container-low)]"
+                      className="transition-colors hover:bg-muted/60"
                       key={`${entry.server.name}:${entry.server.version}`}
                     >
-                      <TableCell className="px-6 py-4">
+                      <TableCell>
                         <ServerIdentityCell
                           href={`/org/${encodeURIComponent(organizationId)}/catalog`}
                           iconUrl={iconUrl}
@@ -375,7 +375,7 @@ export function CatalogListClient({
                           title={entry.server.title || entry.server.name}
                         />
                       </TableCell>
-                      <TableCell className="px-6 py-4">
+                      <TableCell>
                         <div className="flex flex-wrap items-center gap-2">
                           {runtimes.map((runtime) => {
                             return (
@@ -394,13 +394,13 @@ export function CatalogListClient({
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell className="px-6 py-4 text-sm font-medium text-[var(--on-surface)]">
+                      <TableCell className="text-sm font-medium">
                         {entry.server.version || "-"}
                       </TableCell>
-                      <TableCell className="px-6 py-4 text-sm font-medium text-[var(--on-surface)]">
+                      <TableCell className="text-sm font-medium">
                         {serverInstallations.length > 0 ? serverInstallations.length : "-"}
                       </TableCell>
-                      <TableCell className="px-6 py-4 text-right">
+                      <TableCell className="text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                           <Button asChild size="icon" variant="ghost">
                             <Link
