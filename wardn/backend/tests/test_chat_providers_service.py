@@ -87,11 +87,21 @@ def test_qr_payload_from_bridge_data_accepts_sse_json() -> None:
 
 def test_bridge_status_from_payload_normalizes_connected_state() -> None:
     status, message, phone_number = service.bridge_status_from_payload(
-        {"connected": True, "phone_number": "+15551234567"}
+        {"connected": True, "logged_in": True, "phone_number": "+15551234567"}
     )
 
     assert status == "connected"
     assert message == "WhatsApp session is connected."
+    assert phone_number == "+15551234567"
+
+
+def test_bridge_status_from_payload_rejects_half_linked_state() -> None:
+    status, message, phone_number = service.bridge_status_from_payload(
+        {"connected": True, "logged_in": False, "phone_number": "+15551234567"}
+    )
+
+    assert status == "needs_pairing"
+    assert "not linked" in message
     assert phone_number == "+15551234567"
 
 
@@ -159,6 +169,70 @@ async def test_connection_response_includes_known_provider_identities(monkeypatc
     assert len(response.known_identities) == 1
     assert response.known_identities[0].display_name == "Abhimanyu Saharan"
     assert response.known_identities[0].external_thread_id == "164750684061759@lid"
+
+
+@pytest.mark.asyncio
+async def test_reset_workspace_chat_provider_pairing_deletes_session_before_qr(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    connection_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_active=True)
+    connection = make_connection()
+    connection.id = connection_id
+    connection.organization_id = organization_id
+    connection.workspace_id = workspace_id
+    connection.config = {
+        "bridge_base_url": "http://bridge.local",
+        "bridge_user_id": "98619967",
+    }
+    calls: list[str] = []
+
+    async def require_workspace_admin(session, current_user, org_id, ws_id):
+        calls.append(f"admin:{current_user.id}:{org_id}:{ws_id}")
+
+    async def get_connection(*args, **kwargs):
+        return connection
+
+    async def delete_whatsapp_bridge_session(target):
+        calls.append(f"delete:{target.user_id}")
+        return ""
+
+    async def create_whatsapp_bridge_session(target):
+        calls.append(f"create:{target.user_id}")
+        return ""
+
+    async def request_whatsapp_bridge_qr(target):
+        calls.append(f"qr:{target.user_id}")
+        return "2@fresh", ""
+
+    async def request_whatsapp_bridge_status(target):
+        calls.append(f"status:{target.user_id}")
+        return {"connected": True, "logged_in": False}, ""
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_connection", get_connection)
+    monkeypatch.setattr(service, "delete_whatsapp_bridge_session", delete_whatsapp_bridge_session)
+    monkeypatch.setattr(service, "create_whatsapp_bridge_session", create_whatsapp_bridge_session)
+    monkeypatch.setattr(service, "request_whatsapp_bridge_qr", request_whatsapp_bridge_qr)
+    monkeypatch.setattr(service, "request_whatsapp_bridge_status", request_whatsapp_bridge_status)
+
+    response = await service.reset_workspace_chat_provider_pairing_qr(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        connection_id,
+    )
+
+    assert response.status == "waiting_for_scan"
+    assert response.qr_payload == "2@fresh"
+    assert "reset" in response.message.lower()
+    assert calls[1:] == [
+        "delete:98619967",
+        "create:98619967",
+        "qr:98619967",
+        "status:98619967",
+    ]
 
 
 @pytest.mark.asyncio

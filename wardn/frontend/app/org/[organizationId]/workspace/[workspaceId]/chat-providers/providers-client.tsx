@@ -60,7 +60,7 @@ import {
   workspaceChatProvidersCreate,
   workspaceChatProvidersDelete,
   workspaceChatProvidersPairingStatus,
-  workspaceChatProvidersRefreshPairingQr,
+  workspaceChatProvidersResetPairingQr,
   workspaceChatProvidersUpdate,
 } from "@/lib/api/generated/workspace-chat-providers/workspace-chat-providers";
 import { cn } from "@/lib/utils";
@@ -960,7 +960,6 @@ function PairingDialog({
   pairingStatus?: ChatProviderPairingStatusResponse;
 }) {
   const isConnected = pairingStatus?.status === "connected";
-  const isWaiting = pairingStatus?.status === "waiting_for_scan";
   const qrPayload = pairingStatus?.qrPayload ?? "";
 
   return (
@@ -1000,8 +999,8 @@ function PairingDialog({
             <div className="grid gap-2">
               {[
                 { label: "Create connection", done: true },
-                { label: "Scan QR", done: isConnected || isWaiting },
-                { label: "Connected", done: isConnected },
+                { label: "QR shown", done: isConnected || Boolean(qrPayload) },
+                { label: "Phone linked", done: isConnected },
               ].map((step, index) => (
                 <div
                   className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm"
@@ -1048,6 +1047,12 @@ function PairingDialog({
                   {pairingStatus.message}
                 </div>
               ) : null}
+              {!isConnected ? (
+                <div className="mt-2 text-sm leading-5 text-muted-foreground">
+                  WhatsApp QR codes expire quickly. If WhatsApp says it could not link the
+                  device, generate a new QR and scan it immediately from Linked Devices.
+                </div>
+              ) : null}
               {pairingStatus?.bridgeBaseUrl ? (
                 <div className="mt-3 grid gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
                   <div className="flex items-center justify-between gap-3">
@@ -1075,7 +1080,7 @@ function PairingDialog({
                 ) : (
                   <QrCode className="size-4" />
                 )}
-                {qrPayload ? "Refresh QR" : "Show QR"}
+                {qrPayload ? "Generate new QR" : "Show QR"}
               </Button>
               <Button
                 disabled={!connection || busy}
@@ -1221,7 +1226,7 @@ export function ChatProvidersClient({
     setNotice(null);
     try {
       const status = refreshQr
-        ? await workspaceChatProvidersRefreshPairingQr(
+        ? await workspaceChatProvidersResetPairingQr(
             organizationId,
             workspaceId,
             connection.id,

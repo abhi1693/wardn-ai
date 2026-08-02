@@ -223,6 +223,14 @@ def nested_payload(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
     return {}
 
 
+def bool_payload_field(payload: dict[str, Any], *keys: str) -> bool | None:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, bool):
+            return value
+    return None
+
+
 def bridge_status_from_payload(payload: dict[str, Any]) -> tuple[str, str, str]:
     status_text = text_payload_field(
         payload,
@@ -244,6 +252,22 @@ def bridge_status_from_payload(payload: dict[str, Any]) -> tuple[str, str, str]:
         ).lower()
 
     connected = payload.get("connected") is True or session.get("connected") is True
+    logged_in = bool_payload_field(
+        payload,
+        "logged_in",
+        "loggedIn",
+        "isLoggedIn",
+        "authenticated",
+    )
+    session_logged_in = bool_payload_field(
+        session,
+        "logged_in",
+        "loggedIn",
+        "isLoggedIn",
+        "authenticated",
+    )
+    if logged_in is None:
+        logged_in = session_logged_in
     phone_number = text_payload_field(
         payload,
         "phoneNumber",
@@ -262,7 +286,14 @@ def bridge_status_from_payload(payload: dict[str, Any]) -> tuple[str, str, str]:
         "user_jid",
     )
 
-    if connected or status_text in WHATSAPP_BRIDGE_STATUS_CONNECTED:
+    if logged_in is False and (connected or status_text in WHATSAPP_BRIDGE_STATUS_CONNECTED):
+        return (
+            "needs_pairing",
+            "WhatsApp reached the bridge, but the phone is not linked. "
+            "Reset pairing and scan a fresh QR.",
+            phone_number,
+        )
+    if logged_in is True or connected or status_text in WHATSAPP_BRIDGE_STATUS_CONNECTED:
         return "connected", "WhatsApp session is connected.", phone_number
     if status_text in WHATSAPP_BRIDGE_STATUS_WAITING:
         return "waiting_for_scan", "Scan the QR code from WhatsApp Linked Devices.", phone_number
@@ -321,6 +352,17 @@ async def create_whatsapp_bridge_session(target: WhatsAppBridgeTarget) -> str:
     return ""
 
 
+async def delete_whatsapp_bridge_session(target: WhatsAppBridgeTarget) -> str:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.delete(
+            whatsapp_bridge_url(target, "/sessions/delete"),
+            params={"user_id": whatsapp_bridge_user_value(target.user_id)},
+        )
+    if response.status_code >= 400:
+        return f"WhatsApp bridge session reset failed with HTTP {response.status_code}."
+    return ""
+
+
 async def request_whatsapp_bridge_qr(target: WhatsAppBridgeTarget) -> tuple[str, str]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         async with client.stream(
@@ -373,6 +415,7 @@ async def whatsapp_pairing_response(
     connection: ChatProviderConnection,
     *,
     refresh_qr: bool = False,
+    reset_session: bool = False,
 ) -> ChatProviderPairingStatusResponse:
     if connection.provider != PROVIDER_WHATSAPP_LOCAL:
         return whatsapp_pairing_unsupported(connection)
@@ -384,6 +427,17 @@ async def whatsapp_pairing_response(
     create_message = ""
     if refresh_qr:
         try:
+            if reset_session:
+                delete_message = await delete_whatsapp_bridge_session(target)
+                if delete_message:
+                    return ChatProviderPairingStatusResponse(
+                        ok=False,
+                        provider=connection.provider,
+                        status="error",
+                        message=delete_message,
+                        bridgeBaseUrl=target.base_url,
+                        bridgeUserId=target.user_id,
+                    )
             create_message = await create_whatsapp_bridge_session(target)
             qr_payload, qr_message = await request_whatsapp_bridge_qr(target)
         except httpx.RequestError as exc:
@@ -397,6 +451,8 @@ async def whatsapp_pairing_response(
             )
         if qr_message and not create_message:
             create_message = qr_message
+        elif reset_session and not create_message and qr_payload:
+            create_message = "WhatsApp session was reset. Scan this fresh QR from Linked Devices."
 
     try:
         raw_status, status_message = await request_whatsapp_bridge_status(target)
@@ -908,6 +964,23 @@ async def refresh_workspace_chat_provider_pairing_qr(
         connection_id,
     )
     return await whatsapp_pairing_response(connection, refresh_qr=True)
+
+
+async def reset_workspace_chat_provider_pairing_qr(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+) -> ChatProviderPairingStatusResponse:
+    connection = await workspace_chat_provider_connection_for_admin(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        connection_id,
+    )
+    return await whatsapp_pairing_response(connection, refresh_qr=True, reset_session=True)
 
 
 def hmac_compare(left: str, right: str) -> bool:

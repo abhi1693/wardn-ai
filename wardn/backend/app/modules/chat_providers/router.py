@@ -24,6 +24,7 @@ from app.modules.chat_providers.service import (
     handle_whatsapp_local_webhook,
     list_workspace_chat_provider_connections,
     refresh_workspace_chat_provider_pairing_qr,
+    reset_workspace_chat_provider_pairing_qr,
     update_workspace_chat_provider_connection,
 )
 from app.modules.users.dependencies import get_current_user
@@ -212,6 +213,31 @@ async def refresh_workspace_chat_provider_pairing_qr_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatProviderPairingStatusResponse:
     return await refresh_workspace_chat_provider_pairing_qr(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        connection_id,
+    )
+
+
+@workspace_router.post(
+    "/{connection_id}/pairing/reset",
+    response_model=ChatProviderPairingStatusResponse,
+    operation_id="workspace_chat_providers_reset_pairing_qr",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def reset_workspace_chat_provider_pairing_qr_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    connection_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ChatProviderPairingStatusResponse:
+    return await reset_workspace_chat_provider_pairing_qr(
         session,
         current_user,
         organization_id,

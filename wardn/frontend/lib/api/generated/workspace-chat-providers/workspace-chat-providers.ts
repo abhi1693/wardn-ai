@@ -201,3 +201,30 @@ export const workspaceChatProvidersRefreshPairingQr = async (organizationId: str
 );}
 
 
+export const getWorkspaceChatProvidersResetPairingQrUrl = (organizationId: string,
+    workspaceId: string,
+    connectionId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/chat-providers/${connectionId}/pairing/reset`
+}
+
+/**
+ * @summary Reset Workspace Chat Provider Pairing Qr Route
+ */
+export const workspaceChatProvidersResetPairingQr = async (organizationId: string,
+    workspaceId: string,
+    connectionId: string, options?: Parameters<typeof apiRequest>[1]): Promise<ChatProviderPairingStatusResponse> => {
+
+  return apiRequest<ChatProviderPairingStatusResponse>(getWorkspaceChatProvidersResetPairingQrUrl(organizationId,workspaceId,connectionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
