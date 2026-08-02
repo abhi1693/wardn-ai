@@ -67,6 +67,9 @@ export default async function WorkspaceChatProvidersPage({
     >
       <ChatProvidersClient
         connections={connections}
+        defaultWhatsappBridgeBaseUrl={
+          process.env.WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL?.trim() ?? ""
+        }
         organizationId={organization.id}
         secretHandles={secretHandles}
         secretStores={secretStores}

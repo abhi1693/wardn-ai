@@ -75,6 +75,7 @@ type ProviderFilter = "active" | "needs_setup" | "all";
 
 type ChatProvidersClientProps = {
   connections: ChatProviderConnectionRead[];
+  defaultWhatsappBridgeBaseUrl: string;
   organizationId: string;
   secretHandles: SecretHandleRead[];
   secretStores: SecretStoreRead[];
@@ -453,6 +454,7 @@ function TestDialog({
 function ConnectProviderDialog({
   activeSecretStores,
   connectionCount,
+  defaultWhatsappBridgeBaseUrl,
   isCreating,
   onCreate,
   onOpenChange,
@@ -460,14 +462,16 @@ function ConnectProviderDialog({
 }: {
   activeSecretStores: SecretStoreRead[];
   connectionCount: number;
+  defaultWhatsappBridgeBaseUrl: string;
   isCreating: boolean;
   onCreate: (payload: ChatProviderConnectionCreate) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
+  const normalizedDefaultBridgeUrl = defaultWhatsappBridgeBaseUrl.trim();
   const [provider, setProvider] = useState<ProviderType>("whatsapp_local");
   const [name, setName] = useState("Personal WhatsApp");
-  const [bridgeBaseUrl, setBridgeBaseUrl] = useState("http://localhost:8090");
+  const [bridgeBaseUrl, setBridgeBaseUrl] = useState(normalizedDefaultBridgeUrl);
   const [bridgeUserId, setBridgeUserId] = useState(defaultBridgeUserId);
   const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const [webhookSecret, setWebhookSecret] = useState(randomSecret);
@@ -486,6 +490,9 @@ function ConnectProviderDialog({
           ? `Personal WhatsApp ${connectionCount + 1}`
           : "Personal WhatsApp"
     );
+    if (nextProvider === "whatsapp_local") {
+      setBridgeBaseUrl(normalizedDefaultBridgeUrl);
+    }
     setAdvancedOpen(false);
   }
 
@@ -605,7 +612,11 @@ function ConnectProviderDialog({
                 <Input
                   disabled
                   id="chat-provider-pairing"
-                  value="WhatsApp Linked Devices QR"
+                  value={
+                    normalizedDefaultBridgeUrl
+                      ? `QR via ${displayHost(normalizedDefaultBridgeUrl)}`
+                      : "WhatsApp bridge URL required"
+                  }
                 />
               </div>
             ) : (
@@ -923,6 +934,7 @@ function PairingDialog({
 
 export function ChatProvidersClient({
   connections,
+  defaultWhatsappBridgeBaseUrl,
   organizationId,
   secretStores,
   workspaceId,
@@ -1259,6 +1271,7 @@ export function ChatProvidersClient({
             const config = record(connection.config);
             const pairingStatus = pairingStatuses[connection.id];
             const bridgeBaseUrl = stringConfig(config, "bridge_base_url", "bridgeBaseUrl");
+            const effectiveBridgeBaseUrl = pairingStatus?.bridgeBaseUrl || bridgeBaseUrl;
             const bridgeUserId =
               stringConfig(config, "bridge_user_id", "bridgeUserId", "account_name", "accountName") ||
               connection.externalId;
@@ -1313,7 +1326,7 @@ export function ChatProvidersClient({
                         <div className="truncate text-xs text-muted-foreground">Bridge</div>
                         <div className="truncate text-sm font-medium">
                           {connection.provider === "whatsapp_local"
-                            ? displayHost(bridgeBaseUrl)
+                            ? displayHost(effectiveBridgeBaseUrl)
                             : "Telegram API"}
                         </div>
                       </div>
@@ -1414,6 +1427,7 @@ export function ChatProvidersClient({
       <ConnectProviderDialog
         activeSecretStores={activeSecretStores}
         connectionCount={connections.length}
+        defaultWhatsappBridgeBaseUrl={defaultWhatsappBridgeBaseUrl}
         isCreating={isCreating}
         onCreate={createProvider}
         onOpenChange={setConnectOpen}

@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.cli_utils import exit_with_code
 from app.core.config import Settings, get_settings
+from app.modules.chat_providers.bridge_worker import run_whatsapp_bridge_event_worker_loop
 from app.modules.mcp_registry.job_handlers import build_job_handlers
 from app.modules.mcp_registry.job_worker import (
     default_worker_id,
@@ -98,6 +99,17 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
             retry_max_seconds=settings.secret_cleanup_worker_retry_max_seconds,
         )
     )
+    chat_provider_event_task: asyncio.Task[None] | None = None
+    if settings.chat_provider_event_worker_enabled:
+        chat_provider_event_task = asyncio.create_task(
+            run_whatsapp_bridge_event_worker_loop(
+                poll_interval_seconds=settings.chat_provider_event_worker_poll_interval_seconds,
+                stream_seconds=settings.chat_provider_event_worker_stream_seconds,
+                retry_base_seconds=settings.chat_provider_event_worker_retry_base_seconds,
+                retry_max_seconds=settings.chat_provider_event_worker_retry_max_seconds,
+            ),
+            name="chat-provider-events",
+        )
     warmup_task = start_runtime_warmup(
         concurrency=settings.mcp_runtime_warm_startup_concurrency,
     )
@@ -113,6 +125,10 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
         secret_cleanup_task.cancel()
         with suppress(asyncio.CancelledError):
             await secret_cleanup_task
+        if chat_provider_event_task is not None:
+            chat_provider_event_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await chat_provider_event_task
         await stop_runtime_warmup(warmup_task)
         await stop_runtime_reaper(reaper_task)
     return 0

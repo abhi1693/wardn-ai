@@ -4,12 +4,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.db.errors import is_constraint_violation
 from app.modules.agents import repository as agent_repository
 from app.modules.agents import service as agent_service
@@ -90,6 +92,7 @@ WHATSAPP_BRIDGE_STATUS_DISCONNECTED = {
     "not_connected",
     "unpaired",
 }
+LOOPBACK_BRIDGE_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 
 @dataclass(frozen=True)
@@ -128,13 +131,43 @@ def provider_config_model(
     raise InvalidChatProviderConnectionError("unsupported chat provider")
 
 
-def normalize_connection_config(provider: str, config: dict[str, Any] | None) -> dict[str, Any]:
+def bridge_base_url_host(value: str) -> str:
     try:
-        return provider_config_model(provider).model_validate(config or {}).model_dump(
+        return (urlparse(value).hostname or "").casefold()
+    except ValueError:
+        return ""
+
+
+def should_replace_bridge_base_url(value: str) -> bool:
+    if not value:
+        return True
+    return bridge_base_url_host(value) in LOOPBACK_BRIDGE_HOSTS
+
+
+def default_whatsapp_bridge_base_url(settings: Settings | None = None) -> str:
+    configured = (settings or get_settings()).chat_provider_whatsapp_bridge_base_url.strip()
+    return configured.rstrip("/")
+
+
+def normalize_connection_config(
+    provider: str,
+    config: dict[str, Any] | None,
+    *,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    try:
+        normalized = provider_config_model(provider).model_validate(config or {}).model_dump(
             by_alias=False
         )
     except ValidationError as exc:
         raise InvalidChatProviderConnectionError("invalid chat provider config") from exc
+    if provider == PROVIDER_WHATSAPP_LOCAL:
+        default_bridge_url = default_whatsapp_bridge_base_url(settings)
+        if default_bridge_url and should_replace_bridge_base_url(
+            str(normalized.get("bridge_base_url") or "")
+        ):
+            normalized["bridge_base_url"] = default_bridge_url
+    return normalized
 
 
 def public_connection_config(connection: ChatProviderConnection) -> dict[str, Any]:
@@ -148,12 +181,19 @@ def normalized_config(connection: ChatProviderConnection) -> dict[str, Any]:
 def whatsapp_bridge_target(connection: ChatProviderConnection) -> WhatsAppBridgeTarget | None:
     if connection.provider != PROVIDER_WHATSAPP_LOCAL:
         return None
-    config = WhatsAppLocalProviderConfig.model_validate(connection.config or {})
-    if not config.bridge_base_url:
+    config = normalized_config(connection)
+    base_url = str(config.get("bridge_base_url") or "").strip().rstrip("/")
+    if not base_url:
         return None
+    user_id = str(
+        config.get("bridge_user_id")
+        or config.get("account_name")
+        or connection.external_id
+        or ""
+    ).strip()
     return WhatsAppBridgeTarget(
-        base_url=config.bridge_base_url.rstrip("/"),
-        user_id=config.bridge_user_id or config.account_name or connection.external_id,
+        base_url=base_url,
+        user_id=user_id,
     )
 
 
@@ -315,7 +355,7 @@ def whatsapp_pairing_not_configured(connection: ChatProviderConnection) -> (
         ok=False,
         provider=connection.provider,
         status="not_configured",
-        message="Configure a local WhatsApp bridge URL in advanced settings.",
+        message="Configure a WhatsApp bridge URL for this deployment.",
     )
 
 
@@ -1173,6 +1213,9 @@ async def handle_telegram_webhook(
 def whatsapp_local_payload_items(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
+    bridge_payload = payload.get("payload")
+    if isinstance(bridge_payload, dict):
+        return [bridge_payload]
     messages = payload.get("messages")
     if isinstance(messages, list):
         return [item for item in messages if isinstance(item, dict)]
@@ -1182,24 +1225,20 @@ def whatsapp_local_payload_items(payload: dict[str, Any] | list[Any]) -> list[di
     return [payload]
 
 
-async def handle_whatsapp_local_webhook(
+async def process_whatsapp_local_payload_items(
     session: AsyncSession,
+    connection: ChatProviderConnection,
+    items: list[dict[str, Any]],
     *,
-    connection_id: uuid.UUID,
-    body: bytes,
-    secret_header: str | None,
+    source: str,
     session_factory: AgentSessionFactory | None = None,
 ) -> ChatProviderWebhookResponse:
-    connection = await active_connection(
-        session,
-        connection_id,
-        provider=PROVIDER_WHATSAPP_LOCAL,
-    )
-    await validate_webhook_secret(session, connection, secret_header)
-    payload = decode_webhook_body(body, provider_name="WhatsApp local")
-
     response = ChatProviderWebhookResponse()
-    for item in whatsapp_local_payload_items(payload):
+    for item in items:
+        if source == "bridge" and whatsapp_local.is_bridge_outbound_echo(item):
+            response.received += 1
+            response.ignored += 1
+            continue
         text_message = whatsapp_local.text_message(item)
         if text_message is not None:
             response.received += 1
@@ -1213,12 +1252,13 @@ async def handle_whatsapp_local_webhook(
             except Exception:
                 response.failed += 1
                 logger.exception(
-                    "Failed to process WhatsApp local chat provider message.",
+                    "Failed to process WhatsApp chat provider message.",
                     extra={
                         "organization_id": str(connection.organization_id),
                         "workspace_id": str(connection.workspace_id),
                         "chat_provider_connection_id": str(connection.id),
                         "chat_provider_event_id": text_message.event_id,
+                        "chat_provider_source": source,
                     },
                 )
             else:
@@ -1241,6 +1281,50 @@ async def handle_whatsapp_local_webhook(
             else:
                 response.duplicates += 1
     return response
+
+
+async def handle_whatsapp_local_webhook(
+    session: AsyncSession,
+    *,
+    connection_id: uuid.UUID,
+    body: bytes,
+    secret_header: str | None,
+    session_factory: AgentSessionFactory | None = None,
+) -> ChatProviderWebhookResponse:
+    connection = await active_connection(
+        session,
+        connection_id,
+        provider=PROVIDER_WHATSAPP_LOCAL,
+    )
+    await validate_webhook_secret(session, connection, secret_header)
+    payload = decode_webhook_body(body, provider_name="WhatsApp local")
+    return await process_whatsapp_local_payload_items(
+        session,
+        connection,
+        whatsapp_local_payload_items(payload),
+        source="webhook",
+        session_factory=session_factory,
+    )
+
+
+async def handle_whatsapp_local_bridge_event(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    payload: dict[str, Any],
+    *,
+    session_factory: AgentSessionFactory | None = None,
+) -> ChatProviderWebhookResponse:
+    if connection.provider != PROVIDER_WHATSAPP_LOCAL:
+        raise InvalidChatProviderConnectionError("invalid WhatsApp bridge connection")
+    if not connection.is_active:
+        return ChatProviderWebhookResponse(received=1, ignored=1)
+    return await process_whatsapp_local_payload_items(
+        session,
+        connection,
+        whatsapp_local_payload_items(payload),
+        source="bridge",
+        session_factory=session_factory,
+    )
 
 
 async def record_unsupported_provider_message(

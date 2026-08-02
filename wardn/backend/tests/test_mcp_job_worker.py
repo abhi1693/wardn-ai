@@ -400,11 +400,21 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
 
     async def cancel_worker_loop(**kwargs):
         seen["worker"] = kwargs
+        await asyncio.sleep(0)
         raise asyncio.CancelledError
+
+    async def run_chat_provider_worker(**kwargs):
+        seen["chat_provider_worker"] = kwargs
+        await asyncio.Future()
 
     monkeypatch.setattr(job_commands, "stop_runtime_warmup", stop_runtime_warmup)
     monkeypatch.setattr(job_commands, "stop_runtime_reaper", stop_runtime_reaper)
     monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
+    monkeypatch.setattr(
+        job_commands,
+        "run_whatsapp_bridge_event_worker_loop",
+        run_chat_provider_worker,
+    )
 
     args = SimpleNamespace(
         once=False,
@@ -423,6 +433,12 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         "limit": settings.mcp_runtime_reaper_batch_size,
         "event_retention_days": settings.mcp_runtime_event_retention_days,
         "invocation_retention_days": settings.mcp_runtime_invocation_retention_days,
+    }
+    assert seen["chat_provider_worker"] == {
+        "poll_interval_seconds": settings.chat_provider_event_worker_poll_interval_seconds,
+        "stream_seconds": settings.chat_provider_event_worker_stream_seconds,
+        "retry_base_seconds": settings.chat_provider_event_worker_retry_base_seconds,
+        "retry_max_seconds": settings.chat_provider_event_worker_retry_max_seconds,
     }
     assert seen["warmup_stop"] is warmup_task
     assert seen["reaper_stop"] is reaper_task

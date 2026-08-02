@@ -111,6 +111,25 @@ def test_settings_parse_outbound_http_policy_lists() -> None:
     ]
 
 
+def test_settings_normalize_whatsapp_bridge_base_url() -> None:
+    settings = make_settings(
+        chat_provider_whatsapp_bridge_base_url=" http://wardn-ai-whatsapp-bridge:8090/ "
+    )
+
+    assert (
+        settings.chat_provider_whatsapp_bridge_base_url
+        == "http://wardn-ai-whatsapp-bridge:8090"
+    )
+
+
+def test_settings_reject_invalid_chat_provider_retry_bounds() -> None:
+    with pytest.raises(ValidationError, match="chat provider event worker retry base"):
+        make_settings(
+            chat_provider_event_worker_retry_base_seconds=31,
+            chat_provider_event_worker_retry_max_seconds=30,
+        )
+
+
 def test_settings_normalize_release_tag_version() -> None:
     settings = make_settings(app_version="v1.2.3")
 

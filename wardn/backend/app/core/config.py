@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     secret_cleanup_provisioning_grace_seconds: int = Field(default=300, ge=10, le=86_400)
     secret_cleanup_worker_retry_base_seconds: int = Field(default=15, ge=1, le=3600)
     secret_cleanup_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
+    chat_provider_event_worker_enabled: bool = True
+    chat_provider_event_worker_poll_interval_seconds: float = Field(default=5.0, gt=0, le=300)
+    chat_provider_event_worker_stream_seconds: float = Field(default=55.0, gt=0, le=600)
+    chat_provider_event_worker_retry_base_seconds: float = Field(default=2.0, gt=0, le=300)
+    chat_provider_event_worker_retry_max_seconds: float = Field(default=30.0, gt=0, le=600)
+    chat_provider_whatsapp_bridge_base_url: str = Field(default="", max_length=2048)
     outbound_http_allow_http: bool = False
     outbound_http_allowed_ports: list[int] = [443]
     outbound_http_private_host_allowlist: list[str] = []
@@ -198,6 +204,11 @@ class Settings(BaseSettings):
             raise ValueError("application version must not be empty")
         return normalized
 
+    @field_validator("chat_provider_whatsapp_bridge_base_url")
+    @classmethod
+    def normalize_optional_url(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
     @field_validator("oidc_allowed_email_domains", mode="before")
     @classmethod
     def parse_oidc_allowed_email_domains(cls, value: str | list[str]) -> list[str]:
@@ -295,6 +306,11 @@ class Settings(BaseSettings):
             > self.secret_cleanup_worker_retry_max_seconds
         ):
             raise ValueError("secret cleanup worker retry base must not exceed its maximum")
+        if (
+            self.chat_provider_event_worker_retry_base_seconds
+            > self.chat_provider_event_worker_retry_max_seconds
+        ):
+            raise ValueError("chat provider event worker retry base must not exceed its maximum")
         if environment == "production":
             production_secrets = {
                 "WARDN_API_TOKEN_SECRET": self.api_token_secret.get_secret_value(),

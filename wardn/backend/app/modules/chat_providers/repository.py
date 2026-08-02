@@ -28,6 +28,20 @@ async def list_connections(
     return list(result.scalars().all())
 
 
+async def list_active_whatsapp_connections(
+    session: AsyncSession,
+) -> list[ChatProviderConnection]:
+    result = await session.execute(
+        select(ChatProviderConnection)
+        .where(
+            ChatProviderConnection.provider == "whatsapp_local",
+            ChatProviderConnection.is_active.is_(True),
+        )
+        .order_by(ChatProviderConnection.created_at.asc(), ChatProviderConnection.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_connection(
     session: AsyncSession,
     *,

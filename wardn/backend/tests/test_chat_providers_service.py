@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.config import Settings
 from app.modules.agents.models import WorkspaceConversation
 from app.modules.agents.schemas import (
     AgentConversationResponse,
@@ -95,6 +96,84 @@ def test_bridge_status_from_payload_normalizes_connected_state() -> None:
     assert status == "connected"
     assert message == "WhatsApp session is connected."
     assert phone_number == "+15551234567"
+
+
+def test_normalize_whatsapp_config_replaces_loopback_with_deployment_bridge() -> None:
+    settings = Settings(
+        _env_file=None,
+        chat_provider_whatsapp_bridge_base_url="http://wardn-ai-whatsapp-bridge:8090/",
+    )
+
+    config = service.normalize_connection_config(
+        service.PROVIDER_WHATSAPP_LOCAL,
+        {"bridgeBaseUrl": "http://localhost:8090", "bridgeUserId": "95273632"},
+        settings=settings,
+    )
+
+    assert config["bridge_base_url"] == "http://wardn-ai-whatsapp-bridge:8090"
+    assert config["bridge_user_id"] == "95273632"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_bridge_event_processes_self_chat_message(monkeypatch) -> None:
+    connection = make_connection()
+    processed: list[service.ProviderTextMessage] = []
+
+    async def process_provider_text_message(*args, **kwargs):
+        processed.append(args[2])
+        return True
+
+    monkeypatch.setattr(service, "process_provider_text_message", process_provider_text_message)
+
+    response = await service.handle_whatsapp_local_bridge_event(
+        FakeSession(),
+        connection,
+        {
+            "type": "message",
+            "payload": {
+                "id": "bridge-inbound-1",
+                "chat_jid": "15551234567@s.whatsapp.net",
+                "sender_jid": "15551234567:8@s.whatsapp.net",
+                "sender_name": "Asha",
+                "text": "summarize workspace",
+                "is_from_me": True,
+            },
+        },
+    )
+
+    assert response.received == 1
+    assert response.processed == 1
+    assert processed[0].event_id == "bridge-inbound-1"
+    assert processed[0].external_thread_id == "15551234567@s.whatsapp.net"
+    assert processed[0].external_user_id == "15551234567:8@s.whatsapp.net"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_bridge_event_ignores_outbound_echo(monkeypatch) -> None:
+    connection = make_connection()
+
+    async def process_provider_text_message(*args, **kwargs):
+        raise AssertionError("outbound bridge echoes must not reach the workspace agent")
+
+    monkeypatch.setattr(service, "process_provider_text_message", process_provider_text_message)
+
+    response = await service.handle_whatsapp_local_bridge_event(
+        FakeSession(),
+        connection,
+        {
+            "type": "message",
+            "payload": {
+                "id": "bridge-echo-1",
+                "chat_jid": "15551234567@s.whatsapp.net",
+                "sender_jid": "15557654321@s.whatsapp.net",
+                "text": "agent reply",
+                "is_from_me": True,
+            },
+        },
+    )
+
+    assert response.received == 1
+    assert response.ignored == 1
 
 
 @pytest.mark.asyncio

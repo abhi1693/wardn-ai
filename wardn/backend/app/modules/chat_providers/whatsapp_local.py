@@ -33,12 +33,29 @@ def string_field(payload: dict[str, Any], *names: str) -> str:
 
 
 def text_message(payload: dict[str, Any]) -> WhatsAppLocalTextMessage | None:
-    text = string_field(payload, "text", "body", "messageText", "message_text")
+    text = string_field(payload, "text", "body", "messageText", "message_text", "caption")
     if not text:
         return None
     event_id = string_field(payload, "messageId", "message_id", "id")
-    chat_id = string_field(payload, "chatId", "chat_id", "jid", "remoteJid", "remote_jid")
-    sender_id = string_field(payload, "senderId", "sender_id", "from", "participant")
+    chat_id = string_field(
+        payload,
+        "chatId",
+        "chat_id",
+        "chatJid",
+        "chat_jid",
+        "jid",
+        "remoteJid",
+        "remote_jid",
+    )
+    sender_id = string_field(
+        payload,
+        "senderId",
+        "sender_id",
+        "senderJid",
+        "sender_jid",
+        "from",
+        "participant",
+    )
     if not event_id or not chat_id or not sender_id:
         return None
     return WhatsAppLocalTextMessage(
@@ -49,6 +66,8 @@ def text_message(payload: dict[str, Any]) -> WhatsAppLocalTextMessage | None:
             payload,
             "senderDisplayName",
             "sender_display_name",
+            "senderName",
+            "sender_name",
             "pushName",
             "push_name",
             "name",
@@ -62,8 +81,25 @@ def unsupported_message(payload: dict[str, Any]) -> WhatsAppLocalUnsupportedMess
     if text_message(payload) is not None:
         return None
     event_id = string_field(payload, "messageId", "message_id", "id")
-    chat_id = string_field(payload, "chatId", "chat_id", "jid", "remoteJid", "remote_jid")
-    sender_id = string_field(payload, "senderId", "sender_id", "from", "participant")
+    chat_id = string_field(
+        payload,
+        "chatId",
+        "chat_id",
+        "chatJid",
+        "chat_jid",
+        "jid",
+        "remoteJid",
+        "remote_jid",
+    )
+    sender_id = string_field(
+        payload,
+        "senderId",
+        "sender_id",
+        "senderJid",
+        "sender_jid",
+        "from",
+        "participant",
+    )
     if not event_id or not chat_id or not sender_id:
         return None
     return WhatsAppLocalUnsupportedMessage(
@@ -74,6 +110,8 @@ def unsupported_message(payload: dict[str, Any]) -> WhatsAppLocalUnsupportedMess
             payload,
             "senderDisplayName",
             "sender_display_name",
+            "senderName",
+            "sender_name",
             "pushName",
             "push_name",
             "name",
@@ -81,6 +119,31 @@ def unsupported_message(payload: dict[str, Any]) -> WhatsAppLocalUnsupportedMess
         message_type=string_field(payload, "type", "messageType", "message_type") or "unknown",
         raw=payload,
     )
+
+
+def jid_without_device(value: str) -> str:
+    user, separator, server = value.strip().partition("@")
+    if not separator:
+        return value.strip()
+    base_user = user.split(":", 1)[0]
+    return f"{base_user}@{server}"
+
+
+def is_bridge_self_chat(payload: dict[str, Any]) -> bool:
+    if payload.get("is_from_me") is not True and payload.get("isFromMe") is not True:
+        return False
+    chat_id = string_field(payload, "chatId", "chat_id", "chatJid", "chat_jid", "jid")
+    sender_id = string_field(payload, "senderId", "sender_id", "senderJid", "sender_jid")
+    return bool(
+        chat_id
+        and sender_id
+        and jid_without_device(chat_id) == jid_without_device(sender_id)
+    )
+
+
+def is_bridge_outbound_echo(payload: dict[str, Any]) -> bool:
+    is_from_me = payload.get("is_from_me") is True or payload.get("isFromMe") is True
+    return bool(is_from_me and not is_bridge_self_chat(payload))
 
 
 def outbound_text_payload(
