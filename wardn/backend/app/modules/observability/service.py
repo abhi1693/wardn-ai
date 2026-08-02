@@ -26,6 +26,14 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
+    OrganizationDashboardAttentionItem,
+    OrganizationDashboardCatalogHealth,
+    OrganizationDashboardProviderRow,
+    OrganizationDashboardResponse,
+    OrganizationDashboardRuntimeRow,
+    OrganizationDashboardSummary,
+    OrganizationDashboardToolRow,
+    OrganizationDashboardWorkspaceRow,
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
@@ -39,6 +47,9 @@ USAGE_SUMMARY_DEFAULT_DAYS = 30
 USAGE_SUMMARY_MAX_DAYS = 366
 USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT = 25
 USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT = 100
+DASHBOARD_CATALOG_STALE_AFTER = timedelta(hours=24)
+DASHBOARD_DEFAULT_LIMIT = 8
+DASHBOARD_MAX_LIMIT = 25
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_TIMEOUT_SECONDS = 10
 OPENROUTER_MAX_MODEL_PAGES = 20
@@ -763,6 +774,420 @@ def resolve_usage_summary_window(
             effective_end + timedelta(days=1),
             time.min,
             tzinfo=UTC,
+        ),
+    )
+
+
+def int_row_value(row, key: str, default: int = 0) -> int:
+    return int(row_value(row, key, default) or default)
+
+
+def decimal_row_value(row, key: str, default: Decimal | str = Decimal("0")) -> Decimal:
+    value = row_value(row, key, default)
+    return value if isinstance(value, Decimal) else Decimal(str(value or default))
+
+
+def optional_duration(value: object) -> int | None:
+    if value is None:
+        return None
+    return int(round(float(value)))
+
+
+def percent(part: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round((part / total) * 100, 1)
+
+
+def success_rate(succeeded: int, total: int) -> float:
+    if total <= 0:
+        return 100.0
+    return round((succeeded / total) * 100, 1)
+
+
+def projected_monthly_cost(cost: Decimal, window: UsageSummaryWindow) -> Decimal:
+    days = max((window.end_date - window.start_date).days + 1, 1)
+    return ((cost * Decimal(30)) / Decimal(days)).quantize(Decimal("0.000001"))
+
+
+def budget_utilization_percent(
+    *,
+    projected_cost: Decimal,
+    monthly_budget: Decimal | None,
+) -> float | None:
+    if monthly_budget is None or monthly_budget <= 0:
+        return None
+    return round(float((projected_cost / monthly_budget) * Decimal(100)), 1)
+
+
+def runtime_label(value: str) -> str:
+    normalized = value.strip().casefold()
+    labels = {
+        "remote": "Remote endpoints",
+        "oci": "OCI packages",
+        "npm": "NPM packages",
+        "uvx": "UVX packages",
+        "metadata": "Metadata only",
+    }
+    return labels.get(normalized, value or "Unknown runtime")
+
+
+def pluralize(value: int, singular: str, plural: str | None = None) -> str:
+    return singular if value == 1 else plural or f"{singular}s"
+
+
+def dashboard_health_score(
+    *,
+    control: dict[str, Any],
+    usage: UsageSummaryResponse,
+    tool_failed: int,
+    tool_total: int,
+    budget_percent: float | None,
+) -> int:
+    summary = usage.summary
+    completed_requests = summary.succeeded + summary.failed
+    score = 100
+    inactive_workspaces = max(
+        int_row_value(control, "workspaces") - int_row_value(control, "active_workspaces"),
+        0,
+    )
+    score -= min(15, inactive_workspaces * 4)
+    if int_row_value(control, "active_provider_credentials") == 0:
+        score -= 18
+    score -= min(20, int_row_value(control, "servers_needing_attention") * 5)
+    score -= min(15, int_row_value(control, "runtime_sessions_needing_attention") * 5)
+    score -= min(
+        15,
+        int_row_value(control, "catalog_errors") * 5
+        + int_row_value(control, "stale_catalog_sources") * 2,
+    )
+    score -= min(20, int(percent(summary.failed, completed_requests) * 0.5))
+    score -= min(15, int(percent(tool_failed, tool_total) * 0.4))
+    if budget_percent is not None:
+        if budget_percent >= 100:
+            score -= 15
+        elif budget_percent >= 80:
+            score -= 8
+    return max(min(score, 100), 0)
+
+
+def dashboard_attention_items(
+    *,
+    control: dict[str, Any],
+    usage: UsageSummaryResponse,
+    tool_failed: int,
+    budget_percent: float | None,
+) -> list[OrganizationDashboardAttentionItem]:
+    items: list[OrganizationDashboardAttentionItem] = []
+
+    def add(key: str, label: str, detail: str, severity: str) -> None:
+        items.append(
+            OrganizationDashboardAttentionItem(
+                key=key,
+                label=label,
+                detail=detail,
+                severity=severity,
+            )
+        )
+
+    if int_row_value(control, "active_provider_credentials") == 0:
+        add(
+            "provider-credentials",
+            "No active model provider",
+            "Agents cannot run reliably until at least one credential is active.",
+            "danger",
+        )
+    servers_needing_attention = int_row_value(control, "servers_needing_attention")
+    if servers_needing_attention:
+        server_label = pluralize(servers_needing_attention, "server")
+        add(
+            "mcp-servers",
+            f"{servers_needing_attention} MCP {server_label} need review",
+            "Disabled installs or install errors are reducing tool availability.",
+            "danger",
+        )
+    runtime_attention = int_row_value(control, "runtime_sessions_needing_attention")
+    if runtime_attention:
+        add(
+            "runtime-sessions",
+            f"{runtime_attention} runtime {pluralize(runtime_attention, 'session')} need review",
+            "Runtime failures can make installed servers appear available but fail at call time.",
+            "warning",
+        )
+    if usage.summary.failed:
+        add(
+            "llm-failures",
+            f"{usage.summary.failed} failed model {pluralize(usage.summary.failed, 'request')}",
+            "Review recent runs for provider errors, model limits, or invalid payloads.",
+            "warning",
+        )
+    if tool_failed:
+        add(
+            "tool-failures",
+            f"{tool_failed} failed MCP tool {pluralize(tool_failed, 'call')}",
+            "Tool errors are visible in observability and can point to schema or auth issues.",
+            "warning",
+        )
+    catalog_errors = int_row_value(control, "catalog_errors")
+    if catalog_errors:
+        add(
+            "catalog-errors",
+            f"{catalog_errors} catalog {pluralize(catalog_errors, 'source')} reporting errors",
+            "Catalog errors can hide new versions and server metadata.",
+            "warning",
+        )
+    stale_catalog_sources = int_row_value(control, "stale_catalog_sources")
+    if stale_catalog_sources:
+        add(
+            "catalog-stale",
+            f"{stale_catalog_sources} catalog {pluralize(stale_catalog_sources, 'source')} stale",
+            "Enabled sources have not synced successfully in the expected window.",
+            "info",
+        )
+    server_updates = int_row_value(control, "server_updates")
+    if server_updates:
+        add(
+            "server-updates",
+            f"{server_updates} server {pluralize(server_updates, 'update')} available",
+            "Updates may include schema, auth, or runtime fixes.",
+            "info",
+        )
+    if budget_percent is not None and budget_percent >= 80:
+        add(
+            "budget",
+            "Monthly budget pressure",
+            f"Projected usage is at {budget_percent:.1f}% of the configured monthly budget.",
+            "danger" if budget_percent >= 100 else "warning",
+        )
+    if int_row_value(control, "workspaces") == 0:
+        add(
+            "workspaces",
+            "No workspaces configured",
+            "Create a workspace before installing MCP servers or agents.",
+            "info",
+        )
+    has_workspaces = int_row_value(control, "workspaces") > 0
+    if int_row_value(control, "installed_servers") == 0 and has_workspaces:
+        add(
+            "installations",
+            "No MCP servers installed",
+            "The organization has workspaces but no connected tool servers yet.",
+            "info",
+        )
+    return items[:8]
+
+
+def dashboard_workspace_row(row) -> OrganizationDashboardWorkspaceRow:
+    return OrganizationDashboardWorkspaceRow(
+        id=row_value(row, "id"),
+        name=str(row_value(row, "name", "")),
+        slug=str(row_value(row, "slug", "")),
+        status=str(row_value(row, "status", "")),
+        requests=int_row_value(row, "requests"),
+        failedRequests=int_row_value(row, "failed_requests"),
+        totalTokens=int_row_value(row, "total_tokens"),
+        costUsd=decimal_row_value(row, "cost_usd"),
+        toolCalls=int_row_value(row, "tool_calls"),
+        failedToolCalls=int_row_value(row, "failed_tool_calls"),
+        agents=int_row_value(row, "agents"),
+        activeAgents=int_row_value(row, "active_agents"),
+        installations=int_row_value(row, "installations"),
+        enabledInstallations=int_row_value(row, "enabled_installations"),
+        serversNeedingAttention=int_row_value(row, "servers_needing_attention"),
+        serverUpdates=int_row_value(row, "server_updates"),
+        toolCount=int_row_value(row, "tool_count"),
+        runtimeSessions=int_row_value(row, "runtime_sessions"),
+        activeRuntimeSessions=int_row_value(row, "active_runtime_sessions"),
+        runtimeSessionsNeedingAttention=int_row_value(
+            row,
+            "runtime_sessions_needing_attention",
+        ),
+        latestActivityAt=row_value(row, "latest_activity_at", None),
+    )
+
+
+def dashboard_runtime_row(row) -> OrganizationDashboardRuntimeRow:
+    runtime = str(row_value(row, "runtime", "") or "")
+    return OrganizationDashboardRuntimeRow(
+        runtime=runtime,
+        label=runtime_label(runtime),
+        total=int_row_value(row, "total"),
+        enabled=int_row_value(row, "enabled"),
+        attention=int_row_value(row, "attention"),
+    )
+
+
+def dashboard_provider_row(row) -> OrganizationDashboardProviderRow:
+    return OrganizationDashboardProviderRow(
+        provider=str(row_value(row, "provider", "") or ""),
+        total=int_row_value(row, "total"),
+        active=int_row_value(row, "active"),
+        apiKey=int_row_value(row, "api_key"),
+        oauth=int_row_value(row, "oauth"),
+    )
+
+
+def dashboard_tool_row(row) -> OrganizationDashboardToolRow:
+    calls = int_row_value(row, "calls")
+    failed = int_row_value(row, "failed")
+    server_name = str(row_value(row, "server_name", "") or "")
+    tool_name = str(row_value(row, "tool_name", "") or "")
+    workspace_id = row_value(row, "workspace_id", None)
+    return OrganizationDashboardToolRow(
+        id=f"{workspace_id or 'organization'}:{server_name}:{tool_name}",
+        serverName=server_name,
+        toolName=tool_name,
+        workspaceId=workspace_id,
+        workspaceName=str(row_value(row, "workspace_name", "") or "Unknown workspace"),
+        calls=calls,
+        failed=failed,
+        errorRate=percent(failed, calls),
+        averageDurationMs=optional_duration(row_value(row, "average_duration_ms", None)),
+        p95DurationMs=optional_duration(row_value(row, "p95_duration_ms", None)),
+        lastCalledAt=row_value(row, "last_called_at", None),
+    )
+
+
+async def organization_dashboard(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = DASHBOARD_DEFAULT_LIMIT,
+) -> OrganizationDashboardResponse:
+    if not 1 <= breakdown_limit <= DASHBOARD_MAX_LIMIT:
+        raise ValueError(f"breakdownLimit must be between 1 and {DASHBOARD_MAX_LIMIT}")
+
+    usage = await organization_usage_summary(
+        session,
+        organization_id=organization_id,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
+    window = resolve_usage_summary_window(start_date=start_date, end_date=end_date)
+    catalog_stale_before = datetime.now(UTC) - DASHBOARD_CATALOG_STALE_AFTER
+    control, tool_totals, workspace_rows, runtime_rows, provider_rows, tool_rows = (
+        await repository.organization_dashboard_control_counts(
+            session,
+            organization_id=organization_id,
+            catalog_stale_before=catalog_stale_before,
+        ),
+        await repository.organization_dashboard_tool_usage_totals(
+            session,
+            organization_id=organization_id,
+            started_at_from=window.started_at_from,
+            started_at_to=window.started_at_to,
+        ),
+        await repository.organization_dashboard_workspace_rows(
+            session,
+            organization_id=organization_id,
+            started_at_from=window.started_at_from,
+            started_at_to=window.started_at_to,
+            limit=breakdown_limit,
+        ),
+        await repository.organization_dashboard_runtime_rows(
+            session,
+            organization_id=organization_id,
+        ),
+        await repository.organization_dashboard_provider_rows(
+            session,
+            organization_id=organization_id,
+        ),
+        await repository.organization_dashboard_top_tool_rows(
+            session,
+            organization_id=organization_id,
+            started_at_from=window.started_at_from,
+            started_at_to=window.started_at_to,
+            limit=breakdown_limit,
+        ),
+    )
+
+    cost = usage.summary.cost_usd
+    projected_cost = projected_monthly_cost(cost, usage.window)
+    monthly_budget = decimal_row_value(control, "monthly_budget_usd")
+    if monthly_budget <= 0:
+        monthly_budget = None
+    budget_percent = budget_utilization_percent(
+        projected_cost=projected_cost,
+        monthly_budget=monthly_budget,
+    )
+    tool_total = int_row_value(tool_totals, "tool_calls")
+    tool_failed = int_row_value(tool_totals, "failed_tool_calls")
+    tool_running = int_row_value(tool_totals, "running_tool_calls")
+    completed_requests = usage.summary.succeeded + usage.summary.failed
+    tool_success_total = max(tool_total - tool_running, 0)
+    health_score = dashboard_health_score(
+        control=control,
+        usage=usage,
+        tool_failed=tool_failed,
+        tool_total=tool_success_total,
+        budget_percent=budget_percent,
+    )
+
+    return OrganizationDashboardResponse(
+        window=usage.window,
+        summary=OrganizationDashboardSummary(
+            healthScore=health_score,
+            workspaces=int_row_value(control, "workspaces"),
+            activeWorkspaces=int_row_value(control, "active_workspaces"),
+            members=int_row_value(control, "members"),
+            activeMembers=int_row_value(control, "active_members"),
+            requests=usage.summary.requests,
+            requestSuccessRate=success_rate(usage.summary.succeeded, completed_requests),
+            failedRequests=usage.summary.failed,
+            totalTokens=usage.summary.total_tokens,
+            costUsd=cost,
+            projectedMonthlyCostUsd=projected_cost,
+            toolCalls=usage.summary.tool_calls,
+            toolSuccessRate=success_rate(tool_success_total - tool_failed, tool_success_total),
+            averageToolDurationMs=optional_duration(
+                row_value(tool_totals, "average_tool_duration_ms", None)
+            ),
+            agents=int_row_value(control, "agents"),
+            activeAgents=int_row_value(control, "active_agents"),
+            tools=int_row_value(control, "tools"),
+            installedServers=int_row_value(control, "installed_servers"),
+            enabledServers=int_row_value(control, "enabled_servers"),
+            serversNeedingAttention=int_row_value(control, "servers_needing_attention"),
+            serverUpdates=int_row_value(control, "server_updates"),
+            runtimeSessions=int_row_value(control, "runtime_sessions"),
+            activeRuntimeSessions=int_row_value(control, "active_runtime_sessions"),
+            runtimeSessionsNeedingAttention=int_row_value(
+                control,
+                "runtime_sessions_needing_attention",
+            ),
+            catalogSources=int_row_value(control, "catalog_sources"),
+            enabledCatalogSources=int_row_value(control, "enabled_catalog_sources"),
+            catalogErrors=int_row_value(control, "catalog_errors"),
+            staleCatalogSources=int_row_value(control, "stale_catalog_sources"),
+            providerCredentials=int_row_value(control, "provider_credentials"),
+            activeProviderCredentials=int_row_value(control, "active_provider_credentials"),
+            resourceLimits=int_row_value(control, "resource_limits"),
+            usageBudgets=int_row_value(control, "usage_budgets"),
+            monthlyBudgetUsd=monthly_budget,
+            budgetUtilizationPercent=budget_percent,
+        ),
+        daily=usage.daily,
+        workspaces=[dashboard_workspace_row(row) for row in workspace_rows],
+        topModels=usage.by_model[:breakdown_limit],
+        topAgents=usage.by_agent[:breakdown_limit],
+        topTools=[dashboard_tool_row(row) for row in tool_rows],
+        runtimeMix=[dashboard_runtime_row(row) for row in runtime_rows],
+        catalog=OrganizationDashboardCatalogHealth(
+            total=int_row_value(control, "catalog_sources"),
+            enabled=int_row_value(control, "enabled_catalog_sources"),
+            synced=int_row_value(control, "synced_catalog_sources"),
+            errors=int_row_value(control, "catalog_errors"),
+            stale=int_row_value(control, "stale_catalog_sources"),
+        ),
+        providers=[dashboard_provider_row(row) for row in provider_rows],
+        attention=dashboard_attention_items(
+            control=control,
+            usage=usage,
+            tool_failed=tool_failed,
+            budget_percent=budget_percent,
         ),
     )
 

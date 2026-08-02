@@ -6,6 +6,8 @@
  */
 import type {
   MeUsageSummaryParams,
+  OrganizationDashboardParams,
+  OrganizationDashboardResponse,
   OrganizationUsageSummaryParams,
   UsageSummaryResponse,
   WorkspaceUsageSummaryParams
@@ -34,6 +36,38 @@ export const getMeUsageSummaryUrl = (params?: MeUsageSummaryParams,) => {
 export const meUsageSummary = async (params?: MeUsageSummaryParams, options?: Parameters<typeof apiRequest>[1]): Promise<UsageSummaryResponse> => {
 
   return apiRequest<UsageSummaryResponse>(getMeUsageSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export const getOrganizationDashboardUrl = (organizationId: string,
+    params?: OrganizationDashboardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/dashboard?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/dashboard`
+}
+
+/**
+ * @summary Organization Dashboard Route
+ */
+export const organizationDashboard = async (organizationId: string,
+    params?: OrganizationDashboardParams, options?: Parameters<typeof apiRequest>[1]): Promise<OrganizationDashboardResponse> => {
+
+  return apiRequest<OrganizationDashboardResponse>(getOrganizationDashboardUrl(organizationId,params),
   {
     ...options,
     method: 'GET'

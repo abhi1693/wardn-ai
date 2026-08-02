@@ -17,6 +17,9 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     MCPToolUsageRead,
     MCPToolUsageSummary,
+    OrganizationDashboardCatalogHealth,
+    OrganizationDashboardResponse,
+    OrganizationDashboardSummary,
     UsageSummaryBreakdownRow,
     UsageSummaryResponse,
     UsageSummaryTotals,
@@ -129,6 +132,68 @@ def usage_summary_response() -> UsageSummaryResponse:
                 toolCalls=3,
             )
         ],
+    )
+
+
+def dashboard_response() -> OrganizationDashboardResponse:
+    return OrganizationDashboardResponse(
+        window=UsageSummaryWindow(
+            startDate=date(2026, 7, 1),
+            endDate=date(2026, 7, 9),
+            timezone="UTC",
+            breakdownLimit=8,
+        ),
+        summary=OrganizationDashboardSummary(
+            healthScore=92,
+            workspaces=2,
+            activeWorkspaces=2,
+            members=3,
+            activeMembers=3,
+            requests=10,
+            requestSuccessRate=90.0,
+            failedRequests=1,
+            totalTokens=1200,
+            costUsd="0.042",
+            projectedMonthlyCostUsd="0.14",
+            toolCalls=25,
+            toolSuccessRate=96.0,
+            averageToolDurationMs=180,
+            agents=4,
+            activeAgents=3,
+            tools=32,
+            installedServers=8,
+            enabledServers=7,
+            serversNeedingAttention=1,
+            serverUpdates=2,
+            runtimeSessions=5,
+            activeRuntimeSessions=4,
+            runtimeSessionsNeedingAttention=1,
+            catalogSources=2,
+            enabledCatalogSources=2,
+            catalogErrors=0,
+            staleCatalogSources=0,
+            providerCredentials=1,
+            activeProviderCredentials=1,
+            resourceLimits=3,
+            usageBudgets=1,
+            monthlyBudgetUsd="50.00",
+            budgetUtilizationPercent=0.3,
+        ),
+        daily=[],
+        workspaces=[],
+        topModels=[],
+        topAgents=[],
+        topTools=[],
+        runtimeMix=[],
+        catalog=OrganizationDashboardCatalogHealth(
+            total=2,
+            enabled=2,
+            synced=2,
+            errors=0,
+            stale=0,
+        ),
+        providers=[],
+        attention=[],
     )
 
 
@@ -293,6 +358,55 @@ def test_organization_usage_summary_route(monkeypatch) -> None:
         "start_date": date(2026, 7, 1),
         "end_date": date(2026, 7, 9),
         "breakdown_limit": 10,
+    }
+
+
+def test_organization_dashboard_route(monkeypatch) -> None:
+    seen = {}
+
+    async def organization_dashboard(
+        session,
+        *,
+        organization_id,
+        start_date,
+        end_date,
+        breakdown_limit,
+    ):
+        seen["organization_id"] = organization_id
+        seen["start_date"] = start_date
+        seen["end_date"] = end_date
+        seen["breakdown_limit"] = breakdown_limit
+        return dashboard_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_organization_member_or_404",
+        fake_require_organization_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "organization_dashboard",
+        organization_dashboard,
+    )
+
+    response = observability_client(authenticated=True).get(
+        f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/dashboard",
+        params={
+            "startDate": "2026-07-01",
+            "endDate": "2026-07-09",
+            "breakdownLimit": 8,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["healthScore"] == 92
+    assert payload["summary"]["toolSuccessRate"] == 96.0
+    assert seen == {
+        "organization_id": TEST_ORGANIZATION_ID,
+        "start_date": date(2026, 7, 1),
+        "end_date": date(2026, 7, 9),
+        "breakdown_limit": 8,
     }
 
 

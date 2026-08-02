@@ -22,6 +22,7 @@ from app.modules.observability.schemas import (
     LLMModelPriceUpdate,
     LLMUsageListResponse,
     MCPToolUsageListResponse,
+    OrganizationDashboardResponse,
     UsageSummaryResponse,
 )
 from app.modules.users.dependencies import get_current_user
@@ -35,6 +36,13 @@ workspace_router = APIRouter(
 
 @dataclass(frozen=True)
 class UsageSummaryQuery:
+    start_date: date | None
+    end_date: date | None
+    breakdown_limit: int
+
+
+@dataclass(frozen=True)
+class DashboardQuery:
     start_date: date | None
     end_date: date | None
     breakdown_limit: int
@@ -59,11 +67,55 @@ def usage_summary_query(
     )
 
 
+def dashboard_query(
+    start_date: Annotated[date | None, Query(alias="startDate")] = None,
+    end_date: Annotated[date | None, Query(alias="endDate")] = None,
+    breakdown_limit: Annotated[int, Query(alias="breakdownLimit", ge=1, le=25)] = 8,
+) -> DashboardQuery:
+    try:
+        service.resolve_usage_summary_window(start_date=start_date, end_date=end_date)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return DashboardQuery(
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
+
+
 organization_router = APIRouter(
     prefix="/organizations/{organization_id}/observability",
     tags=["organization-observability"],
 )
 usage_router = APIRouter(tags=["usage"])
+
+
+@usage_router.get(
+    "/organizations/{organization_id}/dashboard",
+    response_model=OrganizationDashboardResponse,
+    operation_id="organization_dashboard",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def organization_dashboard_route(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[DashboardQuery, Depends(dashboard_query)],
+) -> OrganizationDashboardResponse:
+    await require_organization_member_or_404(session, current_user, organization_id)
+    return await service.organization_dashboard(
+        session,
+        organization_id=organization_id,
+        start_date=query.start_date,
+        end_date=query.end_date,
+        breakdown_limit=query.breakdown_limit,
+    )
 
 
 @usage_router.get(

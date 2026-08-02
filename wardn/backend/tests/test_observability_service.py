@@ -474,6 +474,204 @@ async def test_usage_summary_merges_llm_and_tool_breakdowns(monkeypatch) -> None
     assert response.daily[0].tool_calls == 3
 
 
+@pytest.mark.asyncio
+async def test_organization_dashboard_composes_usage_and_control_signals(monkeypatch) -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+
+    async def organization_usage_summary(*args, **kwargs):
+        assert kwargs["organization_id"] == organization_id
+        return service.UsageSummaryResponse(
+            window=service.UsageSummaryWindow(
+                startDate=date(2026, 7, 1),
+                endDate=date(2026, 7, 10),
+                timezone="UTC",
+                breakdownLimit=8,
+            ),
+            summary=service.UsageSummaryTotals(
+                requests=10,
+                succeeded=9,
+                failed=1,
+                running=0,
+                inputTokens=1000,
+                outputTokens=500,
+                totalTokens=1500,
+                costUsd=Decimal("1.00"),
+                toolCalls=20,
+            ),
+            byUser=[],
+            byWorkspace=[],
+            byAgent=[
+                service.UsageSummaryBreakdownRow(
+                    id=str(agent_id),
+                    label="Triage agent",
+                    requests=4,
+                    inputTokens=400,
+                    outputTokens=200,
+                    totalTokens=600,
+                    costUsd=Decimal("0.40"),
+                    toolCalls=12,
+                )
+            ],
+            byModel=[
+                service.UsageSummaryBreakdownRow(
+                    id="openai:gpt-4.1-mini",
+                    label="openai / gpt-4.1-mini",
+                    requests=10,
+                    inputTokens=1000,
+                    outputTokens=500,
+                    totalTokens=1500,
+                    costUsd=Decimal("1.00"),
+                    toolCalls=0,
+                )
+            ],
+            daily=[],
+        )
+
+    async def control_counts(*args, **kwargs):
+        assert kwargs["organization_id"] == organization_id
+        assert kwargs["catalog_stale_before"].tzinfo is not None
+        return {
+            "workspaces": 1,
+            "active_workspaces": 1,
+            "members": 3,
+            "active_members": 3,
+            "agents": 2,
+            "active_agents": 1,
+            "installed_servers": 3,
+            "enabled_servers": 2,
+            "servers_needing_attention": 1,
+            "server_updates": 1,
+            "tools": 9,
+            "runtime_sessions": 2,
+            "active_runtime_sessions": 1,
+            "runtime_sessions_needing_attention": 1,
+            "catalog_sources": 2,
+            "enabled_catalog_sources": 2,
+            "synced_catalog_sources": 1,
+            "catalog_errors": 1,
+            "stale_catalog_sources": 1,
+            "provider_credentials": 1,
+            "active_provider_credentials": 1,
+            "resource_limits": 2,
+            "usage_budgets": 1,
+            "monthly_budget_usd": Decimal("10.00"),
+        }
+
+    async def tool_totals(*args, **kwargs):
+        assert kwargs["started_at_from"] == datetime(2026, 7, 1, tzinfo=UTC)
+        assert kwargs["started_at_to"] == datetime(2026, 7, 11, tzinfo=UTC)
+        return {
+            "tool_calls": 20,
+            "failed_tool_calls": 2,
+            "running_tool_calls": 0,
+            "average_tool_duration_ms": 125.4,
+        }
+
+    async def workspace_rows(*args, **kwargs):
+        assert kwargs["limit"] == 8
+        return [
+            {
+                "id": workspace_id,
+                "name": "Production",
+                "slug": "prod",
+                "status": "active",
+                "requests": 10,
+                "failed_requests": 1,
+                "total_tokens": 1500,
+                "cost_usd": Decimal("1.00"),
+                "tool_calls": 20,
+                "failed_tool_calls": 2,
+                "agents": 2,
+                "active_agents": 1,
+                "installations": 3,
+                "enabled_installations": 2,
+                "servers_needing_attention": 1,
+                "server_updates": 1,
+                "tool_count": 9,
+                "runtime_sessions": 2,
+                "active_runtime_sessions": 1,
+                "runtime_sessions_needing_attention": 1,
+                "latest_activity_at": datetime(2026, 7, 10, 12, tzinfo=UTC),
+            }
+        ]
+
+    async def runtime_rows(*args, **kwargs):
+        return [{"runtime": "remote", "total": 3, "enabled": 2, "attention": 1}]
+
+    async def provider_rows(*args, **kwargs):
+        return [{"provider": "openai", "total": 1, "active": 1, "api_key": 1, "oauth": 0}]
+
+    async def top_tool_rows(*args, **kwargs):
+        return [
+            {
+                "server_name": "acme/github",
+                "tool_name": "search_issues",
+                "workspace_id": workspace_id,
+                "workspace_name": "Production",
+                "calls": 20,
+                "failed": 2,
+                "average_duration_ms": 125.4,
+                "p95_duration_ms": 320,
+                "last_called_at": datetime(2026, 7, 10, 12, tzinfo=UTC),
+            }
+        ]
+
+    monkeypatch.setattr(service, "organization_usage_summary", organization_usage_summary)
+    monkeypatch.setattr(service.repository, "organization_dashboard_control_counts", control_counts)
+    monkeypatch.setattr(
+        service.repository,
+        "organization_dashboard_tool_usage_totals",
+        tool_totals,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "organization_dashboard_workspace_rows",
+        workspace_rows,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "organization_dashboard_runtime_rows",
+        runtime_rows,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "organization_dashboard_provider_rows",
+        provider_rows,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "organization_dashboard_top_tool_rows",
+        top_tool_rows,
+    )
+
+    response = await service.organization_dashboard(
+        object(),
+        organization_id=organization_id,
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 10),
+    )
+
+    assert response.summary.health_score == 74
+    assert response.summary.projected_monthly_cost_usd == Decimal("3.000000")
+    assert response.summary.budget_utilization_percent == 30.0
+    assert response.summary.request_success_rate == 90.0
+    assert response.summary.tool_success_rate == 90.0
+    assert response.summary.average_tool_duration_ms == 125
+    assert response.workspaces[0].name == "Production"
+    assert response.runtime_mix[0].label == "Remote endpoints"
+    assert response.providers[0].provider == "openai"
+    assert response.top_tools[0].error_rate == 10.0
+    assert response.top_tools[0].p95_duration_ms == 320
+    assert {item.key for item in response.attention} >= {
+        "catalog-errors",
+        "mcp-servers",
+        "runtime-sessions",
+        "tool-failures",
+    }
+
+
 def test_usage_summary_window_defaults_to_thirty_days() -> None:
     window = service.resolve_usage_summary_window(today=date(2026, 7, 16))
 

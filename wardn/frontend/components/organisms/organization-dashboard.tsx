@@ -1,17 +1,39 @@
+"use client";
+
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   BookOpen,
   Boxes,
+  CircleDollarSign,
+  Clock3,
   Gauge,
   KeyRound,
   Network,
   ServerCog,
   ShieldCheck,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { StatusDot } from "@/components/atoms/status-dot";
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
@@ -29,85 +51,74 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type {
-  LLMProviderCredentialRead,
-  MCPCatalogSourceRead,
+  OrganizationDashboardResponse,
+  OrganizationDashboardToolRow,
+  OrganizationDashboardWorkspaceRow,
   OrganizationRead,
-  ResourceLimitRead,
-  UsageSummaryResponse,
-  WorkspaceRead,
+  UsageSummaryBreakdownRow,
 } from "@/lib/api/generated/model";
 
-export type WorkspaceDashboardDigest = {
-  activeAgentCount: number | null;
-  agentCount: number | null;
-  agentLoadFailed: boolean;
-  attentionInstallationCount: number | null;
-  enabledInstallationCount: number | null;
-  installationCount: number | null;
-  installationLoadFailed: boolean;
-  runtimeCounts: Record<string, number> | null;
-  toolCount: number | null;
-  updateCount: number | null;
-  workspace: WorkspaceRead;
-};
-
 type OrganizationDashboardProps = {
-  catalogSources: MCPCatalogSourceRead[] | null;
+  dashboard: OrganizationDashboardResponse;
   organization: OrganizationRead;
-  providerCredentials: LLMProviderCredentialRead[] | null;
-  resourceLimits: ResourceLimitRead[] | null;
-  usage: UsageSummaryResponse | null;
-  workspaceDigests: WorkspaceDashboardDigest[];
 };
 
-type NullableAggregate = {
-  complete: boolean;
-  value: number | null;
+type ChartTooltipProps = {
+  active?: boolean;
+  label?: string;
+  payload?: Array<{
+    color?: string;
+    dataKey?: string;
+    name?: string;
+    value?: number | string;
+  }>;
 };
 
-const numberFormatter = new Intl.NumberFormat("en-US");
 const compactNumberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
   notation: "compact",
 });
+const numberFormatter = new Intl.NumberFormat("en-US");
+const chartColors = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#0891b2", "#7c3aed"];
 
-function aggregateNullable(values: Array<number | null>): NullableAggregate {
-  if (values.length === 0) {
-    return { complete: true, value: 0 };
-  }
-  const knownValues = values.filter((value): value is number => value !== null);
-  if (knownValues.length === 0) {
-    return { complete: false, value: null };
-  }
-  return {
-    complete: knownValues.length === values.length,
-    value: knownValues.reduce((sum, value) => sum + value, 0),
-  };
+function numberValue(value: number | string | null | undefined) {
+  return Number(value ?? 0);
 }
 
 function formatCount(value: number | null | undefined) {
-  return typeof value === "number" ? numberFormatter.format(value) : "n/a";
+  return typeof value === "number" ? numberFormatter.format(value) : "0";
 }
 
-function formatCompactCount(value: number | null | undefined) {
-  return typeof value === "number" ? compactNumberFormatter.format(value) : "n/a";
+function formatCompact(value: number | null | undefined) {
+  return typeof value === "number" ? compactNumberFormatter.format(value) : "0";
 }
 
 function formatCurrency(value: number | string | null | undefined) {
-  if (value === null || value === undefined) {
-    return "n/a";
-  }
   return new Intl.NumberFormat("en-US", {
     currency: "USD",
-    maximumFractionDigits: 4,
+    maximumFractionDigits: Number(value ?? 0) >= 1 ? 2 : 4,
     minimumFractionDigits: 2,
     style: "currency",
-  }).format(Number(value || 0));
+  }).format(numberValue(value));
+}
+
+function formatPercent(value: number | null | undefined) {
+  return typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
+}
+
+function formatDuration(value: number | null | undefined) {
+  if (typeof value !== "number") {
+    return "n/a";
+  }
+  if (value < 1000) {
+    return `${formatCount(value)} ms`;
+  }
+  return `${(value / 1000).toFixed(1)} s`;
 }
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return "Never";
+    return "No activity";
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -117,224 +128,545 @@ function formatDate(value: string | null | undefined) {
     day: "numeric",
     month: "short",
     timeZone: "UTC",
-    year: "numeric",
   }).format(date);
 }
 
-function pluralize(value: number, singular: string, plural = `${singular}s`) {
-  return value === 1 ? singular : plural;
+function shortLabel(value: string, maxLength = 22) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
 }
 
-function statusTone(status: string) {
-  const normalized = status.toLowerCase();
-  if (["active", "enabled", "healthy", "ok", "ready"].includes(normalized)) {
+function healthTone(score: number) {
+  if (score >= 85) {
     return "success" as const;
   }
-  if (["disabled", "inactive", "pending", "paused"].includes(normalized)) {
+  if (score >= 65) {
     return "warning" as const;
   }
-  if (["error", "failed", "blocked"].includes(normalized)) {
+  return "danger" as const;
+}
+
+function severityTone(severity: string) {
+  if (severity === "danger") {
     return "danger" as const;
   }
-  return "neutral" as const;
+  if (severity === "warning") {
+    return "warning" as const;
+  }
+  return "info" as const;
 }
 
-function availabilityLabel(aggregate: NullableAggregate) {
-  if (aggregate.value === null) {
-    return "Unavailable";
+function badgeVariant(tone: "danger" | "info" | "success" | "warning") {
+  if (tone === "danger") {
+    return "destructive" as const;
   }
-  return aggregate.complete ? "Complete" : "Partial";
+  if (tone === "success") {
+    return "success" as const;
+  }
+  return "secondary" as const;
 }
 
-function runtimeEntries(workspaceDigests: WorkspaceDashboardDigest[]) {
-  const counts = new Map<string, number>();
-  for (const digest of workspaceDigests) {
-    for (const [runtime, count] of Object.entries(digest.runtimeCounts ?? {})) {
-      counts.set(runtime, (counts.get(runtime) ?? 0) + count);
-    }
-  }
-  return [...counts.entries()].sort((left, right) => right[1] - left[1]);
+function chartDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
 }
 
-function workspaceHref(organizationId: string, workspaceId: string) {
-  return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-    workspaceId
-  )}/chat`;
-}
-
-function catalogSyncDetail(catalogSources: MCPCatalogSourceRead[] | null) {
-  if (catalogSources === null) {
-    return "Catalog source data unavailable";
+function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
+  if (!active || !payload?.length) {
+    return null;
   }
-  if (catalogSources.length === 0) {
-    return "No catalog sources configured";
-  }
-  const errored = catalogSources.filter((source) => source.lastError).length;
-  const synced = catalogSources.filter((source) => source.lastSuccessAt).length;
-  if (errored > 0) {
-    return `${errored} ${pluralize(errored, "source")} reporting errors`;
-  }
-  if (synced === 0) {
-    return `${catalogSources.length} ${pluralize(catalogSources.length, "source")} configured`;
-  }
-  return `${synced} ${pluralize(synced, "source")} synced`;
-}
-
-export function OrganizationDashboard({
-  catalogSources,
-  organization,
-  providerCredentials,
-  resourceLimits,
-  usage,
-  workspaceDigests,
-}: OrganizationDashboardProps) {
-  const workspaces = workspaceDigests.map((digest) => digest.workspace);
-  const activeWorkspaces = workspaces.filter((workspace) => workspace.status === "active").length;
-  const inactiveWorkspaces = Math.max(workspaces.length - activeWorkspaces, 0);
-  const connectionCount = aggregateNullable(
-    workspaceDigests.map((digest) => digest.installationCount)
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2 text-xs shadow-[var(--shadow-card)]">
+      {label ? <div className="mb-1 font-medium text-foreground">{label}</div> : null}
+      <div className="space-y-1">
+        {payload.map((item) => {
+          const key = String(item.dataKey ?? item.name ?? "");
+          const value = Number(item.value ?? 0);
+          const formatted =
+            key.toLowerCase().includes("cost") || key.toLowerCase().includes("spend")
+              ? formatCurrency(value)
+              : key.toLowerCase().includes("rate")
+                ? formatPercent(value)
+                : formatCount(value);
+          return (
+            <div className="flex items-center gap-2" key={`${key}-${item.name}`}>
+              <span
+                className="size-2 rounded-full"
+                style={{ backgroundColor: item.color ?? "#2563eb" }}
+              />
+              <span className="text-muted-foreground">{item.name ?? key}</span>
+              <span className="font-medium text-foreground">{formatted}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
-  const enabledConnections = aggregateNullable(
-    workspaceDigests.map((digest) => digest.enabledInstallationCount)
+}
+
+function EmptyChart({ label }: { label: string }) {
+  return (
+    <div className="flex h-72 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+      {label}
+    </div>
   );
-  const attentionConnections = aggregateNullable(
-    workspaceDigests.map((digest) => digest.attentionInstallationCount)
+}
+
+function CostTrendChart({ dashboard }: { dashboard: OrganizationDashboardResponse }) {
+  const data = dashboard.daily.map((point) => ({
+    costUsd: numberValue(point.costUsd),
+    dateLabel: chartDate(point.date),
+    requests: point.requests,
+    toolCalls: point.toolCalls,
+    totalTokens: point.totalTokens,
+  }));
+
+  return (
+    <DashboardPanel
+      className="xl:col-span-2"
+      description={`${dashboard.window.startDate} to ${dashboard.window.endDate}`}
+      title="Activity trend"
+    >
+      {data.length === 0 ? (
+        <EmptyChart label="No usage recorded in this window." />
+      ) : (
+        <div className="h-72">
+          <ResponsiveContainer height="100%" width="100%">
+            <AreaChart data={data} margin={{ left: 0, right: 12, top: 10 }}>
+              <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="dateLabel"
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickLine={false}
+                tickMargin={10}
+              />
+              <YAxis
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickFormatter={(value) => formatCompact(Number(value))}
+                tickLine={false}
+                tickMargin={10}
+                yAxisId="volume"
+              />
+              <YAxis hide orientation="right" yAxisId="cost" />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend />
+              <Area
+                dataKey="requests"
+                fill="#2563eb"
+                fillOpacity={0.14}
+                name="Requests"
+                stroke="#2563eb"
+                strokeWidth={2}
+                type="monotone"
+                yAxisId="volume"
+              />
+              <Area
+                dataKey="toolCalls"
+                fill="#16a34a"
+                fillOpacity={0.12}
+                name="Tool calls"
+                stroke="#16a34a"
+                strokeWidth={2}
+                type="monotone"
+                yAxisId="volume"
+              />
+              <Line
+                dataKey="costUsd"
+                dot={false}
+                name="Cost"
+                stroke="#dc2626"
+                strokeWidth={2}
+                type="monotone"
+                yAxisId="cost"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </DashboardPanel>
   );
-  const availableUpdates = aggregateNullable(workspaceDigests.map((digest) => digest.updateCount));
-  const agents = aggregateNullable(workspaceDigests.map((digest) => digest.agentCount));
-  const activeAgents = aggregateNullable(workspaceDigests.map((digest) => digest.activeAgentCount));
-  const tools = aggregateNullable(workspaceDigests.map((digest) => digest.toolCount));
-  const enabledCatalogSources = catalogSources?.filter((source) => source.isEnabled).length ?? null;
-  const catalogErrors = catalogSources?.filter((source) => source.lastError).length ?? null;
-  const activeCredentials = providerCredentials?.filter(
-    (credential) => credential.isActive && credential.status === "active"
-  ).length;
-  const runtimeMix = runtimeEntries(workspaceDigests);
-  const usageSummary = usage?.summary ?? null;
-  const usageWindow = usage?.window ?? null;
-  const organizationHealthy = organization.status === "active";
-  const connectionHealthKnown = attentionConnections.value !== null;
-  const connectionHealthy = connectionHealthKnown && attentionConnections.value === 0;
-  const catalogHealthy = catalogSources !== null && (catalogErrors ?? 0) === 0;
-  const providerHealthy = providerCredentials !== null && (activeCredentials ?? 0) > 0;
-  const completedHealthChecks = [
-    organizationHealthy,
-    workspaces.length === 0 || inactiveWorkspaces === 0,
-    connectionHealthy,
-    catalogHealthy,
-    providerHealthy,
-  ].filter(Boolean).length;
+}
+
+function ModelSpendChart({ rows }: { rows: UsageSummaryBreakdownRow[] }) {
+  const data = rows.slice(0, 8).map((row) => ({
+    costUsd: numberValue(row.costUsd),
+    name: shortLabel(row.label, 28),
+    requests: row.requests,
+    totalTokens: row.totalTokens,
+  }));
+
+  return (
+    <DashboardPanel description="Highest cost model routes in the selected window." title="Model spend">
+      {data.length === 0 ? (
+        <EmptyChart label="No model spend recorded." />
+      ) : (
+        <div className="h-72">
+          <ResponsiveContainer height="100%" width="100%">
+            <BarChart data={data} layout="vertical" margin={{ left: 8, right: 18 }}>
+              <CartesianGrid horizontal={false} stroke="var(--border)" strokeDasharray="3 3" />
+              <XAxis
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickFormatter={(value) => formatCurrency(Number(value))}
+                tickLine={false}
+                type="number"
+              />
+              <YAxis
+                dataKey="name"
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickLine={false}
+                type="category"
+                width={126}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Bar dataKey="costUsd" fill="#2563eb" name="Cost" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </DashboardPanel>
+  );
+}
+
+function WorkspaceDemandChart({ rows }: { rows: OrganizationDashboardWorkspaceRow[] }) {
+  const data = rows.slice(0, 8).map((row) => ({
+    costUsd: numberValue(row.costUsd),
+    name: shortLabel(row.name, 24),
+    requests: row.requests,
+    toolCalls: row.toolCalls,
+  }));
+
+  return (
+    <DashboardPanel description="Workspaces ranked by requests and MCP activity." title="Workspace demand">
+      {data.length === 0 ? (
+        <EmptyChart label="No workspace activity recorded." />
+      ) : (
+        <div className="h-72">
+          <ResponsiveContainer height="100%" width="100%">
+            <BarChart data={data} margin={{ left: 0, right: 12, top: 10 }}>
+              <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="name"
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickLine={false}
+                tickMargin={10}
+              />
+              <YAxis
+                tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                tickFormatter={(value) => formatCompact(Number(value))}
+                tickLine={false}
+                tickMargin={10}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend />
+              <Bar dataKey="requests" fill="#0891b2" name="Requests" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="toolCalls" fill="#f59e0b" name="Tool calls" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </DashboardPanel>
+  );
+}
+
+function RuntimeMixChart({ dashboard }: { dashboard: OrganizationDashboardResponse }) {
+  const data = dashboard.runtimeMix.map((row) => ({
+    ...row,
+    name: row.label,
+    value: row.total,
+  }));
+
+  return (
+    <DashboardPanel description="Installed MCP server runtime distribution." title="Runtime mix">
+      {data.length === 0 ? (
+        <EmptyChart label="No MCP runtimes installed." />
+      ) : (
+        <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="h-56">
+            <ResponsiveContainer height="100%" width="100%">
+              <PieChart>
+                <Tooltip content={<ChartTooltip />} />
+                <Pie
+                  cx="50%"
+                  cy="50%"
+                  data={data}
+                  dataKey="value"
+                  innerRadius={58}
+                  nameKey="name"
+                  outerRadius={88}
+                  paddingAngle={2}
+                >
+                  {data.map((entry, index) => (
+                    <Cell fill={chartColors[index % chartColors.length]} key={entry.runtime} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="space-y-3 self-center">
+            {dashboard.runtimeMix.map((row, index) => (
+              <div className="space-y-2" key={row.runtime}>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: chartColors[index % chartColors.length] }}
+                    />
+                    <span className="truncate font-medium">{row.label}</span>
+                  </div>
+                  <span className="font-mono text-muted-foreground">{formatCount(row.total)}</span>
+                </div>
+                <SignalBar
+                  segments={[
+                    { label: `${row.enabled} enabled`, tone: "success", value: row.enabled },
+                    { label: `${row.attention} review`, tone: "warning", value: row.attention },
+                    {
+                      label: "Other",
+                      tone: "neutral",
+                      value: Math.max(row.total - row.enabled - row.attention, 0),
+                    },
+                  ]}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </DashboardPanel>
+  );
+}
+
+function WorkspaceTable({
+  organizationId,
+  rows,
+}: {
+  organizationId: string;
+  rows: OrganizationDashboardWorkspaceRow[];
+}) {
+  return (
+    <DashboardPanel
+      action={
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/org/${encodeURIComponent(organizationId)}/workspaces`}>
+            <Boxes className="size-4" />
+            All
+          </Link>
+        </Button>
+      }
+      description="Spend, demand, and MCP readiness by workspace."
+      title="Workspace hotspots"
+    >
+      <div className="-mx-4 overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Workspace</TableHead>
+              <TableHead className="text-right">Requests</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
+              <TableHead className="text-right">Tools</TableHead>
+              <TableHead className="text-right">Review</TableHead>
+              <TableHead className="text-right">Open</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell className="h-24 text-center text-muted-foreground" colSpan={6}>
+                  No workspace activity recorded.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((row) => {
+                const attention =
+                  row.serversNeedingAttention + row.runtimeSessionsNeedingAttention;
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <div className="min-w-44">
+                        <div className="flex items-center gap-2 font-medium">
+                          <StatusDot tone={row.status === "active" ? "success" : "warning"} />
+                          {row.name}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {row.slug} · {formatDate(row.latestActivityAt)}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCount(row.requests)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrency(row.costUsd)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCount(row.toolCount)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Badge variant={attention > 0 ? "destructive" : "outline"}>
+                        {formatCount(attention)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button aria-label={`Open ${row.name}`} asChild size="icon" variant="ghost">
+                        <Link
+                          href={`/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+                            row.id
+                          )}/chat`}
+                        >
+                          <ArrowRight className="size-4" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function ToolTable({ rows }: { rows: OrganizationDashboardToolRow[] }) {
+  return (
+    <DashboardPanel description="Most active MCP tools with reliability and latency." title="Tool reliability">
+      <div className="-mx-4 overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tool</TableHead>
+              <TableHead>Workspace</TableHead>
+              <TableHead className="text-right">Calls</TableHead>
+              <TableHead className="text-right">Error rate</TableHead>
+              <TableHead className="text-right">p95</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell className="h-24 text-center text-muted-foreground" colSpan={5}>
+                  No MCP tool calls recorded.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <div className="min-w-52">
+                      <div className="font-medium">{row.toolName}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{row.serverName}</div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{row.workspaceName}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCount(row.calls)}</TableCell>
+                  <TableCell className="text-right">
+                    <Badge variant={row.errorRate > 0 ? "destructive" : "outline"}>
+                      {formatPercent(row.errorRate)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatDuration(row.p95DurationMs)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </DashboardPanel>
+  );
+}
+
+export function OrganizationDashboard({ dashboard, organization }: OrganizationDashboardProps) {
+  const summary = dashboard.summary;
+  const scoreTone = healthTone(summary.healthScore);
+  const budgetDetail =
+    summary.monthlyBudgetUsd && summary.budgetUtilizationPercent !== null
+      ? `${formatPercent(summary.budgetUtilizationPercent)} of ${formatCurrency(
+          summary.monthlyBudgetUsd
+        )}`
+      : "No monthly budget configured";
+  const attentionCount = dashboard.attention.length;
 
   return (
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="p-5 md:p-6">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{organization.currentUserRole}</Badge>
-              <div className="inline-flex items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
-                <StatusDot tone={statusTone(organization.status)} />
-                {organization.status}
-              </div>
+              <Badge variant={badgeVariant(scoreTone)}>{summary.healthScore}/100 health</Badge>
+              <span className="text-sm text-muted-foreground">
+                {dashboard.window.startDate} to {dashboard.window.endDate}
+              </span>
             </div>
-            <div className="mt-5 max-w-3xl">
-              <h2 className="text-2xl font-semibold leading-8 text-foreground md:text-3xl md:leading-10">
-                {organization.name}
-              </h2>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm leading-5 text-muted-foreground">
-                <span>{organization.slug}</span>
-                <span>Created {formatDate(organization.createdAt)}</span>
-                <span>Updated {formatDate(organization.updatedAt)}</span>
+            <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
+                <h2 className="text-2xl font-semibold leading-8 text-foreground md:text-3xl md:leading-10">
+                  {organization.name}
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {formatCount(summary.activeWorkspaces)} active workspaces,{" "}
+                  {formatCount(summary.enabledServers)} enabled MCP servers,{" "}
+                  {formatCount(summary.activeAgents)} active agents
+                </p>
               </div>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <Button asChild size="sm">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/workspaces`}>
-                  <Boxes className="size-4" />
-                  Workspaces
-                </Link>
-              </Button>
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/catalog`}>
-                  <BookOpen className="size-4" />
-                  Catalog
-                </Link>
-              </Button>
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/organizations/${encodeURIComponent(organization.id)}/settings`}>
-                  <ShieldCheck className="size-4" />
-                  Settings
-                </Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/org/${encodeURIComponent(organization.id)}/usage`}>
+                    <BarChart3 className="size-4" />
+                    Usage
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/org/${encodeURIComponent(organization.id)}/catalog`}>
+                    <BookOpen className="size-4" />
+                    Catalog
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/organizations/${encodeURIComponent(organization.id)}/settings`}>
+                    <ShieldCheck className="size-4" />
+                    Settings
+                  </Link>
+                </Button>
+              </div>
             </div>
           </div>
-          <div className="border-t border-border bg-muted/30 p-5 lg:border-l lg:border-t-0">
+          <div className="border-t border-border bg-muted/25 p-5 xl:border-l xl:border-t-0">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold leading-5 text-foreground">
-                  Control plane
-                </div>
-                <div className="text-xs leading-4 text-muted-foreground">
-                  {completedHealthChecks} of 5 checks passing
+                <div className="text-sm font-semibold">Operating posture</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {attentionCount === 0 ? "No active attention items" : `${attentionCount} signals`}
                 </div>
               </div>
-              <Badge variant={completedHealthChecks >= 4 ? "success" : "secondary"}>
-                {completedHealthChecks >= 4 ? "Stable" : "Review"}
-              </Badge>
+              <Gauge className="size-5 text-muted-foreground" />
             </div>
-            <div className="mt-5 space-y-4">
-              <div>
-                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Workspace status</span>
-                  <span>
-                    {activeWorkspaces}/{workspaces.length || 0}
-                  </span>
+            <div className="mt-5">
+              <SignalBar
+                className="h-3"
+                segments={[
+                  { label: "Health", tone: scoreTone, value: summary.healthScore },
+                  { label: "Risk", tone: "neutral", value: 100 - summary.healthScore },
+                ]}
+              />
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="px-2 py-2">
+                  <div className="text-lg font-semibold">{formatPercent(summary.requestSuccessRate)}</div>
+                  <div className="mt-1 text-muted-foreground">Requests</div>
                 </div>
-                <SignalBar
-                  segments={[
-                    { label: `${activeWorkspaces} active`, tone: "success", value: activeWorkspaces },
-                    { label: `${inactiveWorkspaces} inactive`, tone: "warning", value: inactiveWorkspaces },
-                  ]}
-                />
-              </div>
-              <div>
-                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Connection state</span>
-                  <span>{availabilityLabel(connectionCount)}</span>
+                <div className="border-x border-border px-2 py-2">
+                  <div className="text-lg font-semibold">{formatPercent(summary.toolSuccessRate)}</div>
+                  <div className="mt-1 text-muted-foreground">Tools</div>
                 </div>
-                <SignalBar
-                  segments={[
-                    {
-                      label: `${enabledConnections.value ?? 0} enabled`,
-                      tone: "success",
-                      value: enabledConnections.value ?? 0,
-                    },
-                    {
-                      label: `${attentionConnections.value ?? 0} review`,
-                      tone: "warning",
-                      value: attentionConnections.value ?? 0,
-                    },
-                  ]}
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md border border-border bg-card px-2 py-3">
-                  <div className="text-lg font-semibold leading-6">
-                    {formatCompactCount(tools.value)}
+                <div className="px-2 py-2">
+                  <div className="text-lg font-semibold">
+                    {formatCount(summary.serversNeedingAttention)}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">Tools</div>
-                </div>
-                <div className="rounded-md border border-border bg-card px-2 py-3">
-                  <div className="text-lg font-semibold leading-6">
-                    {formatCompactCount(usageSummary?.requests)}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">Requests</div>
-                </div>
-                <div className="rounded-md border border-border bg-card px-2 py-3">
-                  <div className="text-lg font-semibold leading-6">
-                    {formatCompactCount(usageSummary?.toolCalls)}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">Calls</div>
+                  <div className="mt-1 text-muted-foreground">Review</div>
                 </div>
               </div>
             </div>
@@ -344,392 +676,141 @@ export function OrganizationDashboard({
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <DashboardMetricCard
-          detail={`${activeWorkspaces} active, ${inactiveWorkspaces} inactive`}
-          href={`/org/${encodeURIComponent(organization.id)}/workspaces`}
-          icon={Boxes}
-          label="Workspaces"
-          tone="info"
-          value={formatCount(workspaces.length)}
+          detail={`${formatCurrency(summary.costUsd)} actual · ${budgetDetail}`}
+          href={`/org/${encodeURIComponent(organization.id)}/usage`}
+          icon={CircleDollarSign}
+          label="Monthly run-rate"
+          tone={summary.budgetUtilizationPercent && summary.budgetUtilizationPercent >= 80 ? "warning" : "success"}
+          value={formatCurrency(summary.projectedMonthlyCostUsd)}
         />
         <DashboardMetricCard
-          badge={availabilityLabel(connectionCount)}
-          detail={
-            connectionCount.value === null
-              ? "Connection data unavailable"
-              : `${formatCount(enabledConnections.value)} enabled, ${formatCount(
-                  attentionConnections.value
-                )} review`
-          }
-          icon={ServerCog}
-          label="MCP connections"
-          tone={connectionHealthy ? "success" : "warning"}
-          value={formatCount(connectionCount.value)}
+          badge={formatPercent(summary.requestSuccessRate)}
+          detail={`${formatCount(summary.failedRequests)} failed · ${formatCompact(
+            summary.totalTokens
+          )} tokens`}
+          icon={Activity}
+          label="Model requests"
+          tone={summary.failedRequests > 0 ? "warning" : "info"}
+          value={formatCompact(summary.requests)}
         />
         <DashboardMetricCard
-          badge={availabilityLabel(agents)}
-          detail={
-            agents.value === null
-              ? "Agent data unavailable"
-              : `${formatCount(activeAgents.value)} active, ${formatCount(tools.value)} tools`
-          }
-          icon={Sparkles}
-          label="Agents"
-          tone={agents.value === null ? "warning" : "info"}
-          value={formatCount(agents.value)}
+          badge={formatPercent(summary.toolSuccessRate)}
+          detail={`${formatDuration(summary.averageToolDurationMs)} avg · ${formatCount(
+            summary.tools
+          )} tools`}
+          icon={Wrench}
+          label="MCP tool calls"
+          tone={summary.toolSuccessRate >= 98 ? "success" : "warning"}
+          value={formatCompact(summary.toolCalls)}
         />
         <DashboardMetricCard
-          detail={
-            catalogSources === null
-              ? "Catalog source data unavailable"
-              : `${formatCount(enabledCatalogSources)} enabled, ${formatCount(
-                  catalogErrors
-                )} errors`
-          }
+          detail={`${formatCount(summary.enabledServers)}/${formatCount(
+            summary.installedServers
+          )} enabled · ${formatCount(summary.serverUpdates)} updates`}
           href={`/org/${encodeURIComponent(organization.id)}/catalog`}
-          icon={BookOpen}
-          label="Catalog sources"
-          tone={catalogHealthy ? "success" : "warning"}
-          value={formatCount(catalogSources?.length)}
+          icon={ServerCog}
+          label="MCP coverage"
+          tone={summary.serversNeedingAttention > 0 ? "danger" : "success"}
+          value={formatCompact(summary.installedServers)}
         />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-3">
+        <CostTrendChart dashboard={dashboard} />
+        <ModelSpendChart rows={dashboard.topModels} />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-2">
+        <WorkspaceDemandChart rows={dashboard.workspaces} />
+        <RuntimeMixChart dashboard={dashboard} />
       </section>
 
       <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-5">
-          <DashboardPanel
-            action={
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/workspaces`}>
-                  <Boxes className="size-4" />
-                  All
-                </Link>
-              </Button>
-            }
-            description="Workspace posture, MCP connection state, agent coverage, and tool availability."
-            title="Workspace fleet"
-          >
-            <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Workspace</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Connections</TableHead>
-                <TableHead>Agents</TableHead>
-                <TableHead>Updates</TableHead>
-                <TableHead className="w-12 text-right">Open</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {workspaceDigests.length === 0 ? (
-                <TableRow>
-                  <TableCell className="h-28 text-center text-muted-foreground" colSpan={6}>
-                    No workspaces in this organization.
-                  </TableCell>
-                </TableRow>
+          <WorkspaceTable organizationId={organization.id} rows={dashboard.workspaces} />
+          <ToolTable rows={dashboard.topTools} />
+        </div>
+        <div className="min-w-0 space-y-5">
+          <DashboardPanel description="Signals ranked by operational impact." title="Attention">
+            <div className="-m-4">
+              {dashboard.attention.length === 0 ? (
+                <HealthRow
+                  badge="Clear"
+                  detail="No reliability, catalog, budget, or runtime issues detected"
+                  icon={ShieldCheck}
+                  label="No active items"
+                  tone="success"
+                />
               ) : (
-                workspaceDigests.map((digest) => {
-                  const workspace = digest.workspace;
-                  const connectionLabel =
-                    digest.installationCount === null
-                      ? "Unavailable"
-                      : `${formatCount(digest.enabledInstallationCount)}/${formatCount(
-                          digest.installationCount
-                        )}`;
-                  const agentLabel =
-                    digest.agentCount === null
-                      ? "Unavailable"
-                      : `${formatCount(digest.activeAgentCount)}/${formatCount(digest.agentCount)}`;
-                  const attention = digest.attentionInstallationCount ?? 0;
+                dashboard.attention.map((item) => {
+                  const tone = severityTone(item.severity);
                   return (
-                    <TableRow key={workspace.id}>
-                      <TableCell>
-                        <div className="min-w-48">
-                          <div className="font-medium leading-5">{workspace.name}</div>
-                          <div className="text-xs leading-4 text-muted-foreground">
-                            {workspace.slug}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={workspace.status === "active" ? "success" : "outline"}>
-                          {workspace.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <StatusDot
-                            tone={
-                              digest.installationLoadFailed
-                                ? "warning"
-                                : digest.installationCount === 0
-                                  ? "neutral"
-                                : attention > 0
-                                  ? "danger"
-                                  : "success"
-                            }
-                          />
-                          <span className="font-mono">{connectionLabel}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono">{agentLabel}</TableCell>
-                      <TableCell>
-                        <Badge variant={(digest.updateCount ?? 0) > 0 ? "secondary" : "outline"}>
-                          {digest.updateCount === null ? "n/a" : formatCount(digest.updateCount)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button aria-label={`Open ${workspace.name}`} asChild size="icon" variant="ghost">
-                          <Link href={workspaceHref(organization.id, workspace.id)}>
-                            <ArrowRight className="size-4" />
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                    <HealthRow
+                      badge={item.severity}
+                      detail={item.detail}
+                      icon={tone === "danger" ? AlertTriangle : Activity}
+                      key={item.key}
+                      label={item.label}
+                      tone={tone}
+                    />
                   );
                 })
               )}
-            </TableBody>
-            </Table>
-          </DashboardPanel>
-
-          <DashboardPanel
-            action={
-              <Badge variant={availableUpdates.value ? "secondary" : "outline"}>
-                {availableUpdates.value === null
-                  ? "n/a"
-                  : `${formatCount(availableUpdates.value)} updates`}
-              </Badge>
-            }
-            description="Installed MCP runtime types across all loaded workspaces."
-            title="Runtime mix"
-          >
-            {runtimeMix.length === 0 ? (
-              <div className="flex min-h-28 items-center gap-3 rounded-md border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                <ServerCog className="size-4 shrink-0" />
-                No runtime targets are currently loaded.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {runtimeMix.map(([runtime, count]) => (
-                  <div className="space-y-2" key={runtime}>
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="font-medium text-foreground">{runtime}</span>
-                      <span className="font-mono text-muted-foreground">
-                        {formatCount(count)}
-                      </span>
-                    </div>
-                    <SignalBar
-                      segments={[
-                        { label: `${runtime} ${count}`, tone: "info", value: count },
-                        {
-                          label: "Remaining",
-                          tone: "neutral",
-                          value: Math.max((connectionCount.value ?? count) - count, 0),
-                        },
-                      ]}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </DashboardPanel>
-        </div>
-
-        <div className="min-w-0 space-y-5">
-          <DashboardPanel
-            description="Current readiness signals across organization-owned surfaces."
-            title="Health"
-          >
-            <div className="-m-4">
-              <HealthRow
-                badge={organization.status}
-                detail={organization.slug}
-                icon={ShieldCheck}
-                label="Organization"
-                tone={statusTone(organization.status)}
-              />
-              <HealthRow
-                badge={`${activeWorkspaces}/${workspaces.length}`}
-                detail={
-                  inactiveWorkspaces === 0
-                    ? "All workspaces active"
-                    : `${inactiveWorkspaces} workspace ${pluralize(inactiveWorkspaces, "is", "are")} inactive`
-                }
-                icon={Boxes}
-                label="Workspace coverage"
-                tone={inactiveWorkspaces === 0 ? "success" : "warning"}
-              />
-              <HealthRow
-                badge={
-                  attentionConnections.value === null
-                    ? "n/a"
-                    : formatCount(attentionConnections.value)
-                }
-                detail={
-                  attentionConnections.value === null
-                    ? "MCP connection checks unavailable"
-                    : connectionCount.value === 0
-                      ? "No MCP connections installed"
-                    : connectionHealthy
-                      ? "No installed servers need review"
-                      : "Installed servers need review"
-                }
-                icon={Network}
-                label="MCP health"
-                tone={connectionHealthy ? "success" : "warning"}
-              />
-              <HealthRow
-                badge={catalogSources === null ? "n/a" : formatCount(catalogErrors)}
-                detail={catalogSyncDetail(catalogSources)}
-                icon={BookOpen}
-                label="Catalog sync"
-                tone={catalogHealthy ? "success" : "warning"}
-              />
-              <HealthRow
-                badge={
-                  providerCredentials === null
-                    ? "n/a"
-                    : `${activeCredentials ?? 0}/${providerCredentials.length}`
-                }
-                detail={
-                  providerCredentials === null
-                    ? "Credential data unavailable"
-                    : providerHealthy
-                      ? "Active model provider credentials available"
-                      : "No active provider credentials"
-                }
-                icon={KeyRound}
-                label="LLM credentials"
-                tone={providerHealthy ? "success" : "warning"}
-              />
             </div>
           </DashboardPanel>
 
-          <DashboardPanel
-            action={
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/usage`}>
-                  <Gauge className="size-4" />
-                  Usage
-                </Link>
-              </Button>
-            }
-            description={
-              usageWindow
-                ? `${usageWindow.startDate} to ${usageWindow.endDate}`
-                : "Usage summary unavailable"
-            }
-            title="Usage"
-          >
-            {usageSummary ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground">Requests</div>
-                    <div className="mt-1 text-xl font-semibold leading-7">
-                      {formatCount(usageSummary.requests)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Tokens</div>
-                    <div className="mt-1 text-xl font-semibold leading-7">
-                      {formatCompactCount(usageSummary.totalTokens)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Tool calls</div>
-                    <div className="mt-1 text-xl font-semibold leading-7">
-                      {formatCount(usageSummary.toolCalls)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Cost</div>
-                    <div className="mt-1 text-xl font-semibold leading-7">
-                      {formatCurrency(usageSummary.costUsd)}
-                    </div>
-                  </div>
-                </div>
-                <SignalBar
-                  segments={[
-                    {
-                      label: `${usageSummary.succeeded} succeeded`,
-                      tone: "success",
-                      value: usageSummary.succeeded,
-                    },
-                    {
-                      label: `${usageSummary.running} running`,
-                      tone: "info",
-                      value: usageSummary.running,
-                    },
-                    {
-                      label: `${usageSummary.failed} failed`,
-                      tone: "danger",
-                      value: usageSummary.failed,
-                    },
-                  ]}
-                />
-              </div>
-            ) : (
-              <div className="flex min-h-28 items-center gap-3 rounded-md border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                <Activity className="size-4 shrink-0" />
-                Usage metrics are not available for this organization.
-              </div>
-            )}
-          </DashboardPanel>
-
-          <DashboardPanel
-            action={
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/org/${encodeURIComponent(organization.id)}/limits`}>
-                  <AlertTriangle className="size-4" />
-                  Limits
-                </Link>
-              </Button>
-            }
-            description="Catalog, provider credential, and limit configuration state."
-            title="Readiness"
-          >
+          <DashboardPanel description="Catalog sync and model credential coverage." title="Readiness">
             <div className="-m-4">
               <HealthRow
-                badge={catalogSources === null ? "n/a" : formatCount(catalogSources.length)}
+                badge={`${formatCount(summary.activeProviderCredentials)}/${formatCount(
+                  summary.providerCredentials
+                )}`}
                 detail={
-                  catalogSources === null
-                    ? "Catalog sources unavailable"
-                    : `${formatCount(enabledCatalogSources)} enabled`
+                  dashboard.providers.length === 0
+                    ? "No provider credentials configured"
+                    : dashboard.providers
+                        .map((provider) => `${provider.provider}: ${provider.active}/${provider.total}`)
+                        .join(", ")
                 }
-                label="Catalog sources"
-                tone={catalogHealthy ? "success" : "warning"}
+                icon={KeyRound}
+                label="Model providers"
+                tone={summary.activeProviderCredentials > 0 ? "success" : "danger"}
               />
               <HealthRow
-                badge={
-                  providerCredentials === null ? "n/a" : formatCount(providerCredentials.length)
-                }
-                detail={
-                  providerCredentials === null
-                    ? "Credentials unavailable"
-                    : `${activeCredentials ?? 0} active credentials`
-                }
-                label="Provider credentials"
-                tone={providerHealthy ? "success" : "warning"}
+                badge={`${formatCount(dashboard.catalog.synced)}/${formatCount(
+                  dashboard.catalog.enabled
+                )}`}
+                detail={`${formatCount(dashboard.catalog.errors)} errors · ${formatCount(
+                  dashboard.catalog.stale
+                )} stale`}
+                icon={BookOpen}
+                label="Catalog sync"
+                tone={dashboard.catalog.errors > 0 ? "warning" : "success"}
               />
               <HealthRow
-                badge={resourceLimits === null ? "n/a" : formatCount(resourceLimits.length)}
-                detail={
-                  resourceLimits === null
-                    ? "Limit data unavailable"
-                    : `${formatCount(resourceLimits.length)} limits scoped to this organization`
-                }
-                label="Resource limits"
-                tone={resourceLimits === null ? "warning" : "neutral"}
+                badge={`${formatCount(summary.activeRuntimeSessions)}/${formatCount(
+                  summary.runtimeSessions
+                )}`}
+                detail={`${formatCount(
+                  summary.runtimeSessionsNeedingAttention
+                )} sessions need review`}
+                icon={Network}
+                label="Runtime sessions"
+                tone={summary.runtimeSessionsNeedingAttention > 0 ? "warning" : "success"}
               />
               <HealthRow
-                badge={tools.value === null ? "n/a" : formatCompactCount(tools.value)}
-                detail={
-                  tools.value === null
-                    ? "Tool data unavailable"
-                    : `${formatCount(tools.value)} assigned agent tools`
-                }
-                label="Agent tool surface"
-                tone={tools.value === null ? "warning" : "info"}
+                badge={`${formatCount(summary.activeAgents)}/${formatCount(summary.agents)}`}
+                detail={`${formatCount(summary.tools)} active tool schemas available`}
+                icon={Sparkles}
+                label="Agent coverage"
+                tone={summary.activeAgents > 0 ? "success" : "warning"}
+              />
+              <HealthRow
+                badge={formatCount(summary.usageBudgets)}
+                detail={`${formatCount(summary.resourceLimits)} resource limits configured`}
+                icon={Clock3}
+                label="Controls"
+                tone={summary.usageBudgets > 0 || summary.resourceLimits > 0 ? "info" : "neutral"}
               />
             </div>
           </DashboardPanel>

@@ -180,6 +180,126 @@ class UsageSummaryResponse(APIModel):
     daily: list[UsageTrendPoint]
 
 
+class OrganizationDashboardSummary(APIModel):
+    health_score: int = Field(ge=0, le=100)
+    workspaces: int
+    active_workspaces: int
+    members: int
+    active_members: int
+    requests: int
+    request_success_rate: float
+    failed_requests: int
+    total_tokens: int
+    cost_usd: Decimal
+    projected_monthly_cost_usd: Decimal
+    tool_calls: int
+    tool_success_rate: float
+    average_tool_duration_ms: int | None = None
+    agents: int
+    active_agents: int
+    tools: int
+    installed_servers: int
+    enabled_servers: int
+    servers_needing_attention: int
+    server_updates: int
+    runtime_sessions: int
+    active_runtime_sessions: int
+    runtime_sessions_needing_attention: int
+    catalog_sources: int
+    enabled_catalog_sources: int
+    catalog_errors: int
+    stale_catalog_sources: int
+    provider_credentials: int
+    active_provider_credentials: int
+    resource_limits: int
+    usage_budgets: int
+    monthly_budget_usd: Decimal | None = None
+    budget_utilization_percent: float | None = None
+
+
+class OrganizationDashboardWorkspaceRow(APIModel):
+    id: UUID
+    name: str
+    slug: str
+    status: str
+    requests: int
+    failed_requests: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
+    failed_tool_calls: int
+    agents: int
+    active_agents: int
+    installations: int
+    enabled_installations: int
+    servers_needing_attention: int
+    server_updates: int
+    tool_count: int
+    runtime_sessions: int
+    active_runtime_sessions: int
+    runtime_sessions_needing_attention: int
+    latest_activity_at: datetime | None = None
+
+
+class OrganizationDashboardRuntimeRow(APIModel):
+    runtime: str
+    label: str
+    total: int
+    enabled: int
+    attention: int
+
+
+class OrganizationDashboardCatalogHealth(APIModel):
+    total: int
+    enabled: int
+    synced: int
+    errors: int
+    stale: int
+
+
+class OrganizationDashboardProviderRow(APIModel):
+    provider: str
+    total: int
+    active: int
+    api_key: int
+    oauth: int
+
+
+class OrganizationDashboardToolRow(APIModel):
+    id: str
+    server_name: str
+    tool_name: str
+    workspace_id: UUID | None = None
+    workspace_name: str
+    calls: int
+    failed: int
+    error_rate: float
+    average_duration_ms: int | None = None
+    p95_duration_ms: int | None = None
+    last_called_at: datetime | None = None
+
+
+class OrganizationDashboardAttentionItem(APIModel):
+    key: str
+    label: str
+    detail: str
+    severity: str
+
+
+class OrganizationDashboardResponse(APIModel):
+    window: UsageSummaryWindow
+    summary: OrganizationDashboardSummary
+    daily: list[UsageTrendPoint]
+    workspaces: list[OrganizationDashboardWorkspaceRow]
+    top_models: list[UsageSummaryBreakdownRow]
+    top_agents: list[UsageSummaryBreakdownRow]
+    top_tools: list[OrganizationDashboardToolRow]
+    runtime_mix: list[OrganizationDashboardRuntimeRow]
+    catalog: OrganizationDashboardCatalogHealth
+    providers: list[OrganizationDashboardProviderRow]
+    attention: list[OrganizationDashboardAttentionItem]
+
+
 class MCPToolUsageRead(APIModel):
     id: UUID
     organization_id: UUID | None = None

@@ -6239,6 +6239,629 @@
         "title": "OrganizationCreate",
         "type": "object"
       },
+      "OrganizationDashboardAttentionItem": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "detail",
+          "severity"
+        ],
+        "title": "OrganizationDashboardAttentionItem",
+        "type": "object"
+      },
+      "OrganizationDashboardCatalogHealth": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "integer"
+          },
+          "synced": {
+            "title": "Synced",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "enabled",
+          "synced",
+          "errors",
+          "stale"
+        ],
+        "title": "OrganizationDashboardCatalogHealth",
+        "type": "object"
+      },
+      "OrganizationDashboardProviderRow": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "apiKey": {
+            "title": "Apikey",
+            "type": "integer"
+          },
+          "oauth": {
+            "title": "Oauth",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "total",
+          "active",
+          "apiKey",
+          "oauth"
+        ],
+        "title": "OrganizationDashboardProviderRow",
+        "type": "object"
+      },
+      "OrganizationDashboardResponse": {
+        "properties": {
+          "attention": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDashboardAttentionItem"
+            },
+            "title": "Attention",
+            "type": "array"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/OrganizationDashboardCatalogHealth"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/UsageTrendPoint"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDashboardProviderRow"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "runtimeMix": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDashboardRuntimeRow"
+            },
+            "title": "Runtimemix",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OrganizationDashboardSummary"
+          },
+          "topAgents": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Topagents",
+            "type": "array"
+          },
+          "topModels": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Topmodels",
+            "type": "array"
+          },
+          "topTools": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDashboardToolRow"
+            },
+            "title": "Toptools",
+            "type": "array"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageSummaryWindow"
+          },
+          "workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDashboardWorkspaceRow"
+            },
+            "title": "Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "window",
+          "summary",
+          "daily",
+          "workspaces",
+          "topModels",
+          "topAgents",
+          "topTools",
+          "runtimeMix",
+          "catalog",
+          "providers",
+          "attention"
+        ],
+        "title": "OrganizationDashboardResponse",
+        "type": "object"
+      },
+      "OrganizationDashboardRuntimeRow": {
+        "properties": {
+          "attention": {
+            "title": "Attention",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "runtime": {
+            "title": "Runtime",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runtime",
+          "label",
+          "total",
+          "enabled",
+          "attention"
+        ],
+        "title": "OrganizationDashboardRuntimeRow",
+        "type": "object"
+      },
+      "OrganizationDashboardSummary": {
+        "properties": {
+          "activeAgents": {
+            "title": "Activeagents",
+            "type": "integer"
+          },
+          "activeMembers": {
+            "title": "Activemembers",
+            "type": "integer"
+          },
+          "activeProviderCredentials": {
+            "title": "Activeprovidercredentials",
+            "type": "integer"
+          },
+          "activeRuntimeSessions": {
+            "title": "Activeruntimesessions",
+            "type": "integer"
+          },
+          "activeWorkspaces": {
+            "title": "Activeworkspaces",
+            "type": "integer"
+          },
+          "agents": {
+            "title": "Agents",
+            "type": "integer"
+          },
+          "averageToolDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Averagetooldurationms"
+          },
+          "budgetUtilizationPercent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budgetutilizationpercent"
+          },
+          "catalogErrors": {
+            "title": "Catalogerrors",
+            "type": "integer"
+          },
+          "catalogSources": {
+            "title": "Catalogsources",
+            "type": "integer"
+          },
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "enabledCatalogSources": {
+            "title": "Enabledcatalogsources",
+            "type": "integer"
+          },
+          "enabledServers": {
+            "title": "Enabledservers",
+            "type": "integer"
+          },
+          "failedRequests": {
+            "title": "Failedrequests",
+            "type": "integer"
+          },
+          "healthScore": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Healthscore",
+            "type": "integer"
+          },
+          "installedServers": {
+            "title": "Installedservers",
+            "type": "integer"
+          },
+          "members": {
+            "title": "Members",
+            "type": "integer"
+          },
+          "monthlyBudgetUsd": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthlybudgetusd"
+          },
+          "projectedMonthlyCostUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Projectedmonthlycostusd",
+            "type": "string"
+          },
+          "providerCredentials": {
+            "title": "Providercredentials",
+            "type": "integer"
+          },
+          "requestSuccessRate": {
+            "title": "Requestsuccessrate",
+            "type": "number"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "resourceLimits": {
+            "title": "Resourcelimits",
+            "type": "integer"
+          },
+          "runtimeSessions": {
+            "title": "Runtimesessions",
+            "type": "integer"
+          },
+          "runtimeSessionsNeedingAttention": {
+            "title": "Runtimesessionsneedingattention",
+            "type": "integer"
+          },
+          "serverUpdates": {
+            "title": "Serverupdates",
+            "type": "integer"
+          },
+          "serversNeedingAttention": {
+            "title": "Serversneedingattention",
+            "type": "integer"
+          },
+          "staleCatalogSources": {
+            "title": "Stalecatalogsources",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "toolSuccessRate": {
+            "title": "Toolsuccessrate",
+            "type": "number"
+          },
+          "tools": {
+            "title": "Tools",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          },
+          "usageBudgets": {
+            "title": "Usagebudgets",
+            "type": "integer"
+          },
+          "workspaces": {
+            "title": "Workspaces",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "healthScore",
+          "workspaces",
+          "activeWorkspaces",
+          "members",
+          "activeMembers",
+          "requests",
+          "requestSuccessRate",
+          "failedRequests",
+          "totalTokens",
+          "costUsd",
+          "projectedMonthlyCostUsd",
+          "toolCalls",
+          "toolSuccessRate",
+          "agents",
+          "activeAgents",
+          "tools",
+          "installedServers",
+          "enabledServers",
+          "serversNeedingAttention",
+          "serverUpdates",
+          "runtimeSessions",
+          "activeRuntimeSessions",
+          "runtimeSessionsNeedingAttention",
+          "catalogSources",
+          "enabledCatalogSources",
+          "catalogErrors",
+          "staleCatalogSources",
+          "providerCredentials",
+          "activeProviderCredentials",
+          "resourceLimits",
+          "usageBudgets"
+        ],
+        "title": "OrganizationDashboardSummary",
+        "type": "object"
+      },
+      "OrganizationDashboardToolRow": {
+        "properties": {
+          "averageDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Averagedurationms"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "errorRate": {
+            "title": "Errorrate",
+            "type": "number"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lastCalledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastcalledat"
+          },
+          "p95DurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95Durationms"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceid"
+          },
+          "workspaceName": {
+            "title": "Workspacename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "serverName",
+          "toolName",
+          "workspaceName",
+          "calls",
+          "failed",
+          "errorRate"
+        ],
+        "title": "OrganizationDashboardToolRow",
+        "type": "object"
+      },
+      "OrganizationDashboardWorkspaceRow": {
+        "properties": {
+          "activeAgents": {
+            "title": "Activeagents",
+            "type": "integer"
+          },
+          "activeRuntimeSessions": {
+            "title": "Activeruntimesessions",
+            "type": "integer"
+          },
+          "agents": {
+            "title": "Agents",
+            "type": "integer"
+          },
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "enabledInstallations": {
+            "title": "Enabledinstallations",
+            "type": "integer"
+          },
+          "failedRequests": {
+            "title": "Failedrequests",
+            "type": "integer"
+          },
+          "failedToolCalls": {
+            "title": "Failedtoolcalls",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "installations": {
+            "title": "Installations",
+            "type": "integer"
+          },
+          "latestActivityAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestactivityat"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "runtimeSessions": {
+            "title": "Runtimesessions",
+            "type": "integer"
+          },
+          "runtimeSessionsNeedingAttention": {
+            "title": "Runtimesessionsneedingattention",
+            "type": "integer"
+          },
+          "serverUpdates": {
+            "title": "Serverupdates",
+            "type": "integer"
+          },
+          "serversNeedingAttention": {
+            "title": "Serversneedingattention",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "toolCount": {
+            "title": "Toolcount",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "status",
+          "requests",
+          "failedRequests",
+          "totalTokens",
+          "costUsd",
+          "toolCalls",
+          "failedToolCalls",
+          "agents",
+          "activeAgents",
+          "installations",
+          "enabledInstallations",
+          "serversNeedingAttention",
+          "serverUpdates",
+          "toolCount",
+          "runtimeSessions",
+          "activeRuntimeSessions",
+          "runtimeSessionsNeedingAttention"
+        ],
+        "title": "OrganizationDashboardWorkspaceRow",
+        "type": "object"
+      },
       "OrganizationListResponse": {
         "properties": {
           "organizations": {
@@ -9528,6 +10151,131 @@
         "summary": "Update Organization Route",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/dashboard": {
+      "get": {
+        "operationId": "organization_dashboard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "breakdownLimit",
+            "required": false,
+            "schema": {
+              "default": 8,
+              "maximum": 25,
+              "minimum": 1,
+              "title": "Breakdownlimit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDashboardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Organization Dashboard Route",
+        "tags": [
+          "usage"
         ]
       }
     },
