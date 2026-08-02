@@ -4,13 +4,20 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { OrganizationWorkspaces } from "@/components/organisms/organization-workspaces";
+import type { OrganizationDashboardResponse } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
-
-import { WorkspacesOverviewClient } from "./workspaces-overview-client";
 
 type OrganizationWorkspacesPageProps = {
   params: Promise<{ organizationId: string }>;
 };
+
+async function getOrganizationDashboard(organizationId: string) {
+  return backendJson<OrganizationDashboardResponse>(
+    `/api/v1/organizations/${encodeURIComponent(organizationId)}/dashboard?breakdownLimit=100`
+  );
+}
 
 export default async function OrganizationWorkspacesPage({
   params,
@@ -23,6 +30,8 @@ export default async function OrganizationWorkspacesPage({
   if (!organization) {
     notFound();
   }
+
+  const dashboard = await getOrganizationDashboard(organization.id);
 
   return (
     <AppShell
@@ -44,7 +53,11 @@ export default async function OrganizationWorkspacesPage({
       title="Workspaces"
       workspaceContext={workspaceContext}
     >
-      <WorkspacesOverviewClient organization={organization} workspaces={workspaces} />
+      <OrganizationWorkspaces
+        dashboard={dashboard}
+        organization={organization}
+        workspaces={workspaces}
+      />
     </AppShell>
   );
 }

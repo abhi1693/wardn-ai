@@ -70,7 +70,7 @@ def usage_summary_query(
 def dashboard_query(
     start_date: Annotated[date | None, Query(alias="startDate")] = None,
     end_date: Annotated[date | None, Query(alias="endDate")] = None,
-    breakdown_limit: Annotated[int, Query(alias="breakdownLimit", ge=1, le=25)] = 8,
+    breakdown_limit: Annotated[int, Query(alias="breakdownLimit", ge=1, le=100)] = 8,
 ) -> DashboardQuery:
     try:
         service.resolve_usage_summary_window(start_date=start_date, end_date=end_date)

@@ -10,7 +10,7 @@ startDate?: string | null;
 endDate?: string | null;
 /**
  * @minimum 1
- * @maximum 25
+ * @maximum 100
  */
 breakdownLimit?: number;
 };

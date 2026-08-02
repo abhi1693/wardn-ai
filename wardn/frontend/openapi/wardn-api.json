@@ -10208,7 +10208,7 @@
             "required": false,
             "schema": {
               "default": 8,
-              "maximum": 25,
+              "maximum": 100,
               "minimum": 1,
               "title": "Breakdownlimit",
               "type": "integer"
