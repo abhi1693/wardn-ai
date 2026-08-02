@@ -16,5 +16,6 @@ export const SecretHandleCreatePurpose = {
   oauth_token: 'oauth_token',
   catalog_source: 'catalog_source',
   runtime_config: 'runtime_config',
+  chat_provider: 'chat_provider',
   other: 'other',
 } as const;

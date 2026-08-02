@@ -8,7 +8,9 @@ import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionListResponse,
   ChatProviderConnectionRead,
-  ChatProviderConnectionUpdate
+  ChatProviderConnectionUpdate,
+  ChatProviderTestMessageRequest,
+  ChatProviderTestMessageResponse
 } from '../model';
 
 import { apiRequest } from '../../client';
@@ -142,6 +144,34 @@ export const workspaceChatProvidersUpdate = async (organizationId: string,
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(chatProviderConnectionUpdate)
+  }
+);}
+
+
+export const getWorkspaceChatProvidersTestMessageUrl = (organizationId: string,
+    workspaceId: string,
+    connectionId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/chat-providers/${connectionId}/test-message`
+}
+
+/**
+ * @summary Test Workspace Chat Provider Connection Route
+ */
+export const workspaceChatProvidersTestMessage = async (organizationId: string,
+    workspaceId: string,
+    connectionId: string,
+    chatProviderTestMessageRequest: ChatProviderTestMessageRequest, options?: Parameters<typeof apiRequest>[1]): Promise<ChatProviderTestMessageResponse> => {
+
+  return apiRequest<ChatProviderTestMessageResponse>(getWorkspaceChatProvidersTestMessageUrl(organizationId,workspaceId,connectionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(chatProviderTestMessageRequest)
   }
 );}
 

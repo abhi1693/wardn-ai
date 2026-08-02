@@ -7,6 +7,7 @@
 import type { ChatProviderConnectionCreateConfig } from './chatProviderConnectionCreateConfig';
 import type { ChatProviderConnectionCreateProvider } from './chatProviderConnectionCreateProvider';
 import type { ChatProviderConnectionCreateSecretHandleIds } from './chatProviderConnectionCreateSecretHandleIds';
+import type { ChatProviderConnectionCreateSecretValues } from './chatProviderConnectionCreateSecretValues';
 
 export interface ChatProviderConnectionCreate {
   config?: ChatProviderConnectionCreateConfig;
@@ -24,4 +25,6 @@ export interface ChatProviderConnectionCreate {
   name: string;
   provider: ChatProviderConnectionCreateProvider;
   secretHandleIds?: ChatProviderConnectionCreateSecretHandleIds;
+  secretStoreId?: string | null;
+  secretValues?: ChatProviderConnectionCreateSecretValues;
 }

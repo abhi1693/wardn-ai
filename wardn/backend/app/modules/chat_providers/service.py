@@ -35,12 +35,21 @@ from app.modules.chat_providers.schemas import (
     ChatProviderConnectionListResponse,
     ChatProviderConnectionRead,
     ChatProviderConnectionUpdate,
+    ChatProviderTestMessageRequest,
+    ChatProviderTestMessageResponse,
     ChatProviderWebhookResponse,
     TelegramProviderConfig,
     WhatsAppLocalProviderConfig,
 )
 from app.modules.organizations.service import require_workspace_admin
-from app.modules.secrets.service import resolve_secret
+from app.modules.secrets.managed import (
+    activate_managed_secret,
+    delete_managed_secret_handles,
+    owner_managed_secrets,
+    queue_managed_secret_cleanup,
+)
+from app.modules.secrets.schemas import SecretHandleCreate
+from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
 from app.modules.users.repository import get_user_by_id
 
@@ -54,6 +63,8 @@ SECRET_OUTBOUND_SECRET = "outbound_secret"
 SECRET_SIGNING_SECRET = "signing_secret"
 SECRET_WEBHOOK_SECRET = "webhook_secret"
 SUPPORTED_PROVIDERS = {PROVIDER_TELEGRAM, PROVIDER_WHATSAPP_LOCAL}
+CHAT_PROVIDER_SECRET_PURPOSE = "chat_provider"
+CHAT_PROVIDER_SECRET_OWNER_TYPE = "chat_provider_connection"
 CHAT_PROVIDER_DUPLICATE_CONSTRAINTS = {
     "uq_chat_provider_connections_workspace_name",
     "uq_chat_provider_connections_workspace_provider_external",
@@ -140,6 +151,22 @@ def required_secret_keys(provider: str) -> set[str]:
     raise InvalidChatProviderConnectionError("unsupported chat provider")
 
 
+def supported_secret_keys(provider: str) -> set[str]:
+    if provider == PROVIDER_TELEGRAM:
+        return {
+            SECRET_ACCESS_TOKEN,
+            SECRET_BOT_TOKEN,
+            SECRET_SIGNING_SECRET,
+            SECRET_WEBHOOK_SECRET,
+        }
+    if provider == PROVIDER_WHATSAPP_LOCAL:
+        return {
+            SECRET_OUTBOUND_SECRET,
+            SECRET_WEBHOOK_SECRET,
+        }
+    raise InvalidChatProviderConnectionError("unsupported chat provider")
+
+
 async def connection_secret_handle_ids(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -178,6 +205,111 @@ async def replace_connection_secrets(
             )
         )
     await session.flush()
+
+
+def secret_purpose_label(purpose: str) -> str:
+    return " ".join(item.capitalize() for item in purpose.split("_") if item)
+
+
+def chat_provider_secret_path(
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    provider: str,
+    connection_id: uuid.UUID,
+) -> str:
+    return (
+        f"wardn/orgs/{organization_id}/workspaces/{workspace_id}"
+        f"/chat-providers/{provider}/{connection_id}"
+    )
+
+
+def chat_provider_secret_display_name(
+    *,
+    connection_name: str,
+    purpose: str,
+    connection_id: uuid.UUID,
+) -> str:
+    label = secret_purpose_label(purpose)
+    suffix = str(connection_id)[:8]
+    return f"{connection_name} {label} ({suffix})"[:100]
+
+
+async def create_secret_handles_for_values(
+    session: AsyncSession,
+    user: User,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    provider: str,
+    connection_id: uuid.UUID,
+    connection_name: str,
+    secret_store_id: uuid.UUID | None,
+    secret_values: dict[str, str],
+) -> tuple[dict[str, uuid.UUID], uuid.UUID | None]:
+    normalized_values = {
+        key.strip().lower(): value
+        for key, value in secret_values.items()
+        if key.strip() and isinstance(value, str) and value.strip()
+    }
+    if not normalized_values:
+        return {}, None
+    if secret_store_id is None:
+        raise InvalidChatProviderConnectionError(
+            "secretStoreId is required when secretValues are provided"
+        )
+    unsupported_keys = set(normalized_values) - supported_secret_keys(provider)
+    if unsupported_keys:
+        raise InvalidChatProviderConnectionError(
+            f"unsupported chat provider secrets: {', '.join(sorted(unsupported_keys))}"
+        )
+
+    external_ref = chat_provider_secret_path(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        provider=provider,
+        connection_id=connection_id,
+    )
+    write_result = await write_secret_values(
+        session,
+        user,
+        organization_id,
+        secret_store_id,
+        workspace_id=workspace_id,
+        external_ref=external_ref,
+        values=normalized_values,
+        purpose=CHAT_PROVIDER_SECRET_PURPOSE,
+        owner_type=CHAT_PROVIDER_SECRET_OWNER_TYPE,
+        owner_id=connection_id,
+    )
+    managed_secret_id = getattr(write_result, "managed_secret_id", None)
+    handle_ids: dict[str, uuid.UUID] = {}
+    for purpose in sorted(normalized_values):
+        handle = await create_secret_handle(
+            session,
+            user,
+            organization_id,
+            SecretHandleCreate(
+                storeId=secret_store_id,
+                workspaceId=workspace_id,
+                purpose=CHAT_PROVIDER_SECRET_PURPOSE,
+                displayName=chat_provider_secret_display_name(
+                    connection_name=connection_name,
+                    purpose=purpose,
+                    connection_id=connection_id,
+                ),
+                externalRef=external_ref,
+                keyName=purpose,
+                metadata={
+                    "provider": provider,
+                    "connectionId": str(connection_id),
+                    "secretKey": purpose,
+                },
+            ),
+            managed_secret_id=managed_secret_id,
+        )
+        handle_ids[purpose] = handle.id
+    return handle_ids, managed_secret_id
 
 
 async def connection_response(
@@ -275,7 +407,22 @@ async def create_workspace_chat_provider_connection(
 ) -> ChatProviderConnectionRead:
     await require_workspace_admin(session, user, organization_id, workspace_id)
     config = normalize_connection_config(payload.provider, payload.config)
-    secret_handle_ids = normalize_secret_handle_ids(payload.secret_handle_ids)
+    connection_id = uuid.uuid4()
+    secret_value_handle_ids, managed_secret_id = await create_secret_handles_for_values(
+        session,
+        user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        provider=payload.provider,
+        connection_id=connection_id,
+        connection_name=payload.name,
+        secret_store_id=payload.secret_store_id,
+        secret_values=payload.secret_values,
+    )
+    secret_handle_ids = {
+        **normalize_secret_handle_ids(payload.secret_handle_ids),
+        **secret_value_handle_ids,
+    }
     await validate_secret_handles(
         session,
         organization_id=organization_id,
@@ -284,6 +431,7 @@ async def create_workspace_chat_provider_connection(
         secret_handle_ids=secret_handle_ids,
     )
     connection = ChatProviderConnection(
+        id=connection_id,
         organization_id=organization_id,
         workspace_id=workspace_id,
         created_by_id=user.id,
@@ -304,6 +452,7 @@ async def create_workspace_chat_provider_connection(
             ) from exc
         raise
     await replace_connection_secrets(session, connection, secret_handle_ids)
+    await activate_managed_secret(session, managed_secret_id)
     await session.refresh(connection)
     return await connection_response(session, connection)
 
@@ -376,8 +525,158 @@ async def delete_workspace_chat_provider_connection(
     )
     if connection is None:
         raise ChatProviderConnectionNotFoundError("chat provider connection not found")
+    managed_secrets = await owner_managed_secrets(
+        session,
+        owner_type=CHAT_PROVIDER_SECRET_OWNER_TYPE,
+        owner_id=connection.id,
+    )
+    managed_secret_ids = {managed_secret.id for managed_secret in managed_secrets}
+    await repository.delete_connection_secrets(session, connection_id=connection.id)
+    await delete_managed_secret_handles(session, managed_secret_ids)
+    await queue_managed_secret_cleanup(session, managed_secret_ids)
     await session.delete(connection)
     await session.flush()
+
+
+async def test_workspace_chat_provider_connection(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    payload: ChatProviderTestMessageRequest,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+) -> ChatProviderTestMessageResponse:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    connection = await repository.get_connection(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection_id,
+    )
+    if connection is None:
+        raise ChatProviderConnectionNotFoundError("chat provider connection not found")
+    if not connection.is_active:
+        raise InvalidChatProviderConnectionError("chat provider connection is inactive")
+
+    event_id = f"test:{uuid.uuid4()}"
+    message = ProviderTextMessage(
+        event_id=event_id,
+        external_thread_id=payload.external_thread_id,
+        external_user_id=payload.external_user_id or str(user.id),
+        external_user_display_name=payload.external_user_display_name or user.email,
+        text=payload.text,
+        raw={
+            "test": True,
+            "text": payload.text,
+            "threadId": payload.external_thread_id,
+            "senderId": payload.external_user_id or str(user.id),
+            "senderDisplayName": payload.external_user_display_name or user.email,
+        },
+    )
+    event = ChatProviderEvent(
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        provider=connection.provider,
+        external_event_id=message.event_id,
+        direction="inbound",
+        event_type="message.test",
+        status="processing",
+        payload={"test": message.raw},
+    )
+    session.add(event)
+    await session.flush()
+
+    try:
+        if not sender_allowed(connection, message):
+            event.status = "ignored"
+            event.error = f"{provider_display_name(connection.provider)} sender is not allowed"
+            event.processed_at = datetime.now(UTC)
+            await session.flush()
+            return ChatProviderTestMessageResponse(
+                ok=True,
+                processed=False,
+                eventId=event_id,
+                message=event.error,
+            )
+
+        actor = await provider_actor(session, connection)
+        thread, conversation_id, agent_id = await provider_thread_conversation(
+            session,
+            connection,
+            actor,
+            message,
+        )
+        event.thread_id = thread.id
+        event.conversation_id = conversation_id
+        thread.last_external_message_id = message.event_id
+        await session.flush()
+        stream = await agent_service.stream_agent_chat(
+            session,
+            actor,
+            connection.organization_id,
+            agent_id,
+            AgentChatRequest(
+                id=str(conversation_id),
+                messages=[
+                    AgentChatMessage(
+                        role="user",
+                        parts=text_parts(message.text),
+                    )
+                ],
+            ),
+            workspace_id=connection.workspace_id,
+            session_factory=session_factory,
+        )
+        await session.commit()
+        async for _chunk in stream:
+            pass
+        reply_text = await latest_assistant_text(session, conversation_id)
+        if not reply_text:
+            reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
+
+        outbound_event = ChatProviderEvent(
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            thread_id=thread.id,
+            conversation_id=conversation_id,
+            provider=connection.provider,
+            external_event_id=f"test-reply:{message.event_id.removeprefix('test:')}",
+            direction="outbound",
+            event_type="message.test_reply",
+            status="processed",
+            payload={
+                "test": {
+                    "delivery": "skipped",
+                    "replyToEventId": message.event_id,
+                    "text": reply_text,
+                }
+            },
+            processed_at=datetime.now(UTC),
+        )
+        session.add(outbound_event)
+        event.status = "processed"
+        event.processed_at = datetime.now(UTC)
+        await session.flush()
+    except Exception as exc:
+        event.status = "failed"
+        event.error = str(exc)
+        event.processed_at = datetime.now(UTC)
+        await session.flush()
+        raise
+
+    return ChatProviderTestMessageResponse(
+        ok=True,
+        processed=True,
+        eventId=event_id,
+        conversationId=conversation_id,
+        threadId=thread.id,
+        replyText=reply_text,
+        message="External delivery skipped for test message.",
+    )
 
 
 def hmac_compare(left: str, right: str) -> bool:

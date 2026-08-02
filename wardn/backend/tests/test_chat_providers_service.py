@@ -17,8 +17,13 @@ from app.modules.chat_providers.exceptions import (
 )
 from app.modules.chat_providers.models import (
     ChatProviderConnection,
+    ChatProviderConnectionSecret,
     ChatProviderEvent,
     ChatProviderThread,
+)
+from app.modules.chat_providers.schemas import (
+    ChatProviderConnectionCreate,
+    ChatProviderTestMessageRequest,
 )
 from app.modules.secrets.provider import ResolvedSecret
 from app.modules.users.models import User
@@ -37,15 +42,21 @@ class FakeSession:
         for instance in self.added:
             if getattr(instance, "id", None) is None:
                 instance.id = uuid4()
-            instance.created_at = getattr(instance, "created_at", now)
-            instance.updated_at = getattr(instance, "updated_at", now)
+            instance.created_at = getattr(instance, "created_at", None) or now
+            instance.updated_at = getattr(instance, "updated_at", None) or now
 
     async def refresh(self, instance: object) -> None:
         if getattr(instance, "id", None) is None:
             instance.id = uuid4()
+        now = datetime(2026, 8, 2, tzinfo=UTC)
+        instance.created_at = getattr(instance, "created_at", None) or now
+        instance.updated_at = getattr(instance, "updated_at", None) or now
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def execute(self, *args, **kwargs):
+        return SimpleNamespace()
 
 
 def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProviderConnection:
@@ -66,6 +77,104 @@ def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProv
         else {"allow_all_senders": True},
         is_active=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_create_connection_writes_secret_values_and_attaches_handles(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    store_id = uuid4()
+    managed_secret_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_active=True)
+    required_scope: list[tuple] = []
+    write_calls: list[dict] = []
+    handle_payloads: list[object] = []
+    validated_secret_ids: list[dict[str, object]] = []
+    activated: list[object] = []
+
+    async def require_workspace_admin(session, current_user, org_id, ws_id):
+        required_scope.append((current_user.id, org_id, ws_id))
+
+    async def write_secret_values(*args, **kwargs):
+        write_calls.append({"args": args, "kwargs": kwargs})
+        return SimpleNamespace(managed_secret_id=managed_secret_id)
+
+    async def create_secret_handle(*args, **kwargs):
+        handle_payloads.append(args[3])
+        return SimpleNamespace(id=uuid4())
+
+    async def validate_secret_handles(*args, **kwargs):
+        validated_secret_ids.append(kwargs["secret_handle_ids"])
+
+    async def activate_managed_secret(*args, **kwargs):
+        activated.append(args[1])
+
+    async def connection_secret_handle_ids(session, connection):
+        return {
+            item.purpose: item.secret_handle_id
+            for item in session.added
+            if isinstance(item, ChatProviderConnectionSecret)
+            and item.connection_id == connection.id
+        }
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service, "write_secret_values", write_secret_values)
+    monkeypatch.setattr(service, "create_secret_handle", create_secret_handle)
+    monkeypatch.setattr(service, "validate_secret_handles", validate_secret_handles)
+    monkeypatch.setattr(service, "activate_managed_secret", activate_managed_secret)
+    monkeypatch.setattr(service, "connection_secret_handle_ids", connection_secret_handle_ids)
+
+    session = FakeSession()
+    response = await service.create_workspace_chat_provider_connection(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        ChatProviderConnectionCreate(
+            provider=service.PROVIDER_WHATSAPP_LOCAL,
+            name="Personal WhatsApp",
+            externalId="personal-phone",
+            secretStoreId=store_id,
+            secretValues={
+                service.SECRET_WEBHOOK_SECRET: "bridge-secret",
+                service.SECRET_OUTBOUND_SECRET: "bridge-secret",
+            },
+            config={
+                "allowAllSenders": True,
+                "accountName": "personal-phone",
+            },
+        ),
+    )
+
+    connection = next(item for item in session.added if isinstance(item, ChatProviderConnection))
+    connection_secrets = [
+        item for item in session.added if isinstance(item, ChatProviderConnectionSecret)
+    ]
+
+    assert response.id == connection.id
+    assert required_scope == [(user.id, organization_id, workspace_id)]
+    assert write_calls[0]["args"][3] == store_id
+    assert write_calls[0]["kwargs"]["workspace_id"] == workspace_id
+    assert write_calls[0]["kwargs"]["values"] == {
+        service.SECRET_OUTBOUND_SECRET: "bridge-secret",
+        service.SECRET_WEBHOOK_SECRET: "bridge-secret",
+    }
+    assert write_calls[0]["kwargs"]["purpose"] == service.CHAT_PROVIDER_SECRET_PURPOSE
+    assert write_calls[0]["kwargs"]["owner_type"] == service.CHAT_PROVIDER_SECRET_OWNER_TYPE
+    assert write_calls[0]["kwargs"]["owner_id"] == connection.id
+    assert {payload.key_name for payload in handle_payloads} == {
+        service.SECRET_OUTBOUND_SECRET,
+        service.SECRET_WEBHOOK_SECRET,
+    }
+    assert {secret.purpose for secret in connection_secrets} == {
+        service.SECRET_OUTBOUND_SECRET,
+        service.SECRET_WEBHOOK_SECRET,
+    }
+    assert set(validated_secret_ids[0]) == {
+        service.SECRET_OUTBOUND_SECRET,
+        service.SECRET_WEBHOOK_SECRET,
+    }
+    assert activated == [managed_secret_id]
 
 
 @pytest.mark.asyncio
@@ -319,6 +428,90 @@ async def test_process_provider_text_message_ignores_disallowed_sender(monkeypat
     assert fake_session.commits == 0
     assert inbound_event.status == "ignored"
     assert inbound_event.error == "WhatsApp sender is not allowed"
+
+
+@pytest.mark.asyncio
+async def test_test_workspace_chat_provider_connection_returns_reply_without_delivery(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    user = User(id=uuid4(), email="admin@example.com", is_active=True)
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="test-thread",
+        external_user_id=str(user.id),
+        external_user_display_name="Wardn test",
+    )
+    agent_id = uuid4()
+    sent: list[object] = []
+
+    async def require_workspace_admin(*args, **kwargs):
+        return None
+
+    async def get_connection(*args, **kwargs):
+        return connection
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, thread.conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_text(*args, **kwargs):
+        return "The workspace is ready."
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent.append(args)
+        return {}
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_connection", get_connection)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_text", latest_assistant_text)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    response = await service.test_workspace_chat_provider_connection(
+        fake_session,
+        user,
+        connection.organization_id,
+        connection.workspace_id,
+        connection.id,
+        ChatProviderTestMessageRequest(
+            text="Check this provider",
+            externalThreadId="test-thread",
+            externalUserId=str(user.id),
+            externalUserDisplayName="Wardn test",
+        ),
+    )
+
+    outbound_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "outbound"
+    )
+
+    assert response.ok
+    assert response.processed
+    assert response.reply_text == "The workspace is ready."
+    assert response.conversation_id == thread.conversation_id
+    assert outbound_event.status == "processed"
+    assert outbound_event.event_type == "message.test_reply"
+    assert outbound_event.payload["test"]["delivery"] == "skipped"
+    assert sent == []
 
 
 @pytest.mark.asyncio

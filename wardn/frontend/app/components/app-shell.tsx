@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Webhook,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
@@ -35,6 +36,7 @@ type AppShellActive =
   | "workspace-settings"
   | "workspace-dashboard"
   | "workspace-chat"
+  | "workspace-chat-providers"
   | "workspace-runs"
   | "workspace-skills"
   | "workspace-observability"
@@ -184,6 +186,12 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           icon: MessageSquare,
         },
         {
+          label: "Providers",
+          href: `${workspaceBasePath}/chat-providers`,
+          activeKey: "workspace-chat-providers",
+          icon: Webhook,
+        },
+        {
           label: "Connections",
           href: `${workspaceBasePath}/install`,
           activeKey: "install",
@@ -282,6 +290,7 @@ export function AppShell({
   const isWorkspaceScope =
     active === "workspace-dashboard" ||
     active === "workspace-chat" ||
+    active === "workspace-chat-providers" ||
     active === "workspace-runs" ||
     active === "workspace-skills" ||
     active === "install" ||

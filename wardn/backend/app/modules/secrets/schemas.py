@@ -15,6 +15,7 @@ SecretPurpose = Literal[
     "oauth_token",
     "catalog_source",
     "runtime_config",
+    "chat_provider",
     "other",
 ]
 

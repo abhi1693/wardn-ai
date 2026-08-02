@@ -48,6 +48,8 @@ class ChatProviderConnectionCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     external_id: str = Field(min_length=1, max_length=255)
     display_name: str = Field(default="", max_length=255)
+    secret_store_id: uuid.UUID | None = None
+    secret_values: dict[str, str] = Field(default_factory=dict)
     secret_handle_ids: dict[str, uuid.UUID] = Field(default_factory=dict)
     config: ProviderConfig = Field(default_factory=dict)
 
@@ -55,6 +57,15 @@ class ChatProviderConnectionCreate(APIModel):
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return " ".join(value.strip().split())
+
+    @field_validator("secret_values")
+    @classmethod
+    def normalize_secret_values(cls, value: dict[str, str]) -> dict[str, str]:
+        return {
+            str(key).strip().lower(): secret
+            for key, secret in value.items()
+            if str(key).strip() and isinstance(secret, str) and secret.strip()
+        }
 
 
 class ChatProviderConnectionUpdate(APIModel):
@@ -102,3 +113,30 @@ class ChatProviderWebhookResponse(APIModel):
     ignored: int = 0
     duplicates: int = 0
     failed: int = 0
+
+
+class ChatProviderTestMessageRequest(APIModel):
+    text: str = Field(min_length=1, max_length=4000)
+    external_thread_id: str = Field(default="wardn-test", min_length=1, max_length=255)
+    external_user_id: str = Field(default="", max_length=255)
+    external_user_display_name: str = Field(default="Wardn test", max_length=255)
+
+    @field_validator(
+        "text",
+        "external_thread_id",
+        "external_user_id",
+        "external_user_display_name",
+    )
+    @classmethod
+    def normalize_message_text(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class ChatProviderTestMessageResponse(APIModel):
+    ok: bool
+    processed: bool
+    event_id: str
+    conversation_id: uuid.UUID | None = None
+    thread_id: uuid.UUID | None = None
+    reply_text: str = ""
+    message: str = ""

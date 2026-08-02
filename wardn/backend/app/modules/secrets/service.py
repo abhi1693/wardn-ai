@@ -46,6 +46,7 @@ SECRET_HANDLE_IN_USE_CONSTRAINTS = frozenset(
         "fk_llm_provider_credentials_api_key_secret_handle",
         "fk_llm_provider_credentials_oauth_access_secret_handle",
         "fk_llm_provider_credentials_oauth_refresh_secret_handle",
+        "fk_chat_provider_connection_secrets_secret_handle",
         "fk_managed_secrets_store",
     }
 )
@@ -743,7 +744,7 @@ async def delete_secret_handle(
     await session.delete(handle)
     await flush_secret_deletion(
         session,
-        in_use_message="secret handle is used by an LLM provider credential",
+        in_use_message="secret handle is used by another resource",
     )
     logger.info(
         "Deleted secret handle.",

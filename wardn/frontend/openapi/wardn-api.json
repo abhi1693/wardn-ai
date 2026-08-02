@@ -1319,6 +1319,25 @@
             },
             "title": "Secrethandleids",
             "type": "object"
+          },
+          "secretStoreId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretstoreid"
+          },
+          "secretValues": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secretvalues",
+            "type": "object"
           }
         },
         "required": [
@@ -1513,6 +1532,97 @@
           }
         },
         "title": "ChatProviderConnectionUpdate",
+        "type": "object"
+      },
+      "ChatProviderTestMessageRequest": {
+        "properties": {
+          "externalThreadId": {
+            "default": "wardn-test",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Externalthreadid",
+            "type": "string"
+          },
+          "externalUserDisplayName": {
+            "default": "Wardn test",
+            "maxLength": 255,
+            "title": "Externaluserdisplayname",
+            "type": "string"
+          },
+          "externalUserId": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Externaluserid",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ChatProviderTestMessageRequest",
+        "type": "object"
+      },
+      "ChatProviderTestMessageResponse": {
+        "properties": {
+          "conversationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "eventId": {
+            "title": "Eventid",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "processed": {
+            "title": "Processed",
+            "type": "boolean"
+          },
+          "replyText": {
+            "default": "",
+            "title": "Replytext",
+            "type": "string"
+          },
+          "threadId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threadid"
+          }
+        },
+        "required": [
+          "ok",
+          "processed",
+          "eventId"
+        ],
+        "title": "ChatProviderTestMessageResponse",
         "type": "object"
       },
       "ChatProviderWebhookResponse": {
@@ -6797,6 +6907,7 @@
               "oauth_token",
               "catalog_source",
               "runtime_config",
+              "chat_provider",
               "other"
             ],
             "title": "Purpose",
@@ -7006,6 +7117,7 @@
                   "oauth_token",
                   "catalog_source",
                   "runtime_config",
+                  "chat_provider",
                   "other"
                 ],
                 "type": "string"
@@ -16002,6 +16114,125 @@
           }
         },
         "summary": "Update Workspace Chat Provider Connection Route",
+        "tags": [
+          "workspace-chat-providers"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/chat-providers/{connection_id}/test-message": {
+      "post": {
+        "operationId": "workspace_chat_providers_test_message",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatProviderTestMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatProviderTestMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Workspace Chat Provider Connection Route",
         "tags": [
           "workspace-chat-providers"
         ]
