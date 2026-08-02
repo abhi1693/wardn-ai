@@ -4,7 +4,25 @@ import { apiStreamFetch, apiUrl } from "@/lib/api/client";
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { Bot, Info, Loader2, Pencil, Send, Square } from "lucide-react";
+import {
+  AlertTriangle,
+  Bot,
+  Cpu,
+  Database,
+  Info,
+  KeyRound,
+  ListTree,
+  Loader2,
+  MessageSquare,
+  Network,
+  PanelRight,
+  Pencil,
+  Send,
+  ShieldCheck,
+  Square,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import {
   type FormEvent,
@@ -61,6 +79,210 @@ type AgentChatClientProps = {
   workspaceId: string;
 };
 
+type ChatStatProps = {
+  detail: string;
+  icon: LucideIcon;
+  label: string;
+  tone?: "danger" | "info" | "neutral" | "success" | "warning";
+  value: string;
+};
+
+const toneClassNames: Record<NonNullable<ChatStatProps["tone"]>, string> = {
+  danger: "border-red-200 bg-red-50 text-red-700",
+  info: "border-sky-200 bg-sky-50 text-sky-700",
+  neutral: "border-border bg-muted text-muted-foreground",
+  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-700",
+};
+
+const promptSuggestions = [
+  "Summarize recent workspace activity.",
+  "Check which MCP tools are available.",
+  "Review the latest failed agent runs.",
+];
+
+function pluralize(value: number, singular: string, plural = `${singular}s`) {
+  return value === 1 ? singular : plural;
+}
+
+function compactCount(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(value);
+}
+
+function displayDate(value?: string | null) {
+  if (!value) {
+    return "No activity";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "No activity";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function ChatStat({
+  detail,
+  icon: Icon,
+  label,
+  tone = "neutral",
+  value,
+}: ChatStatProps) {
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-3 shadow-[var(--shadow-card)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        <span
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md border",
+            toneClassNames[tone]
+          )}
+        >
+          <Icon className="size-3.5" />
+        </span>
+      </div>
+      <div className="mt-3 text-xl font-semibold leading-7 text-foreground">{value}</div>
+      <div className="mt-1 truncate text-xs text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function StatusBadge({ agent }: { agent: AgentRead }) {
+  return (
+    <Badge variant={agent.isActive ? "success" : "secondary"}>
+      {agent.isActive ? "Active" : "Inactive"}
+    </Badge>
+  );
+}
+
+function ContextPanel({
+  agent,
+  connectionsPath,
+  credentials,
+  editPath,
+  runsPath,
+}: {
+  agent: AgentRead;
+  connectionsPath: string;
+  credentials: LlmCredentialRead[];
+  editPath: string;
+  runsPath: string;
+}) {
+  const credential = credentialLabel(credentials, agent.providerCredentialId);
+  const serverLabel = `${agent.serverCount} ${pluralize(agent.serverCount, "server")}`;
+  const toolLabel = `${agent.toolCount} ${pluralize(agent.toolCount, "tool")}`;
+  const modelLabel = agent.modelName || "No model";
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <section className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <Bot className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-sm font-semibold leading-5">{agent.name}</h2>
+              <StatusBadge agent={agent} />
+            </div>
+            <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">
+              {agent.description || "Workspace assistant"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <ChatStat
+            detail="Bound servers"
+            icon={Network}
+            label="Connections"
+            tone={agent.serverCount > 0 ? "success" : "warning"}
+            value={compactCount(agent.serverCount)}
+          />
+          <ChatStat
+            detail="Callable tools"
+            icon={Wrench}
+            label="Tools"
+            tone={agent.toolCount > 0 ? "success" : "neutral"}
+            value={compactCount(agent.toolCount)}
+          />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">Runtime context</div>
+          <Cpu className="size-4 text-muted-foreground" />
+        </div>
+        <div className="space-y-3 text-sm">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <Database className="size-4 shrink-0" />
+              Model
+            </span>
+            <span className="truncate font-mono text-xs text-foreground">{modelLabel}</span>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <KeyRound className="size-4 shrink-0" />
+              Credential
+            </span>
+            <span className="truncate text-right text-xs font-medium text-foreground">
+              {credential}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <ShieldCheck className="size-4 shrink-0" />
+              Scope
+            </span>
+            <Badge variant="outline">{agent.scope}</Badge>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="mb-3 text-sm font-semibold">Workspace links</div>
+        <div className="grid gap-2">
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={runsPath}>
+              <ListTree className="size-4" />
+              Agent runs
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={connectionsPath}>
+              <Network className="size-4" />
+              Connections
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={editPath}>
+              <Pencil className="size-4" />
+              Edit agent
+            </Link>
+          </Button>
+        </div>
+      </section>
+
+      <section className="mt-auto rounded-md border border-border bg-muted/40 p-4">
+        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <Info className="size-4" />
+          Conversation state
+        </div>
+        <div className="mt-2 text-xs leading-5 text-muted-foreground">
+          {serverLabel}, {toolLabel}, updated {displayDate(agent.updatedAt)}.
+        </div>
+      </section>
+    </div>
+  );
+}
 
 export function AgentChatClient({
   agent,
@@ -91,9 +313,15 @@ export function AgentChatClient({
   });
   const isRunning = status === "submitted" || status === "streaming";
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
-  const serverLabel = agent.serverCount === 1 ? "1 server" : `${agent.serverCount} servers`;
-  const toolLabel = agent.toolCount === 1 ? "1 tool" : `${agent.toolCount} tools`;
-  const editPath = `/org/${organization.id}/workspace/${workspaceId}/agents/${agent.id}/edit`;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const workspaceBasePath = `/org/${organization.id}/workspace/${workspaceId}`;
+  const editPath = `${workspaceBasePath}/agents/${agent.id}/edit`;
+  const runsPath = `${workspaceBasePath}/agent-runs`;
+  const connectionsPath = `${workspaceBasePath}/install`;
+  const serverLabel = `${agent.serverCount} ${pluralize(agent.serverCount, "server")}`;
+  const toolLabel = `${agent.toolCount} ${pluralize(agent.toolCount, "tool")}`;
+  const conversationTitle = conversation?.title?.trim() || "New conversation";
+  const messageCount = messages.filter((message) => message.role !== "system").length;
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +427,11 @@ export function AgentChatClient({
     }
   }
 
+  function setSuggestion(value: string) {
+    setInput(value);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   useEffect(() => {
     window.requestAnimationFrame(() => {
       const viewport = transcriptViewportRef.current;
@@ -209,127 +442,114 @@ export function AgentChatClient({
     });
   }, [messages, status]);
 
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 176)}px`;
+  }, [input]);
+
   return (
-    <div className="flex h-[calc(100dvh-4rem)] min-h-0 w-full flex-col overflow-hidden bg-white max-lg:h-[calc(100dvh-11.75rem)]">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="shrink-0 border-b border-[var(--outline-variant)] bg-white px-8 py-4 max-md:px-4">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-primary-foreground">
-                  <Bot className="size-4" />
+    <div className="grid h-full min-h-0 w-full overflow-hidden bg-background text-foreground xl:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 border-r border-border bg-sidebar/70 p-4 xl:block">
+        <ContextPanel
+          agent={agent}
+          connectionsPath={connectionsPath}
+          credentials={credentials}
+          editPath={editPath}
+          runsPath={runsPath}
+        />
+      </aside>
+
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <header className="shrink-0 border-b border-border bg-card/95 px-5 py-3 shadow-[var(--shadow-card)] backdrop-blur">
+          <div className="flex min-w-0 items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <MessageSquare className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="truncate text-base font-semibold leading-6">
+                    {conversationTitle}
+                  </h2>
+                  <StatusBadge agent={agent} />
                 </div>
-                <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold leading-6">{agent.name}</h2>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <Badge className="font-mono" variant="outline">
-                      {agent.modelName || "No model"}
-                    </Badge>
-                    <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
-                      {serverLabel}
-                    </Badge>
-                    <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
-                      {toolLabel}
-                    </Badge>
-                  </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="truncate">{agent.name}</span>
+                  <span className="text-border">/</span>
+                  <span>{messageCount} {pluralize(messageCount, "message")}</span>
+                  <span className="text-border">/</span>
+                  <span>{serverLabel}</span>
+                  <span className="text-border">/</span>
+                  <span>{toolLabel}</span>
                 </div>
               </div>
             </div>
 
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button className="shrink-0" size="sm" type="button" variant="outline">
-                  <Info className="size-4" />
-                  Details
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
-                <DialogHeader className="border-b border-[var(--outline-variant)] px-5 py-4">
-                  <DialogTitle>{agent.name}</DialogTitle>
-                  <DialogDescription>Workspace chat details</DialogDescription>
-                </DialogHeader>
-                <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5 text-sm">
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                      Model
-                    </h3>
-                    <div className="rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
-                      <div className="font-mono text-sm">{agent.modelName || "No model"}</div>
-                    </div>
-                  </section>
-
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                      Credential
-                    </h3>
-                    <div className="rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
-                      <div className="truncate">
-                        {credentialLabel(credentials, agent.providerCredentialId)}
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                      MCP servers
-                    </h3>
-                    <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
-                      <span>Bound to this chat</span>
-                      <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
-                        {serverLabel}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center justify-between rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2">
-                      <span>Discovered tools</span>
-                      <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
-                        {toolLabel}
-                      </Badge>
-                    </div>
-                  </section>
-
-                  <section className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
-                      Agent settings
-                    </h3>
-                    <div className="space-y-3 rounded-md border border-[var(--outline-variant)] bg-white px-3 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[var(--on-surface-variant)]">Status</span>
-                        <Badge variant={agent.isActive ? "success" : "secondary"}>
-                          {agent.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[var(--on-surface-variant)]">Scope</span>
-                        <span>{agent.scope}</span>
-                      </div>
-                      <Button asChild className="w-full" size="sm" variant="outline">
-                        <Link href={editPath}>
-                          <Pencil className="size-4" />
-                          Edit agent
-                        </Link>
-                      </Button>
-                    </div>
-                  </section>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button asChild className="max-md:hidden" size="sm" variant="outline">
+                <Link href={runsPath}>
+                  <ListTree className="size-4" />
+                  Runs
+                </Link>
+              </Button>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="sm" type="button" variant="outline">
+                    <PanelRight className="size-4" />
+                    Context
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
+                  <DialogHeader className="border-b border-border px-5 py-4">
+                    <DialogTitle>{agent.name}</DialogTitle>
+                    <DialogDescription>Workspace chat context</DialogDescription>
+                  </DialogHeader>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    <ContextPanel
+                      agent={agent}
+                      connectionsPath={connectionsPath}
+                      credentials={credentials}
+                      editPath={editPath}
+                      runsPath={runsPath}
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        </div>
+        </header>
 
         <div
-          className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface-bright)]"
+          className="min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,var(--surface-bright)_0%,var(--background)_52%,var(--surface)_100%)]"
           ref={transcriptViewportRef}
         >
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-8 py-8 max-md:px-4">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8 md:px-8">
             {messages.length === 0 ? (
-              <div className="flex min-h-96 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] bg-white text-center shadow-[var(--shadow-card)]">
-                <div className="mb-3 flex size-10 items-center justify-center rounded-md bg-[var(--surface-container)] text-primary">
-                  <Bot className="size-5" />
+              <div className="mx-auto flex min-h-[min(560px,calc(100dvh-18rem))] w-full max-w-3xl flex-col items-center justify-center text-center">
+                <div className="mb-4 flex size-12 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
+                  <Bot className="size-6" />
                 </div>
-                <div className="text-sm font-semibold">Start a conversation</div>
-                <div className="mt-1 text-sm text-[var(--on-surface-variant)]">
-                  {serverLabel}
-                  {agent.serverCount > 0 ? " connected" : ""}
+                <h2 className="text-2xl font-semibold leading-8 text-foreground">
+                  Start with {agent.name}
+                </h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                  {agent.modelName || "Model not selected"} · {serverLabel} · {toolLabel}
+                </p>
+                <div className="mt-6 grid w-full gap-3 sm:grid-cols-3">
+                  {promptSuggestions.map((suggestion) => (
+                    <button
+                      className="min-h-24 rounded-md border border-border bg-card px-4 py-3 text-left text-sm leading-5 shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/35"
+                      key={suggestion}
+                      onClick={() => setSuggestion(suggestion)}
+                      type="button"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : (
@@ -343,60 +563,67 @@ export function AgentChatClient({
                 }
                 const agentRunId = agentRunIdFromMessage(message);
                 const traceHref = agentRunId
-                  ? `/org/${organization.id}/workspace/${workspaceId}/agent-runs/${agentRunId}`
+                  ? `${workspaceBasePath}/agent-runs/${agentRunId}`
                   : undefined;
                 return (
-                  <div
-                    className={cn("group flex gap-3", isUser ? "justify-end" : "justify-start")}
+                  <article
+                    className={cn("group flex", isUser ? "justify-end" : "justify-start")}
                     key={message.id}
                   >
-                    {!isUser ? <MessageAvatar role={message.role} /> : null}
                     <div
                       className={cn(
-                        "min-w-0",
-                        isUser ? "max-w-[720px]" : "max-w-[900px] flex-1"
+                        "flex max-w-[min(100%,820px)] gap-3",
+                        isUser ? "flex-row-reverse" : "w-full"
                       )}
                     >
-                      <div
-                        className={cn(
-                          "mb-1.5 text-xs font-medium text-[var(--on-surface-variant)]",
-                          isUser && "text-right"
-                        )}
-                      >
-                        <MessageLabel role={message.role} />
-                      </div>
-                      <div
-                        className={cn(
-                          "overflow-hidden border px-4 py-3 text-sm leading-6",
-                          isUser
-                            ? "rounded-md border-primary bg-primary text-primary-foreground shadow-[var(--shadow-card)]"
-                            : "rounded-lg border-[var(--outline-variant)] bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)]"
-                        )}
-                      >
-                        {!isUser ? (
-                          <>
+                      <MessageAvatar role={message.role} />
+                      <div className={cn("min-w-0", isUser ? "max-w-[720px]" : "flex-1")}>
+                        <div
+                          className={cn(
+                            "mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground",
+                            isUser && "justify-end"
+                          )}
+                        >
+                          <MessageLabel role={message.role} />
+                          {!isUser && traceHref ? (
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              href={traceHref}
+                            >
+                              <ListTree className="size-3" />
+                              Trace
+                            </Link>
+                          ) : null}
+                        </div>
+                        <div
+                          className={cn(
+                            "overflow-hidden rounded-md border px-4 py-3 text-sm leading-6 shadow-[var(--shadow-card)]",
+                            isUser
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-card"
+                          )}
+                        >
+                          {!isUser ? (
                             <ToolActivity
                               activities={activities}
                               approvalDecisions={approvalDecisions}
                               onDecideApproval={decideToolApproval}
                               summaries={summaries}
-                              traceHref={traceHref}
                             />
-                          </>
-                        ) : null}
-                        {text ? <MessageMarkdown role={message.role} text={text} /> : null}
+                          ) : null}
+                          {text ? <MessageMarkdown role={message.role} text={text} /> : null}
+                        </div>
                       </div>
                     </div>
-                    {isUser ? <MessageAvatar role={message.role} /> : null}
-                  </div>
+                  </article>
                 );
               })
             )}
 
             {status === "submitted" ? (
-              <div aria-live="polite" className="flex items-center gap-3" role="status">
+              <div aria-live="polite" className="flex items-start gap-3" role="status">
                 <MessageAvatar role="assistant" />
-                <div className="flex items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm text-[var(--on-surface-variant)] shadow-[var(--shadow-card)]">
+                <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-[var(--shadow-card)]">
                   <Loader2 className="size-4 animate-spin" />
                   Thinking
                 </div>
@@ -421,39 +648,68 @@ export function AgentChatClient({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-[var(--outline-variant)] bg-white px-8 py-4 max-md:px-4">
+        <div className="shrink-0 border-t border-border bg-card/95 px-4 py-3 backdrop-blur md:px-6">
+          {!agent.isActive ? (
+            <div className="mx-auto mb-3 flex max-w-4xl items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertTriangle className="size-4 shrink-0" />
+              This agent is inactive.
+            </div>
+          ) : null}
           <form
-            className="mx-auto flex w-full max-w-5xl items-end gap-2 rounded-lg border border-[var(--outline-variant)] bg-white p-2 shadow-[0_8px_24px_rgb(15_23_42/0.08)] transition-colors focus-within:border-[var(--ring)] focus-within:ring-2 focus-within:ring-sky-100"
+            className="mx-auto w-full max-w-4xl overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-float)] transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-sky-100"
             onSubmit={submitMessage}
           >
-            <textarea
-              className="max-h-40 min-h-12 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-[var(--on-surface-variant)]"
-              disabled={isRunning}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder="Message this workspace"
-              value={input}
-            />
-            {isRunning ? (
-              <Button
-                aria-label="Stop response"
-                onClick={stop}
-                size="icon"
-                type="button"
-                variant="secondary"
-              >
-                <Square className="size-4" />
-              </Button>
-            ) : (
-              <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
-                <Send className="size-4" />
-              </Button>
-            )}
+            <div className="border-b border-border bg-muted/35 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge className="font-mono" variant="outline">
+                  {agent.modelName || "No model"}
+                </Badge>
+                <Badge variant={agent.serverCount > 0 ? "secondary" : "outline"}>
+                  {serverLabel}
+                </Badge>
+                <Badge variant={agent.toolCount > 0 ? "secondary" : "outline"}>
+                  {toolLabel}
+                </Badge>
+                <Badge className="max-w-full truncate" variant="outline">
+                  {credentialLabel(credentials, agent.providerCredentialId)}
+                </Badge>
+              </div>
+            </div>
+            <div className="flex items-end gap-2 p-2">
+              <textarea
+                className="max-h-44 min-h-14 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+                disabled={isRunning}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && isRunning) {
+                    event.preventDefault();
+                    stop();
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="Message this workspace"
+                ref={textareaRef}
+                value={input}
+              />
+              {isRunning ? (
+                <Button
+                  aria-label="Stop response"
+                  onClick={stop}
+                  size="icon"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Square className="size-4" />
+                </Button>
+              ) : (
+                <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
+                  <Send className="size-4" />
+                </Button>
+              )}
+            </div>
           </form>
         </div>
       </div>

@@ -283,13 +283,13 @@ export function ReasoningSummary({ summaries }: { summaries: ReasoningSummaryPar
 export function MessageAvatar({ role }: { role: MessageRole }) {
   if (role === "user") {
     return (
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-primary-foreground">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-[var(--shadow-card)]">
         <UserRound className="size-4" />
       </div>
     );
   }
   return (
-    <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[var(--outline-variant)] bg-white text-primary">
+    <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
       <Bot className="size-4" />
     </div>
   );
@@ -554,20 +554,26 @@ export function ToolActivity({
     return null;
   }
   const summaryBadge = activities.length > 0 ? toolActivitySummary(activities) : "Reasoning";
+  const shouldOpen =
+    Boolean(reasoningText) ||
+    activities.some((activity) => {
+      const status = activity.data?.status ?? "running";
+      return status !== "completed";
+    });
   return (
     <details
-      className="mb-2 rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)]"
-      open
+      className="mb-3 rounded-md border border-border bg-muted/35"
+      open={shouldOpen}
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-[var(--on-surface-variant)]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-muted-foreground">
         <span className="flex min-w-0 items-center gap-2">
           <Brain className="size-3.5 shrink-0" />
-          <span>Thinking</span>
+          <span>Agent activity</span>
         </span>
         <span className="flex items-center gap-2">
           {traceHref ? (
             <Link
-              className="inline-flex items-center gap-1 rounded-sm border border-[var(--outline-variant)] bg-white px-2 py-0.5 text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)]"
+              className="inline-flex items-center gap-1 rounded-sm border border-border bg-card px-2 py-0.5 text-xs text-foreground hover:bg-muted"
               href={traceHref}
             >
               <ListTree className="size-3" />
@@ -578,9 +584,9 @@ export function ToolActivity({
           <Badge variant="outline">{summaryBadge}</Badge>
         </span>
       </summary>
-      <div className="border-t border-[var(--outline-variant)] px-3 py-2">
+      <div className="border-t border-border px-3 py-2">
         {reasoningText ? (
-          <div className="mb-3 rounded border border-[var(--outline-variant)] bg-white px-2 py-2 text-xs leading-5 text-[var(--on-surface-variant)]">
+          <div className="mb-3 rounded border border-border bg-card px-2 py-2 text-xs leading-5 text-muted-foreground">
             <MessageMarkdown role="assistant" text={reasoningText} />
           </div>
         ) : null}
@@ -611,21 +617,21 @@ export function ToolActivity({
                 : activity.data?.message ?? toolActivityStatusLabel(status);
             return (
               <div
-                className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 border-b border-[var(--outline-variant)] py-2 text-xs last:border-b-0"
+                className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 border-b border-border py-2 text-xs last:border-b-0"
                 key={activity.id ?? `${activity.data?.toolName}-${status}`}
               >
                 <div className="flex flex-col items-center">
-                  <span className="flex size-6 items-center justify-center rounded-sm border border-[var(--outline-variant)] bg-white font-mono text-[11px] text-[var(--on-surface-variant)]">
+                  <span className="flex size-6 items-center justify-center rounded-sm border border-border bg-card font-mono text-[11px] text-muted-foreground">
                     {index + 1}
                   </span>
                   {index < activities.length - 1 ? (
-                    <span className="mt-1 w-px flex-1 bg-[var(--outline-variant)]" />
+                    <span className="mt-1 w-px flex-1 bg-border" />
                   ) : null}
                 </div>
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-2 font-medium text-[var(--on-surface)]">
+                      <div className="flex min-w-0 items-center gap-2 font-medium text-foreground">
                         {isDone ? (
                           <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />
                         ) : isBlocked || isDenied ? (
@@ -706,31 +712,31 @@ export function ToolActivity({
                     </div>
                   ) : null}
                   {args ? (
-                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
-                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                    <details className="mt-2 rounded border border-border bg-card">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-muted-foreground">
                         Arguments
                       </summary>
-                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                      <pre className="max-h-52 overflow-auto border-t border-border px-2 py-2 font-mono text-[11px] leading-5 text-foreground whitespace-pre-wrap">
                         {args}
                       </pre>
                     </details>
                   ) : null}
                   {details ? (
-                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
-                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                    <details className="mt-2 rounded border border-border bg-card">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-muted-foreground">
                         Evidence
                       </summary>
-                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                      <pre className="max-h-52 overflow-auto border-t border-border px-2 py-2 font-mono text-[11px] leading-5 text-foreground whitespace-pre-wrap">
                         {details}
                       </pre>
                     </details>
                   ) : null}
                   {result ? (
-                    <details className="mt-2 rounded border border-[var(--outline-variant)] bg-white">
-                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-[var(--on-surface-variant)]">
+                    <details className="mt-2 rounded border border-border bg-card">
+                      <summary className="cursor-pointer px-2 py-1.5 font-medium text-muted-foreground">
                         Result
                       </summary>
-                      <pre className="max-h-52 overflow-auto border-t border-[var(--outline-variant)] px-2 py-2 font-mono text-[11px] leading-5 text-[var(--on-surface)] whitespace-pre-wrap">
+                      <pre className="max-h-52 overflow-auto border-t border-border px-2 py-2 font-mono text-[11px] leading-5 text-foreground whitespace-pre-wrap">
                         {result}
                       </pre>
                     </details>
