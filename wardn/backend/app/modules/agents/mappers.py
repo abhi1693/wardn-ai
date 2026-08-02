@@ -1,16 +1,11 @@
 import re
-import uuid
 from typing import Any
 
-from app.modules.agents.exceptions import InvalidAgentToolAssignmentError
 from app.modules.agents.models import Agent, AgentRun, ConversationMessage, WorkspaceConversation
 from app.modules.agents.schemas import (
-    TOOL_ASSIGNMENT_WILDCARD,
     AgentRead,
     AgentRunRead,
     AgentRunStepRead,
-    AgentServerToolAssignmentRead,
-    AgentToolRead,
     ConversationMessageRead,
     WorkspaceConversationRead,
 )
@@ -160,42 +155,3 @@ def agent_run_step_response(step) -> AgentRunStepRead:
         createdAt=step.created_at,
         updatedAt=step.updated_at,
     )
-
-
-def assigned_tool_response(row) -> AgentToolRead:
-    assignment, tool_schema, installation = row
-    if tool_schema.workspace_id is None:
-        raise InvalidAgentToolAssignmentError("assigned tool has no workspace")
-    return AgentToolRead(
-        id=tool_schema.id,
-        agentId=assignment.agent_id,
-        toolSchemaId=tool_schema.id,
-        installationId=assignment.installation_id,
-        workspaceId=tool_schema.workspace_id,
-        serverName=tool_schema.server_name,
-        configName=installation.config_name,
-        toolName=tool_schema.tool_name,
-        title=tool_schema.title,
-        description=tool_schema.description,
-        inputSchema=tool_schema.input_schema,
-        outputSchema=tool_schema.output_schema,
-        annotations=tool_schema.annotations,
-        createdAt=assignment.created_at,
-    )
-
-
-def server_assignment_responses(rows) -> list[AgentServerToolAssignmentRead]:
-    assignments: dict[uuid.UUID, list[uuid.UUID | str]] = {}
-    for server_assignment, tool_assignment in rows:
-        selected = assignments.setdefault(server_assignment.installation_id, [])
-        if tool_assignment.wildcard:
-            selected[:] = [TOOL_ASSIGNMENT_WILDCARD]
-        elif TOOL_ASSIGNMENT_WILDCARD not in selected and tool_assignment.tool_schema_id:
-            selected.append(tool_assignment.tool_schema_id)
-    return [
-        AgentServerToolAssignmentRead(
-            installationId=installation_id,
-            toolSchemaIds=tool_schema_ids,
-        )
-        for installation_id, tool_schema_ids in assignments.items()
-    ]

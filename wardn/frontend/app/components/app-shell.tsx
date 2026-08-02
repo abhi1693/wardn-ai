@@ -2,7 +2,6 @@ import {
   Activity,
   BadgeDollarSign,
   BookOpen,
-  Bot,
   Boxes,
   BarChart3,
   Gauge,
@@ -45,8 +44,6 @@ type AppShellActive =
   | "usage"
   | "secret-backends"
   | "workspace-guardrails"
-  | "agents"
-  | "workspace-agents"
   | "agent-tokens"
   | "limits"
   | "runtime"
@@ -216,13 +213,6 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
       label: "Manage",
       items: [
         {
-          label: "Agents",
-          href: `${workspaceBasePath}/agents`,
-          activeKey: "workspace-agents",
-          activeKeys: ["agents"],
-          icon: Bot,
-        },
-        {
           label: "Runtime",
           href: `${workspaceBasePath}/runtime`,
           activeKey: "runtime",
@@ -298,8 +288,6 @@ export function AppShell({
     active === "runtime" ||
     active === "workspace-observability" ||
     active === "workspace-guardrails" ||
-    active === "workspace-agents" ||
-    active === "agents" ||
     active === "workspace-settings";
   const navigationSections = isWorkspaceScope
     ? workspaceNavSections(workspaceContext)

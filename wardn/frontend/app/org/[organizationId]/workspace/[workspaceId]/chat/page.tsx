@@ -115,7 +115,7 @@ function buildSetupCards({
     },
     {
       count: connectedCount,
-      description: "Connections ready for agent tool use.",
+      description: "Connections ready for workspace chat.",
       href: `${workspaceBasePath}/install`,
       icon: CheckCircle2,
       label: "Connected",

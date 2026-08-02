@@ -107,7 +107,7 @@ export async function WorkspaceDashboardView({ workspaceContext }: WorkspaceDash
 
   const basePath = workspaceBasePath(workspaceContext);
   const paths = {
-    agents: basePath ? `${basePath}/agents` : "/",
+    agents: basePath ? `${basePath}/chat` : "/",
     chat: basePath ? `${basePath}/chat` : "/",
     install: workspaceInstallPath(workspaceContext) || "/",
     observability: workspaceObservabilityPath(workspaceContext) || "/",

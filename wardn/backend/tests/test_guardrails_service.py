@@ -9,6 +9,7 @@ from app.modules.agents import service as agent_service
 from app.modules.agents import tool_execution as agent_tool_execution
 from app.modules.agents.models import Agent, AgentRun, AgentToolApproval, WorkspaceConversation
 from app.modules.agents.schemas import AgentToolApprovalDecisionRequest
+from app.modules.agents.types import AgentRuntimeTool
 from app.modules.guardrails import repository, service
 from app.modules.guardrails.exceptions import InvalidGuardrailPolicyError
 from app.modules.guardrails.models import GuardrailPolicy
@@ -791,7 +792,7 @@ async def test_agent_tool_call_guardrail_block_skips_runtime(monkeypatch) -> Non
         annotations={},
         is_active=True,
     )
-    runtime_tool = agent_service.AgentRuntimeTool(
+    runtime_tool = AgentRuntimeTool(
         wire_name="delete_repo",
         assignment_id=uuid4(),
         tool_schema=tool_schema,
@@ -923,7 +924,7 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
         annotations={},
         is_active=True,
     )
-    runtime_tool = agent_service.AgentRuntimeTool(
+    runtime_tool = AgentRuntimeTool(
         wire_name="search_repositories",
         assignment_id=uuid4(),
         tool_schema=tool_schema,

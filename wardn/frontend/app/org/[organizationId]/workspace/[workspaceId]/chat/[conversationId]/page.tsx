@@ -38,10 +38,12 @@ export default async function WorkspaceConversationChatPage({
     getWorkspaceConversation(organizationId, workspaceId, conversationId),
   ]);
   const organization = workspaceContext.selectedOrganization;
+  const workspace = workspaceContext.selectedWorkspace;
 
-  if (!organization || !conversation) {
+  if (!organization || !workspace || !conversation) {
     notFound();
   }
+  const canManageModel = ["admin", "owner"].includes(workspace.currentUserRole);
   const workspaceSettingsPath = `/organizations/${encodeURIComponent(
     organization.id
   )}/workspaces/${encodeURIComponent(workspaceId)}/settings`;
@@ -66,6 +68,7 @@ export default async function WorkspaceConversationChatPage({
     >
       <AgentChatClient
         agent={conversation.agent}
+        canManageModel={canManageModel}
         conversation={conversation.conversation}
         credentials={credentials}
         initialMessages={conversation.messages}

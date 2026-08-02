@@ -9,10 +9,8 @@ from app.core.schemas import ErrorResponse
 from app.db.session import get_db_session
 from app.modules.agents.schemas import (
     AgentAvailableToolListResponse,
-    AgentCapabilityDiagnosisResponse,
     AgentChatRequest,
     AgentConversationResponse,
-    AgentCreate,
     AgentListResponse,
     AgentRead,
     AgentRunDetailResponse,
@@ -21,29 +19,21 @@ from app.modules.agents.schemas import (
     AgentSkillSearchResponse,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
-    AgentToolAssignmentUpdate,
-    AgentToolListResponse,
-    AgentUpdate,
+    WorkspaceAgentModelUpdate,
 )
 from app.modules.agents.service import (
-    create_workspace_agent,
     decide_agent_tool_approval,
-    delete_agent,
-    diagnose_agent_capabilities,
     get_agent,
     get_workspace_agent_run,
     get_workspace_conversation,
-    install_find_skills_for_agent,
-    list_agent_tools,
     list_agents,
     list_available_agent_tools,
     list_workspace_agent_runs,
     list_workspace_skills,
     quick_start_workspace_agent,
-    replace_agent_tools,
     search_workspace_skills,
     stream_agent_chat,
-    update_agent,
+    update_workspace_assistant_model,
 )
 from app.modules.users.dependencies import get_current_user, get_stream_current_user
 from app.modules.users.models import User
@@ -103,34 +93,6 @@ async def list_workspace_agents_route(
         workspace_id,
         cursor=cursor,
         limit=limit,
-    )
-
-
-@workspace_router.post(
-    "",
-    response_model=AgentRead,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="workspace_agents_create",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
-    },
-)
-async def create_workspace_agent_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    payload: AgentCreate,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> AgentRead:
-    return await create_workspace_agent(
-        session,
-        current_user,
-        organization_id,
-        workspace_id,
-        payload,
     )
 
 
@@ -277,32 +239,6 @@ async def search_workspace_skills_route(
     )
 
 
-@workspace_skills_router.post(
-    "/find-skills/agents/{agent_id}/install",
-    response_model=AgentRead,
-    operation_id="workspace_skills_install_find_skills_for_agent",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def install_find_skills_for_agent_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> AgentRead:
-    return await install_find_skills_for_agent(
-        session,
-        current_user,
-        organization_id,
-        workspace_id,
-        agent_id,
-    )
-
-
 @workspace_router.get(
     "/available-tools",
     response_model=AgentAvailableToolListResponse,
@@ -326,6 +262,32 @@ async def list_workspace_agent_available_tools_route(
     )
 
 
+@workspace_router.patch(
+    "/workspace-assistant/model",
+    response_model=AgentRead,
+    operation_id="workspace_agents_update_workspace_assistant_model",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def update_workspace_assistant_model_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: WorkspaceAgentModelUpdate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentRead:
+    return await update_workspace_assistant_model(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
+
+
 @workspace_router.get(
     "/{agent_id}",
     response_model=AgentRead,
@@ -343,63 +305,6 @@ async def get_workspace_agent_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRead:
     return await get_agent(session, current_user, organization_id, agent_id, workspace_id)
-
-
-@workspace_router.patch(
-    "/{agent_id}",
-    response_model=AgentRead,
-    operation_id="workspace_agents_update",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
-    },
-)
-async def update_workspace_agent_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    payload: AgentUpdate,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> AgentRead:
-    workspace_payload = payload.model_copy(
-        update={"scope": "workspace", "workspace_id": workspace_id}
-    )
-    return await update_agent(
-        session,
-        current_user,
-        organization_id,
-        agent_id,
-        workspace_payload,
-        workspace_id=workspace_id,
-    )
-
-
-@workspace_router.delete(
-    "/{agent_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    operation_id="workspace_agents_delete",
-    responses={
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def delete_workspace_agent_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> None:
-    await delete_agent(
-        session,
-        current_user,
-        organization_id,
-        agent_id,
-        workspace_id=workspace_id,
-    )
 
 
 @workspace_router.post(
@@ -476,86 +381,4 @@ async def decide_workspace_agent_tool_approval_route(
         agent_id,
         approval_id,
         payload,
-    )
-
-
-@workspace_router.get(
-    "/{agent_id}/tools",
-    response_model=AgentToolListResponse,
-    operation_id="workspace_agents_list_tools",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def list_workspace_agent_tools_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> AgentToolListResponse:
-    return await list_agent_tools(
-        session,
-        current_user,
-        organization_id,
-        agent_id,
-        workspace_id=workspace_id,
-    )
-
-
-@workspace_router.get(
-    "/{agent_id}/capability-diagnosis",
-    response_model=AgentCapabilityDiagnosisResponse,
-    operation_id="workspace_agents_diagnose_capabilities",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def diagnose_workspace_agent_capabilities_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    query: str = "",
-) -> AgentCapabilityDiagnosisResponse:
-    return await diagnose_agent_capabilities(
-        session,
-        current_user,
-        organization_id,
-        agent_id,
-        workspace_id,
-        query=query,
-    )
-
-
-@workspace_router.put(
-    "/{agent_id}/tools",
-    response_model=AgentToolListResponse,
-    operation_id="workspace_agents_replace_tools",
-    responses={
-        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-    },
-)
-async def replace_workspace_agent_tools_route(
-    organization_id: UUID,
-    workspace_id: UUID,
-    agent_id: UUID,
-    payload: AgentToolAssignmentUpdate,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> AgentToolListResponse:
-    return await replace_agent_tools(
-        session,
-        current_user,
-        organization_id,
-        agent_id,
-        payload,
-        workspace_id=workspace_id,
     )

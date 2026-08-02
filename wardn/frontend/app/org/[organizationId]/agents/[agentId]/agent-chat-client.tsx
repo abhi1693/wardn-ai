@@ -15,7 +15,6 @@ import {
   Loader2,
   Network,
   PanelRight,
-  Pencil,
   Send,
   ShieldCheck,
   Square,
@@ -43,13 +42,24 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   AgentRead,
   ConversationMessageRead,
   OrganizationRead,
   WorkspaceConversationRead,
 } from "@/lib/api/generated/model";
-import { workspaceAgentsDecideToolApproval } from "@/lib/api/generated/workspace-agents/workspace-agents";
+import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
+import {
+  workspaceAgentsDecideToolApproval,
+  workspaceAgentsUpdateWorkspaceAssistantModel,
+} from "@/lib/api/generated/workspace-agents/workspace-agents";
 import { cn } from "@/lib/utils";
 
 import type { LlmCredentialRead } from "../../llm-credentials/types";
@@ -72,6 +82,7 @@ import {
 
 type AgentChatClientProps = {
   agent: AgentRead;
+  canManageModel?: boolean;
   conversation?: WorkspaceConversationRead | null;
   credentials: LlmCredentialRead[];
   initialMessages?: ConversationMessageRead[];
@@ -85,6 +96,20 @@ type ChatStatProps = {
   label: string;
   tone?: "danger" | "info" | "neutral" | "success" | "warning";
   value: string;
+};
+
+type ModelSwitcherProps = {
+  agent: AgentRead;
+  canManageModel: boolean;
+  credentials: LlmCredentialRead[];
+  onAgentChange: (agent: AgentRead) => void;
+  organizationId: string;
+  workspaceId: string;
+};
+
+type ProviderModel = {
+  id: string;
+  name: string;
 };
 
 type ChatComposerProps = {
@@ -122,6 +147,33 @@ function compactCount(value: number) {
     maximumFractionDigits: 1,
     notation: "compact",
   }).format(value);
+}
+
+function providerLabel(credential: LlmCredentialRead) {
+  if (credential.provider === "openai_chatgpt" || credential.authMethod === "oauth") {
+    return "OpenAI ChatGPT";
+  }
+  if (credential.provider === "openai") {
+    return "OpenAI";
+  }
+  return credential.provider;
+}
+
+function credentialName(credential: LlmCredentialRead) {
+  return `${credential.name} (${providerLabel(credential)})`;
+}
+
+function credentialAvailableForWorkspace(
+  credential: LlmCredentialRead,
+  workspaceId: string
+) {
+  if (credential.status !== "active") {
+    return false;
+  }
+  if (credential.visibility !== "workspace") {
+    return true;
+  }
+  return credential.workspaceId === workspaceId;
 }
 
 function displayDate(value?: string | null) {
@@ -177,13 +229,11 @@ function ContextPanel({
   agent,
   connectionsPath,
   credentials,
-  editPath,
   runsPath,
 }: {
   agent: AgentRead;
   connectionsPath: string;
   credentials: LlmCredentialRead[];
-  editPath: string;
   runsPath: string;
 }) {
   const credential = credentialLabel(credentials, agent.providerCredentialId);
@@ -274,12 +324,6 @@ function ContextPanel({
               Connections
             </Link>
           </Button>
-          <Button asChild className="justify-start" size="sm" variant="outline">
-            <Link href={editPath}>
-              <Pencil className="size-4" />
-              Edit agent
-            </Link>
-          </Button>
         </div>
       </section>
 
@@ -293,6 +337,217 @@ function ContextPanel({
         </div>
       </section>
     </div>
+  );
+}
+
+function ModelSwitcher({
+  agent,
+  canManageModel,
+  credentials,
+  onAgentChange,
+  organizationId,
+  workspaceId,
+}: ModelSwitcherProps) {
+  const availableCredentials = useMemo(
+    () =>
+      credentials.filter((credential) =>
+        credentialAvailableForWorkspace(credential, workspaceId)
+      ),
+    [credentials, workspaceId]
+  );
+  const currentCredentialId =
+    agent.providerCredentialId &&
+    availableCredentials.some((entry) => entry.id === agent.providerCredentialId)
+      ? agent.providerCredentialId
+      : availableCredentials[0]?.id ?? "";
+  const [open, setOpen] = useState(false);
+  const [credentialId, setCredentialId] = useState(currentCredentialId);
+  const [modelName, setModelName] = useState(agent.modelName ?? "");
+  const [modelOptions, setModelOptions] = useState<ProviderModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function updateOpen(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (nextOpen) {
+      setCredentialId(currentCredentialId);
+      setModelName(agent.modelName ?? "");
+    }
+    setModelOptions([]);
+    setError("");
+  }
+
+  useEffect(() => {
+    if (!open || !credentialId) {
+      return;
+    }
+    const abortController = new AbortController();
+    const preferredModel = credentialId === currentCredentialId ? agent.modelName ?? "" : "";
+
+    async function loadModels() {
+      setIsLoadingModels(true);
+      setError("");
+      try {
+        const data = await llmProviderCredentialsListModels(organizationId, credentialId, {
+          signal: abortController.signal,
+        });
+        const models = Array.isArray((data as { models?: unknown }).models)
+          ? ((data as { models: ProviderModel[] }).models ?? [])
+          : [];
+        setModelOptions(models);
+        if (preferredModel && models.some((model) => model.id === preferredModel)) {
+          setModelName(preferredModel);
+        } else {
+          setModelName(models[0]?.id ?? "");
+        }
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          return;
+        }
+        setModelOptions([]);
+        setError(caught instanceof Error ? caught.message : "Models could not be loaded.");
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsLoadingModels(false);
+        }
+      }
+    }
+
+    void loadModels();
+    return () => abortController.abort();
+  }, [agent.modelName, credentialId, currentCredentialId, open, organizationId]);
+
+  async function saveModel() {
+    if (!credentialId || !modelName || isSaving || isLoadingModels) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const updatedAgent = await workspaceAgentsUpdateWorkspaceAssistantModel(
+        organizationId,
+        workspaceId,
+        {
+          providerCredentialId: credentialId,
+          modelName,
+        }
+      );
+      onAgentChange(updatedAgent);
+      setOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Model could not be changed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (!canManageModel) {
+    return (
+      <Badge className="h-8 gap-1.5 px-2.5 font-mono" variant="outline">
+        <Cpu className="size-3.5" />
+        {agent.modelName || "No model"}
+      </Badge>
+    );
+  }
+
+  return (
+    <Dialog onOpenChange={updateOpen} open={open}>
+      <DialogTrigger asChild>
+        <Button
+          disabled={availableCredentials.length === 0}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Cpu className="size-4" />
+          <span className="max-w-48 truncate font-mono text-xs">
+            {agent.modelName || "Select model"}
+          </span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Chat model</DialogTitle>
+          <DialogDescription>
+            Select the LLM credential and model used by this workspace assistant.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">Credential</div>
+            <Select
+              disabled={availableCredentials.length === 0 || isSaving}
+              onValueChange={(value) => {
+                setCredentialId(value);
+                setModelName("");
+              }}
+              value={credentialId}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select credential" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableCredentials.map((credential) => (
+                  <SelectItem key={credential.id} value={credential.id}>
+                    {credentialName(credential)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">Model</div>
+            <Select
+              disabled={!credentialId || isLoadingModels || isSaving || Boolean(error)}
+              onValueChange={setModelName}
+              value={modelName}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    isLoadingModels
+                      ? "Loading models"
+                      : credentialId
+                        ? "Select model"
+                        : "Select credential"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.name || model.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={isSaving}
+              onClick={() => setOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!credentialId || !modelName || isLoadingModels || isSaving}
+              onClick={saveModel}
+              type="button"
+            >
+              {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -360,16 +615,18 @@ function ChatComposer({
 
 export function AgentChatClient({
   agent,
+  canManageModel = false,
   conversation = null,
   credentials,
   initialMessages = [],
   organization,
   workspaceId,
 }: AgentChatClientProps) {
+  const [currentAgent, setCurrentAgent] = useState(agent);
   const [input, setInput] = useState("");
   const [approvalDecisions, setApprovalDecisions] = useState<Record<string, string>>({});
   const [lastSubmittedText, setLastSubmittedText] = useState("");
-  const chatApi = `/api/v1/organizations/${organization.id}/workspaces/${workspaceId}/agents/${agent.id}/chat`;
+  const chatApi = `/api/v1/organizations/${organization.id}/workspaces/${workspaceId}/agents/${currentAgent.id}/chat`;
   const persistedMessages = useMemo(() => uiMessages(initialMessages), [initialMessages]);
   const transport = useMemo(
     () =>
@@ -389,11 +646,16 @@ export function AgentChatClient({
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const workspaceBasePath = `/org/${organization.id}/workspace/${workspaceId}`;
-  const editPath = `${workspaceBasePath}/agents/${agent.id}/edit`;
   const runsPath = `${workspaceBasePath}/agent-runs`;
   const connectionsPath = `${workspaceBasePath}/install`;
-  const serverLabel = `${agent.serverCount} ${pluralize(agent.serverCount, "server")}`;
-  const toolLabel = `${agent.toolCount} ${pluralize(agent.toolCount, "tool")}`;
+  const serverLabel = `${currentAgent.serverCount} ${pluralize(
+    currentAgent.serverCount,
+    "server"
+  )}`;
+  const toolLabel = `${currentAgent.toolCount} ${pluralize(
+    currentAgent.toolCount,
+    "tool"
+  )}`;
   const conversationTitle = conversation?.title?.trim() || "New conversation";
   const messageCount = messages.filter((message) => message.role !== "system").length;
   const isEmptyConversation = messages.length === 0 && !error && status !== "submitted";
@@ -475,7 +737,7 @@ export function AgentChatClient({
       const data = await workspaceAgentsDecideToolApproval(
         organization.id,
         workspaceId,
-        agent.id,
+        currentAgent.id,
         approvalId,
         { decision }
       );
@@ -529,6 +791,14 @@ export function AgentChatClient({
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
       <div className="absolute right-5 top-4 z-10 flex shrink-0 items-center gap-2">
+        <ModelSwitcher
+          agent={currentAgent}
+          canManageModel={canManageModel}
+          credentials={credentials}
+          onAgentChange={setCurrentAgent}
+          organizationId={organization.id}
+          workspaceId={workspaceId}
+        />
         {!isEmptyConversation ? (
           <div className="mr-1 hidden max-w-[360px] items-center gap-2 rounded-md border border-border bg-card/85 px-3 py-1.5 text-xs text-muted-foreground shadow-[var(--shadow-card)] backdrop-blur lg:flex">
             <span className="truncate font-medium text-foreground">{conversationTitle}</span>
@@ -551,15 +821,14 @@ export function AgentChatClient({
           </DialogTrigger>
           <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
             <DialogHeader className="border-b border-border px-5 py-4">
-              <DialogTitle>{agent.name}</DialogTitle>
+              <DialogTitle>{currentAgent.name}</DialogTitle>
               <DialogDescription>Workspace chat context</DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <ContextPanel
-                agent={agent}
+                agent={currentAgent}
                 connectionsPath={connectionsPath}
                 credentials={credentials}
-                editPath={editPath}
                 runsPath={runsPath}
               />
             </div>
@@ -586,8 +855,8 @@ export function AgentChatClient({
                 How can I help with this workspace?
               </h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                {agent.name} is using {agent.modelName || "no selected model"} with {serverLabel}
-                and {toolLabel} available.
+                {currentAgent.name} is using {currentAgent.modelName || "no selected model"} with{" "}
+                {serverLabel} and {toolLabel} available.
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-2">
                 {promptSuggestions.map((suggestion) => (
@@ -603,7 +872,7 @@ export function AgentChatClient({
               </div>
               <div className="mt-4 w-full max-w-2xl">
                 <ChatComposer
-                  agent={agent}
+                  agent={currentAgent}
                   input={input}
                   isRunning={isRunning}
                   onInputChange={setInput}
@@ -712,27 +981,27 @@ export function AgentChatClient({
       </div>
 
       {!isEmptyConversation ? (
-      <div className="shrink-0 border-t border-border bg-card/95 px-4 py-3 backdrop-blur md:px-6">
-        {!agent.isActive ? (
-          <div className="mx-auto mb-3 flex max-w-4xl items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            <AlertTriangle className="size-4 shrink-0" />
-            This agent is inactive.
+        <div className="shrink-0 border-t border-border bg-card/95 px-4 py-3 backdrop-blur md:px-6">
+          {!currentAgent.isActive ? (
+            <div className="mx-auto mb-3 flex max-w-4xl items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertTriangle className="size-4 shrink-0" />
+              This agent is inactive.
+            </div>
+          ) : null}
+          <div className="mx-auto w-full max-w-4xl">
+            <ChatComposer
+              agent={currentAgent}
+              input={input}
+              isRunning={isRunning}
+              onInputChange={setInput}
+              onStop={stop}
+              onSubmit={submitMessage}
+              serverLabel={serverLabel}
+              textareaRef={textareaRef}
+              toolLabel={toolLabel}
+            />
           </div>
-        ) : null}
-        <div className="mx-auto w-full max-w-4xl">
-          <ChatComposer
-            agent={agent}
-            input={input}
-            isRunning={isRunning}
-            onInputChange={setInput}
-            onStop={stop}
-            onSubmit={submitMessage}
-            serverLabel={serverLabel}
-            textareaRef={textareaRef}
-            toolLabel={toolLabel}
-          />
         </div>
-      </div>
       ) : null}
     </div>
   );

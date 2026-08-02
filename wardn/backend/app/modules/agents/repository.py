@@ -649,46 +649,6 @@ async def count_agent_servers(session: AsyncSession, agent_id: uuid.UUID) -> int
     return int(result.scalar_one())
 
 
-async def get_installations_by_ids(
-    session: AsyncSession,
-    installation_ids: list[uuid.UUID],
-) -> list[tuple[MCPServerInstallation, Workspace]]:
-    if not installation_ids:
-        return []
-    result = await session.execute(
-        select(MCPServerInstallation, Workspace)
-        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
-        .where(
-            MCPServerInstallation.id.in_(installation_ids),
-            MCPServerInstallation.status == "enabled",
-        )
-    )
-    return list(result.all())
-
-
-async def get_tool_schemas_by_ids(
-    session: AsyncSession,
-    tool_schema_ids: list[uuid.UUID],
-) -> list[tuple[MCPServerToolSchema, MCPServerInstallation, Workspace]]:
-    if not tool_schema_ids:
-        return []
-    result = await session.execute(
-        select(MCPServerToolSchema, MCPServerInstallation, Workspace)
-        .join(
-            MCPServerInstallation,
-            MCPServerInstallation.id == MCPServerToolSchema.installation_id,
-        )
-        .join(Workspace, Workspace.id == MCPServerInstallation.workspace_id)
-        .where(
-            MCPServerToolSchema.id.in_(tool_schema_ids),
-            MCPServerToolSchema.is_active.is_(True),
-            MCPServerToolSchema.installation_id.is_not(None),
-            MCPServerInstallation.status == "enabled",
-        )
-    )
-    return list(result.all())
-
-
 async def replace_agent_tools(
     session: AsyncSession,
     *,
@@ -772,26 +732,6 @@ async def list_agent_tools(
     )
     rows = list(explicit_result.all()) + list(wildcard_result.all())
     return sorted(rows, key=lambda row: (row[2].server_name, row[2].config_name, row[1].tool_name))
-
-
-async def list_agent_server_assignments(
-    session: AsyncSession,
-    *,
-    agent_id: uuid.UUID,
-) -> list[tuple[AgentMCPServerAssignment, AgentMCPToolAssignment]]:
-    result = await session.execute(
-        select(AgentMCPServerAssignment, AgentMCPToolAssignment)
-        .join(
-            AgentMCPToolAssignment,
-            AgentMCPToolAssignment.server_assignment_id == AgentMCPServerAssignment.id,
-        )
-        .where(AgentMCPServerAssignment.agent_id == agent_id)
-        .order_by(
-            AgentMCPServerAssignment.created_at.asc(),
-            AgentMCPToolAssignment.created_at.asc(),
-        )
-    )
-    return list(result.all())
 
 
 async def list_agent_tool_runtime_rows(

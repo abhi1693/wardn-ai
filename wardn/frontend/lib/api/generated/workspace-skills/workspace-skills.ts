@@ -5,7 +5,6 @@
  * OpenAPI spec version: 0.0.1
  */
 import type {
-  AgentRead,
   AgentSkillCatalogResponse,
   AgentSkillSearchResponse,
   WorkspaceSkillsSearchParams
@@ -32,33 +31,6 @@ export const workspaceSkillsList = async (organizationId: string,
   {
     ...options,
     method: 'GET'
-
-
-  }
-);}
-
-
-export const getWorkspaceSkillsInstallFindSkillsForAgentUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,) => {
-
-
-
-
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/skills/find-skills/agents/${agentId}/install`
-}
-
-/**
- * @summary Install Find Skills For Agent Route
- */
-export const workspaceSkillsInstallFindSkillsForAgent = async (organizationId: string,
-    workspaceId: string,
-    agentId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
-
-  return apiRequest<AgentRead>(getWorkspaceSkillsInstallFindSkillsForAgentUrl(organizationId,workspaceId,agentId),
-  {
-    ...options,
-    method: 'POST'
 
 
   }

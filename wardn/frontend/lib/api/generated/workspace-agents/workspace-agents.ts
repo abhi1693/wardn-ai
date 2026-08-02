@@ -6,18 +6,13 @@
  */
 import type {
   AgentAvailableToolListResponse,
-  AgentCapabilityDiagnosisResponse,
   AgentChatRequest,
   AgentConversationResponse,
-  AgentCreate,
   AgentListResponse,
   AgentRead,
   AgentToolApprovalDecisionRequest,
   AgentToolApprovalDecisionResponse,
-  AgentToolAssignmentUpdate,
-  AgentToolListResponse,
-  AgentUpdate,
-  WorkspaceAgentsDiagnoseCapabilitiesParams,
+  WorkspaceAgentModelUpdate,
   WorkspaceAgentsListParams
 } from '../model';
 
@@ -53,32 +48,6 @@ export const workspaceAgentsList = async (organizationId: string,
     method: 'GET'
 
 
-  }
-);}
-
-
-export const getWorkspaceAgentsCreateUrl = (organizationId: string,
-    workspaceId: string,) => {
-
-
-
-
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents`
-}
-
-/**
- * @summary Create Workspace Agent Route
- */
-export const workspaceAgentsCreate = async (organizationId: string,
-    workspaceId: string,
-    agentCreate: AgentCreate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
-
-  return apiRequest<AgentRead>(getWorkspaceAgentsCreateUrl(organizationId,workspaceId),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(agentCreate)
   }
 );}
 
@@ -160,29 +129,28 @@ export const workspaceAgentsQuickStart = async (organizationId: string,
 );}
 
 
-export const getWorkspaceAgentsDeleteUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,) => {
+export const getWorkspaceAgentsUpdateWorkspaceAssistantModelUrl = (organizationId: string,
+    workspaceId: string,) => {
 
 
 
 
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/workspace-assistant/model`
 }
 
 /**
- * @summary Delete Workspace Agent Route
+ * @summary Update Workspace Assistant Model Route
  */
-export const workspaceAgentsDelete = async (organizationId: string,
+export const workspaceAgentsUpdateWorkspaceAssistantModel = async (organizationId: string,
     workspaceId: string,
-    agentId: string, options?: Parameters<typeof apiRequest>[1]): Promise<void> => {
+    workspaceAgentModelUpdate: WorkspaceAgentModelUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
 
-  return apiRequest<void>(getWorkspaceAgentsDeleteUrl(organizationId,workspaceId,agentId),
+  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantModelUrl(organizationId,workspaceId),
   {
     ...options,
-    method: 'DELETE'
-
-
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceAgentModelUpdate)
   }
 );}
 
@@ -205,70 +173,6 @@ export const workspaceAgentsGet = async (organizationId: string,
     agentId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
 
   return apiRequest<AgentRead>(getWorkspaceAgentsGetUrl(organizationId,workspaceId,agentId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-export const getWorkspaceAgentsUpdateUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,) => {
-
-
-
-
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}`
-}
-
-/**
- * @summary Update Workspace Agent Route
- */
-export const workspaceAgentsUpdate = async (organizationId: string,
-    workspaceId: string,
-    agentId: string,
-    agentUpdate: AgentUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
-
-  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateUrl(organizationId,workspaceId,agentId),
-  {
-    ...options,
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(agentUpdate)
-  }
-);}
-
-
-export const getWorkspaceAgentsDiagnoseCapabilitiesUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,
-    params?: WorkspaceAgentsDiagnoseCapabilitiesParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/capability-diagnosis?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/capability-diagnosis`
-}
-
-/**
- * @summary Diagnose Workspace Agent Capabilities Route
- */
-export const workspaceAgentsDiagnoseCapabilities = async (organizationId: string,
-    workspaceId: string,
-    agentId: string,
-    params?: WorkspaceAgentsDiagnoseCapabilitiesParams, options?: Parameters<typeof apiRequest>[1]): Promise<AgentCapabilityDiagnosisResponse> => {
-
-  return apiRequest<AgentCapabilityDiagnosisResponse>(getWorkspaceAgentsDiagnoseCapabilitiesUrl(organizationId,workspaceId,agentId,params),
   {
     ...options,
     method: 'GET'
@@ -332,61 +236,6 @@ export const workspaceAgentsDecideToolApproval = async (organizationId: string,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentToolApprovalDecisionRequest)
-  }
-);}
-
-
-export const getWorkspaceAgentsListToolsUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,) => {
-
-
-
-
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
-}
-
-/**
- * @summary List Workspace Agent Tools Route
- */
-export const workspaceAgentsListTools = async (organizationId: string,
-    workspaceId: string,
-    agentId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentToolListResponse> => {
-
-  return apiRequest<AgentToolListResponse>(getWorkspaceAgentsListToolsUrl(organizationId,workspaceId,agentId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-export const getWorkspaceAgentsReplaceToolsUrl = (organizationId: string,
-    workspaceId: string,
-    agentId: string,) => {
-
-
-
-
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tools`
-}
-
-/**
- * @summary Replace Workspace Agent Tools Route
- */
-export const workspaceAgentsReplaceTools = async (organizationId: string,
-    workspaceId: string,
-    agentId: string,
-    agentToolAssignmentUpdate: AgentToolAssignmentUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentToolListResponse> => {
-
-  return apiRequest<AgentToolListResponse>(getWorkspaceAgentsReplaceToolsUrl(organizationId,workspaceId,agentId),
-  {
-    ...options,
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(agentToolAssignmentUpdate)
   }
 );}
 

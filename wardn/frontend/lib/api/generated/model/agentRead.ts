@@ -4,7 +4,6 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
-import type { AgentReadScope } from './agentReadScope';
 
 export interface AgentRead {
   createdAt: string;
@@ -17,7 +16,7 @@ export interface AgentRead {
   name: string;
   organizationId: string;
   providerCredentialId?: string | null;
-  scope: AgentReadScope;
+  scope: 'workspace';
   serverCount: number;
   skillIds?: string[];
   toolCount: number;

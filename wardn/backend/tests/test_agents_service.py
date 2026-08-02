@@ -8,24 +8,18 @@ import httpx
 import pytest
 
 from app.modules.agents import chat_orchestrator, provider_clients, service, skills, tool_execution
-from app.modules.agents.exceptions import (
-    DuplicateAgentError,
-    InvalidAgentScopeError,
-    InvalidAgentToolAssignmentError,
-)
 from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
-    AgentMCPToolAssignment,
     AgentRun,
     WorkspaceConversation,
 )
 from app.modules.agents.schemas import (
     AgentChatMessage,
     AgentChatRequest,
-    AgentCreate,
-    AgentToolAssignmentUpdate,
+    WorkspaceAgentModelUpdate,
 )
+from app.modules.agents.types import AgentRuntimeTool, AgentRuntimeToolGuardrailFilter
 from app.modules.guardrails.service import GuardrailDecision
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
@@ -35,7 +29,6 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
-from app.modules.organizations.models import Organization, OrganizationMembership, Workspace
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
@@ -184,7 +177,7 @@ def make_agent_runtime_tool(
     workspace_id=None,
     organization_id=None,
     server_name: str = "io.github.example/tools",
-) -> service.AgentRuntimeTool:
+) -> AgentRuntimeTool:
     workspace_id = workspace_id or uuid4()
     organization_id = organization_id or uuid4()
     installation = MCPServerInstallation(
@@ -223,7 +216,7 @@ def make_agent_runtime_tool(
         annotations=annotations or {},
         is_active=True,
     )
-    return service.AgentRuntimeTool(
+    return AgentRuntimeTool(
         wire_name=wire_name,
         assignment_id=uuid4(),
         tool_schema=tool_schema,
@@ -641,7 +634,7 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
         return []
 
     async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
-        return service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={})
+        return AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={})
 
     async def run_agent_chat(*args, **kwargs):
         seen_provider_run.append(kwargs["agent_run"])
@@ -882,14 +875,14 @@ async def test_filter_agent_runtime_tools_omits_denied_tools(monkeypatch) -> Non
     )
     user = User(id=uuid4(), email="user@example.com", is_superuser=False)
     tools = {
-        "allowed": service.AgentRuntimeTool(
+        "allowed": AgentRuntimeTool(
             wire_name="allowed",
             assignment_id=uuid4(),
             tool_schema=allowed_schema,
             installation=installation,
             server=server,
         ),
-        "denied": service.AgentRuntimeTool(
+        "denied": AgentRuntimeTool(
             wire_name="denied",
             assignment_id=uuid4(),
             tool_schema=denied_schema,
@@ -969,11 +962,11 @@ async def test_denied_mcp_request_preflight_blocks_before_model() -> None:
         annotations={},
         is_active=True,
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={},
         denied_tools={
             "search": (
-                service.AgentRuntimeTool(
+                AgentRuntimeTool(
                     wire_name="search",
                     assignment_id=uuid4(),
                     tool_schema=tool_schema,
@@ -1059,9 +1052,9 @@ def test_denied_mcp_request_preflight_skips_when_any_tool_is_allowed() -> None:
         annotations={},
         is_active=True,
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={
-            "allowed": service.AgentRuntimeTool(
+            "allowed": AgentRuntimeTool(
                 wire_name="allowed",
                 assignment_id=uuid4(),
                 tool_schema=allowed_schema,
@@ -1071,7 +1064,7 @@ def test_denied_mcp_request_preflight_skips_when_any_tool_is_allowed() -> None:
         },
         denied_tools={
             "denied": (
-                service.AgentRuntimeTool(
+                AgentRuntimeTool(
                     wire_name="denied",
                     assignment_id=uuid4(),
                     tool_schema=denied_schema,
@@ -1121,7 +1114,7 @@ def test_denied_mcp_request_preflight_blocks_matching_denied_tool_with_allowed_t
         title="List Search Console sites",
         description="[READ] List Google Search Console sites.",
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={allowed_tool.wire_name: allowed_tool},
         denied_tools={
             denied_tool.wire_name: (
@@ -1169,7 +1162,7 @@ async def test_preflight_blocked_tool_stream_reports_matching_denied_tool() -> N
             message="Tool call blocked because it did not match any active allow guardrail policy.",
         ),
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={allowed_tool.wire_name: allowed_tool},
         denied_tools={denied_tool.wire_name: denied_match},
     )
@@ -1291,7 +1284,7 @@ async def test_stream_agent_chat_preflight_block_uses_cached_tools_before_refres
     async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
         runtime_tools = args[1]
         tool = next(iter(runtime_tools.values()))
-        return service.AgentRuntimeToolGuardrailFilter(
+        return AgentRuntimeToolGuardrailFilter(
             allowed_tools={},
             denied_tools={
                 tool.wire_name: (
@@ -1779,7 +1772,7 @@ def test_response_function_tools_include_configured_mcp_target() -> None:
         annotations={},
         is_active=True,
     )
-    runtime_tool = service.AgentRuntimeTool(
+    runtime_tool = AgentRuntimeTool(
         wire_name="wardn_test",
         assignment_id=uuid4(),
         tool_schema=tool_schema,
@@ -1865,7 +1858,7 @@ def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
 
 def test_execute_agent_search_tools_returns_enabled_skills_as_dynamic_results() -> None:
     result = service.execute_agent_search_tools(
-        service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+        AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
         service.AgentToolCall(
             name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
             call_id="call_1",
@@ -1904,7 +1897,7 @@ def test_dynamic_tools_report_policy_denied_tools_without_fallback() -> None:
         title="List Search Console sites",
         description="[READ] List Google Search Console sites.",
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={allowed_tool.wire_name: allowed_tool},
         denied_tools={
             denied_tool.wire_name: (
@@ -1956,7 +1949,7 @@ def test_dynamic_run_tool_reports_installed_but_unassigned() -> None:
         title="List Search Console sites",
         description="[READ] List Google Search Console sites.",
     )
-    guardrail_filter = service.AgentRuntimeToolGuardrailFilter(
+    guardrail_filter = AgentRuntimeToolGuardrailFilter(
         allowed_tools={},
         denied_tools={},
         installed_tools={
@@ -2116,7 +2109,7 @@ async def test_execute_agent_dynamic_run_tool_stream_dispatches_enabled_skill(
     events = [
         event
         async for event in chat_orchestrator.execute_agent_dynamic_tool_call_stream(
-            service.AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+            AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
             service.AgentToolCall(
                 name=service.AGENT_RUN_TOOL_TOOL_NAME,
                 call_id="call_1",
@@ -2775,7 +2768,7 @@ async def test_execute_agent_tool_blocks_ambiguous_duplicate_mutating_target(mon
         status="active",
     )
 
-    def runtime_tool(wire_name: str, config_name: str) -> service.AgentRuntimeTool:
+    def runtime_tool(wire_name: str, config_name: str) -> AgentRuntimeTool:
         installation = MCPServerInstallation(
             id=uuid4(),
             workspace_id=workspace_id,
@@ -2797,7 +2790,7 @@ async def test_execute_agent_tool_blocks_ambiguous_duplicate_mutating_target(mon
             annotations={},
             is_active=True,
         )
-        return service.AgentRuntimeTool(
+        return AgentRuntimeTool(
             wire_name=wire_name,
             assignment_id=uuid4(),
             tool_schema=tool_schema,
@@ -2873,7 +2866,7 @@ async def test_execute_agent_tool_allows_duplicate_read_only_targets(monkeypatch
     )
     calls = []
 
-    def runtime_tool(wire_name: str, config_name: str) -> service.AgentRuntimeTool:
+    def runtime_tool(wire_name: str, config_name: str) -> AgentRuntimeTool:
         installation = MCPServerInstallation(
             id=uuid4(),
             workspace_id=workspace_id,
@@ -2895,7 +2888,7 @@ async def test_execute_agent_tool_allows_duplicate_read_only_targets(monkeypatch
             annotations={"readOnlyHint": True},
             is_active=True,
         )
-        return service.AgentRuntimeTool(
+        return AgentRuntimeTool(
             wire_name=wire_name,
             assignment_id=uuid4(),
             tool_schema=tool_schema,
@@ -3394,7 +3387,7 @@ async def test_stream_agent_chat_keeps_cached_tools_after_refresh_failure(monkey
 
     async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
         seen_filter_tools.append(args[1])
-        return service.AgentRuntimeToolGuardrailFilter(allowed_tools=args[1], denied_tools={})
+        return AgentRuntimeToolGuardrailFilter(allowed_tools=args[1], denied_tools={})
 
     async def run_agent_chat(*args, **kwargs):
         seen_provider_tools.append(args[3])
@@ -3445,31 +3438,6 @@ async def test_stream_agent_chat_keeps_cached_tools_after_refresh_failure(monkey
     assert steps[1]["step_type"] == "tool_discovery"
     assert steps[1]["status"] == "failed"
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
-
-
-def patch_org_owner(monkeypatch, organization_id, user):
-    organization = Organization(
-        id=organization_id,
-        name="Default",
-        slug="default",
-        status="active",
-    )
-    membership = OrganizationMembership(
-        organization_id=organization_id,
-        user_id=user.id,
-        role="owner",
-        is_active=True,
-    )
-
-    async def get_organization_by_id(*args, **kwargs):
-        return organization
-
-    async def get_organization_membership(*args, **kwargs):
-        return membership
-
-    org_repository = service.require_organization_admin.__globals__["repository"]
-    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
-    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
 
 
 @pytest.mark.asyncio
@@ -3538,209 +3506,6 @@ async def test_get_agent_model_for_run_allows_workspace_member(monkeypatch) -> N
     assert result_agent is agent
     assert result_credential is credential
     assert calls == ["organization_member", "workspace_member"]
-
-
-@pytest.mark.asyncio
-async def test_create_agent_with_provider_credential(monkeypatch) -> None:
-    organization_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-    credential = LLMProviderCredential(
-        id=uuid4(),
-        organization_id=organization_id,
-        name="OpenAI",
-        provider="openai",
-        visibility="organization",
-        api_key_secret_handle_id=uuid4(),
-        base_url="",
-        extra_headers={},
-        is_active=True,
-    )
-
-    patch_org_owner(monkeypatch, organization_id, user)
-
-    async def no_duplicate(*args, **kwargs):
-        return None
-
-    async def get_credential(*args, **kwargs):
-        return credential
-
-    async def credential_supports_model(*args, **kwargs):
-        return True
-
-    monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
-    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
-    monkeypatch.setattr(
-        provider_clients,
-        "credential_supports_model",
-        credential_supports_model,
-    )
-
-    session = FakeSession()
-    response = await service.create_agent(
-        session,
-        user,
-        organization_id,
-        AgentCreate(
-            name=" SRE Agent ",
-            description=" Runtime helper ",
-            instructions="Use tools carefully.",
-            providerCredentialId=credential.id,
-            modelName="gpt-4o-mini",
-            skillIds=[skills.WARDN_FIND_SKILLS_URL, skills.WARDN_FIND_SKILLS_ID],
-        ),
-    )
-
-    agent = session.added[0]
-    assert isinstance(agent, Agent)
-    assert agent.name == "SRE Agent"
-    assert agent.provider_credential_id == credential.id
-    assert agent.scope == "organization"
-    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
-    assert response.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
-    assert response.tool_count == 0
-
-
-@pytest.mark.asyncio
-async def test_create_agent_rejects_model_unavailable_for_credential(monkeypatch) -> None:
-    organization_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-    credential = LLMProviderCredential(
-        id=uuid4(),
-        organization_id=organization_id,
-        name="OpenAI",
-        provider="openai",
-        visibility="organization",
-        api_key_secret_handle_id=uuid4(),
-        base_url="",
-        extra_headers={},
-        is_active=True,
-    )
-
-    patch_org_owner(monkeypatch, organization_id, user)
-
-    async def no_duplicate(*args, **kwargs):
-        return None
-
-    async def get_credential(*args, **kwargs):
-        return credential
-
-    async def credential_supports_model(*args, **kwargs):
-        return False
-
-    monkeypatch.setattr(service.repository, "get_agent_by_name", no_duplicate)
-    monkeypatch.setattr(service.llm_provider_repository, "get_credential", get_credential)
-    monkeypatch.setattr(
-        provider_clients,
-        "credential_supports_model",
-        credential_supports_model,
-    )
-
-    session = FakeSession()
-    with pytest.raises(InvalidAgentScopeError):
-        await service.create_agent(
-            session,
-            user,
-            organization_id,
-            AgentCreate(
-                name="SRE Agent",
-                instructions="Use tools carefully.",
-                providerCredentialId=credential.id,
-                modelName="not-a-real-model",
-            ),
-        )
-
-    assert session.added == []
-
-
-@pytest.mark.asyncio
-async def test_create_agent_rejects_duplicate_name(monkeypatch) -> None:
-    organization_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-    patch_org_owner(monkeypatch, organization_id, user)
-
-    async def duplicate(*args, **kwargs):
-        return Agent(
-            id=uuid4(),
-            organization_id=organization_id,
-            name="SRE Agent",
-            instructions="Existing",
-            scope="organization",
-        )
-
-    monkeypatch.setattr(service.repository, "get_agent_by_name", duplicate)
-
-    with pytest.raises(DuplicateAgentError):
-        await service.create_agent(
-            FakeSession(),
-            user,
-            organization_id,
-            AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
-        )
-
-
-@pytest.mark.asyncio
-async def test_create_workspace_agent_allows_same_name_in_different_workspace(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None, None, None
-
-    async def existing_by_name(*args, **kwargs):
-        assert kwargs["workspace_id"] == workspace_id
-        return None
-
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-    monkeypatch.setattr(service.repository, "get_agent_by_name", existing_by_name)
-
-    session = FakeSession()
-    response = await service.create_workspace_agent(
-        session,
-        user,
-        organization_id,
-        workspace_id,
-        AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
-    )
-
-    agent = session.added[0]
-    assert isinstance(agent, Agent)
-    assert agent.name == "SRE Agent"
-    assert agent.workspace_id == workspace_id
-    assert response.workspace_id == workspace_id
-
-
-@pytest.mark.asyncio
-async def test_create_workspace_agent_rejects_duplicate_name_in_same_workspace(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None, None, None
-
-    async def duplicate(*args, **kwargs):
-        assert kwargs["workspace_id"] == workspace_id
-        return Agent(
-            id=uuid4(),
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            name="SRE Agent",
-            instructions="Existing",
-            scope="workspace",
-        )
-
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-    monkeypatch.setattr(service.repository, "get_agent_by_name", duplicate)
-
-    with pytest.raises(DuplicateAgentError):
-        await service.create_workspace_agent(
-            FakeSession(),
-            user,
-            organization_id,
-            workspace_id,
-            AgentCreate(name="SRE Agent", instructions="Use tools carefully."),
-        )
 
 
 @pytest.mark.asyncio
@@ -3947,6 +3712,209 @@ async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_update_workspace_assistant_model_updates_existing_agent(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace OpenAI",
+        provider="openai",
+        visibility="workspace",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        provider_credential_id=uuid4(),
+        name=service.QUICK_START_AGENT_NAME,
+        description="",
+        instructions="",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[],
+        is_active=False,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    assigned_servers = []
+
+    async def require_agent_scope_permission(*args, **kwargs):
+        assert kwargs["scope"] == "workspace"
+        assert kwargs["workspace_id"] == workspace_id
+        return workspace_id
+
+    async def validate_provider_credential(*args, **kwargs):
+        assert kwargs["agent_workspace_id"] == workspace_id
+        assert kwargs["provider_credential_id"] == credential.id
+        return credential
+
+    async def validate_agent_model(*args, **kwargs):
+        assert args[1] is credential
+        assert args[2] == "gpt-5.1"
+        return "gpt-5.1"
+
+    async def get_agent_by_name(*args, **kwargs):
+        assert kwargs["name"] == service.QUICK_START_AGENT_NAME
+        return agent
+
+    async def require_agent_create_limit(*args, **kwargs):
+        raise AssertionError("existing workspace assistant should not consume agent quota")
+
+    async def list_installations(*args, **kwargs):
+        return [installation]
+
+    async def replace_agent_tools(*args, **kwargs):
+        assigned_servers.extend(kwargs["server_assignments"])
+
+    async def count_agent_servers(*args, **kwargs):
+        return 1
+
+    async def count_agent_tools(*args, **kwargs):
+        return 4
+
+    monkeypatch.setattr(
+        service,
+        "require_agent_scope_permission",
+        require_agent_scope_permission,
+    )
+    monkeypatch.setattr(service, "validate_provider_credential", validate_provider_credential)
+    monkeypatch.setattr(service, "validate_agent_model", validate_agent_model)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service, "require_agent_create_limit", require_agent_create_limit)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    response = await service.update_workspace_assistant_model(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        WorkspaceAgentModelUpdate(
+            providerCredentialId=credential.id,
+            modelName="gpt-5.1",
+        ),
+    )
+
+    assert agent.provider_credential_id == credential.id
+    assert agent.model_name == "gpt-5.1"
+    assert agent.scope == "workspace"
+    assert agent.workspace_id == workspace_id
+    assert agent.description == service.QUICK_START_AGENT_DESCRIPTION
+    assert agent.instructions == service.QUICK_START_AGENT_INSTRUCTIONS
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert agent.is_active is True
+    assert assigned_servers == [(installation, True, [])]
+    assert response.provider_credential_id == credential.id
+    assert response.model_name == "gpt-5.1"
+    assert response.server_count == 1
+    assert response.tool_count == 4
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_assistant_model_creates_missing_agent(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace OpenAI",
+        provider="openai",
+        visibility="workspace",
+        api_key_secret_handle_id=uuid4(),
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    create_limit_calls = 0
+
+    async def require_agent_scope_permission(*args, **kwargs):
+        return workspace_id
+
+    async def validate_provider_credential(*args, **kwargs):
+        return credential
+
+    async def validate_agent_model(*args, **kwargs):
+        return "gpt-5.1"
+
+    async def get_agent_by_name(*args, **kwargs):
+        return None
+
+    async def require_agent_create_limit(*args, **kwargs):
+        nonlocal create_limit_calls
+        create_limit_calls += 1
+
+    async def list_installations(*args, **kwargs):
+        return []
+
+    async def replace_agent_tools(*args, **kwargs):
+        assert kwargs["server_assignments"] == []
+
+    async def count_agent_servers(*args, **kwargs):
+        return 0
+
+    async def count_agent_tools(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        service,
+        "require_agent_scope_permission",
+        require_agent_scope_permission,
+    )
+    monkeypatch.setattr(service, "validate_provider_credential", validate_provider_credential)
+    monkeypatch.setattr(service, "validate_agent_model", validate_agent_model)
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service, "require_agent_create_limit", require_agent_create_limit)
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    session = FakeSession()
+    response = await service.update_workspace_assistant_model(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        WorkspaceAgentModelUpdate(
+            providerCredentialId=credential.id,
+            modelName="gpt-5.1",
+        ),
+    )
+
+    agent = session.added[0]
+    assert isinstance(agent, Agent)
+    assert agent.name == service.QUICK_START_AGENT_NAME
+    assert agent.description == service.QUICK_START_AGENT_DESCRIPTION
+    assert agent.instructions == service.QUICK_START_AGENT_INSTRUCTIONS
+    assert agent.provider_credential_id == credential.id
+    assert agent.model_name == "gpt-5.1"
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert agent.is_active is True
+    assert response.id == agent.id
+    assert create_limit_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_list_workspace_skills_returns_find_skills_status_and_recommendations(
     monkeypatch,
 ) -> None:
@@ -4080,66 +4048,6 @@ async def test_search_workspace_skills_returns_temporary_guidance(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_install_find_skills_for_agent_enables_agent_skill(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
-    agent = Agent(
-        id=uuid4(),
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        name="Workspace Assistant",
-        description="Default assistant",
-        instructions="Help.",
-        scope="workspace",
-        model_name="gpt-4o-mini",
-        skill_ids=[],
-        is_active=True,
-        created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
-    )
-
-    async def get_agent(*args, **kwargs):
-        assert kwargs["agent_id"] == agent.id
-        assert kwargs["workspace_id"] == workspace_id
-        return agent
-
-    async def require_agent_scope_permission(*args, **kwargs):
-        assert kwargs["scope"] == "workspace"
-        assert kwargs["workspace_id"] == workspace_id
-        return workspace_id
-
-    async def count_agent_servers(*args, **kwargs):
-        return 2
-
-    async def count_agent_tools(*args, **kwargs):
-        return 7
-
-    monkeypatch.setattr(service.repository, "get_agent", get_agent)
-    monkeypatch.setattr(
-        service,
-        "require_agent_scope_permission",
-        require_agent_scope_permission,
-    )
-    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
-    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
-
-    session = FakeSession()
-    response = await service.install_find_skills_for_agent(
-        session,
-        user,
-        organization_id,
-        workspace_id,
-        agent.id,
-    )
-
-    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
-    assert response.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
-    assert response.server_count == 2
-    assert response.tool_count == 7
-
-
-@pytest.mark.asyncio
 async def test_list_available_agent_tools_includes_enabled_servers_without_tools(
     monkeypatch,
 ) -> None:
@@ -4193,297 +4101,3 @@ async def test_list_available_agent_tools_includes_enabled_servers_without_tools
     assert len(response.servers) == 1
     assert response.servers[0].installation_id == enabled_installation.id
     assert response.servers[0].config_name == "personal"
-
-
-@pytest.mark.asyncio
-async def test_replace_agent_tools_rejects_tool_outside_workspace(monkeypatch) -> None:
-    organization_id = uuid4()
-    agent_workspace_id = uuid4()
-    other_workspace_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
-    agent = Agent(
-        id=uuid4(),
-        organization_id=organization_id,
-        workspace_id=agent_workspace_id,
-        created_by_id=user.id,
-        name="Workspace Agent",
-        instructions="Use tools carefully.",
-        scope="workspace",
-        is_active=True,
-    )
-    tool_schema = MCPServerToolSchema(
-        id=uuid4(),
-        workspace_id=other_workspace_id,
-        installation_id=uuid4(),
-        server_name="io.github.example/server",
-        server_version="1.0.0",
-        tool_name="list_things",
-        title="List things",
-        description="",
-        input_schema={"type": "object"},
-        annotations={},
-        is_active=True,
-    )
-    installation = MCPServerInstallation(
-        id=tool_schema.installation_id,
-        workspace_id=other_workspace_id,
-        server_name=tool_schema.server_name,
-        installed_version="1.0.0",
-        status="enabled",
-    )
-    workspace = Workspace(
-        id=other_workspace_id,
-        organization_id=organization_id,
-        name="Other",
-        slug="other",
-        status="active",
-    )
-
-    async def get_agent(*args, **kwargs):
-        return agent
-
-    async def get_tool_schemas_by_ids(*args, **kwargs):
-        return [(tool_schema, installation, workspace)]
-
-    async def get_installations_by_ids(*args, **kwargs):
-        return [(installation, workspace)]
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(service.repository, "get_agent", get_agent)
-    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
-    monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-
-    with pytest.raises(InvalidAgentToolAssignmentError):
-        await service.replace_agent_tools(
-            FakeSession(),
-            user,
-            organization_id,
-            agent.id,
-            AgentToolAssignmentUpdate(
-                servers=[
-                    {
-                        "installationId": installation.id,
-                        "toolSchemaIds": [tool_schema.id],
-                    }
-                ]
-            ),
-        )
-
-
-@pytest.mark.asyncio
-async def test_replace_agent_tools_persists_unique_assignments(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
-    agent = Agent(
-        id=uuid4(),
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        created_by_id=user.id,
-        name="Workspace Agent",
-        instructions="Use tools carefully.",
-        scope="workspace",
-        is_active=True,
-    )
-    tool_schema = MCPServerToolSchema(
-        id=uuid4(),
-        workspace_id=workspace_id,
-        installation_id=uuid4(),
-        server_name="io.github.example/server",
-        server_version="1.0.0",
-        tool_name="list_things",
-        title="List things",
-        description="",
-        input_schema={"type": "object"},
-        annotations={},
-        is_active=True,
-    )
-    installation = MCPServerInstallation(
-        id=tool_schema.installation_id,
-        workspace_id=workspace_id,
-        server_name=tool_schema.server_name,
-        config_name="default",
-        installed_version="1.0.0",
-        status="enabled",
-    )
-    workspace = Workspace(
-        id=workspace_id,
-        organization_id=organization_id,
-        name="Default",
-        slug="default",
-        status="active",
-    )
-
-    async def get_agent(*args, **kwargs):
-        return agent
-
-    async def get_tool_schemas_by_ids(*args, **kwargs):
-        return [(tool_schema, installation, workspace)]
-
-    async def get_installations_by_ids(*args, **kwargs):
-        return [(installation, workspace)]
-
-    async def replace_agent_tools(*args, **kwargs):
-        return None
-
-    async def list_agent_tools(*args, **kwargs):
-        assignment = AgentMCPServerAssignment(
-            id=uuid4(),
-            agent_id=agent.id,
-            installation_id=installation.id,
-            created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        )
-        return [(assignment, tool_schema, installation)]
-
-    async def list_agent_server_assignments(*args, **kwargs):
-        server_assignment = AgentMCPServerAssignment(
-            id=uuid4(),
-            agent_id=agent.id,
-            installation_id=installation.id,
-            created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        )
-        tool_assignment = AgentMCPToolAssignment(
-            id=uuid4(),
-            server_assignment_id=server_assignment.id,
-            tool_schema_id=tool_schema.id,
-            wildcard=False,
-            created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        )
-        return [(server_assignment, tool_assignment)]
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(service.repository, "get_agent", get_agent)
-    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
-    monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
-    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
-    monkeypatch.setattr(service.repository, "list_agent_tools", list_agent_tools)
-    monkeypatch.setattr(
-        service.repository,
-        "list_agent_server_assignments",
-        list_agent_server_assignments,
-    )
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-
-    response = await service.replace_agent_tools(
-        FakeSession(),
-        user,
-        organization_id,
-        agent.id,
-        AgentToolAssignmentUpdate(
-            servers=[
-                {
-                    "installationId": installation.id,
-                    "toolSchemaIds": [tool_schema.id, tool_schema.id],
-                }
-            ]
-        ),
-    )
-
-    assert len(response.tools) == 1
-    assert response.tools[0].tool_schema_id == tool_schema.id
-    assert response.tools[0].installation_id == installation.id
-    assert response.servers[0].installation_id == installation.id
-    assert response.servers[0].tool_schema_ids == [tool_schema.id]
-
-
-@pytest.mark.asyncio
-async def test_replace_agent_tools_persists_wildcard_server_assignment(monkeypatch) -> None:
-    organization_id = uuid4()
-    workspace_id = uuid4()
-    user = User(id=uuid4(), email="owner@example.com", is_superuser=True)
-    agent = Agent(
-        id=uuid4(),
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        created_by_id=user.id,
-        name="Workspace Agent",
-        instructions="Use tools carefully.",
-        scope="workspace",
-        is_active=True,
-    )
-    installation = MCPServerInstallation(
-        id=uuid4(),
-        workspace_id=workspace_id,
-        server_name="io.github.example/server",
-        config_name="default",
-        installed_version="1.0.0",
-        status="enabled",
-    )
-    workspace = Workspace(
-        id=workspace_id,
-        organization_id=organization_id,
-        name="Default",
-        slug="default",
-        status="active",
-    )
-    captured_assignments = []
-
-    async def get_agent(*args, **kwargs):
-        return agent
-
-    async def get_installations_by_ids(*args, **kwargs):
-        return [(installation, workspace)]
-
-    async def get_tool_schemas_by_ids(*args, **kwargs):
-        return []
-
-    async def replace_agent_tools(*args, **kwargs):
-        captured_assignments.extend(kwargs["server_assignments"])
-
-    async def list_agent_tools(*args, **kwargs):
-        return []
-
-    async def list_agent_server_assignments(*args, **kwargs):
-        server_assignment = AgentMCPServerAssignment(
-            id=uuid4(),
-            agent_id=agent.id,
-            installation_id=installation.id,
-            created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        )
-        tool_assignment = AgentMCPToolAssignment(
-            id=uuid4(),
-            server_assignment_id=server_assignment.id,
-            tool_schema_id=None,
-            wildcard=True,
-            created_at=datetime(2026, 6, 23, tzinfo=UTC),
-        )
-        return [(server_assignment, tool_assignment)]
-
-    async def require_workspace_admin(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(service.repository, "get_agent", get_agent)
-    monkeypatch.setattr(service.repository, "get_installations_by_ids", get_installations_by_ids)
-    monkeypatch.setattr(service.repository, "get_tool_schemas_by_ids", get_tool_schemas_by_ids)
-    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
-    monkeypatch.setattr(service.repository, "list_agent_tools", list_agent_tools)
-    monkeypatch.setattr(
-        service.repository,
-        "list_agent_server_assignments",
-        list_agent_server_assignments,
-    )
-    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
-
-    response = await service.replace_agent_tools(
-        FakeSession(),
-        user,
-        organization_id,
-        agent.id,
-        AgentToolAssignmentUpdate(
-            servers=[
-                {
-                    "installationId": installation.id,
-                    "toolSchemaIds": ["*"],
-                }
-            ]
-        ),
-    )
-
-    assert captured_assignments == [(installation, True, [])]
-    assert response.servers[0].installation_id == installation.id
-    assert response.servers[0].tool_schema_ids == ["*"]

@@ -138,189 +138,6 @@
         "title": "AgentAvailableToolRead",
         "type": "object"
       },
-      "AgentCapabilityDiagnosisResponse": {
-        "properties": {
-          "agentId": {
-            "format": "uuid",
-            "title": "Agentid",
-            "type": "string"
-          },
-          "query": {
-            "default": "",
-            "title": "Query",
-            "type": "string"
-          },
-          "summary": {
-            "$ref": "#/components/schemas/AgentCapabilityDiagnosisSummary"
-          },
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/AgentCapabilityDiagnosisToolRead"
-            },
-            "title": "Tools",
-            "type": "array"
-          },
-          "workspaceId": {
-            "format": "uuid",
-            "title": "Workspaceid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "agentId",
-          "workspaceId",
-          "summary",
-          "tools"
-        ],
-        "title": "AgentCapabilityDiagnosisResponse",
-        "type": "object"
-      },
-      "AgentCapabilityDiagnosisSummary": {
-        "properties": {
-          "allowed": {
-            "title": "Allowed",
-            "type": "integer"
-          },
-          "assigned": {
-            "title": "Assigned",
-            "type": "integer"
-          },
-          "blockedByPolicy": {
-            "title": "Blockedbypolicy",
-            "type": "integer"
-          },
-          "healthy": {
-            "title": "Healthy",
-            "type": "integer"
-          },
-          "installed": {
-            "title": "Installed",
-            "type": "integer"
-          },
-          "runnable": {
-            "title": "Runnable",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "installed",
-          "assigned",
-          "allowed",
-          "blockedByPolicy",
-          "healthy",
-          "runnable"
-        ],
-        "title": "AgentCapabilityDiagnosisSummary",
-        "type": "object"
-      },
-      "AgentCapabilityDiagnosisToolRead": {
-        "properties": {
-          "allowed": {
-            "title": "Allowed",
-            "type": "boolean"
-          },
-          "assigned": {
-            "title": "Assigned",
-            "type": "boolean"
-          },
-          "canRun": {
-            "title": "Canrun",
-            "type": "boolean"
-          },
-          "configName": {
-            "title": "Configname",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "healthy": {
-            "title": "Healthy",
-            "type": "boolean"
-          },
-          "installationId": {
-            "format": "uuid",
-            "title": "Installationid",
-            "type": "string"
-          },
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
-          },
-          "policy": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Policy"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "reasonCode": {
-            "title": "Reasoncode",
-            "type": "string"
-          },
-          "runtime": {
-            "additionalProperties": true,
-            "title": "Runtime",
-            "type": "object"
-          },
-          "serverName": {
-            "title": "Servername",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "toolName": {
-            "title": "Toolname",
-            "type": "string"
-          },
-          "toolSchemaId": {
-            "format": "uuid",
-            "title": "Toolschemaid",
-            "type": "string"
-          },
-          "workspaceId": {
-            "format": "uuid",
-            "title": "Workspaceid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "toolSchemaId",
-          "installationId",
-          "workspaceId",
-          "serverName",
-          "configName",
-          "toolName",
-          "title",
-          "description",
-          "installed",
-          "assigned",
-          "allowed",
-          "healthy",
-          "canRun",
-          "status",
-          "reasonCode",
-          "reason"
-        ],
-        "title": "AgentCapabilityDiagnosisToolRead",
-        "type": "object"
-      },
       "AgentChatMessage": {
         "properties": {
           "parts": {
@@ -392,81 +209,6 @@
           "conversation"
         ],
         "title": "AgentConversationResponse",
-        "type": "object"
-      },
-      "AgentCreate": {
-        "properties": {
-          "description": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Description",
-            "type": "string"
-          },
-          "instructions": {
-            "maxLength": 50000,
-            "minLength": 1,
-            "title": "Instructions",
-            "type": "string"
-          },
-          "modelName": {
-            "default": "",
-            "maxLength": 255,
-            "title": "Modelname",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "providerCredentialId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Providercredentialid"
-          },
-          "scope": {
-            "default": "organization",
-            "enum": [
-              "organization",
-              "workspace"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "skillIds": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 8,
-            "title": "Skillids",
-            "type": "array"
-          },
-          "workspaceId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspaceid"
-          }
-        },
-        "required": [
-          "name",
-          "instructions"
-        ],
-        "title": "AgentCreate",
         "type": "object"
       },
       "AgentListResponse": {
@@ -551,10 +293,7 @@
             "title": "Providercredentialid"
           },
           "scope": {
-            "enum": [
-              "organization",
-              "workspace"
-            ],
+            "const": "workspace",
             "title": "Scope",
             "type": "string"
           },
@@ -848,67 +587,6 @@
           "updatedAt"
         ],
         "title": "AgentRunStepRead",
-        "type": "object"
-      },
-      "AgentServerToolAssignmentRead": {
-        "properties": {
-          "installationId": {
-            "format": "uuid",
-            "title": "Installationid",
-            "type": "string"
-          },
-          "toolSchemaIds": {
-            "items": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "const": "*",
-                  "type": "string"
-                }
-              ]
-            },
-            "title": "Toolschemaids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "installationId",
-          "toolSchemaIds"
-        ],
-        "title": "AgentServerToolAssignmentRead",
-        "type": "object"
-      },
-      "AgentServerToolAssignmentUpdate": {
-        "properties": {
-          "installationId": {
-            "format": "uuid",
-            "title": "Installationid",
-            "type": "string"
-          },
-          "toolSchemaIds": {
-            "items": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "const": "*",
-                  "type": "string"
-                }
-              ]
-            },
-            "title": "Toolschemaids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "installationId"
-        ],
-        "title": "AgentServerToolAssignmentUpdate",
         "type": "object"
       },
       "AgentSkillAgentRead": {
@@ -1399,255 +1077,6 @@
           "toolName"
         ],
         "title": "AgentToolApprovalDecisionResponse",
-        "type": "object"
-      },
-      "AgentToolAssignmentUpdate": {
-        "properties": {
-          "servers": {
-            "items": {
-              "$ref": "#/components/schemas/AgentServerToolAssignmentUpdate"
-            },
-            "title": "Servers",
-            "type": "array"
-          }
-        },
-        "title": "AgentToolAssignmentUpdate",
-        "type": "object"
-      },
-      "AgentToolListResponse": {
-        "properties": {
-          "servers": {
-            "items": {
-              "$ref": "#/components/schemas/AgentServerToolAssignmentRead"
-            },
-            "title": "Servers",
-            "type": "array"
-          },
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/AgentToolRead"
-            },
-            "title": "Tools",
-            "type": "array"
-          }
-        },
-        "required": [
-          "tools"
-        ],
-        "title": "AgentToolListResponse",
-        "type": "object"
-      },
-      "AgentToolRead": {
-        "properties": {
-          "agentId": {
-            "format": "uuid",
-            "title": "Agentid",
-            "type": "string"
-          },
-          "annotations": {
-            "additionalProperties": true,
-            "title": "Annotations",
-            "type": "object"
-          },
-          "configName": {
-            "title": "Configname",
-            "type": "string"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "title": "Createdat",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "inputSchema": {
-            "additionalProperties": true,
-            "title": "Inputschema",
-            "type": "object"
-          },
-          "installationId": {
-            "format": "uuid",
-            "title": "Installationid",
-            "type": "string"
-          },
-          "outputSchema": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outputschema"
-          },
-          "serverName": {
-            "title": "Servername",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "toolName": {
-            "title": "Toolname",
-            "type": "string"
-          },
-          "toolSchemaId": {
-            "format": "uuid",
-            "title": "Toolschemaid",
-            "type": "string"
-          },
-          "workspaceId": {
-            "format": "uuid",
-            "title": "Workspaceid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "agentId",
-          "toolSchemaId",
-          "installationId",
-          "workspaceId",
-          "serverName",
-          "configName",
-          "toolName",
-          "title",
-          "description",
-          "inputSchema",
-          "createdAt"
-        ],
-        "title": "AgentToolRead",
-        "type": "object"
-      },
-      "AgentUpdate": {
-        "properties": {
-          "description": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "instructions": {
-            "anyOf": [
-              {
-                "maxLength": 50000,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instructions"
-          },
-          "isActive": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Isactive"
-          },
-          "modelName": {
-            "anyOf": [
-              {
-                "maxLength": 255,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Modelname"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "providerCredentialId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Providercredentialid"
-          },
-          "scope": {
-            "anyOf": [
-              {
-                "enum": [
-                  "organization",
-                  "workspace"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope"
-          },
-          "skillIds": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 8,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Skillids"
-          },
-          "workspaceId": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspaceid"
-          }
-        },
-        "title": "AgentUpdate",
         "type": "object"
       },
       "AuthConfigRead": {
@@ -8350,6 +7779,27 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkspaceAgentModelUpdate": {
+        "properties": {
+          "modelName": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Modelname",
+            "type": "string"
+          },
+          "providerCredentialId": {
+            "format": "uuid",
+            "title": "Providercredentialid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "providerCredentialId",
+          "modelName"
+        ],
+        "title": "WorkspaceAgentModelUpdate",
+        "type": "object"
+      },
       "WorkspaceConversationRead": {
         "properties": {
           "agentId": {
@@ -14830,123 +14280,6 @@
         "tags": [
           "workspace-agents"
         ]
-      },
-      "post": {
-        "operationId": "workspace_agents_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Workspace Agent Route",
-        "tags": [
-          "workspace-agents"
-        ]
       }
     },
     "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/available-tools": {
@@ -15236,9 +14569,9 @@
         ]
       }
     },
-    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}": {
-      "delete": {
-        "operationId": "workspace_agents_delete",
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/workspace-assistant/model": {
+      "patch": {
+        "operationId": "workspace_agents_update_workspace_assistant_model",
         "parameters": [
           {
             "in": "path",
@@ -15261,16 +14594,6 @@
             }
           },
           {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -15287,9 +14610,36 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceAgentModelUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "204": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRead"
+                }
+              }
+            },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "403": {
             "content": {
@@ -15322,11 +14672,13 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Workspace Agent Route",
+        "summary": "Update Workspace Assistant Model Route",
         "tags": [
           "workspace-agents"
         ]
-      },
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}": {
       "get": {
         "operationId": "workspace_agents_get",
         "parameters": [
@@ -15420,252 +14772,6 @@
           }
         },
         "summary": "Get Workspace Agent Route",
-        "tags": [
-          "workspace-agents"
-        ]
-      },
-      "patch": {
-        "operationId": "workspace_agents_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Workspace Agent Route",
-        "tags": [
-          "workspace-agents"
-        ]
-      }
-    },
-    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}/capability-diagnosis": {
-      "get": {
-        "operationId": "workspace_agents_diagnose_capabilities",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Query",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentCapabilityDiagnosisResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Diagnose Workspace Agent Capabilities Route",
         "tags": [
           "workspace-agents"
         ]
@@ -15924,232 +15030,6 @@
           }
         },
         "summary": "Decide Workspace Agent Tool Approval Route",
-        "tags": [
-          "workspace-agents"
-        ]
-      }
-    },
-    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}/tools": {
-      "get": {
-        "operationId": "workspace_agents_list_tools",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentToolListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Workspace Agent Tools Route",
-        "tags": [
-          "workspace-agents"
-        ]
-      },
-      "put": {
-        "operationId": "workspace_agents_replace_tools",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentToolAssignmentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentToolListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Replace Workspace Agent Tools Route",
         "tags": [
           "workspace-agents"
         ]
@@ -19449,115 +18329,6 @@
           }
         },
         "summary": "List Workspace Skills Route",
-        "tags": [
-          "workspace-skills"
-        ]
-      }
-    },
-    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/skills/find-skills/agents/{agent_id}/install": {
-      "post": {
-        "operationId": "workspace_skills_install_find_skills_for_agent",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Organization Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "agent_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Install Find Skills For Agent Route",
         "tags": [
           "workspace-skills"
         ]

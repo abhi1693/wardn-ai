@@ -33,8 +33,6 @@ import {
 } from "@/lib/workspace-context";
 import type {
   AgentAvailableToolListResponse,
-  AgentRead,
-  AgentToolListResponse,
   GuardrailPolicyListResponse,
   GuardrailPolicyRead,
   MCPGatewayToolApprovalListResponse,
@@ -50,12 +48,6 @@ type ConnectionTool = {
   title: string;
   toolName: string;
   toolSchemaId?: string;
-};
-
-type AgentAccess = {
-  agent: AgentRead;
-  detail: string;
-  toolCount: number;
 };
 
 type OptionalResult<T> = {
@@ -106,15 +98,6 @@ async function getAvailableTools(organizationId: string, workspaceId: string) {
   return payload.tools;
 }
 
-async function getAgents(organizationId: string, workspaceId: string) {
-  const payload = await backendJson<{ agents: AgentRead[] }>(
-    `/api/v1/organizations/${encodeURIComponent(
-      organizationId
-    )}/workspaces/${encodeURIComponent(workspaceId)}/agents`
-  );
-  return payload.agents;
-}
-
 async function getAccessRules(organizationId: string, workspaceId: string) {
   const payload = await backendJson<GuardrailPolicyListResponse>(
     `/api/v1/organizations/${encodeURIComponent(
@@ -122,49 +105,6 @@ async function getAccessRules(organizationId: string, workspaceId: string) {
     )}/workspaces/${encodeURIComponent(workspaceId)}/guardrails/policies`
   );
   return payload.policies;
-}
-
-async function getAgentAccess(
-  organizationId: string,
-  workspaceId: string,
-  installationId: string,
-  connectionToolIds: Set<string>,
-): Promise<AgentAccess[]> {
-  const agents = await getAgents(organizationId, workspaceId);
-  const rows = await Promise.all(
-    agents.map(async (agent) => {
-      const payload = await backendJson<AgentToolListResponse>(
-        `/api/v1/organizations/${encodeURIComponent(
-          organizationId
-        )}/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
-          agent.id
-        )}/tools`
-      );
-      const serverAssignment = payload.servers?.find(
-        (server) => server.installationId === installationId
-      );
-      const explicitTools = payload.tools.filter((tool) => tool.installationId === installationId);
-      const wildcard = serverAssignment?.toolSchemaIds.includes("*") ?? false;
-      const assignedCount = wildcard
-        ? connectionToolIds.size
-        : new Set(
-            explicitTools
-              .map((tool) => tool.toolSchemaId)
-              .filter((toolSchemaId) => connectionToolIds.has(toolSchemaId))
-          ).size;
-
-      if (!serverAssignment && assignedCount === 0) {
-        return null;
-      }
-
-      return {
-        agent,
-        detail: wildcard ? "All current and future tools" : `${assignedCount} selected tools`,
-        toolCount: assignedCount,
-      };
-    })
-  );
-  return rows.filter((row): row is AgentAccess => Boolean(row));
 }
 
 async function getConnectionTools(
@@ -345,7 +285,7 @@ function healthSummary(
     };
   }
   return {
-    description: "Ready to start when an agent uses this connection.",
+    description: "Ready to start when workspace chat uses this connection.",
     label: "Healthy",
     variant: "success" as const,
   };
@@ -420,23 +360,15 @@ export async function ConnectionDetailView({
   const toolsBySchemaId = new Map(
     tools.flatMap((tool) => (tool.toolSchemaId ? [[tool.toolSchemaId, tool] as const] : []))
   );
-  const [agentAccess, matchingPolicies] = await Promise.all([
-    getAgentAccess(organization.id, workspace.id, installation.id, toolSchemaIds),
-    Promise.resolve(
-      policies
-        .filter((policy) => policyTouchesConnection(policy, toolSchemaIds, toolNames))
-        .sort((left, right) => {
-          const priorityCompare = left.priority - right.priority;
-          return priorityCompare !== 0 ? priorityCompare : left.name.localeCompare(right.name);
-        })
-    ),
-  ]);
+  const matchingPolicies = policies
+    .filter((policy) => policyTouchesConnection(policy, toolSchemaIds, toolNames))
+    .sort((left, right) => {
+      const priorityCompare = left.priority - right.priority;
+      return priorityCompare !== 0 ? priorityCompare : left.name.localeCompare(right.name);
+    });
   const health = healthSummary(installation, runtimeResult.data, runtimeResult.error);
   const iconUrl = serverIconUrlFromIcons(installation.server.icons);
   const displayName = installation.server.title || installation.serverName;
-  const advancedAgentHref = `/org/${encodeURIComponent(
-    organization.id
-  )}/workspace/${encodeURIComponent(workspace.id)}/agents`;
   const accessHref = `/org/${encodeURIComponent(
     organization.id
   )}/workspace/${encodeURIComponent(workspace.id)}/guardrails`;
@@ -491,7 +423,7 @@ export async function ConnectionDetailView({
               <h2 className="text-xl font-semibold">{displayName}</h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
                 {installation.server.description ||
-                  "This connection exposes tools that workspace agents can use through Wardn."}
+                  "This connection exposes tools that workspace chat can use through Wardn."}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Badge variant={health.variant}>{health.label}</Badge>
@@ -541,14 +473,16 @@ export async function ConnectionDetailView({
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-medium">Agents</div>
+                <div className="text-sm font-medium">Assistant</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Agents allowed to use it.
+                  Workspace chat availability.
                 </div>
               </div>
               <Bot className="size-4 text-muted-foreground" />
             </div>
-            <div className="mt-3 text-2xl font-semibold">{agentAccess.length}</div>
+            <div className="mt-3 text-2xl font-semibold">
+              {installation.status === "enabled" ? "Ready" : "Off"}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -636,46 +570,22 @@ export async function ConnectionDetailView({
 
           <Card>
             <CardHeader>
-              <CardTitle>Which Agents Can Use It?</CardTitle>
+              <CardTitle>Workspace Assistant Access</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {agentAccess.length > 0 ? (
-                agentAccess.map((access) => (
-                  <div
-                    className="rounded-md border border-border px-3 py-3"
-                    key={access.agent.id}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-medium">{access.agent.name}</div>
-                        <div className="mt-1 text-sm text-muted-foreground">
-                          {access.detail}
-                        </div>
-                      </div>
-                      <Badge variant={access.agent.isActive ? "success" : "secondary"}>
-                        {access.agent.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 flex justify-end">
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={`${advancedAgentHref}/${encodeURIComponent(access.agent.id)}/edit`}>
-                          Edit access
-                        </Link>
-                      </Button>
+              <div className="rounded-md border border-border px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">Workspace Assistant</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      Enabled workspace connections are available in chat automatically.
                     </div>
                   </div>
-                ))
-              ) : (
-                <div className="rounded-md border border-dashed border-border px-3 py-6 text-center">
-                  <div className="font-medium">No agents can use this connection</div>
-                  <div className="mx-auto mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
-                    Assign this connection to an agent from advanced agent settings.
-                  </div>
-                  <Button asChild className="mt-4" size="sm" variant="outline">
-                    <Link href={advancedAgentHref}>Advanced agents</Link>
-                  </Button>
+                  <Badge variant={installation.status === "enabled" ? "success" : "secondary"}>
+                    {installation.status === "enabled" ? "Available" : "Unavailable"}
+                  </Badge>
                 </div>
-              )}
+              </div>
             </CardContent>
           </Card>
 

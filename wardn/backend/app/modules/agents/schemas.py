@@ -3,54 +3,17 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field
 
 from app.core.pagination import CursorPageMetadata
 from app.core.schemas import APIModel
-from app.modules.agents.skills import normalize_agent_skill_ids
 
-AgentScope = Literal["organization", "workspace"]
-
-
-class AgentCreate(APIModel):
-    name: str = Field(min_length=1, max_length=100)
-    description: str = Field(default="", max_length=2000)
-    instructions: str = Field(min_length=1, max_length=50000)
-    scope: AgentScope = "organization"
-    workspace_id: uuid.UUID | None = None
-    provider_credential_id: uuid.UUID | None = None
-    model_name: str = Field(default="", max_length=255)
-    skill_ids: list[str] = Field(default_factory=list, max_length=8)
-
-    @field_validator("skill_ids")
-    @classmethod
-    def validate_skill_ids(cls, value: list[str]) -> list[str]:
-        return normalize_agent_skill_ids(value)
-
-    @model_validator(mode="after")
-    def validate_scope(self) -> "AgentCreate":
-        if self.scope == "workspace" and self.workspace_id is None:
-            raise ValueError("workspaceId is required for workspace-scoped agents")
-        if self.scope != "workspace" and self.workspace_id is not None:
-            raise ValueError("workspaceId is only valid for workspace-scoped agents")
-        return self
+AgentScope = Literal["workspace"]
 
 
-class AgentUpdate(APIModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
-    description: str | None = Field(default=None, max_length=2000)
-    instructions: str | None = Field(default=None, min_length=1, max_length=50000)
-    scope: AgentScope | None = None
-    workspace_id: uuid.UUID | None = None
-    provider_credential_id: uuid.UUID | None = None
-    model_name: str | None = Field(default=None, max_length=255)
-    skill_ids: list[str] | None = Field(default=None, max_length=8)
-    is_active: bool | None = None
-
-    @field_validator("skill_ids")
-    @classmethod
-    def validate_skill_ids(cls, value: list[str] | None) -> list[str] | None:
-        return None if value is None else normalize_agent_skill_ids(value)
+class WorkspaceAgentModelUpdate(APIModel):
+    provider_credential_id: uuid.UUID
+    model_name: str = Field(min_length=1, max_length=255)
 
 
 class AgentRead(APIModel):
@@ -160,55 +123,6 @@ class AgentRunListResponse(APIModel):
 class AgentRunDetailResponse(APIModel):
     run: AgentRunRead
     steps: list[AgentRunStepRead]
-
-
-TOOL_ASSIGNMENT_WILDCARD = "*"
-ToolAssignmentSelection = uuid.UUID | Literal["*"]
-
-
-class AgentServerToolAssignmentUpdate(APIModel):
-    installation_id: uuid.UUID
-    tool_schema_ids: list[ToolAssignmentSelection] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_tool_selection(self) -> "AgentServerToolAssignmentUpdate":
-        has_wildcard = TOOL_ASSIGNMENT_WILDCARD in self.tool_schema_ids
-        if not self.tool_schema_ids:
-            raise ValueError("toolSchemaIds must include at least one tool or '*'")
-        if has_wildcard and len(self.tool_schema_ids) > 1:
-            raise ValueError("'*' cannot be combined with individual tool IDs")
-        return self
-
-
-class AgentToolAssignmentUpdate(APIModel):
-    servers: list[AgentServerToolAssignmentUpdate] = Field(default_factory=list)
-
-
-class AgentToolRead(APIModel):
-    id: uuid.UUID
-    agent_id: uuid.UUID
-    tool_schema_id: uuid.UUID
-    installation_id: uuid.UUID
-    workspace_id: uuid.UUID
-    server_name: str
-    config_name: str
-    tool_name: str
-    title: str
-    description: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any] | None = None
-    annotations: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
-
-
-class AgentServerToolAssignmentRead(APIModel):
-    installation_id: uuid.UUID
-    tool_schema_ids: list[ToolAssignmentSelection]
-
-
-class AgentToolListResponse(APIModel):
-    tools: list[AgentToolRead]
-    servers: list[AgentServerToolAssignmentRead] = Field(default_factory=list)
 
 
 class AgentToolApprovalDecisionRequest(APIModel):
@@ -333,44 +247,6 @@ class AgentSkillCatalogResponse(APIModel):
     agents: list[AgentSkillAgentRead] = Field(default_factory=list)
     recommendations: list[AgentSkillRecommendationRead] = Field(default_factory=list)
     guided_workflows: list[AgentSkillWorkflowRead] = Field(default_factory=list)
-
-
-class AgentCapabilityDiagnosisSummary(APIModel):
-    installed: int
-    assigned: int
-    allowed: int
-    blocked_by_policy: int
-    healthy: int
-    runnable: int
-
-
-class AgentCapabilityDiagnosisToolRead(APIModel):
-    tool_schema_id: uuid.UUID
-    installation_id: uuid.UUID
-    workspace_id: uuid.UUID
-    server_name: str
-    config_name: str
-    tool_name: str
-    title: str
-    description: str
-    installed: bool
-    assigned: bool
-    allowed: bool
-    healthy: bool
-    can_run: bool
-    status: str
-    reason_code: str
-    reason: str
-    policy: dict[str, Any] | None = None
-    runtime: dict[str, Any] = Field(default_factory=dict)
-
-
-class AgentCapabilityDiagnosisResponse(APIModel):
-    agent_id: uuid.UUID
-    workspace_id: uuid.UUID
-    query: str = ""
-    summary: AgentCapabilityDiagnosisSummary
-    tools: list[AgentCapabilityDiagnosisToolRead]
 
 
 class AgentChatMessage(APIModel):

@@ -405,9 +405,12 @@ function AgentDemandChart({
         }));
 
   return (
-    <DashboardPanel description="Agent demand and assigned tool coverage." title="Agent workload">
+    <DashboardPanel
+      description="Workspace assistant demand and tool coverage."
+      title="Assistant workload"
+    >
       {usageRows.length === 0 ? (
-        <EmptyChart label="No agents configured in this workspace." />
+        <EmptyChart label="No workspace assistant activity yet." />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -722,9 +725,9 @@ function buildAttentionItems({
   }
   if (agents.length === 0) {
     items.push({
-      detail: "No active work can run until at least one workspace agent exists",
+      detail: "Start chat to create the workspace assistant",
       key: "agents",
-      label: "Agent coverage",
+      label: "Workspace assistant",
       severity: "info",
     });
   }
@@ -855,8 +858,11 @@ export function WorkspaceDashboardClient({
                   {workspace.name}
                 </h2>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                  {formatCount(activeAgents)} active agents, {formatCount(enabledInstallations)} enabled
-                  connections, {formatCount(usage.summary.requests)} model requests, and{" "}
+                  {activeAgents > 0
+                    ? "Workspace assistant ready"
+                    : "Workspace assistant not started"}
+                  , {formatCount(enabledInstallations)} enabled connections,{" "}
+                  {formatCount(usage.summary.requests)} model requests, and{" "}
                   {formatCount(runtime.toolCalls.total)} MCP tool calls.
                 </p>
               </div>
@@ -955,12 +961,12 @@ export function WorkspaceDashboardClient({
         <DashboardMetricCard
           detail={`${formatCount(activeAgents)}/${formatCount(agents.length)} active · ${formatCount(
             assignedTools
-          )} assigned tools`}
+          )} workspace tools`}
           href={agentsPath}
           icon={Bot}
-          label="Agent coverage"
+          label="Workspace assistant"
           tone={activeAgents > 0 ? "success" : "warning"}
-          value={formatCount(activeAgents)}
+          value={activeAgents > 0 ? "Ready" : "Setup"}
         />
       </section>
 
@@ -986,9 +992,9 @@ export function WorkspaceDashboardClient({
           href={agentsPath}
         >
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">Agents</div>
+            <div className="text-sm font-semibold text-foreground">Workspace assistant</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {formatCount(agents.length)} configured · {formatCount(assignedTools)} tools
+              {activeAgents > 0 ? "Ready" : "Not started"} · {formatCount(assignedTools)} tools
             </div>
           </div>
           <Sparkles className="size-5 shrink-0 text-muted-foreground" />

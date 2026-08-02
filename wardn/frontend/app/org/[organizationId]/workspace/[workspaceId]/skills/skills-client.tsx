@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CheckCircle2,
   ExternalLink,
   Loader2,
   Search,
@@ -23,12 +22,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type {
-  AgentRead,
   AgentSkillCatalogResponse,
   AgentSkillSearchResultRead,
 } from "@/lib/api/generated/model";
 import {
-  workspaceSkillsInstallFindSkillsForAgent,
   workspaceSkillsSearch,
 } from "@/lib/api/generated/workspace-skills/workspace-skills";
 import { cn } from "@/lib/utils";
@@ -56,31 +53,28 @@ function normalizeResults(results?: AgentSkillSearchResultRead[]) {
   return results ?? [];
 }
 
-function agentReadSkillIds(agent: AgentRead) {
-  return agent.skillIds ?? [];
-}
-
 export function SkillsClient({
   initialCatalog,
   organizationId,
   workspaceId,
 }: SkillsClientProps) {
-  const [catalog, setCatalog] = useState(initialCatalog);
+  const catalog = initialCatalog;
   const [query, setQuery] = useState("kubernetes ops");
   const [results, setResults] = useState<AgentSkillSearchResultRead[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [mutatingAgentId, setMutatingAgentId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const findSkills = catalog.skills?.find((skill) => skill.id === FIND_SKILLS_SKILL_ID);
   const agents = catalog.agents ?? [];
+  const assistant = agents[0];
   const recommendations = catalog.recommendations ?? [];
   const workflows = catalog.guidedWorkflows ?? [];
   const installedAgentIds = useMemo(
     () => new Set(findSkills?.enabledAgentIds ?? []),
     [findSkills?.enabledAgentIds]
   );
+  const assistantHasSkillDiscovery = assistant ? installedAgentIds.has(assistant.id) : false;
 
   async function runSearch(nextQuery: string) {
     const normalizedQuery = nextQuery.trim();
@@ -109,56 +103,6 @@ export function SkillsClient({
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await runSearch(query);
-  }
-
-  function mergeInstalledAgent(updatedAgent: AgentRead) {
-    setCatalog((current) => {
-      const currentAgents = current.agents ?? [];
-      const nextAgents = currentAgents.map((agent) =>
-        agent.id === updatedAgent.id
-          ? {
-              ...agent,
-              enabledSkillIds: agentReadSkillIds(updatedAgent),
-            }
-          : agent
-      );
-      const enabledAgents = nextAgents.filter((agent) =>
-        (agent.enabledSkillIds ?? []).includes(FIND_SKILLS_SKILL_ID)
-      );
-      return {
-        ...current,
-        agents: nextAgents,
-        skills: (current.skills ?? []).map((skill) =>
-          skill.id === FIND_SKILLS_SKILL_ID
-            ? {
-                ...skill,
-                installed: enabledAgents.length > 0,
-                enabledAgentIds: enabledAgents.map((agent) => agent.id),
-                enabledAgentNames: enabledAgents.map((agent) => agent.name),
-              }
-            : skill
-        ),
-      };
-    });
-  }
-
-  async function installForAgent(agentId: string) {
-    setMutatingAgentId(agentId);
-    setError("");
-    setNotice("");
-    try {
-      const updatedAgent = await workspaceSkillsInstallFindSkillsForAgent(
-        organizationId,
-        workspaceId,
-        agentId
-      );
-      mergeInstalledAgent(updatedAgent);
-      setNotice("find-skills installed for the selected agent.");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "find-skills could not be installed.");
-    } finally {
-      setMutatingAgentId("");
-    }
   }
 
   return (
@@ -249,52 +193,26 @@ export function SkillsClient({
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Agent Access</div>
-              {agents.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  No workspace agents yet. Start Chat to create the Workspace Assistant.
-                </div>
-              ) : (
-                <div className="divide-y rounded-md border border-border">
-                  {agents.map((agent) => {
-                    const installed = installedAgentIds.has(agent.id);
-                    return (
-                      <div
-                        className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
-                        key={agent.id}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{agent.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {installed ? "Skill discovery enabled" : "Skill discovery available"}
-                          </div>
-                        </div>
-                        {installed ? (
-                          <Badge variant="success">
-                            <CheckCircle2 className="mr-1 size-3" />
-                            Installed
-                          </Badge>
-                        ) : (
-                          <Button
-                            disabled={Boolean(mutatingAgentId)}
-                            onClick={() => void installForAgent(agent.id)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            {mutatingAgentId === agent.id ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="size-4" />
-                            )}
-                            Install
-                          </Button>
-                        )}
+              <div className="text-sm font-medium">Workspace assistant</div>
+              <div className="rounded-md border border-border px-3 py-3">
+                {assistant ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{assistant.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Skill discovery is part of workspace chat.
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    </div>
+                    <Badge variant={assistantHasSkillDiscovery ? "success" : "secondary"}>
+                      {assistantHasSkillDiscovery ? "Enabled" : "Pending"}
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    Start Chat to create the workspace assistant.
+                  </div>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

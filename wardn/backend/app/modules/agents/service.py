@@ -5,11 +5,9 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import CursorPageMetadata
-from app.db.errors import is_constraint_violation
 from app.modules.agents import repository
 from app.modules.agents.approvals import (
     approval_continuation_prompt as approval_continuation_prompt,
@@ -79,12 +77,8 @@ from app.modules.agents.dynamic_tools import (
 from app.modules.agents.dynamic_tools import (
     resolve_agent_run_tool_call as resolve_agent_run_tool_call,
 )
-from app.modules.agents.dynamic_tools import (
-    search_installed_tools,
-)
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
-    DuplicateAgentError,
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
@@ -95,11 +89,9 @@ from app.modules.agents.mappers import (
     agent_response,
     agent_run_response,
     agent_run_step_response,
-    assigned_tool_response,
     conversation_message_response,
     conversation_response,
     sanitize_run_payload,
-    server_assignment_responses,
 )
 from app.modules.agents.models import (
     Agent,
@@ -152,16 +144,11 @@ from app.modules.agents.provider_clients import (
     websocket_error_message as websocket_error_message,
 )
 from app.modules.agents.schemas import (
-    TOOL_ASSIGNMENT_WILDCARD,
     AgentAvailableServerRead,
     AgentAvailableToolListResponse,
     AgentAvailableToolRead,
-    AgentCapabilityDiagnosisResponse,
-    AgentCapabilityDiagnosisSummary,
-    AgentCapabilityDiagnosisToolRead,
     AgentChatRequest,
     AgentConversationResponse,
-    AgentCreate,
     AgentListResponse,
     AgentRead,
     AgentRunDetailResponse,
@@ -174,9 +161,7 @@ from app.modules.agents.schemas import (
     AgentSkillSearchResponse,
     AgentSkillSearchResultRead,
     AgentSkillWorkflowRead,
-    AgentToolAssignmentUpdate,
-    AgentToolListResponse,
-    AgentUpdate,
+    WorkspaceAgentModelUpdate,
 )
 from app.modules.agents.skills import (
     WARDN_FIND_SKILLS_DESCRIPTION,
@@ -204,12 +189,6 @@ from app.modules.agents.tool_execution import (
 from app.modules.agents.tool_execution import (
     execute_agent_tool_call as execute_agent_tool_call,
 )
-from app.modules.agents.types import (
-    FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
-    FAILURE_TOOL_INSTALLED_NOT_ASSIGNED,
-    FAILURE_TOOL_SELECTED_RUNTIME_FAILED,
-    AgentInstalledTool,
-)
 from app.modules.agents.types import AgentChatProviderError as AgentChatProviderError
 from app.modules.agents.types import (
     AgentChatReasoningSummaryEvent as AgentChatReasoningSummaryEvent,
@@ -218,9 +197,8 @@ from app.modules.agents.types import AgentChatTextEvent as AgentChatTextEvent
 from app.modules.agents.types import (
     AgentChatToolActivityEvent as AgentChatToolActivityEvent,
 )
-from app.modules.agents.types import AgentRuntimeTool as AgentRuntimeTool
 from app.modules.agents.types import (
-    AgentRuntimeToolGuardrailFilter as AgentRuntimeToolGuardrailFilter,
+    AgentInstalledTool,
 )
 from app.modules.agents.types import AgentToolCall as AgentToolCall
 from app.modules.agents.types import AgentToolExecutionResult as AgentToolExecutionResult
@@ -239,7 +217,6 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
-from app.modules.mcp_runtime import repository as mcp_runtime_repository
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.observability import service as observability_service
 from app.modules.organizations.service import (
@@ -363,10 +340,6 @@ def agent_log_extra(
         "user_id": str(user_id) if user_id else None,
         "agent_scope": scope,
     }
-
-
-def normalize_name(value: str) -> str:
-    return " ".join(value.strip().split())
 
 
 async def require_agent_scope_permission(
@@ -509,79 +482,6 @@ async def get_agent_model_for_run(
     return agent, credential
 
 
-async def create_agent(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    payload: AgentCreate,
-) -> AgentRead:
-    name = normalize_name(payload.name)
-    workspace_id = await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=payload.scope,
-        workspace_id=payload.workspace_id,
-    )
-    if await repository.get_agent_by_name(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        name=name,
-    ):
-        raise DuplicateAgentError("agent name already exists")
-    provider_credential = await validate_provider_credential(
-        session,
-        user,
-        organization_id,
-        agent_workspace_id=workspace_id,
-        provider_credential_id=payload.provider_credential_id,
-    )
-    model_name = await validate_agent_model(session, provider_credential, payload.model_name)
-    await require_agent_create_limit(session, user, organization_id, workspace_id)
-    agent = Agent(
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        created_by_id=user.id,
-        provider_credential_id=provider_credential.id if provider_credential else None,
-        name=name,
-        description=payload.description.strip(),
-        instructions=payload.instructions.strip(),
-        scope=payload.scope,
-        model_name=model_name,
-        skill_ids=normalize_agent_skill_ids(payload.skill_ids),
-        is_active=True,
-    )
-    session.add(agent)
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        if is_constraint_violation(
-            exc,
-            {"uq_agents_org_name", "uq_agents_workspace_name"},
-        ):
-            raise DuplicateAgentError("agent name already exists") from exc
-        raise
-    await session.refresh(agent)
-    logger.info(
-        "Created agent.",
-        extra={
-            **agent_log_extra(
-                organization_id=organization_id,
-                workspace_id=agent.workspace_id,
-                agent_id=agent.id,
-                user_id=user.id,
-                scope=agent.scope,
-            ),
-            "llm_provider_credential_id": (
-                str(agent.provider_credential_id) if agent.provider_credential_id else None
-            ),
-            "agent_model_name": agent.model_name,
-        },
-    )
-    return agent_response(agent, server_count=0, tool_count=0)
-
-
 async def require_agent_create_limit(
     session: AsyncSession,
     user: User,
@@ -662,21 +562,6 @@ def agent_quota_scopes(
             ]
         )
     return scopes
-
-
-async def create_workspace_agent(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    workspace_id: uuid.UUID,
-    payload: AgentCreate,
-) -> AgentRead:
-    return await create_agent(
-        session,
-        user,
-        organization_id,
-        payload.model_copy(update={"scope": "workspace", "workspace_id": workspace_id}),
-    )
 
 
 def credential_visible_for_workspace_quick_start(
@@ -983,39 +868,6 @@ async def search_workspace_skills(
     )
 
 
-async def install_find_skills_for_agent(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    workspace_id: uuid.UUID,
-    agent_id: uuid.UUID,
-) -> AgentRead:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-        include_inactive=True,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope="workspace",
-        workspace_id=workspace_id,
-    )
-    skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
-    if WARDN_FIND_SKILLS_ID not in skill_ids:
-        agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
-        await session.flush()
-        await session.refresh(agent)
-    server_count = await repository.count_agent_servers(session, agent.id)
-    tool_count = await repository.count_agent_tools(session, agent.id)
-    return agent_response(agent, server_count=server_count, tool_count=tool_count)
-
-
 async def quick_start_workspace_agent(
     session: AsyncSession,
     user: User,
@@ -1102,6 +954,93 @@ async def quick_start_workspace_agent(
         agent=agent_response(agent, server_count=server_count, tool_count=tool_count),
         conversation=conversation_response(conversation),
         messages=[],
+    )
+
+
+async def update_workspace_assistant_model(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: WorkspaceAgentModelUpdate,
+) -> AgentRead:
+    await require_agent_scope_permission(
+        session,
+        user,
+        organization_id,
+        scope="workspace",
+        workspace_id=workspace_id,
+    )
+    provider_credential = await validate_provider_credential(
+        session,
+        user,
+        organization_id,
+        agent_workspace_id=workspace_id,
+        provider_credential_id=payload.provider_credential_id,
+    )
+    if provider_credential is None:
+        raise InvalidAgentScopeError("workspace assistant requires an LLM credential")
+    model_name = await validate_agent_model(
+        session,
+        provider_credential,
+        payload.model_name,
+    )
+    agent = await repository.get_agent_by_name(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name=QUICK_START_AGENT_NAME,
+    )
+    if agent is None:
+        await require_agent_create_limit(session, user, organization_id, workspace_id)
+        agent = Agent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            created_by_id=user.id,
+            provider_credential_id=provider_credential.id,
+            name=QUICK_START_AGENT_NAME,
+            description=QUICK_START_AGENT_DESCRIPTION,
+            instructions=QUICK_START_AGENT_INSTRUCTIONS,
+            scope="workspace",
+            model_name=model_name,
+            skill_ids=[WARDN_FIND_SKILLS_ID],
+            is_active=True,
+        )
+        session.add(agent)
+    else:
+        agent.provider_credential_id = provider_credential.id
+        agent.model_name = model_name
+        agent.scope = "workspace"
+        agent.workspace_id = workspace_id
+        if not agent.description.strip():
+            agent.description = QUICK_START_AGENT_DESCRIPTION
+        if not agent.instructions.strip():
+            agent.instructions = QUICK_START_AGENT_INSTRUCTIONS
+        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
+        if WARDN_FIND_SKILLS_ID not in skill_ids:
+            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
+        agent.is_active = True
+    await session.flush()
+    await session.refresh(agent)
+    await sync_quick_start_agent_tools(session, agent, workspace_id)
+    logger.info(
+        "Updated workspace assistant model.",
+        extra={
+            **agent_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                user_id=user.id,
+                scope=agent.scope,
+            ),
+            "llm_provider_credential_id": str(agent.provider_credential_id),
+            "agent_model_name": agent.model_name,
+        },
+    )
+    return agent_response(
+        agent,
+        server_count=await repository.count_agent_servers(session, agent.id),
+        tool_count=await repository.count_agent_tools(session, agent.id),
     )
 
 
@@ -1538,548 +1477,4 @@ async def stream_agent_chat(
         stream,
         agent_run,
         session_factory=session_factory,
-    )
-
-
-async def update_agent(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    payload: AgentUpdate,
-    workspace_id: uuid.UUID | None = None,
-) -> AgentRead:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-        include_inactive=True,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-
-    scope = "workspace" if workspace_id is not None else payload.scope or agent.scope
-    target_workspace_id = (
-        workspace_id
-        if workspace_id is not None
-        else payload.workspace_id
-        if "workspace_id" in payload.model_fields_set
-        else agent.workspace_id
-    )
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=scope,
-        workspace_id=target_workspace_id,
-    )
-
-    if payload.name is not None:
-        name = normalize_name(payload.name)
-        existing = await repository.get_agent_by_name(
-            session,
-            organization_id=organization_id,
-            workspace_id=target_workspace_id,
-            name=name,
-        )
-        if existing is not None and existing.id != agent.id:
-            raise DuplicateAgentError("agent name already exists")
-        agent.name = name
-    if payload.description is not None:
-        agent.description = payload.description.strip()
-    if payload.instructions is not None:
-        agent.instructions = payload.instructions.strip()
-    if (
-        workspace_id is not None
-        or payload.scope is not None
-        or "workspace_id" in payload.model_fields_set
-    ):
-        agent.scope = scope
-        agent.workspace_id = target_workspace_id
-    provider_credential_changed = (
-        payload.provider_credential_id is not None
-        or "provider_credential_id" in payload.model_fields_set
-    )
-    scope_changed = (
-        workspace_id is not None
-        or payload.scope is not None
-        or "workspace_id" in payload.model_fields_set
-    )
-    provider_credential = None
-    if provider_credential_changed:
-        provider_credential = await validate_provider_credential(
-            session,
-            user,
-            organization_id,
-            agent_workspace_id=agent.workspace_id,
-            provider_credential_id=payload.provider_credential_id,
-        )
-        agent.provider_credential_id = provider_credential.id if provider_credential else None
-    elif (scope_changed or payload.model_name is not None) and agent.provider_credential_id:
-        provider_credential = await validate_provider_credential(
-            session,
-            user,
-            organization_id,
-            agent_workspace_id=agent.workspace_id,
-            provider_credential_id=agent.provider_credential_id,
-        )
-    if payload.model_name is not None:
-        agent.model_name = await validate_agent_model(
-            session,
-            provider_credential,
-            payload.model_name,
-        )
-    elif provider_credential_changed and provider_credential is not None:
-        agent.model_name = await validate_agent_model(
-            session,
-            provider_credential,
-            agent.model_name,
-        )
-    if "skill_ids" in payload.model_fields_set:
-        agent.skill_ids = normalize_agent_skill_ids(payload.skill_ids)
-    if payload.is_active is not None:
-        agent.is_active = payload.is_active
-
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        if is_constraint_violation(
-            exc,
-            {"uq_agents_org_name", "uq_agents_workspace_name"},
-        ):
-            raise DuplicateAgentError("agent name already exists") from exc
-        raise
-    await session.refresh(agent)
-    logger.info(
-        "Updated agent.",
-        extra={
-            **agent_log_extra(
-                organization_id=organization_id,
-                workspace_id=agent.workspace_id,
-                agent_id=agent.id,
-                user_id=user.id,
-                scope=agent.scope,
-            ),
-            "agent_updated_fields": sorted(payload.model_fields_set),
-            "agent_is_active": agent.is_active,
-            "llm_provider_credential_id": (
-                str(agent.provider_credential_id) if agent.provider_credential_id else None
-            ),
-            "agent_model_name": agent.model_name,
-        },
-    )
-    return agent_response(
-        agent,
-        server_count=await repository.count_agent_servers(session, agent.id),
-        tool_count=await repository.count_agent_tools(session, agent.id),
-    )
-
-
-async def delete_agent(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    workspace_id: uuid.UUID | None = None,
-) -> None:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-        include_inactive=True,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=agent.scope,
-        workspace_id=agent.workspace_id,
-    )
-    agent.is_active = False
-    await session.flush()
-    logger.info(
-        "Deleted agent.",
-        extra=agent_log_extra(
-            organization_id=organization_id,
-            workspace_id=agent.workspace_id,
-            agent_id=agent.id,
-            user_id=user.id,
-            scope=agent.scope,
-        ),
-    )
-
-
-async def list_agent_tools(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    workspace_id: uuid.UUID | None = None,
-) -> AgentToolListResponse:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=agent.scope,
-        workspace_id=agent.workspace_id,
-    )
-    return AgentToolListResponse(
-        tools=[
-            assigned_tool_response(row)
-            for row in await repository.list_agent_tools(session, agent_id=agent.id)
-        ],
-        servers=server_assignment_responses(
-            await repository.list_agent_server_assignments(session, agent_id=agent.id)
-        ),
-    )
-
-
-def guardrail_policy_payload(decision) -> dict[str, object]:
-    return {
-        "mode": decision.mode,
-        "policyId": str(decision.policy_id) if decision.policy_id else None,
-        "policyName": decision.policy_name,
-        "message": decision.message,
-        "matchedPolicyIds": [str(policy_id) for policy_id in decision.matched_policy_ids],
-    }
-
-
-def runtime_diagnosis_payload(
-    installation: MCPServerInstallation,
-    runtime_session,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "installationStatus": installation.status,
-        "installError": installation.install_error,
-        "installType": installation.install_type,
-        "runtimeProvider": installation.runtime_config.get("provider", ""),
-    }
-    if runtime_session is None:
-        payload["sessionStatus"] = ""
-        payload["lastError"] = ""
-        return payload
-    payload.update(
-        {
-            "runtimeSessionId": str(runtime_session.id),
-            "sessionStatus": runtime_session.status,
-            "lastError": runtime_session.last_error,
-            "failureCount": runtime_session.failure_count,
-        }
-    )
-    return payload
-
-
-def installation_is_diagnosis_healthy(
-    installation: MCPServerInstallation,
-    runtime_session,
-) -> bool:
-    if installation.status != "enabled" or installation.install_error:
-        return False
-    if runtime_session is None:
-        return True
-    if runtime_session.status in {"failed", "expired"}:
-        return False
-    return not bool(runtime_session.last_error)
-
-
-async def diagnose_agent_capabilities(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    workspace_id: uuid.UUID,
-    *,
-    query: str = "",
-) -> AgentCapabilityDiagnosisResponse:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=agent.scope,
-        workspace_id=agent.workspace_id,
-    )
-
-    installed_rows = await repository.list_workspace_available_tools(
-        session,
-        workspace_id=workspace_id,
-    )
-    installed_tools = installed_agent_tools(installed_rows)
-    runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
-    runtime_tools = agent_runtime_tools(runtime_rows)
-    guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
-        session,
-        runtime_tools,
-        user=user,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        agent=agent,
-        installed_tools=installed_tools,
-    )
-    assigned_tool_ids = {
-        tool_schema.id
-        for _assignment, tool_schema, _installation in await repository.list_agent_tools(
-            session,
-            agent_id=agent.id,
-        )
-    }
-    runtime_resolved_tool_ids = {
-        tool.tool_schema.id
-        for tool in [
-            *guardrail_filter.allowed_tools.values(),
-            *(tool for tool, _decision in guardrail_filter.denied_tools.values()),
-        ]
-    }
-    allowed_tool_ids = {
-        tool.tool_schema.id for tool in guardrail_filter.allowed_tools.values()
-    }
-    denied_by_tool_id = {
-        tool.tool_schema.id: decision
-        for tool, decision in guardrail_filter.denied_tools.values()
-    }
-    runtime_sessions = await mcp_runtime_repository.list_runtime_sessions(
-        session,
-        workspace_id=workspace_id,
-        limit=500,
-    )
-    latest_runtime_by_installation = {}
-    for runtime_session in runtime_sessions:
-        latest_runtime_by_installation.setdefault(runtime_session.installation_id, runtime_session)
-
-    normalized_query = query.strip()
-    tools_for_response = (
-        search_installed_tools(installed_tools, query=normalized_query, limit=100)
-        if normalized_query
-        else sorted(
-            installed_tools.values(),
-            key=lambda tool: (
-                tool.installation.config_name,
-                tool.tool_schema.server_name,
-                tool.tool_schema.tool_name,
-                str(tool.tool_schema.id),
-            ),
-        )
-    )
-
-    responses: list[AgentCapabilityDiagnosisToolRead] = []
-    for installed in tools_for_response:
-        tool_schema = installed.tool_schema
-        installation = installed.installation
-        runtime_session = latest_runtime_by_installation.get(installation.id)
-        assigned = tool_schema.id in assigned_tool_ids
-        allowed = tool_schema.id in allowed_tool_ids
-        policy = denied_by_tool_id.get(tool_schema.id)
-        healthy = installation_is_diagnosis_healthy(installation, runtime_session)
-        runtime_payload = runtime_diagnosis_payload(installation, runtime_session)
-        can_run = assigned and allowed and healthy
-        if not assigned:
-            status_label = "installed_not_assigned"
-            reason_code = FAILURE_TOOL_INSTALLED_NOT_ASSIGNED
-            reason = "Tool is installed in this workspace but is not assigned to this agent."
-        elif policy is not None:
-            status_label = "blocked_by_policy"
-            reason_code = FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY
-            reason = policy.message or "Tool is assigned but blocked by policy."
-        elif tool_schema.id not in runtime_resolved_tool_ids:
-            status_label = "runtime_unavailable"
-            reason_code = FAILURE_TOOL_SELECTED_RUNTIME_FAILED
-            reason = "Tool is assigned, but its installed server version could not be prepared."
-            healthy = False
-        elif not healthy:
-            status_label = "unhealthy"
-            reason_code = FAILURE_TOOL_SELECTED_RUNTIME_FAILED
-            reason = (
-                installation.install_error
-                or str(runtime_payload.get("lastError") or "")
-                or "Runtime is not healthy."
-            )
-        else:
-            status_label = "ready"
-            reason_code = ""
-            reason = "Tool is installed, assigned, allowed, and healthy."
-        responses.append(
-            AgentCapabilityDiagnosisToolRead(
-                toolSchemaId=tool_schema.id,
-                installationId=installation.id,
-                workspaceId=tool_schema.workspace_id or workspace_id,
-                serverName=tool_schema.server_name,
-                configName=installation.config_name,
-                toolName=tool_schema.tool_name,
-                title=tool_schema.title,
-                description=tool_schema.description,
-                installed=True,
-                assigned=assigned,
-                allowed=allowed,
-                healthy=healthy,
-                canRun=can_run,
-                status=status_label,
-                reasonCode=reason_code,
-                reason=reason,
-                policy=guardrail_policy_payload(policy) if policy is not None else None,
-                runtime=runtime_payload,
-            )
-        )
-
-    summary = AgentCapabilityDiagnosisSummary(
-        installed=len(installed_tools),
-        assigned=len(assigned_tool_ids),
-        allowed=len(allowed_tool_ids),
-        blockedByPolicy=len(denied_by_tool_id),
-        healthy=sum(1 for tool in responses if tool.healthy),
-        runnable=sum(1 for tool in responses if tool.can_run),
-    )
-    return AgentCapabilityDiagnosisResponse(
-        agentId=agent.id,
-        workspaceId=workspace_id,
-        query=normalized_query,
-        summary=summary,
-        tools=responses,
-    )
-
-
-async def replace_agent_tools(
-    session: AsyncSession,
-    user: User,
-    organization_id: uuid.UUID,
-    agent_id: uuid.UUID,
-    payload: AgentToolAssignmentUpdate,
-    workspace_id: uuid.UUID | None = None,
-) -> AgentToolListResponse:
-    agent = await repository.get_agent(
-        session,
-        organization_id=organization_id,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-    )
-    if agent is None:
-        raise AgentNotFoundError("agent not found")
-    await require_agent_scope_permission(
-        session,
-        user,
-        organization_id,
-        scope=agent.scope,
-        workspace_id=agent.workspace_id,
-    )
-
-    requested_installation_ids = [server.installation_id for server in payload.servers]
-    if len(set(requested_installation_ids)) != len(requested_installation_ids):
-        raise InvalidAgentToolAssignmentError("server assignments must be unique")
-
-    installation_rows = await repository.get_installations_by_ids(
-        session,
-        requested_installation_ids,
-    )
-    installations = {
-        installation.id: (installation, workspace)
-        for installation, workspace in installation_rows
-    }
-    if len(installations) != len(set(requested_installation_ids)):
-        raise InvalidAgentToolAssignmentError(
-            "one or more MCP server installations are not available"
-        )
-
-    unique_tool_ids = sorted(
-        {
-            tool_id
-            for server in payload.servers
-            for tool_id in server.tool_schema_ids
-            if tool_id != TOOL_ASSIGNMENT_WILDCARD
-        },
-        key=str,
-    )
-    tool_rows = await repository.get_tool_schemas_by_ids(session, unique_tool_ids)
-    tools_by_id = {
-        tool_schema.id: (tool_schema, installation, workspace)
-        for tool_schema, installation, workspace in tool_rows
-    }
-    if len(tools_by_id) != len(unique_tool_ids):
-        raise InvalidAgentToolAssignmentError("one or more tools are not available")
-
-    server_assignments: list[tuple[MCPServerInstallation, bool, list[MCPServerToolSchema]]] = []
-    for server in payload.servers:
-        installation, workspace = installations[server.installation_id]
-        if workspace.organization_id != organization_id:
-            raise InvalidAgentToolAssignmentError("MCP server is outside the agent organization")
-        if agent.workspace_id is not None and installation.workspace_id != agent.workspace_id:
-            raise InvalidAgentToolAssignmentError("MCP server must belong to the agent workspace")
-
-        wildcard = server.tool_schema_ids == [TOOL_ASSIGNMENT_WILDCARD]
-        if wildcard:
-            server_assignments.append((installation, True, []))
-            continue
-
-        selected_tools: list[MCPServerToolSchema] = []
-        seen_tool_ids: set[uuid.UUID] = set()
-        for tool_id in server.tool_schema_ids:
-            if tool_id == TOOL_ASSIGNMENT_WILDCARD:
-                raise InvalidAgentToolAssignmentError(
-                    "'*' cannot be combined with individual tool IDs"
-                )
-            if tool_id in seen_tool_ids:
-                continue
-            seen_tool_ids.add(tool_id)
-            tool_schema, _tool_installation, tool_workspace = tools_by_id[tool_id]
-            if tool_workspace.organization_id != organization_id:
-                raise InvalidAgentToolAssignmentError("tool is outside the agent organization")
-            if tool_schema.installation_id != installation.id:
-                raise InvalidAgentToolAssignmentError(
-                    "tool must belong to the assigned MCP server"
-                )
-            if agent.workspace_id is not None and tool_schema.workspace_id != agent.workspace_id:
-                raise InvalidAgentToolAssignmentError("tool must belong to the agent workspace")
-            selected_tools.append(tool_schema)
-        server_assignments.append((installation, False, selected_tools))
-
-    await repository.replace_agent_tools(
-        session,
-        agent_id=agent.id,
-        server_assignments=server_assignments,
-    )
-    logger.info(
-        "Replaced agent tool assignments.",
-        extra={
-            **agent_log_extra(
-                organization_id=organization_id,
-                workspace_id=agent.workspace_id,
-                agent_id=agent.id,
-                user_id=user.id,
-                scope=agent.scope,
-            ),
-            "agent_server_assignment_count": len(server_assignments),
-            "agent_tool_assignment_count": sum(
-                len(selected_tools)
-                for _installation, _wildcard, selected_tools in server_assignments
-            ),
-            "agent_wildcard_server_assignment_count": sum(
-                1 for _installation, wildcard, _selected_tools in server_assignments if wildcard
-            ),
-        },
-    )
-    return AgentToolListResponse(
-        tools=[
-            assigned_tool_response(row)
-            for row in await repository.list_agent_tools(session, agent_id=agent.id)
-        ],
-        servers=server_assignment_responses(
-            await repository.list_agent_server_assignments(session, agent_id=agent.id)
-        ),
     )
