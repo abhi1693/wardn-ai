@@ -138,6 +138,29 @@ class AgentToolApprovalDecisionResponse(APIModel):
     assistant_message: ConversationMessageRead | None = None
 
 
+class AgentToolApprovalRead(APIModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
+    agent_run_id: uuid.UUID | None = None
+    requested_by_id: uuid.UUID | None = None
+    decided_by_id: uuid.UUID | None = None
+    installation_id: uuid.UUID
+    tool_schema_id: uuid.UUID
+    tool_call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+    status: str
+    result: str = ""
+    error: str = ""
+    approval_url: str
+    action_review: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentAvailableToolRead(APIModel):
     tool_schema_id: uuid.UUID
     installation_id: uuid.UUID

@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents import repository
+from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.chat_orchestrator import chat_stream_error_text, run_agent_chat
 from app.modules.agents.exceptions import AgentNotFoundError, InvalidAgentScopeError
 from app.modules.agents.mappers import (
@@ -18,8 +19,9 @@ from app.modules.agents.schemas import (
     AgentChatRequest,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
+    AgentToolApprovalRead,
 )
-from app.modules.agents.tool_execution import mcp_result_text
+from app.modules.agents.tool_execution import action_review_payload, mcp_result_text
 from app.modules.agents.types import AgentChatTextEvent
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
@@ -42,6 +44,100 @@ def approval_continuation_prompt(approval: AgentToolApproval) -> str:
         "the approved tool result. Do not ask for approval again for this completed call.\n\n"
         f"Tool: {approval.tool_name}\n"
         f"Result:\n{result}"
+    )
+
+
+def agent_tool_approval_read(
+    approval: AgentToolApproval,
+    *,
+    action_review: dict[str, Any] | None = None,
+) -> AgentToolApprovalRead:
+    return AgentToolApprovalRead(
+        id=approval.id,
+        organization_id=approval.organization_id,
+        workspace_id=approval.workspace_id,
+        agent_id=approval.agent_id,
+        conversation_id=approval.conversation_id,
+        agent_run_id=approval.agent_run_id,
+        requested_by_id=approval.requested_by_id,
+        decided_by_id=approval.decided_by_id,
+        installation_id=approval.installation_id,
+        tool_schema_id=approval.tool_schema_id,
+        tool_call_id=approval.tool_call_id,
+        tool_name=approval.tool_name,
+        arguments=approval.arguments,
+        status=approval.status,
+        result=approval.result,
+        error=approval.error,
+        approval_url=agent_tool_approval_url(
+            organization_id=approval.organization_id,
+            workspace_id=approval.workspace_id,
+            agent_id=approval.agent_id,
+            approval_id=approval.id,
+        ),
+        action_review=action_review,
+        created_at=approval.created_at,
+        updated_at=approval.updated_at,
+    )
+
+
+async def approval_action_review(
+    session: AsyncSession,
+    approval: AgentToolApproval,
+    *,
+    agent: Agent,
+) -> dict[str, Any] | None:
+    runtime_rows = await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+    runtime_tools = agent_runtime_tools(runtime_rows)
+    tool = next(
+        (
+            candidate
+            for candidate in runtime_tools.values()
+            if candidate.installation.id == approval.installation_id
+            and candidate.tool_schema.id == approval.tool_schema_id
+        ),
+        None,
+    )
+    if tool is None:
+        return None
+    return action_review_payload(
+        approval=approval,
+        tool=tool,
+        decision_details={},
+    )
+
+
+async def get_agent_tool_approval(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    approval_id: uuid.UUID,
+) -> AgentToolApprovalRead:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    agent = await repository.get_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+    approval = await repository.get_tool_approval(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        approval_id=approval_id,
+    )
+    if approval is None:
+        raise AgentNotFoundError("tool approval not found")
+    if approval.requested_by_id and approval.requested_by_id != user.id and not user.is_superuser:
+        raise InvalidAgentScopeError("tool approval belongs to another user")
+    return agent_tool_approval_read(
+        approval,
+        action_review=await approval_action_review(session, approval, agent=agent),
     )
 
 

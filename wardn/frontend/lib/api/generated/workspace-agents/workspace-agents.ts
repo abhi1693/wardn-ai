@@ -12,6 +12,7 @@ import type {
   AgentRead,
   AgentToolApprovalDecisionRequest,
   AgentToolApprovalDecisionResponse,
+  AgentToolApprovalRead,
   WorkspaceAgentModelUpdate,
   WorkspaceAgentsListParams
 } from '../model';
@@ -206,6 +207,35 @@ export const workspaceAgentsChat = async (organizationId: string,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentChatRequest)
+  }
+);}
+
+
+export const getWorkspaceAgentsGetToolApprovalUrl = (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    approvalId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/tool-approvals/${approvalId}`
+}
+
+/**
+ * @summary Get Workspace Agent Tool Approval Route
+ */
+export const workspaceAgentsGetToolApproval = async (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    approvalId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentToolApprovalRead> => {
+
+  return apiRequest<AgentToolApprovalRead>(getWorkspaceAgentsGetToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
+  {
+    ...options,
+    method: 'GET'
+
+
   }
 );}
 

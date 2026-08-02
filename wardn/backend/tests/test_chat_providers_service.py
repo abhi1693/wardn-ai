@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.core.config import Settings
-from app.modules.agents.models import WorkspaceConversation
+from app.modules.agents.models import AgentToolApproval, WorkspaceConversation
 from app.modules.agents.schemas import (
     AgentConversationResponse,
     AgentRead,
@@ -13,6 +14,7 @@ from app.modules.agents.schemas import (
 )
 from app.modules.chat_providers import service
 from app.modules.chat_providers.exceptions import (
+    ChatProviderDeliveryError,
     ChatProviderWebhookAuthError,
     InvalidChatProviderConnectionError,
 )
@@ -232,6 +234,178 @@ async def test_reset_workspace_chat_provider_pairing_deletes_session_before_qr(m
         "create:98619967",
         "qr:98619967",
         "status:98619967",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_whatsapp_local_text_message_reconnects_and_retries_bridge(
+    monkeypatch,
+) -> None:
+    connection = make_connection()
+    connection.config = {
+        "allow_all_senders": True,
+        "bridge_base_url": "http://bridge.local",
+        "bridge_user_id": "95273632",
+    }
+
+    class FakeBridgeClient:
+        requests: list[dict] = []
+        send_statuses = [503, 200]
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+        async def post(self, url, *, headers=None, json=None, **kwargs):
+            self.requests.append({"url": str(url), "headers": headers or {}, "json": json})
+            request = httpx.Request("POST", str(url))
+            if str(url).endswith("/sessions"):
+                return httpx.Response(200, json={"ok": True}, request=request)
+            status = self.send_statuses.pop(0)
+            if status == 200:
+                return httpx.Response(
+                    200,
+                    json={"message_id": "wa-reply-1"},
+                    request=request,
+                )
+            return httpx.Response(
+                status,
+                json={"error": "not connected"},
+                request=request,
+            )
+
+    async def connection_secret_handle_id(*args, **kwargs):
+        return uuid4()
+
+    async def resolve_secret(*args, **kwargs):
+        return ResolvedSecret("bridge-secret")
+
+    monkeypatch.setattr(service, "connection_secret_handle_id", connection_secret_handle_id)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeBridgeClient)
+    monkeypatch.setattr(service, "WHATSAPP_BRIDGE_DELIVERY_RETRY_BASE_SECONDS", 0.0)
+    monkeypatch.setattr(service, "WHATSAPP_BRIDGE_DELIVERY_RETRY_MAX_SECONDS", 0.0)
+
+    result = await service.send_whatsapp_local_text_message(
+        FakeSession(),
+        connection,
+        chat_id="15551234567@s.whatsapp.net",
+        text="done",
+        reply_to_message_id="wa-inbound-1",
+    )
+
+    assert result == {"message_id": "wa-reply-1"}
+    assert [request["url"] for request in FakeBridgeClient.requests] == [
+        "http://bridge.local/sessions",
+        "http://bridge.local/messages/send",
+        "http://bridge.local/sessions",
+        "http://bridge.local/messages/send",
+    ]
+    assert FakeBridgeClient.requests[-1]["headers"] == {
+        "X-Wardn-Chat-Provider-Secret": "bridge-secret"
+    }
+
+
+@pytest.mark.asyncio
+async def test_pending_approval_reply_text_includes_approval_page(monkeypatch) -> None:
+    connection = make_connection()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_id=uuid4(),
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        requested_by_id=connection.created_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="search_repositories",
+        arguments={"query": "wardn"},
+        status="pending",
+        result="",
+        error="",
+    )
+
+    async def latest_pending_tool_approval_by_conversation(*args, **kwargs):
+        return approval
+
+    monkeypatch.setattr(
+        service.agent_repository,
+        "latest_pending_tool_approval_by_conversation",
+        latest_pending_tool_approval_by_conversation,
+    )
+
+    text = await service.pending_approval_reply_text(
+        FakeSession(),
+        connection,
+        approval.conversation_id,
+    )
+
+    assert "I need approval to run search_repositories" in text
+    assert (
+        f"/org/{connection.organization_id}/workspace/{connection.workspace_id}"
+        f"/agents/{approval.agent_id}/approvals/{approval.id}"
+    ) in text
+
+
+@pytest.mark.asyncio
+async def test_send_whatsapp_local_text_message_does_not_retry_forbidden_bridge(
+    monkeypatch,
+) -> None:
+    connection = make_connection()
+    connection.config = {
+        "allow_all_senders": True,
+        "bridge_base_url": "http://bridge.local",
+        "bridge_user_id": "95273632",
+    }
+
+    class FakeBridgeClient:
+        requests: list[str] = []
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+        async def post(self, url, **kwargs):
+            self.requests.append(str(url))
+            request = httpx.Request("POST", str(url))
+            if str(url).endswith("/sessions"):
+                return httpx.Response(200, json={"ok": True}, request=request)
+            return httpx.Response(403, json={"error": "forbidden"}, request=request)
+
+    async def connection_secret_handle_id(*args, **kwargs):
+        return uuid4()
+
+    async def resolve_secret(*args, **kwargs):
+        return ResolvedSecret("bridge-secret")
+
+    monkeypatch.setattr(service, "connection_secret_handle_id", connection_secret_handle_id)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeBridgeClient)
+
+    with pytest.raises(ChatProviderDeliveryError):
+        await service.send_whatsapp_local_text_message(
+            FakeSession(),
+            connection,
+            chat_id="15551234567@s.whatsapp.net",
+            text="done",
+            reply_to_message_id="wa-inbound-1",
+        )
+
+    assert FakeBridgeClient.requests == [
+        "http://bridge.local/sessions",
+        "http://bridge.local/messages/send",
     ]
 
 

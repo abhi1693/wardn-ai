@@ -19,11 +19,13 @@ from app.modules.agents.schemas import (
     AgentSkillSearchResponse,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
+    AgentToolApprovalRead,
     WorkspaceAgentModelUpdate,
 )
 from app.modules.agents.service import (
     decide_agent_tool_approval,
     get_agent,
+    get_agent_tool_approval,
     get_workspace_agent_run,
     get_workspace_conversation,
     list_agents,
@@ -351,6 +353,33 @@ async def chat_workspace_agent_route(
             "X-Accel-Buffering": "no",
             "X-Vercel-AI-UI-Message-Stream": "v1",
         },
+    )
+
+
+@workspace_router.get(
+    "/{agent_id}/tool-approvals/{approval_id}",
+    response_model=AgentToolApprovalRead,
+    operation_id="workspace_agents_get_tool_approval",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def get_workspace_agent_tool_approval_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_id: UUID,
+    approval_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentToolApprovalRead:
+    return await get_agent_tool_approval(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_id,
+        approval_id,
     )
 
 

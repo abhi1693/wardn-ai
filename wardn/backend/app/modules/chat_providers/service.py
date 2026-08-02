@@ -16,8 +16,10 @@ from app.core.config import Settings, get_settings
 from app.db.errors import is_constraint_violation
 from app.modules.agents import repository as agent_repository
 from app.modules.agents import service as agent_service
+from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.conversations import AgentSessionFactory
 from app.modules.agents.mappers import text_parts
+from app.modules.agents.models import AgentToolApproval
 from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
 from app.modules.chat_providers import repository, telegram, whatsapp_local
 from app.modules.chat_providers.exceptions import (
@@ -76,6 +78,9 @@ PROVIDER_ASSISTANT_EMPTY_REPLY = (
     "I processed that request, but there was no text response to send back here."
 )
 PROVIDER_TYPING_REFRESH_SECONDS = 4.0
+WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS = 5
+WHATSAPP_BRIDGE_DELIVERY_RETRY_BASE_SECONDS = 1.0
+WHATSAPP_BRIDGE_DELIVERY_RETRY_MAX_SECONDS = 8.0
 WHATSAPP_BRIDGE_STATUS_CONNECTED = {"connected", "open", "ready", "registered", "logged_in"}
 WHATSAPP_BRIDGE_STATUS_WAITING = {
     "connecting",
@@ -94,6 +99,15 @@ WHATSAPP_BRIDGE_STATUS_DISCONNECTED = {
     "unpaired",
 }
 LOOPBACK_BRIDGE_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+WHATSAPP_BRIDGE_RECONNECT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+WHATSAPP_BRIDGE_RECONNECT_TEXT_MARKERS = (
+    "connect",
+    "disconnected",
+    "logged",
+    "not connected",
+    "not ready",
+    "session",
+)
 
 
 @dataclass(frozen=True)
@@ -1519,6 +1533,12 @@ async def process_provider_text_message(
         typing_handle = None
         reply_text = await latest_assistant_text(session, conversation_id)
         if not reply_text:
+            reply_text = await pending_approval_reply_text(
+                session,
+                connection,
+                conversation_id,
+            )
+        if not reply_text:
             reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
         outbound_payload = await send_provider_text_message(
             session,
@@ -1666,6 +1686,34 @@ async def latest_assistant_text(session: AsyncSession, conversation_id: uuid.UUI
     return ""
 
 
+def approval_reply_text(approval: AgentToolApproval) -> str:
+    approval_url = agent_tool_approval_url(
+        organization_id=approval.organization_id,
+        workspace_id=approval.workspace_id,
+        agent_id=approval.agent_id,
+        approval_id=approval.id,
+    )
+    return (
+        f"I need approval to run {approval.tool_name}.\n\n"
+        "Open this Wardn approval page to approve or deny the action:\n"
+        f"{approval_url}"
+    )
+
+
+async def pending_approval_reply_text(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    conversation_id: uuid.UUID,
+) -> str:
+    approval = await agent_repository.latest_pending_tool_approval_by_conversation(
+        session,
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        conversation_id=conversation_id,
+    )
+    return approval_reply_text(approval) if approval is not None else ""
+
+
 async def send_provider_text_message(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -1736,6 +1784,80 @@ async def send_telegram_text_message(
     return response_payload
 
 
+def whatsapp_bridge_delivery_retry_delay(attempt: int) -> float:
+    return min(
+        WHATSAPP_BRIDGE_DELIVERY_RETRY_BASE_SECONDS * (2 ** max(attempt - 1, 0)),
+        WHATSAPP_BRIDGE_DELIVERY_RETRY_MAX_SECONDS,
+    )
+
+
+def whatsapp_bridge_delivery_should_retry(
+    status_code: int,
+    response_payload: dict[str, Any],
+) -> bool:
+    if status_code in {401, 403}:
+        return False
+    if status_code in WHATSAPP_BRIDGE_RECONNECT_STATUS_CODES:
+        return True
+    if status_code not in {400, 404, 422}:
+        return False
+    payload_text = json.dumps(response_payload, default=str).casefold()
+    return any(marker in payload_text for marker in WHATSAPP_BRIDGE_RECONNECT_TEXT_MARKERS)
+
+
+async def send_whatsapp_bridge_text_message_with_reconnect(
+    target: WhatsAppBridgeTarget,
+    *,
+    secret: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    last_error = "WhatsApp local bridge delivery failed"
+    for attempt in range(1, WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS + 1):
+        try:
+            create_message = await create_whatsapp_bridge_session(target)
+            if create_message:
+                last_error = create_message
+                if "HTTP 4" in create_message:
+                    break
+            else:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.post(
+                        whatsapp_bridge_url(target, "/messages/send"),
+                        headers={"X-Wardn-Chat-Provider-Secret": secret},
+                        json=payload,
+                    )
+                response_payload = response_json(response)
+                if response.status_code < 400:
+                    return response_payload
+                last_error = (
+                    f"WhatsApp local bridge delivery failed with HTTP "
+                    f"{response.status_code}"
+                )
+                if not whatsapp_bridge_delivery_should_retry(
+                    response.status_code,
+                    response_payload,
+                ):
+                    break
+        except httpx.RequestError as exc:
+            last_error = f"WhatsApp bridge is unreachable: {exc}"
+
+        if attempt >= WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS:
+            break
+        delay = whatsapp_bridge_delivery_retry_delay(attempt)
+        logger.warning(
+            "WhatsApp bridge delivery failed; reconnecting session before retry.",
+            extra={
+                "chat_provider_bridge_base_url": target.base_url,
+                "chat_provider_bridge_user_id": target.user_id,
+                "retry_attempt": attempt + 1,
+                "retry_delay_seconds": delay,
+                "error": last_error,
+            },
+        )
+        await asyncio.sleep(delay)
+    raise ChatProviderDeliveryError(last_error)
+
+
 async def send_whatsapp_local_text_message(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -1769,18 +1891,11 @@ async def send_whatsapp_local_text_message(
             text=text,
             reply_to_message_id=reply_to_message_id,
         )
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                whatsapp_bridge_url(target, "/messages/send"),
-                headers={"X-Wardn-Chat-Provider-Secret": secret.value},
-                json=payload,
-            )
-        response_payload = response_json(response)
-        if response.status_code >= 400:
-            raise ChatProviderDeliveryError(
-                f"WhatsApp local bridge delivery failed with HTTP {response.status_code}"
-            )
-        return response_payload
+        return await send_whatsapp_bridge_text_message_with_reconnect(
+            target,
+            secret=secret.value,
+            payload=payload,
+        )
 
     payload = whatsapp_local.outbound_text_payload(
         connection_id=str(connection.id),

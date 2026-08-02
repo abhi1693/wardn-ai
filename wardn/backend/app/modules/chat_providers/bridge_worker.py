@@ -60,6 +60,24 @@ async def iter_sse_events(response: httpx.Response):
         yield event_type, "\n".join(data_lines)
 
 
+async def iter_sse_events_until_idle_timeout(
+    response: httpx.Response,
+    *,
+    stream_seconds: float,
+):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + stream_seconds
+    events = iter_sse_events(response).__aiter__()
+    while True:
+        remaining_seconds = deadline - loop.time()
+        if remaining_seconds <= 0:
+            raise TimeoutError
+        try:
+            yield await asyncio.wait_for(events.__anext__(), timeout=remaining_seconds)
+        except StopAsyncIteration:
+            return
+
+
 def decode_bridge_event_data(data: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(data)
@@ -190,14 +208,16 @@ class WhatsAppBridgeEventWorker:
                     raise RuntimeError(
                         f"WhatsApp bridge event stream failed with HTTP {response.status_code}"
                     )
-                async with asyncio.timeout(self.stream_seconds):
-                    async for event_type, data in iter_sse_events(response):
-                        if event_type != "message":
-                            continue
-                        payload = decode_bridge_event_data(data)
-                        if payload is None:
-                            continue
-                        await process_bridge_event(subscription.connection_id, payload)
+                async for event_type, data in iter_sse_events_until_idle_timeout(
+                    response,
+                    stream_seconds=self.stream_seconds,
+                ):
+                    if event_type != "message":
+                        continue
+                    payload = decode_bridge_event_data(data)
+                    if payload is None:
+                        continue
+                    await process_bridge_event(subscription.connection_id, payload)
 
 
 async def process_bridge_event(

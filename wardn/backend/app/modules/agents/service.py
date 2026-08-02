@@ -21,6 +21,9 @@ from app.modules.agents.approvals import (
 from app.modules.agents.approvals import (
     generate_approval_continuation_message as generate_approval_continuation_message,
 )
+from app.modules.agents.approvals import (
+    get_agent_tool_approval as get_agent_tool_approval,
+)
 from app.modules.agents.chat_orchestrator import (
     chat_stream_error_text as chat_stream_error_text,
 )

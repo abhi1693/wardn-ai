@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents import repository
+from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.conversations import AgentSessionFactory, agent_stream_unit_of_work
 from app.modules.agents.mappers import sanitize_run_payload
 from app.modules.agents.models import Agent, AgentRun, AgentToolApproval, WorkspaceConversation
@@ -274,6 +275,12 @@ def tool_approval_payload(approval: AgentToolApproval, tool: AgentRuntimeTool) -
         "installationId": str(tool.installation.id),
         "toolSchemaId": str(tool.tool_schema.id),
         "toolName": tool.tool_schema.tool_name,
+        "approvalUrl": agent_tool_approval_url(
+            organization_id=approval.organization_id,
+            workspace_id=approval.workspace_id,
+            agent_id=approval.agent_id,
+            approval_id=approval.id,
+        ),
     }
 
 

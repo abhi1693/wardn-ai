@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,13 @@ class FakeResponse:
     async def aiter_lines(self):
         for line in self.lines:
             yield line
+
+
+class HangingResponse(FakeResponse):
+    async def aiter_lines(self):
+        for line in self.lines:
+            yield line
+        await asyncio.sleep(3600)
 
 
 @pytest.mark.asyncio
@@ -29,6 +37,30 @@ async def test_iter_sse_events_parses_message_data() -> None:
 
     assert events == [
         ("message", '{"type":"message"\n,"payload":{"id":"1"}}'),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sse_idle_timeout_does_not_cancel_event_processing() -> None:
+    response = HangingResponse(
+        [
+            "event: message",
+            'data: {"type":"message","payload":{"id":"1"}}',
+            "",
+        ]
+    )
+    events = []
+
+    with pytest.raises(TimeoutError):
+        async for event in bridge_worker.iter_sse_events_until_idle_timeout(
+            response,
+            stream_seconds=0.01,
+        ):
+            events.append(event)
+            await asyncio.sleep(0.02)
+
+    assert events == [
+        ("message", '{"type":"message","payload":{"id":"1"}}'),
     ]
 
 

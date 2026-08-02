@@ -548,6 +548,27 @@ async def get_tool_approval(
     return result.scalar_one_or_none()
 
 
+async def latest_pending_tool_approval_by_conversation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> AgentToolApproval | None:
+    result = await session.execute(
+        select(AgentToolApproval)
+        .where(
+            AgentToolApproval.organization_id == organization_id,
+            AgentToolApproval.workspace_id == workspace_id,
+            AgentToolApproval.conversation_id == conversation_id,
+            AgentToolApproval.status == "pending",
+        )
+        .order_by(AgentToolApproval.created_at.desc(), AgentToolApproval.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def finish_agent_run(
     session: AsyncSession,
     agent_run: AgentRun,

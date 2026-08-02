@@ -980,6 +980,10 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
     assert execution.status == "requires_confirmation"
     assert execution.approval
     assert execution.approval["id"] == str(approvals[0].id)
+    assert execution.approval["approvalUrl"].endswith(
+        f"/org/{organization_id}/workspace/{workspace_id}"
+        f"/agents/{agent.id}/approvals/{approvals[0].id}"
+    )
     review = execution.approval["actionReview"]
     assert review["targetConnection"] == {
         "serverName": "io.github.example/server",
@@ -1000,6 +1004,117 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
     assert approvals[0].arguments == {"query": "wardn"}
     assert approvals[0].requested_by_id == user.id
     assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_get_agent_tool_approval_returns_review_and_url(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={"provider": "kubernetes"},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version="1.0.0",
+        description="Server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="search_repositories",
+        title="Search repositories",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        requested_by_id=user.id,
+        installation_id=installation.id,
+        tool_schema_id=tool_schema.id,
+        tool_call_id="call-1",
+        tool_name=tool_schema.tool_name,
+        arguments={"query": "wardn"},
+        status="pending",
+        result="",
+        error="",
+        created_at=datetime(2026, 7, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return [(SimpleNamespace(id=uuid4()), tool_schema, installation, server)]
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+
+    response = await agent_approvals.get_agent_tool_approval(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        approval.id,
+    )
+
+    assert response.id == approval.id
+    assert response.status == "pending"
+    assert response.approval_url.endswith(
+        f"/org/{organization_id}/workspace/{workspace_id}"
+        f"/agents/{agent.id}/approvals/{approval.id}"
+    )
+    assert response.action_review
+    assert response.action_review["targetConnection"]["serverName"] == installation.server_name
+    assert response.action_review["tool"]["title"] == "Search repositories"
 
 
 @pytest.mark.asyncio
