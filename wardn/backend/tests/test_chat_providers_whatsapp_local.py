@@ -97,3 +97,17 @@ def test_whatsapp_local_bridge_payload_uses_wa_meow_contract() -> None:
         "text": "hello",
         "reply_to_message_id": "wa-inbound-1",
     }
+
+
+def test_whatsapp_local_bridge_typing_payload_uses_wa_meow_contract() -> None:
+    payload = whatsapp_local.bridge_typing_payload(
+        user_id=1,
+        chat_id="15551234567@s.whatsapp.net",
+        typing=True,
+    )
+
+    assert payload == {
+        "user_id": 1,
+        "chat_jid": "15551234567@s.whatsapp.net",
+        "typing": True,
+    }

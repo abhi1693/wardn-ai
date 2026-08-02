@@ -59,3 +59,13 @@ def test_telegram_text_message_payload_uses_bot_api_shape_and_limit() -> None:
         "https://api.telegram.org/bottoken/sendMessage"
     )
     assert len(telegram.outbound_text_body("x" * 5000)) == telegram.TELEGRAM_TEXT_MAX_CHARS
+
+
+def test_telegram_typing_payload_uses_chat_action_api() -> None:
+    assert telegram.send_chat_action_endpoint("token") == (
+        "https://api.telegram.org/bottoken/sendChatAction"
+    )
+    assert telegram.typing_action_payload(chat_id="555") == {
+        "chat_id": "555",
+        "action": "typing",
+    }

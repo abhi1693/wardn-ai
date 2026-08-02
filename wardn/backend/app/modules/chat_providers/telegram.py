@@ -126,11 +126,22 @@ def send_message_endpoint(bot_token: str) -> str:
     return f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
 
+def send_chat_action_endpoint(bot_token: str) -> str:
+    return f"https://api.telegram.org/bot{bot_token}/sendChatAction"
+
+
 def text_message_payload(*, chat_id: str, text: str) -> dict[str, Any]:
     return {
         "chat_id": chat_id,
         "text": outbound_text_body(text),
         "disable_web_page_preview": True,
+    }
+
+
+def typing_action_payload(*, chat_id: str) -> dict[str, Any]:
+    return {
+        "chat_id": chat_id,
+        "action": "typing",
     }
 
 

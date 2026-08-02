@@ -3,7 +3,6 @@
 import {
   Bot,
   CheckCircle2,
-  Copy,
   KeyRound,
   Loader2,
   MessageCircle,
@@ -53,10 +52,6 @@ import type {
   SecretStoreRead,
 } from "@/lib/api/generated/model";
 import {
-  getChatProviderWebhooksTelegramReceiveUrl,
-  getChatProviderWebhooksWhatsappLocalReceiveUrl,
-} from "@/lib/api/generated/chat-provider-webhooks/chat-provider-webhooks";
-import {
   workspaceChatProvidersCreate,
   workspaceChatProvidersDelete,
   workspaceChatProvidersPairingStatus,
@@ -66,7 +61,6 @@ import {
 import { cn } from "@/lib/utils";
 
 type ProviderType = "whatsapp_local" | "telegram";
-type ProviderFilter = "active" | "needs_setup" | "all";
 
 type ChatProvidersClientProps = {
   connections: ChatProviderConnectionRead[];
@@ -99,7 +93,6 @@ const providerOptions: ProviderOption[] = [
   },
 ];
 
-const connectedStatuses = new Set(["connected", "waiting_for_scan"]);
 const needsSetupStatuses = new Set(["not_configured", "needs_pairing", "error"]);
 
 function randomSecret() {
@@ -202,13 +195,6 @@ function providerOption(provider: string) {
   return providerOptions.find((option) => option.value === provider) ?? providerOptions[0];
 }
 
-function providerWebhookPath(connection: ChatProviderConnectionRead) {
-  if (connection.provider === "telegram") {
-    return getChatProviderWebhooksTelegramReceiveUrl(connection.id);
-  }
-  return getChatProviderWebhooksWhatsappLocalReceiveUrl(connection.id);
-}
-
 function displayDate(value?: string | null) {
   if (!value) {
     return "Never";
@@ -235,16 +221,6 @@ function displayHost(value: string) {
   } catch {
     return value;
   }
-}
-
-function filterLabel(filter: ProviderFilter) {
-  if (filter === "all") {
-    return "All";
-  }
-  if (filter === "needs_setup") {
-    return "Needs setup";
-  }
-  return "Active";
 }
 
 function statusLabel(
@@ -314,25 +290,15 @@ function badgeVariant(
   return "secondary" as const;
 }
 
-function connectionMatchesFilter(
+function connectionNeedsSetup(
   connection: ChatProviderConnectionRead,
-  filter: ProviderFilter,
   pairing?: ChatProviderPairingStatusResponse
 ) {
-  if (filter === "all") {
-    return true;
-  }
-  if (filter === "needs_setup") {
-    return (
-      !connection.isActive ||
-      (connection.provider === "whatsapp_local" &&
-        (!pairing || needsSetupStatuses.has(pairing.status)))
-    );
-  }
-  if (!connection.isActive) {
-    return false;
-  }
-  return connection.provider !== "whatsapp_local" || !pairing || connectedStatuses.has(pairing.status);
+  return (
+    !connection.isActive ||
+    (connection.provider === "whatsapp_local" &&
+      (!pairing || needsSetupStatuses.has(pairing.status)))
+  );
 }
 
 function providerCounts(
@@ -345,7 +311,7 @@ function providerCounts(
     (connection) => pairingStatuses[connection.id]?.status === "connected"
   ).length;
   const needsSetup = connections.filter((connection) =>
-    connectionMatchesFilter(connection, "needs_setup", pairingStatuses[connection.id])
+    connectionNeedsSetup(connection, pairingStatuses[connection.id])
   ).length;
   return { active, connected, needsSetup, total: connections.length, whatsapp: whatsapp.length };
 }
@@ -375,10 +341,6 @@ function ConnectProviderDialog({
   const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const [webhookSecret, setWebhookSecret] = useState(randomSecret);
   const [botToken, setBotToken] = useState("");
-  const [allowAllSenders, setAllowAllSenders] = useState(true);
-  const [allowedSenderIds, setAllowedSenderIds] = useState("");
-  const [allowedChatIds, setAllowedChatIds] = useState("");
-  const [accessAdvancedOpen, setAccessAdvancedOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function applyProviderDefaults(nextProvider: ProviderType) {
@@ -393,7 +355,6 @@ function ConnectProviderDialog({
     if (nextProvider === "whatsapp_local") {
       setBridgeBaseUrl(normalizedDefaultBridgeUrl);
     }
-    setAccessAdvancedOpen(false);
     setAdvancedOpen(false);
   }
 
@@ -412,9 +373,9 @@ function ConnectProviderDialog({
       provider === "telegram"
         ? {
             config: {
-              allowAllSenders: allowAllSenders,
-              allowedChatIds: stringList(allowedChatIds),
-              allowedSenderIds: stringList(allowedSenderIds),
+              allowAllSenders: true,
+              allowedChatIds: [],
+              allowedSenderIds: [],
               replyOnUnsupportedMessages: false,
             },
             displayName: normalizedName,
@@ -427,9 +388,9 @@ function ConnectProviderDialog({
         : {
             config: {
               accountName: normalizedBridgeUserId,
-              allowAllSenders: allowAllSenders,
-              allowedChatIds: stringList(allowedChatIds),
-              allowedSenderIds: stringList(allowedSenderIds),
+              allowAllSenders: true,
+              allowedChatIds: [],
+              allowedSenderIds: [],
               bridgeBaseUrl: bridgeBaseUrl.trim(),
               bridgeUserId: normalizedBridgeUserId,
               replyOnUnsupportedMessages: false,
@@ -536,64 +497,14 @@ function ConnectProviderDialog({
           </div>
 
           <div className="rounded-md border border-border">
-            <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="p-3">
               <div>
                 <div className="text-sm font-medium text-foreground">Replies</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {allowAllSenders ? "Open to every sender" : "Only allowed conversations"}
+                  Open while pairing. Restrict replies from Edit after conversations appear.
                 </div>
               </div>
-              <label className="flex items-center gap-3 text-sm">
-                <input
-                  checked={allowAllSenders}
-                  className="size-4 accent-primary"
-                  onChange={(event) => setAllowAllSenders(event.target.checked)}
-                  type="checkbox"
-                />
-                Allow all
-              </label>
             </div>
-            {!allowAllSenders ? (
-              <div className="space-y-3 border-t border-border p-3">
-                <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                  Connect first, then use Edit to pick known conversations.
-                </div>
-                <div className="rounded-md border border-border">
-                  <button
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium"
-                    onClick={() => setAccessAdvancedOpen((current) => !current)}
-                    type="button"
-                  >
-                    <span>Advanced IDs</span>
-                    <span className="text-xs text-muted-foreground">
-                      {accessAdvancedOpen ? "Hide" : "Show"}
-                    </span>
-                  </button>
-                  {accessAdvancedOpen ? (
-                    <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="chat-provider-senders">Sender IDs</Label>
-                        <textarea
-                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                          id="chat-provider-senders"
-                          onChange={(event) => setAllowedSenderIds(event.target.value)}
-                          value={allowedSenderIds}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="chat-provider-chats">Chat IDs</Label>
-                        <textarea
-                          className="min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/15"
-                          id="chat-provider-chats"
-                          onChange={(event) => setAllowedChatIds(event.target.value)}
-                          value={allowedChatIds}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </div>
 
           <div className="rounded-md border border-border">
@@ -944,7 +855,6 @@ function EditProviderDialog({
 
 function PairingDialog({
   connection,
-  onCheck,
   onOpenChange,
   onRefresh,
   open,
@@ -953,7 +863,6 @@ function PairingDialog({
 }: {
   busy: boolean;
   connection: ChatProviderConnectionRead | null;
-  onCheck: (connection: ChatProviderConnectionRead) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onRefresh: (connection: ChatProviderConnectionRead) => Promise<void>;
   open: boolean;
@@ -1082,15 +991,6 @@ function PairingDialog({
                 )}
                 {qrPayload ? "Generate new QR" : "Show QR"}
               </Button>
-              <Button
-                disabled={!connection || busy}
-                onClick={() => connection && onCheck(connection)}
-                type="button"
-                variant="outline"
-              >
-                <RefreshCw className="size-4" />
-                Check status
-              </Button>
             </div>
           </div>
         </div>
@@ -1108,7 +1008,6 @@ export function ChatProvidersClient({
 }: ChatProvidersClientProps) {
   const router = useRouter();
   const activeSecretStores = secretStores.filter((store) => store.isActive);
-  const [filter, setFilter] = useState<ProviderFilter>("active");
   const [search, setSearch] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
   const [pairingOpen, setPairingOpen] = useState(false);
@@ -1124,6 +1023,9 @@ export function ChatProvidersClient({
   const [busyConnectionId, setBusyConnectionId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const activePairingStatus = pairingConnection
+    ? pairingStatuses[pairingConnection.id]
+    : undefined;
 
   const counts = useMemo(
     () => providerCounts(connections, pairingStatuses),
@@ -1145,22 +1047,11 @@ export function ChatProvidersClient({
           option.shortLabel.toLowerCase().includes(query) ||
           bridgeBaseUrl.toLowerCase().includes(query) ||
           bridgeUserId.toLowerCase().includes(query);
-        return (
-          matchesQuery &&
-          connectionMatchesFilter(connection, filter, pairingStatuses[connection.id])
-        );
+        return matchesQuery;
       })
       .sort((first, second) => {
-        const firstNeeds = connectionMatchesFilter(
-          first,
-          "needs_setup",
-          pairingStatuses[first.id]
-        );
-        const secondNeeds = connectionMatchesFilter(
-          second,
-          "needs_setup",
-          pairingStatuses[second.id]
-        );
+        const firstNeeds = connectionNeedsSetup(first, pairingStatuses[first.id]);
+        const secondNeeds = connectionNeedsSetup(second, pairingStatuses[second.id]);
         if (firstNeeds !== secondNeeds) {
           return firstNeeds ? -1 : 1;
         }
@@ -1169,7 +1060,7 @@ export function ChatProvidersClient({
         }
         return first.name.localeCompare(second.name);
       });
-  }, [connections, filter, pairingStatuses, search]);
+  }, [connections, pairingStatuses, search]);
 
   useEffect(() => {
     let ignore = false;
@@ -1248,6 +1139,51 @@ export function ChatProvidersClient({
       setBusyConnectionId(null);
     }
   }
+
+  useEffect(() => {
+    if (
+      !pairingOpen ||
+      !pairingConnection ||
+      !activePairingStatus?.qrPayload ||
+      activePairingStatus.status === "connected"
+    ) {
+      return;
+    }
+
+    const connection = pairingConnection;
+    let ignore = false;
+    async function pollPairingStatus() {
+      try {
+        const status = await workspaceChatProvidersPairingStatus(
+          organizationId,
+          workspaceId,
+          connection.id,
+          { timeoutMs: 15_000 }
+        );
+        if (!ignore) {
+          setPairingStatuses((current) => ({ ...current, [connection.id]: status }));
+        }
+      } catch {
+        // Keep polling; transient bridge/API errors should not dismiss the QR.
+      }
+    }
+
+    void pollPairingStatus();
+    const intervalId = window.setInterval(() => {
+      void pollPairingStatus();
+    }, 3_000);
+    return () => {
+      ignore = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activePairingStatus?.qrPayload,
+    activePairingStatus?.status,
+    organizationId,
+    pairingConnection,
+    pairingOpen,
+    workspaceId,
+  ]);
 
   async function createProvider(payload: ChatProviderConnectionCreate) {
     if (isCreating) {
@@ -1350,15 +1286,6 @@ export function ChatProvidersClient({
     }
   }
 
-  async function copyWebhook(connection: ChatProviderConnectionRead) {
-    try {
-      await navigator.clipboard.writeText(providerWebhookPath(connection));
-      setNotice("Webhook URL copied.");
-    } catch {
-      setError("Webhook URL could not be copied.");
-    }
-  }
-
   function openPairing(connection: ChatProviderConnectionRead, refreshQr = false) {
     setPairingConnection(connection);
     setPairingOpen(true);
@@ -1402,20 +1329,6 @@ export function ChatProvidersClient({
               type="search"
               value={search}
             />
-          </div>
-          <div className="flex rounded-md border border-border bg-card p-1">
-            {(["active", "needs_setup", "all"] as ProviderFilter[]).map((item) => (
-              <Button
-                className="h-7 px-2 text-xs"
-                key={item}
-                onClick={() => setFilter(item)}
-                size="sm"
-                type="button"
-                variant={filter === item ? "secondary" : "ghost"}
-              >
-                {filterLabel(item)}
-              </Button>
-            ))}
           </div>
           <Button onClick={() => setConnectOpen(true)} type="button">
             <Plus className="size-4" />
@@ -1578,15 +1491,6 @@ export function ChatProvidersClient({
                       Edit
                     </Button>
                     <Button
-                      aria-label={`Copy webhook URL for ${connection.name}`}
-                      onClick={() => copyWebhook(connection)}
-                      size="icon"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Copy className="size-4" />
-                    </Button>
-                    <Button
                       aria-label={
                         connection.isActive
                           ? `Pause ${connection.name}`
@@ -1650,7 +1554,6 @@ export function ChatProvidersClient({
       <PairingDialog
         busy={Boolean(pairingConnection && busyConnectionId === pairingConnection.id)}
         connection={pairingConnection}
-        onCheck={(connection) => refreshPairingStatus(connection)}
         onOpenChange={(open) => {
           setPairingOpen(open);
           if (!open) {

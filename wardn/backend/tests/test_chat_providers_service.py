@@ -545,7 +545,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     )
     conversation_id = thread.conversation_id
     agent_id = uuid4()
-    captured_chat = SimpleNamespace(payload=None, committed_before_stream=False)
+    captured_chat = SimpleNamespace(payload=None, committed_before_stream=False, trigger_type="")
 
     async def get_event_by_external_id(*args, **kwargs):
         return None
@@ -558,6 +558,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
 
     async def stream_agent_chat(*args, **kwargs):
         captured_chat.payload = args[4]
+        captured_chat.trigger_type = kwargs["trigger_type"]
 
         async def stream():
             captured_chat.committed_before_stream = fake_session.commits == 1
@@ -605,6 +606,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert processed
     assert fake_session.commits == 1
     assert captured_chat.committed_before_stream
+    assert captured_chat.trigger_type == "whatsapp"
     assert captured_chat.payload.id == str(conversation_id)
     assert captured_chat.payload.messages[0].parts == [
         {"type": "text", "text": "What changed today?"}
@@ -612,6 +614,107 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert inbound_event.status == "processed"
     assert inbound_event.thread_id == thread.id
     assert outbound_event.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_sends_whatsapp_typing_indicator(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    connection.config = {
+        "allow_all_senders": True,
+        "bridge_base_url": "http://bridge.local",
+        "bridge_user_id": "95273632",
+    }
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    conversation_id = thread.conversation_id
+    agent_id = uuid4()
+    typing_calls = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_text(*args, **kwargs):
+        return "Workspace looks healthy."
+
+    async def send_provider_text_message(*args, **kwargs):
+        return {"message_id": "wa-reply-1"}
+
+    async def send_provider_typing_target(target, *, typing):
+        typing_calls.append(
+            (
+                typing,
+                target.endpoint,
+                target.active_payload if typing else target.idle_payload,
+            )
+        )
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_text", latest_assistant_text)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+    monkeypatch.setattr(service, "send_provider_typing_target", send_provider_typing_target)
+    monkeypatch.setattr(service, "PROVIDER_TYPING_REFRESH_SECONDS", 60.0)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-typing-1",
+            external_thread_id="15551234567@s.whatsapp.net",
+            external_user_id="15551234567@s.whatsapp.net",
+            external_user_display_name="Asha",
+            text="What changed today?",
+            raw={"messageId": "wa-inbound-typing-1"},
+        ),
+    )
+
+    assert processed
+    assert typing_calls == [
+        (
+            True,
+            "http://bridge.local/messages/typing",
+            {
+                "user_id": 95273632,
+                "chat_jid": "15551234567@s.whatsapp.net",
+                "typing": True,
+            },
+        ),
+        (
+            False,
+            "http://bridge.local/messages/typing",
+            {
+                "user_id": 95273632,
+                "chat_jid": "15551234567@s.whatsapp.net",
+                "typing": False,
+            },
+        ),
+    ]
 
 
 @pytest.mark.asyncio

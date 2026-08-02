@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -74,6 +75,7 @@ CHAT_PROVIDER_DUPLICATE_CONSTRAINTS = {
 PROVIDER_ASSISTANT_EMPTY_REPLY = (
     "I processed that request, but there was no text response to send back here."
 )
+PROVIDER_TYPING_REFRESH_SECONDS = 4.0
 WHATSAPP_BRIDGE_STATUS_CONNECTED = {"connected", "open", "ready", "registered", "logged_in"}
 WHATSAPP_BRIDGE_STATUS_WAITING = {
     "connecting",
@@ -118,6 +120,20 @@ class ProviderUnsupportedMessage:
 class WhatsAppBridgeTarget:
     base_url: str
     user_id: str
+
+
+@dataclass(frozen=True)
+class ProviderTypingTarget:
+    provider: str
+    endpoint: str
+    active_payload: dict[str, Any]
+    idle_payload: dict[str, Any] | None = None
+
+
+@dataclass
+class ProviderTypingHandle:
+    target: ProviderTypingTarget
+    refresh_task: asyncio.Task[None] | None = None
 
 
 def provider_config_model(
@@ -1299,6 +1315,134 @@ async def record_unsupported_provider_message(
     return True
 
 
+async def build_provider_typing_target(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    external_thread_id: str,
+) -> ProviderTypingTarget | None:
+    if connection.provider == PROVIDER_TELEGRAM:
+        bot_token_secret_handle_id = await connection_secret_handle_id(
+            session,
+            connection,
+            SECRET_BOT_TOKEN,
+            SECRET_ACCESS_TOKEN,
+        )
+        if bot_token_secret_handle_id is None:
+            return None
+        access_token = await resolve_secret(
+            session,
+            connection.organization_id,
+            bot_token_secret_handle_id,
+            workspace_id=connection.workspace_id,
+        )
+        return ProviderTypingTarget(
+            provider=connection.provider,
+            endpoint=telegram.send_chat_action_endpoint(access_token.value),
+            active_payload=telegram.typing_action_payload(chat_id=external_thread_id),
+        )
+    if connection.provider == PROVIDER_WHATSAPP_LOCAL:
+        target = whatsapp_bridge_target(connection)
+        if target is None:
+            return None
+        user_id = whatsapp_bridge_user_value(target.user_id)
+        return ProviderTypingTarget(
+            provider=connection.provider,
+            endpoint=whatsapp_bridge_url(target, "/messages/typing"),
+            active_payload=whatsapp_local.bridge_typing_payload(
+                user_id=user_id,
+                chat_id=external_thread_id,
+                typing=True,
+            ),
+            idle_payload=whatsapp_local.bridge_typing_payload(
+                user_id=user_id,
+                chat_id=external_thread_id,
+                typing=False,
+            ),
+        )
+    return None
+
+
+async def send_provider_typing_target(
+    target: ProviderTypingTarget,
+    *,
+    typing: bool,
+) -> None:
+    payload = target.active_payload if typing else target.idle_payload
+    if payload is None:
+        return
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.post(target.endpoint, json=payload)
+    if response.status_code >= 400:
+        raise ChatProviderDeliveryError(
+            f"{provider_display_name(target.provider)} typing indicator failed "
+            f"with HTTP {response.status_code}"
+        )
+
+
+async def provider_typing_refresh_loop(target: ProviderTypingTarget) -> None:
+    while True:
+        await asyncio.sleep(PROVIDER_TYPING_REFRESH_SECONDS)
+        try:
+            await send_provider_typing_target(target, typing=True)
+        except Exception:
+            logger.debug(
+                "Failed to refresh chat provider typing indicator.",
+                extra={"chat_provider": target.provider},
+                exc_info=True,
+            )
+
+
+async def start_provider_typing(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    external_thread_id: str,
+) -> ProviderTypingHandle | None:
+    try:
+        target = await build_provider_typing_target(
+            session,
+            connection,
+            external_thread_id=external_thread_id,
+        )
+        if target is None:
+            return None
+        await send_provider_typing_target(target, typing=True)
+    except Exception:
+        logger.debug(
+            "Failed to start chat provider typing indicator.",
+            extra={
+                "chat_provider_connection_id": str(connection.id),
+                "chat_provider": connection.provider,
+            },
+            exc_info=True,
+        )
+        return None
+    return ProviderTypingHandle(
+        target=target,
+        refresh_task=asyncio.create_task(provider_typing_refresh_loop(target)),
+    )
+
+
+async def stop_provider_typing(handle: ProviderTypingHandle | None) -> None:
+    if handle is None:
+        return
+    if handle.refresh_task is not None:
+        handle.refresh_task.cancel()
+        try:
+            await handle.refresh_task
+        except asyncio.CancelledError:
+            pass
+    try:
+        await send_provider_typing_target(handle.target, typing=False)
+    except Exception:
+        logger.debug(
+            "Failed to stop chat provider typing indicator.",
+            extra={"chat_provider": handle.target.provider},
+            exc_info=True,
+        )
+
+
 async def process_provider_text_message(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -1326,6 +1470,7 @@ async def process_provider_text_message(
     )
     session.add(event)
     await session.flush()
+    typing_handle: ProviderTypingHandle | None = None
     try:
         if not sender_allowed(connection, message):
             event.status = "ignored"
@@ -1344,6 +1489,11 @@ async def process_provider_text_message(
         event.conversation_id = conversation_id
         thread.last_external_message_id = message.event_id
         await session.flush()
+        typing_handle = await start_provider_typing(
+            session,
+            connection,
+            external_thread_id=message.external_thread_id,
+        )
         stream = await agent_service.stream_agent_chat(
             session,
             actor,
@@ -1360,10 +1510,13 @@ async def process_provider_text_message(
             ),
             workspace_id=connection.workspace_id,
             session_factory=session_factory,
+            trigger_type=agent_run_trigger_type(connection.provider),
         )
         await session.commit()
         async for _chunk in stream:
             pass
+        await stop_provider_typing(typing_handle)
+        typing_handle = None
         reply_text = await latest_assistant_text(session, conversation_id)
         if not reply_text:
             reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
@@ -1399,6 +1552,8 @@ async def process_provider_text_message(
         event.processed_at = datetime.now(UTC)
         await session.flush()
         raise
+    finally:
+        await stop_provider_typing(typing_handle)
     return True
 
 
@@ -1492,6 +1647,12 @@ def provider_display_name(provider: str) -> str:
     if provider == PROVIDER_WHATSAPP_LOCAL:
         return "WhatsApp"
     return "Chat provider"
+
+
+def agent_run_trigger_type(provider: str) -> str:
+    if provider == PROVIDER_WHATSAPP_LOCAL:
+        return "whatsapp"
+    return provider
 
 
 async def latest_assistant_text(session: AsyncSession, conversation_id: uuid.UUID) -> str:

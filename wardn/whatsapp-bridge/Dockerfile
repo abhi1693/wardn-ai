@@ -1,9 +1,10 @@
 FROM alpine:3.22 AS source
 
-ARG WA_MEOW_REF=ae757266b55d29f887d1bb39a50c8125ba4de24b
+ARG WA_MEOW_REPOSITORY=https://github.com/abhi1693/wa_meow
+ARG WA_MEOW_REF=c641f6528cdc205684a52f708ea5b8c6caaffad5
 RUN apk add --no-cache ca-certificates git
 WORKDIR /src
-RUN git clone https://github.com/jo-inc/wa_meow . \
+RUN git clone "$WA_MEOW_REPOSITORY" . \
     && git checkout "$WA_MEOW_REF"
 
 FROM golang:1.25-alpine AS builder

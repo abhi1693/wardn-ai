@@ -180,6 +180,19 @@ def bridge_text_payload(
     return payload
 
 
+def bridge_typing_payload(
+    *,
+    user_id: int | str,
+    chat_id: str,
+    typing: bool,
+) -> dict[str, Any]:
+    return {
+        "user_id": user_id,
+        "chat_jid": chat_id,
+        "typing": typing,
+    }
+
+
 def response_message_id(payload: dict[str, Any]) -> str:
     direct = string_field(payload, "messageId", "message_id", "id")
     if direct:
