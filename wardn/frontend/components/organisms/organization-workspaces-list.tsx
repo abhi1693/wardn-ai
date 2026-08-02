@@ -45,7 +45,7 @@ function filterLabel(filter: WorkspaceFilter) {
   return "Active";
 }
 
-function workspacePath(organizationId: string, workspaceId: string, suffix = "/chat") {
+function workspacePath(organizationId: string, workspaceId: string, suffix = "/dashboard") {
   return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
   )}${suffix}`;
@@ -267,16 +267,16 @@ export function OrganizationWorkspacesList({
 
                   <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
                     <Button onClick={() => openWorkspace(workspace)} size="sm" type="button">
-                      <MessageSquare className="size-4" />
-                      Chat
+                      <BarChart3 className="size-4" />
+                      Dashboard
                     </Button>
                     <Button asChild size="sm" variant="outline">
                       <Link
-                        href={workspacePath(organization.id, workspace.id, "/dashboard")}
+                        href={workspacePath(organization.id, workspace.id, "/chat")}
                         onClick={() => setWorkspaceContext(workspace.id)}
                       >
-                        <BarChart3 className="size-4" />
-                        Dashboard
+                        <MessageSquare className="size-4" />
+                        Chat
                       </Link>
                     </Button>
                     <Button asChild className="sm:ml-auto" size="sm" variant="ghost">
