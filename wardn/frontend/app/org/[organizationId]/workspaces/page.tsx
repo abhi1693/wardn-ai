@@ -4,20 +4,12 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { OrganizationWorkspaces } from "@/components/organisms/organization-workspaces";
-import type { OrganizationDashboardResponse } from "@/lib/api/generated/model";
-import { backendJson } from "@/lib/api/server";
+import { OrganizationWorkspacesList } from "@/components/organisms/organization-workspaces-list";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type OrganizationWorkspacesPageProps = {
   params: Promise<{ organizationId: string }>;
 };
-
-async function getOrganizationDashboard(organizationId: string) {
-  return backendJson<OrganizationDashboardResponse>(
-    `/api/v1/organizations/${encodeURIComponent(organizationId)}/dashboard?breakdownLimit=100`
-  );
-}
 
 export default async function OrganizationWorkspacesPage({
   params,
@@ -31,13 +23,16 @@ export default async function OrganizationWorkspacesPage({
     notFound();
   }
 
-  const dashboard = await getOrganizationDashboard(organization.id);
-
   return (
     <AppShell
       active="workspaces"
       actions={
         <>
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/org/${encodeURIComponent(organization.id)}/workspaces/dashboard`}>
+              Dashboard
+            </Link>
+          </Button>
           <Button asChild size="sm" variant="outline">
             <Link href="/org">Change organization</Link>
           </Button>
@@ -53,11 +48,7 @@ export default async function OrganizationWorkspacesPage({
       title="Workspaces"
       workspaceContext={workspaceContext}
     >
-      <OrganizationWorkspaces
-        dashboard={dashboard}
-        organization={organization}
-        workspaces={workspaces}
-      />
+      <OrganizationWorkspacesList organization={organization} workspaces={workspaces} />
     </AppShell>
   );
 }
