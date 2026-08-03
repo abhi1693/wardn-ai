@@ -1381,6 +1381,41 @@ def test_kubernetes_provider_runtime_spec_uses_streamable_http_transport(
     assert runtime_spec.command == "node"
 
 
+def test_kubernetes_provider_runtime_spec_does_not_require_api_path_command(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.providers.kubernetes_provider.get_settings",
+        lambda: FakeSettings(),
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: None,
+    )
+    installation = MCPServerInstallation(
+        server_name="io.github.weatherai-io/weatherai",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "npx",
+            "args": ["--offline", "weatherai"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STREAMABLE_HTTP},
+        },
+    )
+    installation.id = uuid.uuid4()
+
+    runtime_spec = KubernetesRuntimeProvider().runtime_spec(installation)
+
+    assert runtime_spec.provider_name == RUNTIME_PROVIDER_KUBERNETES
+    assert runtime_spec.transport == RUNTIME_TRANSPORT_STREAMABLE_HTTP
+    assert runtime_spec.command == "npx"
+
+
 def test_kubernetes_runtime_manifest_keeps_secret_values_only_in_secret(
     tmp_path,
     monkeypatch,

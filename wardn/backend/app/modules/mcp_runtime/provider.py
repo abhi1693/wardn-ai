@@ -300,7 +300,11 @@ def materialize_runtime_files(installation: MCPServerInstallation) -> None:
         file_path.chmod(0o600)
 
 
-def package_runtime(installation: MCPServerInstallation) -> PackageRuntimeSpec:
+def package_runtime(
+    installation: MCPServerInstallation,
+    *,
+    validate_paths: bool = True,
+) -> PackageRuntimeSpec:
     if runtime_kind(installation) != RUNTIME_KIND_PACKAGE:
         raise ValueError("installation is not a package MCP server")
 
@@ -318,12 +322,13 @@ def package_runtime(installation: MCPServerInstallation) -> PackageRuntimeSpec:
     args = [str(normalize_installed_path(arg, installation)) for arg in raw_args or []]
     raw_cwd = runtime_config.get("cwd") or installation.install_path
     cwd = str(normalize_installed_path(raw_cwd, installation))
-    if command and ("/" in command or "\\" in command) and not Path(command).exists():
-        raise ValueError(f"package MCP server command does not exist: {command}")
-    if command and "/" not in command and "\\" not in command and shutil.which(command) is None:
-        raise ValueError(f"package MCP server command was not found in PATH: {command}")
-    if cwd and not Path(cwd).exists():
-        raise ValueError(f"package MCP server working directory does not exist: {cwd}")
+    if validate_paths:
+        if command and ("/" in command or "\\" in command) and not Path(command).exists():
+            raise ValueError(f"package MCP server command does not exist: {command}")
+        if command and "/" not in command and "\\" not in command and shutil.which(command) is None:
+            raise ValueError(f"package MCP server command was not found in PATH: {command}")
+        if cwd and not Path(cwd).exists():
+            raise ValueError(f"package MCP server working directory does not exist: {cwd}")
     return PackageRuntimeSpec(
         command=command,
         args=args,

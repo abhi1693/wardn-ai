@@ -101,12 +101,12 @@ class KubernetesRuntimeProvider:
             runtime_image = command
             workload_runtime = "oci-image"
         elif is_package_native_http_runtime(runtime_config):
-            runtime = package_runtime(installation)
+            runtime = package_runtime(installation, validate_paths=False)
             command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
             runtime_image = supergateway_image(installation, settings=settings)
             workload_runtime = "package-http"
         else:
-            runtime = package_runtime(installation)
+            runtime = package_runtime(installation, validate_paths=False)
             command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
             runtime_image = supergateway_image(installation, settings=settings)
             workload_runtime = "supergateway"

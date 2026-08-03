@@ -950,7 +950,7 @@ def rewrite_runtime_file_paths(values: list[str], runtime_config: dict[str, Any]
     return [rewrite_runtime_file_path(value, runtime_config) for value in values]
 
 def supergateway_stdio_command(installation: MCPServerInstallation) -> str:
-    runtime = package_runtime(installation)
+    runtime = package_runtime(installation, validate_paths=False)
     runtime_config = installation.runtime_config or {}
     command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
     command_parts = [command, *args]
@@ -2671,7 +2671,7 @@ def build_runtime_manifests(
         )
         health_path = None
     elif is_package_native_http_runtime(runtime_config):
-        runtime = package_runtime(installation)
+        runtime = package_runtime(installation, validate_paths=False)
         command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
         container_name = KUBERNETES_MCP_SERVER_CONTAINER_NAME
         container_image = supergateway_image(installation, settings=runtime_settings)
