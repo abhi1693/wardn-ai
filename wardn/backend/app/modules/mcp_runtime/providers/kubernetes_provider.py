@@ -26,6 +26,7 @@ from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
     build_runtime_manifests,
     discover_kubernetes_network,
     is_oci_runtime,
+    is_package_native_http_runtime,
     kubernetes_runtime_process,
     oci_runtime_container_args,
     oci_runtime_image,
@@ -99,6 +100,11 @@ class KubernetesRuntimeProvider:
             cwd = ""
             runtime_image = command
             workload_runtime = "oci-image"
+        elif is_package_native_http_runtime(runtime_config):
+            runtime = package_runtime(installation)
+            command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
+            runtime_image = supergateway_image(installation, settings=settings)
+            workload_runtime = "package-http"
         else:
             runtime = package_runtime(installation)
             command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)

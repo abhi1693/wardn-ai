@@ -1179,6 +1179,58 @@ def test_install_server_runtime_uses_latest_for_npm_placeholder_version(
     assert seen["package_json"]["dependencies"] == {"kubernetes-mcp-server": "latest"}
 
 
+def test_install_server_runtime_runs_npm_streamable_http_start_script(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "@weatherai/mcp-server",
+                "version": "1.0.0",
+                "transport": {
+                    "type": "streamable-http",
+                    "command": "npm",
+                    "args": ["start"],
+                },
+                "environmentVariables": [
+                    {"name": "WEATHERAI_API_KEY", "isRequired": True, "isSecret": True},
+                ],
+            }
+        ]
+    )
+
+    def run_install_command(command, *, cwd):
+        package_path = cwd / "node_modules" / "@weatherai" / "mcp-server"
+        package_path.mkdir(parents=True, exist_ok=True)
+        (package_path / "package.json").write_text(
+            json.dumps({"scripts": {"start": "node dist/index.js"}}),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.npm.run_install_command",
+        run_install_command,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"WEATHERAI_API_KEY": "secret"},
+        install_root=tmp_path,
+    )
+
+    assert install.install_type == "npm"
+    assert install.runtime_config["command"] == "npm"
+    assert install.runtime_config["args"] == ["start"]
+    assert install.runtime_config["cwd"].endswith(
+        "node_modules/@weatherai/mcp-server"
+    )
+    assert install.secret_config == {
+        "environment": {"WEATHERAI_API_KEY": "secret"}
+    }
+
+
 def test_install_server_runtime_runs_npm_js_bin_without_shebang_with_node(
     tmp_path,
     monkeypatch,

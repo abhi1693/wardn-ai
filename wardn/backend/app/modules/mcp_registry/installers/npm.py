@@ -21,6 +21,25 @@ from app.modules.mcp_registry.installers.support import (
 from app.modules.mcp_registry.models import MCPServerVersion
 
 
+def npm_package_directory(install_path: Path, identifier: str) -> Path:
+    return install_path / "node_modules" / identifier
+
+
+def native_http_transport_process(package: dict[str, Any]) -> tuple[str, list[str]] | None:
+    transport = package.get("transport")
+    if not isinstance(transport, dict):
+        return None
+    transport_type = str(transport.get("type") or "").strip().lower().replace("-", "_")
+    if transport_type != "streamable_http":
+        return None
+    command = str(transport.get("command") or "").strip()
+    if not command:
+        return None
+    raw_args = transport.get("args")
+    args = [str(arg) for arg in raw_args] if isinstance(raw_args, list) else []
+    return command, args
+
+
 def build_npm_install(
     server: MCPServerVersion,
     package: dict[str, Any],
@@ -71,14 +90,22 @@ def build_npm_install(
         config_values,
         file_paths=file_paths,
     )
+    native_http_process = native_http_transport_process(package)
     public_package = public_package_config(package, env_vars, package_args, config_values)
     if executable and npm_bin_requires_node(executable):
         command = "node"
         runtime_args = [str(executable), *configured_args]
+        runtime_cwd = str(install_path)
     elif executable:
         runtime_args = configured_args
+        runtime_cwd = str(install_path)
+    elif native_http_process is not None:
+        command, transport_args = native_http_process
+        runtime_args = [*(transport_args or ["start"]), *configured_args]
+        runtime_cwd = str(npm_package_directory(install_path, identifier))
     else:
         runtime_args = ["--offline", identifier, *configured_args]
+        runtime_cwd = str(install_path)
     secret_config = package_secret_config(
         env_vars,
         package_args,
@@ -97,7 +124,7 @@ def build_npm_install(
         "fileMounts": runtime_mounts,
         "command": command,
         "args": runtime_args,
-        "cwd": str(install_path),
+        "cwd": runtime_cwd,
         "requiresConfiguration": False,
     }
     write_runtime_manifest(install_path, runtime_config)
@@ -119,4 +146,3 @@ class NpmInstaller:
         config_values: ConfigValues,
     ) -> MCPRuntimeInstall:
         return build_npm_install(server, package, install_path, config_values)
-

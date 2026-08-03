@@ -24,6 +24,10 @@ RUNTIME_PROVIDER_KUBERNETES = "kubernetes"
 
 RUNTIME_TRANSPORT_STDIO = "stdio"
 RUNTIME_TRANSPORT_STREAMABLE_HTTP = "streamable_http"
+SUPPORTED_PACKAGE_TRANSPORTS = {
+    RUNTIME_TRANSPORT_STDIO,
+    RUNTIME_TRANSPORT_STREAMABLE_HTTP,
+}
 WARDN_CUSTOM_HEADERS_ENV = "WARDN_MCP_CUSTOM_HEADERS"
 MCPProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -173,6 +177,19 @@ def runtime_kind(installation: MCPServerInstallation) -> str:
     return str(runtime_config.get("kind") or installation.install_type)
 
 
+def normalized_transport_type(value: Any, *, default: str = RUNTIME_TRANSPORT_STDIO) -> str:
+    if not isinstance(value, dict):
+        return default
+    raw_value = str(value.get("type") or default).strip().lower().replace("-", "_")
+    return raw_value or default
+
+
+def package_transport_type(runtime_config: dict[str, Any]) -> str:
+    package = runtime_config.get("package")
+    package_transport = package.get("transport") if isinstance(package, dict) else None
+    return normalized_transport_type(package_transport or runtime_config.get("transport"))
+
+
 def remote_url(installation: MCPServerInstallation) -> str:
     runtime_config = installation.runtime_config or {}
     transport = runtime_config.get("transport")
@@ -289,9 +306,9 @@ def package_runtime(installation: MCPServerInstallation) -> PackageRuntimeSpec:
 
     materialize_runtime_files(installation)
     runtime_config = installation.runtime_config or {}
-    transport = runtime_config.get("transport")
-    if isinstance(transport, dict) and transport.get("type") not in (None, RUNTIME_TRANSPORT_STDIO):
-        raise ValueError("only stdio package MCP server transports can be proxied right now")
+    transport_type = package_transport_type(runtime_config)
+    if transport_type not in SUPPORTED_PACKAGE_TRANSPORTS:
+        raise ValueError(f"unsupported package MCP server transport: {transport_type}")
 
     command = str(normalize_installed_path(runtime_config.get("command") or "", installation))
     if not command:

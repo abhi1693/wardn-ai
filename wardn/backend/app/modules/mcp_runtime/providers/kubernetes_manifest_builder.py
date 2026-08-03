@@ -6,6 +6,7 @@ import socket
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from app.core.config import get_settings
@@ -13,8 +14,10 @@ from app.modules.mcp_registry.models import MCPServerInstallation
 from app.modules.mcp_registry.python_runtime import resolve_python_runtime_requirement
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
+    RUNTIME_TRANSPORT_STREAMABLE_HTTP,
     fingerprint_payload,
     package_runtime,
+    package_transport_type,
     secret_environment,
     secret_fingerprint_payload,
     secret_headers,
@@ -307,6 +310,64 @@ def package_registry_remote_destinations(
     return [dict(destination) for destination in destinations]
 
 
+def remote_destination_from_url(value: Any, *, label: str = "") -> dict[str, str | int] | None:
+    raw_url = str(value or "").strip()
+    if not raw_url:
+        return None
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    return {
+        "label": label or parsed.hostname,
+        "host": parsed.hostname,
+        "port": parsed.port or (80 if parsed.scheme == "http" else 443),
+    }
+
+
+def package_transport_remote_destinations(
+    runtime_config: dict[str, Any],
+) -> list[dict[str, str | int]]:
+    package = runtime_config.get("package")
+    raw_transports = [runtime_config.get("transport")]
+    if isinstance(package, dict):
+        raw_transports.append(package.get("transport"))
+
+    destinations: list[dict[str, str | int]] = []
+    for transport in raw_transports:
+        if not isinstance(transport, dict):
+            continue
+        if destination := remote_destination_from_url(transport.get("url")):
+            destinations.append(destination)
+        env = transport.get("env")
+        if isinstance(env, dict):
+            for name, value in env.items():
+                destination = remote_destination_from_url(value, label=str(name))
+                if destination is not None:
+                    destinations.append(destination)
+    return destinations
+
+
+def package_transport_env_values(runtime_config: dict[str, Any]) -> dict[str, str]:
+    package = runtime_config.get("package")
+    raw_transports = [runtime_config.get("transport")]
+    if isinstance(package, dict):
+        raw_transports.append(package.get("transport"))
+
+    env_values: dict[str, str] = {}
+    for transport in raw_transports:
+        if not isinstance(transport, dict):
+            continue
+        env = transport.get("env")
+        if not isinstance(env, dict):
+            continue
+        for name, value in env.items():
+            key = str(name or "").strip()
+            env_value = str(value or "").strip()
+            if key and env_value:
+                env_values[key] = env_value
+    return env_values
+
+
 def merge_remote_destinations(
     *destination_groups: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -373,6 +434,9 @@ def network_policy_config(
     if allow_remote_mcp_egress:
         remote_destinations = merge_remote_destinations(
             normalize_remote_mcp_destinations(raw_config.get("remoteDestinations")),
+            normalize_remote_mcp_destinations(
+                package_transport_remote_destinations(runtime_config)
+            ),
             normalize_remote_mcp_destinations(
                 package_registry_remote_destinations(installation, runtime_config)
             ),
@@ -1088,14 +1152,29 @@ def strip_npm_launcher_args(args: list[str], identifier: str) -> list[str]:
         remaining = remaining[1:]
     return remaining
 
+def transport_process_command(transport: Any) -> tuple[str, list[str]]:
+    if not isinstance(transport, dict):
+        return "", []
+    raw_args = transport.get("args")
+    args = [str(arg) for arg in raw_args] if isinstance(raw_args, list) else []
+    return str(transport.get("command") or "").strip(), args
+
+
 def stdio_transport_command(transport: Any) -> tuple[str, list[str]]:
     if not isinstance(transport, dict):
         return "", []
     if str(transport.get("type") or "stdio").strip().lower() not in {"", "stdio"}:
         return "", []
-    raw_args = transport.get("args")
-    args = [str(arg) for arg in raw_args] if isinstance(raw_args, list) else []
-    return str(transport.get("command") or "").strip(), args
+    return transport_process_command(transport)
+
+
+def is_package_native_http_runtime(runtime_config: dict[str, Any]) -> bool:
+    return package_transport_type(runtime_config) == RUNTIME_TRANSPORT_STREAMABLE_HTTP
+
+
+def npm_package_directory(identifier: str) -> str:
+    return f"{KUBERNETES_NPM_PACKAGE_MOUNT_PATH}/node_modules/{identifier}"
+
 
 PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
 
@@ -1234,6 +1313,28 @@ def kubernetes_runtime_process(
         )
 
     if package_registry_type == "npm" and identifier:
+        if is_package_native_http_runtime(runtime_config):
+            package = runtime_config.get("package")
+            package_transport = package.get("transport") if isinstance(package, dict) else None
+            transport_command, transport_args = transport_process_command(
+                package_transport or runtime_config.get("transport")
+            )
+            command_name = Path(transport_command or runtime.command).name
+            configured_args = transport_args if transport_command else runtime.args
+            package_directory = npm_package_directory(identifier)
+            if command_name == "npm":
+                return (
+                    "npm",
+                    rewrite_runtime_file_paths(configured_args or ["start"], runtime_config),
+                    package_directory,
+                )
+            if transport_command:
+                return (
+                    command_name,
+                    rewrite_runtime_file_paths(configured_args, runtime_config),
+                    package_directory,
+                )
+
         command_name = Path(runtime.command).name
         if command_name == "node" and runtime.args:
             configured_args = runtime.args[1:]
@@ -1637,7 +1738,10 @@ def build_pod_template_manifest(
     container_name: str,
     container_image: str,
     container_port: int,
+    container_command: list[str] | None = None,
     container_args: list[str],
+    container_working_dir: str | None = None,
+    container_env_values: dict[str, str] | None = None,
     init_containers: list[Any] | None = None,
     volumes: list[Any] | None = None,
     volume_mounts: list[Any] | None = None,
@@ -1659,6 +1763,12 @@ def build_pod_template_manifest(
         client.V1LocalObjectReference(name=name)
         for name in (image_pull_secret_names or [])
     ]
+    explicit_env_vars = [
+        client.V1EnvVar(name=name, value=value)
+        for name, value in (container_env_values or {}).items()
+    ]
+    explicit_env_names = {env.name for env in explicit_env_vars}
+    effective_secret_keys = [key for key in secret_keys if key not in explicit_env_names]
     for init_container in init_containers or []:
         if getattr(init_container, "resources", None) is None:
             init_container.resources = resources
@@ -1689,7 +1799,9 @@ def build_pod_template_manifest(
                 client.V1Container(
                     name=container_name,
                     image=container_image,
+                    command=container_command,
                     args=container_args,
+                    working_dir=container_working_dir,
                     ports=[
                         client.V1ContainerPort(
                             container_port=container_port,
@@ -1700,9 +1812,10 @@ def build_pod_template_manifest(
                         *sandbox_env_vars,
                         *secret_env_vars(
                             names=names,
-                            keys=secret_keys,
+                            keys=effective_secret_keys,
                             client_module=client,
                         ),
+                        *explicit_env_vars,
                     ],
                     resources=resources,
                     security_context=container_security_context,
@@ -2532,7 +2645,10 @@ def build_runtime_manifests(
     file_mounts = runtime_file_mounts(runtime_config)
     container_name = KUBERNETES_GATEWAY_CONTAINER_NAME
     container_image = ""
+    container_command: list[str] | None = None
     container_args: list[str] = []
+    container_working_dir: str | None = None
+    container_env_values: dict[str, str] = {}
     health_path: str | None = KUBERNETES_SUPERGATEWAY_HEALTH_PATH
     package_volumes = [runtime_tmp_volume(runtime_settings, client_module=client)]
     package_volume_mounts = [runtime_tmp_volume_mount(client)]
@@ -2554,32 +2670,45 @@ def build_runtime_manifests(
             port=runtime_settings.mcp_runtime_kubernetes_service_port,
         )
         health_path = None
+    elif is_package_native_http_runtime(runtime_config):
+        runtime = package_runtime(installation)
+        command, args, cwd = kubernetes_runtime_process(runtime, runtime_config)
+        container_name = KUBERNETES_MCP_SERVER_CONTAINER_NAME
+        container_image = supergateway_image(installation, settings=runtime_settings)
+        container_command = [command]
+        container_args = args
+        container_working_dir = cwd or None
+        container_env_values = {
+            **package_transport_env_values(runtime_config),
+            "PORT": str(runtime_settings.mcp_runtime_kubernetes_service_port),
+        }
+        health_path = None
     else:
         container_image = supergateway_image(installation, settings=runtime_settings)
         container_args = supergateway_container_args(
             installation,
             gateway_port=runtime_settings.mcp_runtime_kubernetes_service_port,
         )
-        if npm_package_volume_required(runtime_config):
-            package_volumes.append(npm_package_volume(client))
-            package_volume_mounts.append(npm_package_volume_mount(client))
-            init_containers.append(
-                npm_package_init_container(
-                    installation=installation,
-                    image=container_image,
-                    resources=runtime_container_resources(
-                        runtime_settings,
-                        client_module=client,
-                    ),
-                    env=runtime_sandbox_env_vars(client),
-                    security_context=runtime_container_security_context(
-                        runtime_settings,
-                        client_module=client,
-                    ),
-                    extra_volume_mounts=[runtime_tmp_volume_mount(client)],
+    if not is_oci_runtime(runtime_config) and npm_package_volume_required(runtime_config):
+        package_volumes.append(npm_package_volume(client))
+        package_volume_mounts.append(npm_package_volume_mount(client))
+        init_containers.append(
+            npm_package_init_container(
+                installation=installation,
+                image=container_image,
+                resources=runtime_container_resources(
+                    runtime_settings,
                     client_module=client,
-                )
+                ),
+                env=runtime_sandbox_env_vars(client),
+                security_context=runtime_container_security_context(
+                    runtime_settings,
+                    client_module=client,
+                ),
+                extra_volume_mounts=[runtime_tmp_volume_mount(client)],
+                client_module=client,
             )
+        )
     pod_template = build_pod_template_manifest(
         names=names,
         labels=workload_labels,
@@ -2591,7 +2720,10 @@ def build_runtime_manifests(
         container_name=container_name,
         container_image=container_image,
         container_port=runtime_settings.mcp_runtime_kubernetes_service_port,
+        container_command=container_command,
         container_args=container_args,
+        container_working_dir=container_working_dir,
+        container_env_values=container_env_values,
         init_containers=init_containers,
         volumes=package_volumes,
         volume_mounts=package_volume_mounts,

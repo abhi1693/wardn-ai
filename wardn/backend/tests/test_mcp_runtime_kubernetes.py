@@ -50,6 +50,9 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     runtime_service_endpoint_url,
     safe_kubernetes_name,
 )
+from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
+    package_transport_remote_destinations,
+)
 
 
 class FakeKubernetesConfig:
@@ -1863,6 +1866,116 @@ def test_kubernetes_runtime_manifest_installs_npm_package_in_init_container(
     ]
     assert init_container.resources.requests == {"cpu": "100m", "memory": "256Mi"}
     assert init_container.resources.limits == {"cpu": "1", "memory": "1Gi"}
+
+
+def test_kubernetes_runtime_manifest_runs_npm_streamable_http_package_directly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/npm" if command == "npm" else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.weatherai-io/weatherai",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "npm",
+            "command": "npm",
+            "args": ["start"],
+            "cwd": str(tmp_path),
+            "package": {
+                "identifier": "@weatherai/mcp-server",
+                "version": "1.0.0",
+            },
+            "transport": {
+                "type": "streamable-http",
+                "command": "npm",
+                "args": ["start"],
+                "env": {"WEATHERAI_BASE_URL": "https://api.weatherai.io"},
+            },
+        },
+        secret_references={
+            "environment": {
+                "PORT": "3000",
+                "WEATHERAI_API_KEY": "secret",
+            }
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    container = manifest.pod.spec.containers[0]
+    env_by_name = {env.name: env for env in container.env}
+
+    assert container.name == "mcp-server"
+    assert container.image == "registry.example/supergateway:test"
+    assert container.command == ["npm"]
+    assert container.args == ["start"]
+    assert (
+        container.working_dir
+        == "/opt/wardn/npm-package/node_modules/@weatherai/mcp-server"
+    )
+    assert env_by_name["PORT"].value == "8000"
+    assert env_by_name["WEATHERAI_BASE_URL"].value == "https://api.weatherai.io"
+    assert [env.name for env in container.env].count("PORT") == 1
+    assert env_by_name["WEATHERAI_API_KEY"].value_from.secret_key_ref.key == "WEATHERAI_API_KEY"
+    assert manifest.secret.string_data == {
+        "PORT": "3000",
+        "WEATHERAI_API_KEY": "secret",
+    }
+    assert manifest.pod.spec.init_containers[0].name == "install-npm-package"
+    assert manifest.health_path is None
+    assert not hasattr(container, "readiness_probe")
+
+
+def test_package_transport_remote_destinations_include_urls_and_env_defaults() -> None:
+    destinations = package_transport_remote_destinations(
+        {
+            "transport": {
+                "type": "streamable-http",
+                "url": "https://api.weatherai.io/mcp?apiKey=placeholder",
+                "env": {
+                    "WEATHERAI_BASE_URL": "https://api.weatherai.io",
+                    "EMPTY": "",
+                    "NOT_A_URL": "api.weatherai.io",
+                },
+            }
+        }
+    )
+
+    assert destinations == [
+        {"label": "api.weatherai.io", "host": "api.weatherai.io", "port": 443},
+        {"label": "WEATHERAI_BASE_URL", "host": "api.weatherai.io", "port": 443},
+    ]
 
 
 def test_kubernetes_runtime_manifest_runs_oci_image_directly(
