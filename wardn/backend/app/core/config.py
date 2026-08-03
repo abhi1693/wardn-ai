@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     chat_provider_event_worker_retry_base_seconds: float = Field(default=2.0, gt=0, le=300)
     chat_provider_event_worker_retry_max_seconds: float = Field(default=30.0, gt=0, le=600)
     chat_provider_whatsapp_bridge_base_url: str = Field(default="", max_length=2048)
+    scheduled_task_worker_enabled: bool = True
+    scheduled_task_worker_poll_interval_seconds: float = Field(default=10.0, gt=0, le=300)
+    scheduled_task_worker_lease_seconds: int = Field(default=300, ge=10, le=3600)
+    scheduled_task_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
+    scheduled_task_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
+    scheduled_task_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
     agent_chat_websocket_response_timeout_seconds: float = Field(
         default=120.0,
         gt=0,

@@ -27,6 +27,7 @@ from app.modules.observability.router import (
     workspace_router as workspace_observability_router,
 )
 from app.modules.organizations.router import router as organizations_router
+from app.modules.scheduled_tasks.router import workspace_router as workspace_scheduled_tasks_router
 from app.modules.secrets.router import router as secrets_router
 from app.modules.users.auth_router import router as auth_router
 from app.modules.users.router import router as users_router
@@ -48,6 +49,7 @@ api_router.include_router(workspace_agents_router)
 api_router.include_router(workspace_agent_runs_router)
 api_router.include_router(workspace_skills_router)
 api_router.include_router(workspace_chat_providers_router)
+api_router.include_router(workspace_scheduled_tasks_router)
 api_router.include_router(chat_provider_webhook_router)
 api_router.include_router(organization_catalog_router)
 api_router.include_router(organization_mcp_registry_router)

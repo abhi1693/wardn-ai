@@ -1,0 +1,483 @@
+import uuid
+from datetime import datetime, timedelta
+from typing import Any
+
+from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
+from app.modules.scheduled_tasks.models import (
+    WorkspaceScheduledTask,
+    WorkspaceScheduledTaskDelivery,
+    WorkspaceScheduledTaskRun,
+)
+
+ACTIVE_RUN_STATUSES = ("queued", "running")
+
+
+async def list_tasks(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> list[WorkspaceScheduledTask]:
+    result = await session.execute(
+        select(WorkspaceScheduledTask)
+        .where(
+            WorkspaceScheduledTask.organization_id == organization_id,
+            WorkspaceScheduledTask.workspace_id == workspace_id,
+        )
+        .order_by(
+            WorkspaceScheduledTask.is_active.desc(),
+            WorkspaceScheduledTask.next_run_at.asc().nulls_last(),
+            WorkspaceScheduledTask.created_at.desc(),
+            WorkspaceScheduledTask.id.desc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_task(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> WorkspaceScheduledTask | None:
+    result = await session.execute(
+        select(WorkspaceScheduledTask).where(
+            WorkspaceScheduledTask.id == task_id,
+            WorkspaceScheduledTask.organization_id == organization_id,
+            WorkspaceScheduledTask.workspace_id == workspace_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_task_by_name(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    name: str,
+) -> WorkspaceScheduledTask | None:
+    result = await session.execute(
+        select(WorkspaceScheduledTask).where(
+            WorkspaceScheduledTask.workspace_id == workspace_id,
+            WorkspaceScheduledTask.name == name,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_task(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    created_by_id: uuid.UUID | None,
+    name: str,
+    instructions: str,
+    schedule_type: str,
+    schedule_config: dict,
+    timezone: str,
+    output_routes: list[dict],
+    conversation_policy: str,
+    is_active: bool,
+    next_run_at: datetime | None,
+    max_attempts: int,
+) -> WorkspaceScheduledTask:
+    task = WorkspaceScheduledTask(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        created_by_id=created_by_id,
+        name=name,
+        instructions=instructions,
+        schedule_type=schedule_type,
+        schedule_config=schedule_config,
+        timezone=timezone,
+        output_routes=output_routes,
+        conversation_policy=conversation_policy,
+        is_active=is_active,
+        next_run_at=next_run_at if is_active else None,
+        last_status="",
+        last_error="",
+        max_attempts=max_attempts,
+    )
+    session.add(task)
+    await session.flush()
+    await session.refresh(task)
+    return task
+
+
+async def delete_task(session: AsyncSession, task: WorkspaceScheduledTask) -> None:
+    await session.delete(task)
+    await session.flush()
+
+
+async def list_task_runs(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
+    limit: int = 50,
+) -> list[WorkspaceScheduledTaskRun]:
+    statement = select(WorkspaceScheduledTaskRun).where(
+        WorkspaceScheduledTaskRun.organization_id == organization_id,
+        WorkspaceScheduledTaskRun.workspace_id == workspace_id,
+    )
+    if task_id is not None:
+        statement = statement.where(WorkspaceScheduledTaskRun.task_id == task_id)
+    result = await session.execute(
+        statement.order_by(
+            WorkspaceScheduledTaskRun.scheduled_for.desc(),
+            WorkspaceScheduledTaskRun.created_at.desc(),
+            WorkspaceScheduledTaskRun.id.desc(),
+        ).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_run_deliveries(
+    session: AsyncSession,
+    *,
+    run_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[WorkspaceScheduledTaskDelivery]]:
+    if not run_ids:
+        return {}
+    result = await session.execute(
+        select(WorkspaceScheduledTaskDelivery)
+        .where(WorkspaceScheduledTaskDelivery.task_run_id.in_(run_ids))
+        .order_by(
+            WorkspaceScheduledTaskDelivery.created_at.asc(),
+            WorkspaceScheduledTaskDelivery.id.asc(),
+        )
+    )
+    deliveries: dict[uuid.UUID, list[WorkspaceScheduledTaskDelivery]] = {}
+    for delivery in result.scalars().all():
+        deliveries.setdefault(delivery.task_run_id, []).append(delivery)
+    return deliveries
+
+
+def task_has_active_run_condition(candidate) -> Any:
+    active_run = aliased(WorkspaceScheduledTaskRun)
+    return exists(
+        select(active_run.id).where(
+            active_run.task_id == candidate.id,
+            active_run.status.in_(ACTIVE_RUN_STATUSES),
+        )
+    ).correlate(candidate)
+
+
+def due_task_statement(now: datetime, *, limit: int = 25):
+    candidate = aliased(WorkspaceScheduledTask)
+    return (
+        select(candidate)
+        .where(
+            candidate.is_active.is_(True),
+            candidate.schedule_type != "manual",
+            candidate.next_run_at.is_not(None),
+            candidate.next_run_at <= now,
+            ~task_has_active_run_condition(candidate),
+        )
+        .order_by(candidate.next_run_at.asc(), candidate.created_at.asc(), candidate.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+
+
+async def enqueue_due_runs(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    next_run_for_task,
+    limit: int = 25,
+) -> int:
+    result = await session.execute(due_task_statement(now, limit=limit))
+    tasks = list(result.scalars().all())
+    for task in tasks:
+        scheduled_for = task.next_run_at or now
+        run = WorkspaceScheduledTaskRun(
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            task_id=task.id,
+            agent_id=task.agent_id,
+            requested_by_id=task.created_by_id,
+            trigger_source="scheduled",
+            status="queued",
+            scheduled_for=scheduled_for,
+            available_at=now,
+            attempt_count=0,
+            max_attempts=task.max_attempts,
+            error="",
+            delivery_summary={},
+        )
+        session.add(run)
+        task.last_run_at = now
+        task.last_status = "queued"
+        task.last_error = ""
+        task.next_run_at = next_run_for_task(task, scheduled_for)
+    await session.flush()
+    return len(tasks)
+
+
+async def create_task_run(
+    session: AsyncSession,
+    *,
+    task: WorkspaceScheduledTask,
+    scheduled_for: datetime,
+    available_at: datetime,
+    trigger_source: str,
+    requested_by_id: uuid.UUID | None,
+) -> WorkspaceScheduledTaskRun:
+    run = WorkspaceScheduledTaskRun(
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        task_id=task.id,
+        agent_id=task.agent_id,
+        requested_by_id=requested_by_id,
+        trigger_source=trigger_source,
+        status="queued",
+        scheduled_for=scheduled_for,
+        available_at=available_at,
+        attempt_count=0,
+        max_attempts=task.max_attempts,
+        error="",
+        delivery_summary={},
+    )
+    session.add(run)
+    task.last_run_at = available_at
+    task.last_status = "queued"
+    task.last_error = ""
+    await session.flush()
+    await session.refresh(run)
+    return run
+
+
+def claimable_run_statement(now: datetime):
+    candidate = aliased(WorkspaceScheduledTaskRun)
+    blocker = aliased(WorkspaceScheduledTaskRun)
+    earlier_active_run = exists(
+        select(blocker.id).where(
+            blocker.task_id == candidate.task_id,
+            blocker.status.in_(ACTIVE_RUN_STATUSES),
+            or_(
+                blocker.scheduled_for < candidate.scheduled_for,
+                and_(
+                    blocker.scheduled_for == candidate.scheduled_for,
+                    blocker.id < candidate.id,
+                ),
+            ),
+        )
+    ).correlate(candidate)
+    return (
+        select(candidate)
+        .where(
+            candidate.status == "queued",
+            candidate.available_at <= now,
+            ~earlier_active_run,
+        )
+        .order_by(candidate.available_at.asc(), candidate.scheduled_for.asc(), candidate.id.asc())
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+
+
+async def claim_next_run(
+    session: AsyncSession,
+    *,
+    worker_id: str,
+    now: datetime,
+    lease_seconds: int,
+) -> WorkspaceScheduledTaskRun | None:
+    result = await session.execute(claimable_run_statement(now))
+    run = result.scalar_one_or_none()
+    if run is None:
+        return None
+    run.status = "running"
+    run.worker_id = worker_id
+    run.lease_expires_at = now + timedelta(seconds=lease_seconds)
+    run.attempt_count += 1
+    run.started_at = run.started_at or now
+    run.error = ""
+    await session.flush()
+    return run
+
+
+async def heartbeat_run(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    *,
+    worker_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await session.execute(
+        update(WorkspaceScheduledTaskRun)
+        .where(
+            WorkspaceScheduledTaskRun.id == run_id,
+            WorkspaceScheduledTaskRun.status == "running",
+            WorkspaceScheduledTaskRun.worker_id == worker_id,
+        )
+        .values(lease_expires_at=lease_expires_at)
+    )
+    return result.rowcount == 1
+
+
+async def get_owned_running_run(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    *,
+    worker_id: str,
+) -> WorkspaceScheduledTaskRun | None:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskRun)
+        .where(
+            WorkspaceScheduledTaskRun.id == run_id,
+            WorkspaceScheduledTaskRun.status == "running",
+            WorkspaceScheduledTaskRun.worker_id == worker_id,
+        )
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
+async def complete_run(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    *,
+    worker_id: str,
+    now: datetime,
+    status: str,
+    error: str,
+    agent_run_id: uuid.UUID | None,
+    conversation_id: uuid.UUID | None,
+    delivery_summary: dict,
+) -> bool:
+    run = await get_owned_running_run(session, run_id, worker_id=worker_id)
+    if run is None:
+        return False
+    run.status = status
+    run.error = error
+    run.finished_at = now
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.agent_run_id = agent_run_id
+    run.conversation_id = conversation_id
+    run.delivery_summary = delivery_summary
+    task = await session.get(WorkspaceScheduledTask, run.task_id)
+    if task is not None:
+        task.last_status = status
+        task.last_error = error
+        task.last_task_run_id = run.id
+        task.last_agent_run_id = agent_run_id
+        if conversation_id is not None and task.conversation_policy == "reuse":
+            task.conversation_id = conversation_id
+    await session.flush()
+    return True
+
+
+async def retry_or_fail_run(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    *,
+    worker_id: str,
+    now: datetime,
+    retry_at: datetime,
+    error_message: str,
+) -> str | None:
+    run = await get_owned_running_run(session, run_id, worker_id=worker_id)
+    if run is None:
+        return None
+    retryable = run.attempt_count < run.max_attempts
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.error = error_message
+    if retryable:
+        run.status = "queued"
+        run.available_at = retry_at
+        run.finished_at = None
+    else:
+        run.status = "failed"
+        run.finished_at = now
+        task = await session.get(WorkspaceScheduledTask, run.task_id)
+        if task is not None:
+            task.last_status = "failed"
+            task.last_error = error_message
+            task.last_task_run_id = run.id
+            task.last_agent_run_id = run.agent_run_id
+    await session.flush()
+    return run.status
+
+
+async def recover_expired_leases(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int = 100,
+) -> int:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskRun)
+        .where(
+            WorkspaceScheduledTaskRun.status == "running",
+            WorkspaceScheduledTaskRun.lease_expires_at <= now,
+        )
+        .order_by(WorkspaceScheduledTaskRun.lease_expires_at.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    recovered = 0
+    for run in result.scalars().all():
+        retryable = run.attempt_count < run.max_attempts
+        run.status = "queued" if retryable else "failed"
+        run.available_at = now
+        run.finished_at = None if retryable else now
+        run.worker_id = ""
+        run.lease_expires_at = None
+        run.error = "The scheduled task worker stopped renewing its lease"
+        if not retryable:
+            task = await session.get(WorkspaceScheduledTask, run.task_id)
+            if task is not None:
+                task.last_status = "failed"
+                task.last_error = run.error
+                task.last_task_run_id = run.id
+        recovered += 1
+    return recovered
+
+
+async def add_delivery(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    task_run_id: uuid.UUID,
+    route_type: str,
+    status: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str = "",
+    external_thread_id: str = "",
+    display_name: str = "",
+    payload: dict | None = None,
+    error: str = "",
+    delivered_at: datetime | None = None,
+) -> WorkspaceScheduledTaskDelivery:
+    delivery = WorkspaceScheduledTaskDelivery(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        task_run_id=task_run_id,
+        connection_id=connection_id,
+        route_type=route_type,
+        provider=provider,
+        external_thread_id=external_thread_id,
+        display_name=display_name,
+        status=status,
+        payload=payload or {},
+        error=error,
+        delivered_at=delivered_at,
+    )
+    session.add(delivery)
+    await session.flush()
+    return delivery

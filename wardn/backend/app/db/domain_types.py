@@ -49,6 +49,33 @@ class ChatProviderEventStatus(StrEnum):
     SENT = "sent"
 
 
+class WorkspaceScheduledTaskScheduleType(StrEnum):
+    MANUAL = "manual"
+    INTERVAL = "interval"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+class WorkspaceScheduledTaskConversationPolicy(StrEnum):
+    REUSE = "reuse"
+    NEW_EACH_RUN = "new_each_run"
+
+
+class WorkspaceScheduledTaskRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    WAITING_CONFIRMATION = "waiting_confirmation"
+
+
+class WorkspaceScheduledTaskDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class LLMProviderVisibility(StrEnum):
     ORGANIZATION = "organization"
     WORKSPACE = "workspace"

@@ -67,6 +67,11 @@ from app.modules.organizations.exceptions import (
     WorkspaceAccessDeniedError,
     WorkspaceNotFoundError,
 )
+from app.modules.scheduled_tasks.exceptions import (
+    DuplicateScheduledTaskError,
+    InvalidScheduledTaskError,
+    ScheduledTaskNotFoundError,
+)
 from app.modules.secrets.exceptions import (
     DuplicateSecretHandleError,
     DuplicateSecretStoreError,
@@ -162,6 +167,9 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     MCPOperationJobNotFoundError: _definition(404, "mcp_operation_job_not_found"),
     MCPRuntimeSessionNotFoundError: _definition(404, "mcp_runtime_session_not_found"),
     KubernetesRuntimeProviderError: _definition(502, "mcp_runtime_provider_error"),
+    ScheduledTaskNotFoundError: _definition(404, "scheduled_task_not_found"),
+    DuplicateScheduledTaskError: _definition(409, "scheduled_task_already_exists"),
+    InvalidScheduledTaskError: _definition(400, "invalid_scheduled_task"),
     InvalidCursorError: _definition(400, "invalid_cursor"),
     DuplicateUserError: _definition(409, "user_already_exists"),
     BootstrapUserExistsError: _definition(409, "bootstrap_user_already_exists"),

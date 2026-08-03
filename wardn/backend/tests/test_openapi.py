@@ -167,6 +167,22 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/runs"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/{task_id}"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/{task_id}/runs"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/skills"
             ),
             (
@@ -640,6 +656,54 @@ def test_workspace_chat_providers_openapi_contract() -> None:
         "schema"
     ] == {
         "$ref": "#/components/schemas/ChatProviderWebhookResponse"
+    }
+
+
+def test_workspace_scheduled_tasks_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    tasks = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks"
+        )
+    ]
+    task = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/{task_id}"
+        )
+    ]
+    runs = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/runs"
+        )
+    ]
+    run_now = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/{task_id}/runs"
+        )
+    ]
+
+    assert tasks["get"]["operationId"] == "workspace_scheduled_tasks_list"
+    assert tasks["post"]["operationId"] == "workspace_scheduled_tasks_create"
+    assert tasks["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskListResponse"
+    }
+    assert tasks["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskCreate"
+    }
+    assert task["get"]["operationId"] == "workspace_scheduled_tasks_get"
+    assert task["patch"]["operationId"] == "workspace_scheduled_tasks_update"
+    assert task["delete"]["operationId"] == "workspace_scheduled_tasks_delete"
+    assert runs["get"]["operationId"] == "workspace_scheduled_tasks_list_runs"
+    assert runs["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskRunListResponse"
+    }
+    assert run_now["post"]["operationId"] == "workspace_scheduled_tasks_run_now"
+    assert run_now["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskRunRead"
     }
 
 

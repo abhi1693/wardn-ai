@@ -20,6 +20,10 @@ from app.modules.mcp_registry.job_worker import (
 )
 from app.modules.mcp_runtime.reaper import start_runtime_reaper, stop_runtime_reaper
 from app.modules.mcp_runtime.warmup import start_runtime_warmup, stop_runtime_warmup
+from app.modules.scheduled_tasks.worker import (
+    run_scheduled_task_worker_loop,
+    run_scheduled_task_worker_once,
+)
 from app.modules.secrets.cleanup_worker import (
     run_cleanup_worker_loop,
     run_cleanup_worker_once,
@@ -45,10 +49,21 @@ def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float
         raise ValueError("MCP job worker lease must be at least 2 seconds")
     if not 0 < settings.mcp_job_worker_heartbeat_seconds < settings.mcp_job_worker_lease_seconds:
         raise ValueError("MCP job worker heartbeat must be shorter than its lease")
+    if not (
+        0
+        < settings.scheduled_task_worker_heartbeat_seconds
+        < settings.scheduled_task_worker_lease_seconds
+    ):
+        raise ValueError("scheduled task worker heartbeat must be shorter than its lease")
     if settings.mcp_job_worker_retry_base_seconds < 1:
         raise ValueError("MCP job worker retry base must be at least 1 second")
     if settings.mcp_job_worker_retry_max_seconds < settings.mcp_job_worker_retry_base_seconds:
         raise ValueError("MCP job worker retry maximum must not be shorter than its base")
+    if (
+        settings.scheduled_task_worker_retry_max_seconds
+        < settings.scheduled_task_worker_retry_base_seconds
+    ):
+        raise ValueError("scheduled task worker retry maximum must not be shorter than its base")
     if (
         settings.environment.strip().casefold() != "local"
         and settings.mcp_job_worker_isolation != "container"
@@ -81,6 +96,17 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
     if args.once:
         worked = await run_job_worker_once(**kwargs)
         if not worked:
+            scheduled_worked = False
+            if settings.scheduled_task_worker_enabled:
+                scheduled_worked = await run_scheduled_task_worker_once(
+                    worker_id=f"{worker_id}:scheduled",
+                    lease_seconds=settings.scheduled_task_worker_lease_seconds,
+                    heartbeat_seconds=settings.scheduled_task_worker_heartbeat_seconds,
+                    retry_base_seconds=settings.scheduled_task_worker_retry_base_seconds,
+                    retry_max_seconds=settings.scheduled_task_worker_retry_max_seconds,
+                )
+            if scheduled_worked:
+                return 0
             await run_cleanup_worker_once(
                 worker_id=f"{worker_id}:secrets",
                 lease_seconds=settings.secret_cleanup_worker_lease_seconds,
@@ -110,6 +136,19 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
             ),
             name="chat-provider-events",
         )
+    scheduled_task: asyncio.Task[None] | None = None
+    if settings.scheduled_task_worker_enabled:
+        scheduled_task = asyncio.create_task(
+            run_scheduled_task_worker_loop(
+                worker_id=f"{worker_id}:scheduled",
+                poll_interval_seconds=settings.scheduled_task_worker_poll_interval_seconds,
+                lease_seconds=settings.scheduled_task_worker_lease_seconds,
+                heartbeat_seconds=settings.scheduled_task_worker_heartbeat_seconds,
+                retry_base_seconds=settings.scheduled_task_worker_retry_base_seconds,
+                retry_max_seconds=settings.scheduled_task_worker_retry_max_seconds,
+            ),
+            name="scheduled-tasks",
+        )
     warmup_task = start_runtime_warmup(
         concurrency=settings.mcp_runtime_warm_startup_concurrency,
     )
@@ -129,6 +168,10 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
             chat_provider_event_task.cancel()
             with suppress(asyncio.CancelledError):
                 await chat_provider_event_task
+        if scheduled_task is not None:
+            scheduled_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduled_task
         await stop_runtime_warmup(warmup_task)
         await stop_runtime_reaper(reaper_task)
     return 0

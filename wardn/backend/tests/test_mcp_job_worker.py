@@ -345,6 +345,10 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
         seen.update(kwargs)
         return True
 
+    async def no_scheduled_task(**kwargs):
+        seen["scheduled"] = kwargs
+        return False
+
     monkeypatch.setattr(job_commands, "get_settings", lambda: settings)
     monkeypatch.setattr(
         job_commands,
@@ -352,6 +356,7 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
         lambda: job_worker.MCPJobHandlers(executors={}, cleanup_executors={}),
     )
     monkeypatch.setattr(job_commands, "run_job_worker_once", no_mcp_job)
+    monkeypatch.setattr(job_commands, "run_scheduled_task_worker_once", no_scheduled_task)
     monkeypatch.setattr(job_commands, "run_cleanup_worker_once", clean_secret)
 
     result = await job_commands.run_mcp_jobs_from_args(
@@ -407,6 +412,10 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         seen["chat_provider_worker"] = kwargs
         await asyncio.Future()
 
+    async def run_scheduled_worker(**kwargs):
+        seen["scheduled_worker"] = kwargs
+        await asyncio.Future()
+
     monkeypatch.setattr(job_commands, "stop_runtime_warmup", stop_runtime_warmup)
     monkeypatch.setattr(job_commands, "stop_runtime_reaper", stop_runtime_reaper)
     monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
@@ -414,6 +423,11 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         job_commands,
         "run_whatsapp_bridge_event_worker_loop",
         run_chat_provider_worker,
+    )
+    monkeypatch.setattr(
+        job_commands,
+        "run_scheduled_task_worker_loop",
+        run_scheduled_worker,
     )
 
     args = SimpleNamespace(
@@ -439,6 +453,14 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         "stream_seconds": settings.chat_provider_event_worker_stream_seconds,
         "retry_base_seconds": settings.chat_provider_event_worker_retry_base_seconds,
         "retry_max_seconds": settings.chat_provider_event_worker_retry_max_seconds,
+    }
+    assert seen["scheduled_worker"] == {
+        "worker_id": "worker-1:scheduled",
+        "poll_interval_seconds": settings.scheduled_task_worker_poll_interval_seconds,
+        "lease_seconds": settings.scheduled_task_worker_lease_seconds,
+        "heartbeat_seconds": settings.scheduled_task_worker_heartbeat_seconds,
+        "retry_base_seconds": settings.scheduled_task_worker_retry_base_seconds,
+        "retry_max_seconds": settings.scheduled_task_worker_retry_max_seconds,
     }
     assert seen["warmup_stop"] is warmup_task
     assert seen["reaper_stop"] is reaper_task

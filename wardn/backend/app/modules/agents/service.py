@@ -888,6 +888,35 @@ async def quick_start_workspace_agent(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
 ) -> AgentConversationResponse:
+    agent = await ensure_workspace_assistant_agent(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+    )
+    server_count = await repository.count_agent_servers(session, agent.id)
+    tool_count = await repository.count_agent_tools(session, agent.id)
+    await require_workspace_conversation_create_limit(session, user, organization_id, workspace_id)
+    conversation = await repository.create_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        created_by_id=user.id,
+    )
+    return AgentConversationResponse(
+        agent=agent_response(agent, server_count=server_count, tool_count=tool_count),
+        conversation=conversation_response(conversation),
+        messages=[],
+    )
+
+
+async def ensure_workspace_assistant_agent(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> Agent:
     await require_workspace_member(session, user, organization_id, workspace_id)
     await limits_service.lock_quota_capacity(
         session,
@@ -954,21 +983,7 @@ async def quick_start_workspace_agent(
             await session.flush()
             await session.refresh(agent)
     await sync_quick_start_agent_tools(session, agent, workspace_id)
-    server_count = await repository.count_agent_servers(session, agent.id)
-    tool_count = await repository.count_agent_tools(session, agent.id)
-    await require_workspace_conversation_create_limit(session, user, organization_id, workspace_id)
-    conversation = await repository.create_workspace_conversation(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-        created_by_id=user.id,
-    )
-    return AgentConversationResponse(
-        agent=agent_response(agent, server_count=server_count, tool_count=tool_count),
-        conversation=conversation_response(conversation),
-        messages=[],
-    )
+    return agent
 
 
 async def update_workspace_assistant_model(
