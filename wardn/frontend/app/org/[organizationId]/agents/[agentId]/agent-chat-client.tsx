@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type FormEvent,
   type RefObject,
@@ -57,6 +58,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 import {
+  workspaceAgentsQuickStart,
   workspaceAgentsDecideToolApproval,
   workspaceAgentsUpdateWorkspaceAssistantModel,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
@@ -115,6 +117,7 @@ type ProviderModel = {
 type ChatComposerProps = {
   agent: AgentRead;
   input: string;
+  isDisabled?: boolean;
   isRunning: boolean;
   onInputChange: (value: string) => void;
   onStop: () => void;
@@ -174,6 +177,14 @@ function credentialAvailableForWorkspace(
     return true;
   }
   return credential.workspaceId === workspaceId;
+}
+
+function chatCommandName(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/")) {
+    return "";
+  }
+  return trimmed.split(/\s+/, 1)[0].slice(1).toLowerCase();
 }
 
 function displayDate(value?: string | null) {
@@ -554,6 +565,7 @@ function ModelSwitcher({
 function ChatComposer({
   agent,
   input,
+  isDisabled = false,
   isRunning,
   onInputChange,
   onStop,
@@ -570,7 +582,7 @@ function ChatComposer({
       <div className="flex items-end gap-2 p-2">
         <textarea
           className="max-h-44 min-h-14 flex-1 resize-none rounded-md border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-          disabled={isRunning}
+          disabled={isRunning || isDisabled}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape" && isRunning) {
@@ -597,7 +609,12 @@ function ChatComposer({
             <Square className="size-4" />
           </Button>
         ) : (
-          <Button aria-label="Send message" disabled={!input.trim()} size="icon" type="submit">
+          <Button
+            aria-label="Send message"
+            disabled={!input.trim() || isDisabled}
+            size="icon"
+            type="submit"
+          >
             <Send className="size-4" />
           </Button>
         )}
@@ -622,9 +639,12 @@ export function AgentChatClient({
   organization,
   workspaceId,
 }: AgentChatClientProps) {
+  const router = useRouter();
   const [currentAgent, setCurrentAgent] = useState(agent);
   const [input, setInput] = useState("");
   const [approvalDecisions, setApprovalDecisions] = useState<Record<string, string>>({});
+  const [commandError, setCommandError] = useState("");
+  const [isStartingNewChat, setIsStartingNewChat] = useState(false);
   const [lastSubmittedText, setLastSubmittedText] = useState("");
   const chatApi = `/api/v1/organizations/${organization.id}/workspaces/${workspaceId}/agents/${currentAgent.id}/chat`;
   const persistedMessages = useMemo(() => uiMessages(initialMessages), [initialMessages]);
@@ -643,6 +663,7 @@ export function AgentChatClient({
     transport,
   });
   const isRunning = status === "submitted" || status === "streaming";
+  const isComposerDisabled = isStartingNewChat;
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const workspaceBasePath = `/org/${organization.id}/workspace/${workspaceId}`;
@@ -663,10 +684,30 @@ export function AgentChatClient({
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = input.trim();
-    if (!text || isRunning) {
+    if (!text || isRunning || isStartingNewChat) {
       return;
     }
     setInput("");
+    setCommandError("");
+    if (chatCommandName(text) === "new") {
+      setIsStartingNewChat(true);
+      try {
+        const nextConversation = await workspaceAgentsQuickStart(
+          organization.id,
+          workspaceId
+        );
+        router.push(
+          `/org/${encodeURIComponent(organization.id)}/workspace/${encodeURIComponent(
+            workspaceId
+          )}/chat/${encodeURIComponent(nextConversation.conversation.id)}`
+        );
+      } catch (caught) {
+        setCommandError(caught instanceof Error ? caught.message : "New chat could not be started.");
+      } finally {
+        setIsStartingNewChat(false);
+      }
+      return;
+    }
     setLastSubmittedText(text);
     await sendMessage({ text });
   }
@@ -874,6 +915,7 @@ export function AgentChatClient({
                 <ChatComposer
                   agent={currentAgent}
                   input={input}
+                  isDisabled={isComposerDisabled}
                   isRunning={isRunning}
                   onInputChange={setInput}
                   onStop={stop}
@@ -977,6 +1019,9 @@ export function AgentChatClient({
               </Button>
             </AsyncFeedback>
           ) : null}
+          {commandError ? (
+            <AsyncFeedback variant="error">{commandError}</AsyncFeedback>
+          ) : null}
         </div>
       </div>
 
@@ -992,6 +1037,7 @@ export function AgentChatClient({
             <ChatComposer
               agent={currentAgent}
               input={input}
+              isDisabled={isComposerDisabled}
               isRunning={isRunning}
               onInputChange={setInput}
               onStop={stop}

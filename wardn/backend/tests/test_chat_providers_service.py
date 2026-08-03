@@ -892,6 +892,159 @@ async def test_process_provider_text_message_sends_whatsapp_typing_indicator(
 
 
 @pytest.mark.asyncio
+async def test_process_provider_text_message_new_command_starts_new_thread_conversation(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    new_conversation_id = uuid4()
+    agent_id = uuid4()
+    force_new_values = []
+    sent_texts = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        force_new_values.append(kwargs["force_new"])
+        thread.conversation_id = new_conversation_id
+        return thread, new_conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        raise AssertionError("/new should not call the model")
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent_texts.append(kwargs["text"])
+        return {"message_id": "wa-command-reply"}
+
+    async def start_provider_typing(*args, **kwargs):
+        raise AssertionError("/new should not start typing indicator")
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+    monkeypatch.setattr(service, "start_provider_typing", start_provider_typing)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-new-1",
+            external_thread_id="15551234567@s.whatsapp.net",
+            external_user_id="15551234567@s.whatsapp.net",
+            external_user_display_name="Asha",
+            text="/new",
+            raw={"messageId": "wa-new-1"},
+        ),
+    )
+
+    outbound_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.external_event_id == "wa-command-reply"
+    )
+
+    assert processed
+    assert force_new_values == [True]
+    assert sent_texts == ["Started a new chat. Send your next message to begin."]
+    assert outbound_event.conversation_id == new_conversation_id
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_compact_command_compacts_conversation(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    conversation_id = uuid4()
+    agent_id = uuid4()
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    compact_calls = []
+    sent_texts = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def compact_workspace_conversation(*args, **kwargs):
+        compact_calls.append(args)
+        return SimpleNamespace(id=uuid4())
+
+    async def stream_agent_chat(*args, **kwargs):
+        raise AssertionError("/compact should not call the model")
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent_texts.append(kwargs["text"])
+        return {"message_id": "wa-compact-reply"}
+
+    async def start_provider_typing(*args, **kwargs):
+        raise AssertionError("/compact should not start typing indicator")
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(
+        service.agent_service,
+        "compact_workspace_conversation",
+        compact_workspace_conversation,
+    )
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+    monkeypatch.setattr(service, "start_provider_typing", start_provider_typing)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-compact-1",
+            external_thread_id="15551234567@s.whatsapp.net",
+            external_user_id="15551234567@s.whatsapp.net",
+            external_user_display_name="Asha",
+            text="/compact",
+            raw={"messageId": "wa-compact-1"},
+        ),
+    )
+
+    assert processed
+    assert compact_calls[0][1] is actor
+    assert compact_calls[0][4] == conversation_id
+    assert sent_texts == [
+        "Compacted this chat. Future replies will use the compacted context plus new messages."
+    ]
+
+
+@pytest.mark.asyncio
 async def test_process_provider_text_message_ignores_disallowed_sender(monkeypatch) -> None:
     fake_session = FakeSession()
     connection = make_connection()

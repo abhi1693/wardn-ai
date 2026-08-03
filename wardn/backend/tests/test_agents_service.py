@@ -13,6 +13,7 @@ from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
     AgentRun,
+    ConversationMessage,
     WorkspaceConversation,
 )
 from app.modules.agents.schemas import (
@@ -265,6 +266,95 @@ def ui_stream_chunks(raw_chunks: list[str]) -> list[dict]:
             if line.startswith("data: "):
                 chunks.append(json.loads(line.removeprefix("data: ")))
     return chunks
+
+
+def chat_message(role: str, content: str) -> AgentChatMessage:
+    return AgentChatMessage(role=role, parts=[{"type": "text", "text": content}])
+
+
+def persisted_conversation_message(
+    conversation_id,
+    *,
+    role: str,
+    content: str,
+    sequence: int,
+) -> ConversationMessage:
+    return ConversationMessage(
+        id=uuid4(),
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        parts=[{"type": "text", "text": content}],
+        sequence=sequence,
+    )
+
+
+def persisted_compaction_message(
+    conversation_id,
+    *,
+    content: str,
+    sequence: int,
+) -> ConversationMessage:
+    return ConversationMessage(
+        id=uuid4(),
+        conversation_id=conversation_id,
+        role="system",
+        content=content,
+        parts=[
+            {"type": service.CHAT_COMPACTION_PART_TYPE, "data": {"messageCount": sequence - 1}},
+            {"type": "text", "text": content},
+        ],
+        sequence=sequence,
+    )
+
+
+def test_conversation_chat_context_messages_replays_latest_compaction_only() -> None:
+    conversation_id = uuid4()
+    messages = [
+        persisted_conversation_message(
+            conversation_id,
+            role="user",
+            content="Old user detail",
+            sequence=1,
+        ),
+        persisted_conversation_message(
+            conversation_id,
+            role="assistant",
+            content="Old assistant detail",
+            sequence=2,
+        ),
+        persisted_compaction_message(
+            conversation_id,
+            content="Project Apollo is the active project.",
+            sequence=3,
+        ),
+        persisted_conversation_message(
+            conversation_id,
+            role="assistant",
+            content="Compacted this chat.",
+            sequence=4,
+        ),
+    ]
+
+    context, incoming_tail = service.conversation_chat_context_messages(
+        messages,
+        [
+            chat_message("user", "Old user detail"),
+            chat_message("assistant", "Old assistant detail"),
+            chat_message("assistant", "Compacted this chat."),
+            chat_message("user", "What project is active?"),
+        ],
+    )
+
+    assert incoming_tail == [chat_message("user", "What project is active?")]
+    assert [
+        (message.role, service.text_from_chat_message(message))
+        for message in context
+    ] == [
+        ("assistant", "Earlier conversation summary:\nProject Apollo is the active project."),
+        ("assistant", "Compacted this chat."),
+        ("user", "What project is active?"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -777,6 +867,380 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     assert steps[0]["payload"] == {"message": "hi", "messageCount": 1}
     assert steps[-1]["step_type"] == "model_output"
     assert finished == [{"status": "succeeded", "error": ""}]
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+async def run_existing_conversation_chat_with_history(
+    monkeypatch,
+    *,
+    incoming_messages: list[AgentChatMessage],
+    trigger_type: str = "chat",
+):
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        created_by_id=user.id,
+        title="Chat",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=conversation.id,
+        trigger_type=trigger_type,
+        status="running",
+    )
+    persisted_messages = [
+        persisted_conversation_message(
+            conversation.id,
+            role="user",
+            content="Remember project Apollo.",
+            sequence=1,
+        ),
+        persisted_conversation_message(
+            conversation.id,
+            role="assistant",
+            content="Got it.",
+            sequence=2,
+        ),
+    ]
+    seen_model_messages: list[list[tuple[str, str]]] = []
+    persisted_writes: list[dict] = []
+    steps: list[dict] = []
+
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def get_workspace_conversation(*args, **kwargs):
+        return conversation
+
+    async def list_conversation_messages(*args, **kwargs):
+        return persisted_messages
+
+    async def create_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        steps.append(kwargs)
+
+    async def append_conversation_message(*args, **kwargs):
+        persisted_writes.append(kwargs)
+
+    async def finish_agent_run(*args, **kwargs):
+        return None
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def refresh_wildcard_agent_server_tools(*args, **kwargs):
+        return []
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return []
+
+    async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
+        return AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={})
+
+    async def run_agent_chat(*args, **kwargs):
+        payload = args[2]
+        seen_model_messages.append(
+            [
+                (message.role, service.text_from_chat_message(message))
+                for message in payload.messages
+            ]
+        )
+        yield service.AgentChatTextEvent(text="Apollo was the project.")
+
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(
+        service.repository,
+        "get_workspace_conversation",
+        get_workspace_conversation,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_conversation_messages",
+        list_conversation_messages,
+    )
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service,
+        "refresh_wildcard_agent_server_tools",
+        refresh_wildcard_agent_server_tools,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            id=str(conversation.id),
+            messages=incoming_messages,
+        ),
+        workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
+        trigger_type=trigger_type,
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    return SimpleNamespace(
+        agent_run=agent_run,
+        chunks=chunks,
+        persisted_writes=persisted_writes,
+        seen_model_messages=seen_model_messages,
+        steps=steps,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chat_includes_persisted_history_for_current_turn_payload(
+    monkeypatch,
+) -> None:
+    result = await run_existing_conversation_chat_with_history(
+        monkeypatch,
+        incoming_messages=[chat_message("user", "What project did I mention?")],
+        trigger_type="whatsapp",
+    )
+
+    assert result.seen_model_messages == [
+        [
+            ("user", "Remember project Apollo."),
+            ("assistant", "Got it."),
+            ("user", "What project did I mention?"),
+        ]
+    ]
+    assert result.persisted_writes[0]["role"] == "user"
+    assert result.persisted_writes[0]["content"] == "What project did I mention?"
+    assert result.persisted_writes[0]["agent_run_id"] == result.agent_run.id
+    assert result.persisted_writes[1]["role"] == "assistant"
+    assert result.steps[0]["payload"] == {
+        "message": "What project did I mention?",
+        "messageCount": 3,
+    }
+    assert result.chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chat_deduplicates_full_history_payload_for_builtin_chat(
+    monkeypatch,
+) -> None:
+    result = await run_existing_conversation_chat_with_history(
+        monkeypatch,
+        incoming_messages=[
+            chat_message("user", "Remember project Apollo."),
+            chat_message("assistant", "Got it."),
+            chat_message("user", "What project did I mention?"),
+        ],
+    )
+
+    assert result.seen_model_messages == [
+        [
+            ("user", "Remember project Apollo."),
+            ("assistant", "Got it."),
+            ("user", "What project did I mention?"),
+        ]
+    ]
+    assert result.persisted_writes[0]["role"] == "user"
+    assert result.persisted_writes[0]["content"] == "What project did I mention?"
+    assert result.persisted_writes[1]["role"] == "assistant"
+    assert result.chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chat_compact_command_appends_hidden_summary(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    conversation = WorkspaceConversation(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        created_by_id=user.id,
+        title="Chat",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=conversation.id,
+        trigger_type="chat",
+        status="running",
+    )
+    persisted_messages = [
+        persisted_conversation_message(
+            conversation.id,
+            role="user",
+            content="Remember project Apollo.",
+            sequence=1,
+        ),
+        persisted_conversation_message(
+            conversation.id,
+            role="assistant",
+            content="Got it.",
+            sequence=2,
+        ),
+    ]
+    persisted_writes: list[dict] = []
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, None, None
+
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def get_workspace_conversation(*args, **kwargs):
+        return conversation
+
+    async def list_conversation_messages(*args, **kwargs):
+        return persisted_messages
+
+    async def create_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        return None
+
+    async def append_conversation_message(*args, **kwargs):
+        persisted_writes.append(kwargs)
+        message = persisted_conversation_message(
+            kwargs["conversation_id"],
+            role=kwargs["role"],
+            content=kwargs["content"],
+            sequence=len(persisted_messages) + 1,
+        )
+        message.parts = kwargs["parts"]
+        message.agent_run_id = kwargs.get("agent_run_id")
+        persisted_messages.append(message)
+        return message
+
+    async def finish_agent_run(*args, **kwargs):
+        return None
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def run_agent_chat(*args, **kwargs):
+        raise AssertionError("/compact should not call the model")
+        yield service.AgentChatTextEvent(text="unreachable")
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(
+        service.repository,
+        "get_workspace_conversation",
+        get_workspace_conversation,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "list_conversation_messages",
+        list_conversation_messages,
+    )
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        service.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            id=str(conversation.id),
+            messages=[chat_message("user", "/compact")],
+        ),
+        workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    assert [write["role"] for write in persisted_writes] == ["user", "system", "assistant"]
+    assert persisted_writes[1]["parts"][0]["type"] == service.CHAT_COMPACTION_PART_TYPE
+    assert "Remember project Apollo" in persisted_writes[1]["content"]
+    assert any(
+        chunk.get("type") == "text-delta" and "Compacted this chat" in chunk["delta"]
+        for chunk in chunks
+    )
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
 
 

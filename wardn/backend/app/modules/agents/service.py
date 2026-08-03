@@ -95,9 +95,12 @@ from app.modules.agents.mappers import (
     conversation_message_response,
     conversation_response,
     sanitize_run_payload,
+    text_parts,
 )
 from app.modules.agents.models import (
     Agent,
+    ConversationMessage,
+    WorkspaceConversation,
 )
 from app.modules.agents.provider_clients import (
     CODEX_COMPAT_USER_AGENT as CODEX_COMPAT_USER_AGENT,
@@ -150,6 +153,7 @@ from app.modules.agents.schemas import (
     AgentAvailableServerRead,
     AgentAvailableToolListResponse,
     AgentAvailableToolRead,
+    AgentChatMessage,
     AgentChatRequest,
     AgentConversationResponse,
     AgentListResponse,
@@ -233,6 +237,13 @@ from app.modules.users.models import User
 logger = logging.getLogger(__name__)
 
 AGENT_CHAT_TOOL_OUTPUT_MAX_CHARS = 40_000
+CHAT_COMMAND_COMPACT = "compact"
+CHAT_COMMAND_NEW = "new"
+CHAT_COMMANDS = {CHAT_COMMAND_COMPACT, CHAT_COMMAND_NEW}
+CHAT_COMPACTION_PART_TYPE = "data-chat-compaction"
+CHAT_COMPACTION_MAX_MESSAGES = 24
+CHAT_COMPACTION_MAX_CHARS = 6_000
+CHAT_COMPACTION_MESSAGE_MAX_CHARS = 800
 QUICK_START_AGENT_NAME = "Workspace Assistant"
 QUICK_START_AGENT_DESCRIPTION = "Default assistant for workspace chat."
 QUICK_START_AGENT_INSTRUCTIONS = (
@@ -1377,6 +1388,240 @@ def installed_agent_tools(
     }
 
 
+def chat_messages_match(left: AgentChatMessage, right: AgentChatMessage) -> bool:
+    return left.role == right.role and text_from_chat_message(left) == text_from_chat_message(right)
+
+
+def chat_command_from_text(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None
+    token = stripped.split(maxsplit=1)[0][1:].casefold()
+    return token if token in CHAT_COMMANDS else None
+
+
+def chat_command_from_message(message: AgentChatMessage | None) -> str | None:
+    if message is None:
+        return None
+    return chat_command_from_text(text_from_chat_message(message))
+
+
+def conversation_message_has_part(message: ConversationMessage, part_type: str) -> bool:
+    return any(part.get("type") == part_type for part in message.parts or [])
+
+
+def is_compaction_message(message: ConversationMessage) -> bool:
+    return (
+        message.role == "system"
+        and conversation_message_has_part(message, CHAT_COMPACTION_PART_TYPE)
+    )
+
+
+def latest_compaction_index(messages: list[ConversationMessage]) -> int | None:
+    for index in range(len(messages) - 1, -1, -1):
+        if is_compaction_message(messages[index]):
+            return index
+    return None
+
+
+def compaction_message_to_chat_message(message: ConversationMessage) -> AgentChatMessage:
+    return AgentChatMessage(
+        role="assistant",
+        parts=text_parts(f"Earlier conversation summary:\n{message.content}"),
+    )
+
+
+def incoming_chat_message_tail(
+    persisted_messages: list[AgentChatMessage],
+    incoming_messages: list[AgentChatMessage],
+) -> list[AgentChatMessage]:
+    if not persisted_messages:
+        return incoming_messages
+    max_overlap = min(len(persisted_messages), len(incoming_messages))
+    for overlap in range(max_overlap, 0, -1):
+        persisted_anchor = persisted_messages[-overlap:]
+        for start in range(len(incoming_messages) - overlap, -1, -1):
+            incoming_slice = incoming_messages[start : start + overlap]
+            if all(
+                chat_messages_match(persisted, incoming)
+                for persisted, incoming in zip(
+                    persisted_anchor,
+                    incoming_slice,
+                    strict=True,
+                )
+            ):
+                return incoming_messages[start + overlap :]
+    return incoming_messages
+
+
+def conversation_chat_context_messages(
+    persisted_messages: list[ConversationMessage],
+    incoming_messages: list[AgentChatMessage],
+) -> tuple[list[AgentChatMessage], list[AgentChatMessage]]:
+    compaction_index = latest_compaction_index(persisted_messages)
+    compacted_context_messages: list[AgentChatMessage] = []
+    persisted_visible_messages: list[AgentChatMessage] = []
+    replay_messages = (
+        persisted_messages[compaction_index:]
+        if compaction_index is not None
+        else persisted_messages
+    )
+    for message in replay_messages:
+        if is_compaction_message(message):
+            compacted_context_messages.append(compaction_message_to_chat_message(message))
+        elif message.role in {"user", "assistant"}:
+            persisted_visible_messages.append(conversation_message_to_chat_message(message))
+    incoming_chat_messages = [
+        message for message in incoming_messages if message.role in {"user", "assistant"}
+    ]
+    incoming_tail = incoming_chat_message_tail(
+        persisted_visible_messages,
+        incoming_chat_messages,
+    )
+    return [*compacted_context_messages, *persisted_visible_messages, *incoming_tail], incoming_tail
+
+
+def compact_text(value: str, *, max_chars: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[: max_chars - 3].rstrip()}..."
+
+
+def compactable_conversation_messages(
+    messages: list[ConversationMessage],
+) -> list[ConversationMessage]:
+    compaction_index = latest_compaction_index(messages)
+    candidates = (
+        messages[compaction_index:]
+        if compaction_index is not None
+        else messages
+    )
+    return [
+        message
+        for message in candidates
+        if is_compaction_message(message)
+        or (
+            message.role in {"user", "assistant"}
+            and chat_command_from_text(message.content) != CHAT_COMMAND_COMPACT
+        )
+    ]
+
+
+def conversation_message_compaction_line(message: ConversationMessage) -> str:
+    if is_compaction_message(message):
+        label = "Previous summary"
+    elif message.role == "user":
+        label = "User"
+    else:
+        label = "Assistant"
+    content = compact_text(message.content, max_chars=CHAT_COMPACTION_MESSAGE_MAX_CHARS)
+    return f"- {label}: {content}"
+
+
+def conversation_compaction_summary(messages: list[ConversationMessage]) -> str:
+    compactable_messages = compactable_conversation_messages(messages)
+    if len(compactable_messages) < 2:
+        return ""
+    selected_messages = compactable_messages[-CHAT_COMPACTION_MAX_MESSAGES:]
+    omitted_count = max(len(compactable_messages) - len(selected_messages), 0)
+    lines = [
+        "Compacted conversation context. Use this as background for future replies.",
+        f"Messages compacted: {len(compactable_messages)}.",
+    ]
+    if omitted_count:
+        lines.append(f"Older messages omitted from this compacted snapshot: {omitted_count}.")
+    lines.append("Recent compacted transcript:")
+    lines.extend(conversation_message_compaction_line(message) for message in selected_messages)
+    summary = "\n".join(lines)
+    if len(summary) <= CHAT_COMPACTION_MAX_CHARS:
+        return summary
+    return summary[-CHAT_COMPACTION_MAX_CHARS:].lstrip()
+
+
+async def compact_workspace_conversation(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> ConversationMessage | None:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    conversation = await repository.get_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+    )
+    if conversation is None:
+        raise AgentNotFoundError("conversation not found")
+    messages = await repository.list_conversation_messages(
+        session,
+        conversation_id=conversation.id,
+    )
+    summary = conversation_compaction_summary(messages)
+    if not summary:
+        return None
+    return await repository.append_conversation_message(
+        session,
+        conversation_id=conversation.id,
+        role="system",
+        content=summary,
+        parts=[
+            {"type": CHAT_COMPACTION_PART_TYPE, "data": {"messageCount": len(messages)}},
+            {"type": "text", "text": summary},
+        ],
+    )
+
+
+async def chat_command_text_stream(text: str) -> AsyncGenerator[AgentChatTextEvent, None]:
+    yield AgentChatTextEvent(text=text)
+
+
+async def create_workspace_agent_conversation(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent: Agent,
+    *,
+    title: str = "New chat",
+) -> WorkspaceConversation:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    await require_workspace_conversation_create_limit(session, user, organization_id, workspace_id)
+    return await repository.create_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        created_by_id=user.id,
+        title=title,
+    )
+
+
+async def new_chat_command_stream(
+    conversation: WorkspaceConversation,
+) -> AsyncGenerator[str, None]:
+    message_id = str(uuid.uuid4())
+    text_id = f"text-{message_id}"
+    text = "Started a new chat."
+    yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
+    yield ui_message_sse_chunk(
+        {
+            "type": "data-chat-command",
+            "id": f"command-{message_id}",
+            "data": {
+                "command": CHAT_COMMAND_NEW,
+                "conversationId": str(conversation.id),
+            },
+        }
+    )
+    yield ui_message_sse_chunk({"type": "text-start", "id": text_id})
+    yield ui_message_sse_chunk({"type": "text-delta", "id": text_id, "delta": text})
+    yield ui_message_sse_chunk({"type": "text-end", "id": text_id})
+    yield ui_message_sse_chunk({"type": "finish", "finishReason": "stop"})
+
+
 async def stream_agent_chat(
     session: AsyncSession,
     user: User,
@@ -1400,7 +1645,20 @@ async def stream_agent_chat(
         raise InvalidAgentScopeError("chat requires at least one user message")
     if workspace_id is None:
         raise InvalidAgentScopeError("agent chat requires a workspace")
+    latest_message = latest_user_message(payload.messages)
+    command = chat_command_from_message(latest_message)
+    if command == CHAT_COMMAND_NEW:
+        new_conversation = await create_workspace_agent_conversation(
+            session,
+            user,
+            organization_id,
+            workspace_id,
+            agent,
+        )
+        return new_chat_command_stream(new_conversation)
     conversation = None
+    chat_messages = payload.messages
+    new_chat_messages = payload.messages
     conversation_id = conversation_id_from_payload(payload)
     if conversation_id is not None:
         conversation = await repository.get_workspace_conversation(
@@ -1411,6 +1669,14 @@ async def stream_agent_chat(
         )
         if conversation is None or conversation.agent_id != agent.id:
             raise AgentNotFoundError("conversation not found")
+        persisted_messages = await repository.list_conversation_messages(
+            session,
+            conversation_id=conversation.id,
+        )
+        chat_messages, new_chat_messages = conversation_chat_context_messages(
+            persisted_messages,
+            payload.messages,
+        )
     agent_run = await repository.create_agent_run(
         session,
         organization_id=organization_id,
@@ -1420,7 +1686,6 @@ async def stream_agent_chat(
         triggered_by_id=user.id,
         trigger_type=trigger_type,
     )
-    latest_message = latest_user_message(payload.messages)
     await repository.append_agent_run_step(
         session,
         agent_run_id=agent_run.id,
@@ -1431,11 +1696,40 @@ async def stream_agent_chat(
             "message": sanitize_run_payload(text_from_chat_message(latest_message))
             if latest_message
             else "",
-            "messageCount": len(payload.messages),
+            "messageCount": len(chat_messages),
         },
     )
-    if conversation is not None:
-        await persist_chat_turn_user_message(session, conversation, payload, agent_run)
+    new_latest_message = latest_user_message(new_chat_messages)
+    if conversation is not None and new_latest_message is not None:
+        await persist_chat_turn_user_message(
+            session,
+            conversation,
+            AgentChatRequest(id=payload.id, messages=new_chat_messages),
+            agent_run,
+        )
+    if command == CHAT_COMMAND_COMPACT:
+        if conversation is None:
+            text = "There is no active conversation to compact yet."
+        else:
+            compacted_message = await compact_workspace_conversation(
+                session,
+                user,
+                organization_id,
+                workspace_id,
+                conversation.id,
+            )
+            text = (
+                "Compacted this chat. Future replies will use the compacted context "
+                "plus new messages."
+                if compacted_message is not None
+                else "There is not enough conversation to compact yet."
+            )
+        return persisted_agent_chat_stream(
+            conversation,
+            chat_command_text_stream(text),
+            agent_run,
+            session_factory=session_factory,
+        )
     installed_tools = installed_agent_tools(
         await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
     )
@@ -1508,7 +1802,7 @@ async def stream_agent_chat(
         stream = run_agent_chat(
             agent,
             credential,
-            AgentChatRequest(id=payload.id, messages=payload.messages),
+            AgentChatRequest(id=payload.id, messages=chat_messages),
             guardrail_filter,
             session_factory=session_factory,
             user=user,

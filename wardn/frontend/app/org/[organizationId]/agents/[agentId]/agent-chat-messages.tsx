@@ -108,13 +108,25 @@ export function uiMessageParts(message: ConversationMessageRead): UIMessage["par
     : ([textPart(message.content)] as UIMessage["parts"]);
 }
 
+function isCompactionMessage(message: ConversationMessageRead) {
+  return (
+    message.role === "system" &&
+    message.parts?.some((part) => part.type === "data-chat-compaction")
+  );
+}
+
 export function uiMessages(messages: ConversationMessageRead[] = []): UIMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    metadata: { agentRunId: message.agentRunId },
-    role: message.role,
-    parts: uiMessageParts(message),
-  }));
+  const latestCompactionIndex = messages.findLastIndex(isCompactionMessage);
+  const activeMessages =
+    latestCompactionIndex >= 0 ? messages.slice(latestCompactionIndex + 1) : messages;
+  return activeMessages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      id: message.id,
+      metadata: { agentRunId: message.agentRunId },
+      role: message.role,
+      parts: uiMessageParts(message),
+    }));
 }
 
 export function markdownText(children: ComponentPropsWithoutRef<"code">["children"]) {

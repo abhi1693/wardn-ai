@@ -1493,16 +1493,54 @@ async def process_provider_text_message(
             await session.flush()
             return True
         actor = await provider_actor(session, connection)
+        command = agent_service.chat_command_from_text(message.text)
         thread, conversation_id, agent_id = await provider_thread_conversation(
             session,
             connection,
             actor,
             message,
+            force_new=command == agent_service.CHAT_COMMAND_NEW,
         )
         event.thread_id = thread.id
         event.conversation_id = conversation_id
         thread.last_external_message_id = message.event_id
         await session.flush()
+        if command is not None:
+            reply_text = await provider_chat_command_reply_text(
+                session,
+                connection,
+                actor,
+                command,
+                conversation_id,
+            )
+            outbound_payload = await send_provider_text_message(
+                session,
+                connection,
+                external_thread_id=message.external_thread_id,
+                text=reply_text,
+                reply_to_message_id=message.event_id,
+            )
+            outbound_message_id = provider_response_message_id(connection, outbound_payload)
+            session.add(
+                ChatProviderEvent(
+                    organization_id=connection.organization_id,
+                    workspace_id=connection.workspace_id,
+                    connection_id=connection.id,
+                    thread_id=thread.id,
+                    conversation_id=conversation_id,
+                    provider=connection.provider,
+                    external_event_id=outbound_message_id or f"outbound:{message.event_id}",
+                    direction="outbound",
+                    event_type="message.text",
+                    status="sent",
+                    payload={connection.provider: outbound_payload},
+                    processed_at=datetime.now(UTC),
+                )
+            )
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.flush()
+            return True
         typing_handle = await start_provider_typing(
             session,
             connection,
@@ -1591,6 +1629,8 @@ async def provider_thread_conversation(
     connection: ChatProviderConnection,
     actor: User,
     message: ProviderTextMessage,
+    *,
+    force_new: bool = False,
 ) -> tuple[ChatProviderThread, uuid.UUID, uuid.UUID]:
     thread = await repository.get_thread(
         session,
@@ -1598,7 +1638,7 @@ async def provider_thread_conversation(
         external_thread_id=message.external_thread_id,
     )
     conversation = None
-    if thread is not None and thread.conversation_id is not None:
+    if not force_new and thread is not None and thread.conversation_id is not None:
         conversation = await agent_repository.get_workspace_conversation(
             session,
             organization_id=connection.organization_id,
@@ -1646,6 +1686,32 @@ async def provider_thread_conversation(
         thread.external_user_display_name = message.external_user_display_name
     await session.flush()
     return thread, conversation_id, agent_id
+
+
+async def provider_chat_command_reply_text(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    actor: User,
+    command: str,
+    conversation_id: uuid.UUID,
+) -> str:
+    if command == agent_service.CHAT_COMMAND_NEW:
+        return "Started a new chat. Send your next message to begin."
+    if command == agent_service.CHAT_COMMAND_COMPACT:
+        compacted_message = await agent_service.compact_workspace_conversation(
+            session,
+            actor,
+            connection.organization_id,
+            connection.workspace_id,
+            conversation_id,
+        )
+        if compacted_message is None:
+            return "There is not enough conversation to compact yet."
+        return (
+            "Compacted this chat. Future replies will use the compacted context "
+            "plus new messages."
+        )
+    return f"Unknown command: /{command}"
 
 
 def provider_conversation_title(
