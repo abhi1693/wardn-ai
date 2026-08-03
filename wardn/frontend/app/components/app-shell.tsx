@@ -5,6 +5,7 @@ import {
   Boxes,
   BarChart3,
   Building2,
+  CalendarClock,
   Gauge,
   Home,
   KeyRound,
@@ -38,6 +39,7 @@ type AppShellActive =
   | "workspace-dashboard"
   | "workspace-chat"
   | "workspace-chat-providers"
+  | "workspace-scheduled-tasks"
   | "workspace-runs"
   | "workspace-skills"
   | "workspace-observability"
@@ -197,6 +199,12 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           activeKey: "workspace-chat-providers",
           icon: Webhook,
         },
+        {
+          label: "Scheduled Tasks",
+          href: `${workspaceBasePath}/scheduled-tasks`,
+          activeKey: "workspace-scheduled-tasks",
+          icon: CalendarClock,
+        },
       ],
     },
     {
@@ -302,6 +310,7 @@ export function AppShell({
     active === "workspace-dashboard" ||
     active === "workspace-chat" ||
     active === "workspace-chat-providers" ||
+    active === "workspace-scheduled-tasks" ||
     active === "workspace-runs" ||
     active === "workspace-skills" ||
     active === "install" ||

@@ -70,6 +70,7 @@ function metricValue(value?: number | null) {
 function triggerLabel(triggerType: string) {
   const labels: Record<string, string> = {
     chat: "Chat",
+    scheduled: "Scheduled",
     telegram: "Telegram",
     whatsapp: "WhatsApp",
     whatsapp_local: "WhatsApp",
