@@ -95,6 +95,17 @@ def test_next_run_supports_interval_daily_and_weekly() -> None:
     ) == datetime(2026, 8, 4, 9, 0, tzinfo=UTC)
 
 
+def test_timezone_aliases_are_normalized_for_browser_values() -> None:
+    assert service.normalize_timezone(" Asia/Calcutta ") == "Asia/Kolkata"
+    assert service.zoneinfo_for("Asia/Calcutta").key == "Asia/Kolkata"
+    assert service.next_run_at(
+        schedule_type="daily",
+        schedule_config={"time": "09:00"},
+        timezone="Asia/Calcutta",
+        after=datetime(2026, 8, 4, 2, 0, tzinfo=UTC),
+    ) == datetime(2026, 8, 4, 3, 30, tzinfo=UTC)
+
+
 def test_due_and_claim_statements_use_skip_locked() -> None:
     now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
 

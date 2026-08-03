@@ -45,6 +45,9 @@ TASK_UNIQUE_CONSTRAINTS = {"uq_workspace_scheduled_tasks_workspace_name"}
 DEFAULT_OUTPUT_ROUTES = [WorkspaceScheduledTaskOutputRoute(route_type="chat")]
 SCHEDULED_AGENT_TRIGGER = "scheduled"
 PROVIDER_EMPTY_REPLY = "The scheduled task completed, but the assistant did not return text."
+TIMEZONE_ALIASES = {
+    "Asia/Calcutta": "Asia/Kolkata",
+}
 
 
 def utc_now() -> datetime:
@@ -57,9 +60,15 @@ def aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def normalize_timezone(value: str) -> str:
+    timezone = (value or "").strip() or "UTC"
+    return TIMEZONE_ALIASES.get(timezone, timezone)
+
+
 def zoneinfo_for(value: str) -> ZoneInfo:
+    timezone = normalize_timezone(value)
     try:
-        return ZoneInfo(value.strip() or "UTC")
+        return ZoneInfo(timezone)
     except ZoneInfoNotFoundError as exc:
         raise InvalidScheduledTaskError("invalid task timezone") from exc
 
@@ -358,7 +367,7 @@ async def create_workspace_scheduled_task(
         workspace_id,
     )
     schedule_config = normalize_schedule_config(payload.schedule_type, payload.schedule_config)
-    timezone = payload.timezone or "UTC"
+    timezone = normalize_timezone(payload.timezone or "UTC")
     zoneinfo_for(timezone)
     routes = normalize_output_routes(payload.output_routes)
     await validate_output_routes(
@@ -431,7 +440,7 @@ async def update_workspace_scheduled_task(
     if payload.schedule_config is not None:
         schedule_changed = True
     if payload.timezone is not None:
-        task.timezone = payload.timezone
+        task.timezone = normalize_timezone(payload.timezone)
         schedule_changed = True
     if payload.output_routes is not None:
         routes = normalize_output_routes(payload.output_routes)

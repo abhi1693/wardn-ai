@@ -101,9 +101,18 @@ const weekdays = [
   { label: "Sunday", value: "6" },
 ];
 
+const timezoneAliases: Record<string, string> = {
+  "Asia/Calcutta": "Asia/Kolkata",
+};
+
+function normalizeTimezone(value: string) {
+  const timezone = value.trim() || "UTC";
+  return timezoneAliases[timezone] ?? timezone;
+}
+
 function browserTimezone() {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    return normalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   } catch {
     return "UTC";
   }
@@ -719,7 +728,7 @@ export function ScheduledTasksClient({
       outputRoutes: buildOutputRoutes(form.selectedRoutes, providerOptions),
       scheduleConfig: scheduleConfig(form),
       scheduleType: form.scheduleType,
-      timezone: form.timezone.trim() || "UTC",
+      timezone: normalizeTimezone(form.timezone),
     } satisfies WorkspaceScheduledTaskCreate;
 
     try {
