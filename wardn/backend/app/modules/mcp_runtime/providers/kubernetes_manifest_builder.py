@@ -2602,11 +2602,7 @@ def build_custom_network_policy_manifests(
             )
         )
 
-    if (
-        policy_config["allowRemoteMcpEgress"]
-        and backend == "cilium"
-        and policy_config["remoteDestinations"]
-    ):
+    if backend == "cilium" and policy_config["remoteDestinations"]:
         cilium_remote_policy = build_cilium_remote_mcp_egress_network_policy(
             names=names,
             labels=labels,
@@ -2841,10 +2837,7 @@ def build_network_policy_manifests(
                     client_module=client,
                 )
             )
-    if (
-        policy_config["allowRemoteMcpEgress"]
-        and backend != "cilium"
-    ):
+    if backend != "cilium" and policy_config["remoteDestinations"]:
         remote_mcp_policy = build_remote_mcp_egress_network_policy(
             names=names,
             labels=labels,

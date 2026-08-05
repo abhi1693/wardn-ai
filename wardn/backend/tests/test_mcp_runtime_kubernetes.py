@@ -3164,6 +3164,101 @@ def test_kubernetes_runtime_network_policy_splits_remote_and_dependency_egress(
     }
 
 
+def test_kubernetes_runtime_manifest_renders_dependency_egress_without_remote_endpoints(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.AIops-tools/k8s-aiops",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "k8s_aiops"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "k8s-aiops", "version": "0.2.0"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "allowRuntimeDependencyEgress": True,
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {
+                        "label": "rancher",
+                        "destinationType": "domain",
+                        "domain": "rancher.controllergateway.com",
+                        "ports": [443],
+                    }
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        network_discovery=cilium_network_discovery(),
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    cilium_remote_policy_ref = runtime_custom_network_policy_refs(manifest.names)[2]
+    cilium_remote_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.name == cilium_remote_policy_ref.name
+    )
+    assert cilium_remote_policy.body["spec"]["egress"][0] == cilium_dns_proxy_egress_rule()
+    assert {
+        match["matchName"]
+        for egress in cilium_remote_policy.body["spec"]["egress"]
+        for match in egress.get("toFQDNs", [])
+    } == {"pypi.org", "files.pythonhosted.org"}
+
+    cilium_custom_policy_ref = runtime_custom_network_policy_refs(manifest.names)[3]
+    cilium_custom_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.name == cilium_custom_policy_ref.name
+    )
+    assert {
+        match["matchName"]
+        for egress in cilium_custom_policy.body["spec"]["egress"]
+        for match in egress.get("toFQDNs", [])
+    } == {"rancher.controllergateway.com"}
+
+
 def test_kubernetes_runtime_manifest_deduplicates_installed_pypi_transport_args(
     tmp_path,
     monkeypatch,
