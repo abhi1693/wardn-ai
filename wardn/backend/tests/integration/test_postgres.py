@@ -219,6 +219,41 @@ async def test_catalog_full_text_search_keyset_and_normalized_source_lookup(
                         status_changed_at=now,
                     )
                 )
+            for name, quality_score in (
+                ("io.github.github/github-mcp-server", 72),
+                ("io.github.github/github-actions-mcp-server", 99),
+            ):
+                session.add(
+                    MCPServerVersion(
+                        organization_id=organization.id,
+                        catalog_source_id=source.id,
+                        name=name,
+                        title="GitHub MCP server",
+                        description="GitHub repository and issue tools",
+                        version="1.0.0",
+                        website_url="",
+                        status="active",
+                        status_message="",
+                        is_latest=True,
+                        repository=None,
+                        packages=[],
+                        remotes=[],
+                        icons=[],
+                        server_json={
+                            "$schema": "https://example.com/schema.json",
+                            "name": name,
+                            "description": "GitHub repository and issue tools",
+                            "version": "1.0.0",
+                            "_meta": {
+                                "dev.wardnai.hub/catalog": {
+                                    "qualityScore": quality_score,
+                                },
+                            },
+                        },
+                        published_at=now,
+                        status_changed_at=now,
+                    )
+                )
         organization_id = organization.id
         source_id = source.id
 
@@ -243,12 +278,28 @@ async def test_catalog_full_text_search_keyset_and_normalized_source_lookup(
             organization_id=organization_id,
             source_id=source_id,
         )
+        exact_identifier_page, _ = await mcp_registry_repository.list_servers(
+            session,
+            cursor=None,
+            limit=2,
+            include_deleted=False,
+            search="io.github.github/github-mcp-server",
+            organization_id=organization_id,
+        )
 
     assert [row.name for row in first_page] == ["example/weather"]
     assert next_cursor
     assert [row.name for row in second_page] == ["example/forecast"]
     assert final_cursor == ""
-    assert {row.name for row in sourced} == {"example/forecast", "example/weather"}
+    assert [row.name for row in exact_identifier_page][:1] == [
+        "io.github.github/github-mcp-server"
+    ]
+    assert {row.name for row in sourced} == {
+        "example/forecast",
+        "example/weather",
+        "io.github.github/github-actions-mcp-server",
+        "io.github.github/github-mcp-server",
+    }
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,13 @@ def normalize_registry_search_query(query: str) -> str:
     return " ".join(meaningful_tokens or tokens) or normalized_query.strip()
 
 
+def registry_identifier_search_query(query: str) -> str | None:
+    normalized_query = query.strip().casefold()
+    if "/" not in normalized_query:
+        return None
+    return normalized_query or None
+
+
 def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
     statement = select(MCPServerVersion)
     if not include_deleted:
@@ -267,6 +274,7 @@ async def list_servers(
     statement = _visible_query(include_deleted or updated_since is not None)
     if organization_id is not None:
         statement = statement.where(MCPServerVersion.organization_id == organization_id)
+    identifier_search = registry_identifier_search_query(search) if search else None
     normalized_search = normalize_registry_search_query(search) if search else ""
     quality_score_rank = _quality_score_rank_expression()
     if normalized_search:
@@ -284,10 +292,15 @@ async def list_servers(
         text_match = or_(english_match, simple_match)
         normalized_name = func.lower(MCPServerVersion.name)
         normalized_title = func.lower(MCPServerVersion.title)
-        exact_match = or_(
+        exact_match_conditions = [
             normalized_name == normalized_search,
             normalized_title == normalized_search,
-        )
+        ]
+        identifier_exact_match = None
+        if identifier_search and identifier_search != normalized_search:
+            identifier_exact_match = normalized_name == identifier_search
+            exact_match_conditions.insert(0, identifier_exact_match)
+        exact_match = or_(*exact_match_conditions)
         prefix_pattern = f"{escaped_search}%"
         prefix_match = or_(
             normalized_name.ilike(prefix_pattern, escape="\\"),
@@ -316,7 +329,14 @@ async def list_servers(
                 32,
             )
         ).label("text_rank")
-        search_quality_score_rank = quality_score_rank.label("quality_score_rank")
+        if identifier_exact_match is not None:
+            effective_quality_score_rank = case(
+                (identifier_exact_match, literal(Decimal("-1000000001"))),
+                else_=quality_score_rank,
+            )
+        else:
+            effective_quality_score_rank = quality_score_rank
+        search_quality_score_rank = effective_quality_score_rank.label("quality_score_rank")
         statement = statement.where(
             or_(exact_match, prefix_match, contains_match, text_match)
         ).add_columns(
@@ -333,7 +353,7 @@ async def list_servers(
 
     if normalized_search:
         statement = statement.order_by(
-            quality_score_rank.asc(),
+            search_quality_score_rank.asc(),
             match_tier.asc(),
             text_rank.desc(),
             MCPServerVersion.name.asc(),
@@ -354,7 +374,7 @@ async def list_servers(
                 _search_cursor_after_condition(
                     match_tier=match_tier,
                     text_rank=text_rank,
-                    quality_score_rank=quality_score_rank,
+                    quality_score_rank=search_quality_score_rank,
                     after_match_tier=_search_match_tier_cursor_value(after_match_tier_value),
                     after_text_rank=_search_text_rank_cursor_float(after_text_rank_value),
                     after_quality_score_rank=_decimal_cursor_decimal(

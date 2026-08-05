@@ -95,6 +95,14 @@ def test_registry_search_normalization_drops_only_generic_catalog_terms() -> Non
     )
 
 
+def test_registry_identifier_search_query_preserves_exact_server_ids() -> None:
+    assert (
+        repository.registry_identifier_search_query("io.github.github/github-mcp-server")
+        == "io.github.github/github-mcp-server"
+    )
+    assert repository.registry_identifier_search_query("ArgoCD MCP Server") is None
+
+
 @pytest.mark.asyncio
 async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     organization_id = uuid4()
@@ -144,11 +152,11 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     assert "MCP_SERVER_VERSIONS.DESCRIPTION ILIKE" not in statement_sql
     assert "CASE WHEN" in statement_sql
     assert (
-        "ORDER BY COALESCE(-COALESCE("
+        "QUALITY_SCORE_RANK AS"
         in statement_sql
         and "MATCH_TIER ASC, TEXT_RANK DESC" in statement_sql
     )
-    assert statement_sql.index("ORDER BY COALESCE(-COALESCE(") < statement_sql.index(
+    assert statement_sql.index("ORDER BY QUALITY_SCORE_RANK ASC") < statement_sql.index(
         "MATCH_TIER ASC"
     )
     assert "MCP_SERVER_VERSIONS.NAME ASC" in statement_sql
@@ -169,6 +177,36 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     assert "MCP_SERVER_VERSIONS.NAME, MCP_SERVER_VERSIONS.VERSION, " in statement_sql
     assert ") > (" in statement_sql
     assert " OFFSET " not in statement_sql
+
+
+@pytest.mark.asyncio
+async def test_list_servers_prioritizes_exact_server_identifier_search() -> None:
+    session = RecordingSession([])
+
+    await repository.list_servers(
+        session,
+        cursor=None,
+        limit=25,
+        include_deleted=False,
+        search="io.github.github/github-mcp-server",
+        organization_id=uuid4(),
+    )
+
+    statement_sql = sql(session.statements[0], literal_binds=True).lower()
+    assert "lower(mcp_server_versions.name) = 'io.github.github/github-mcp-server'" in (
+        statement_sql
+    )
+    assert (
+        "mcp_server_versions.search_vector @@ "
+        "websearch_to_tsquery('english'::regconfig, 'io github github github')"
+        in statement_sql
+    )
+    assert (
+        "case when (lower(mcp_server_versions.name) = "
+        "'io.github.github/github-mcp-server') then -1000000001"
+        in statement_sql
+    )
+    assert "order by quality_score_rank asc, match_tier asc" in statement_sql
 
 
 @pytest.mark.asyncio
