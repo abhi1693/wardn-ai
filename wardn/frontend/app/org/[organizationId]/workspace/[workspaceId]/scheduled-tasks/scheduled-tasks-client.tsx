@@ -171,6 +171,29 @@ const schedulePresets: { label: string; type: ScheduleEntryType; icon: typeof Cl
   { label: "Cron", type: "cron", icon: Clock3 },
 ];
 
+const editorSections = [
+  { id: "basics", icon: Pencil, label: "Basics" },
+  { id: "instructions", icon: MessageSquare, label: "Instructions" },
+  { id: "schedule", icon: CalendarClock, label: "Schedule" },
+  { id: "outputs", icon: Route, label: "Outputs" },
+  { id: "notifications", icon: BellRing, label: "Notifications" },
+  { id: "monitoring", icon: Eye, label: "Monitoring" },
+  { id: "review", icon: ShieldCheck, label: "Review" },
+] as const;
+
+type EditorSectionId = (typeof editorSections)[number]["id"];
+
+const notificationRuleOptions: {
+  key: keyof FormState["notificationRules"];
+  label: string;
+}[] = [
+  { key: "onFailure", label: "Failure" },
+  { key: "onWaitingApproval", label: "Waiting approval" },
+  { key: "onNoOutput", label: "No output" },
+  { key: "onDeliveryFailure", label: "Delivery failure" },
+  { key: "onMeaningfulUpdate", label: "Meaningful update" },
+];
+
 function normalizeTimezone(value: string) {
   const timezone = value.trim() || "UTC";
   return timezoneAliases[timezone] ?? timezone;
@@ -253,13 +276,17 @@ function scheduleKey() {
   return `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function newScheduleDraft(type: ScheduleEntryType, timezone: string): ScheduleDraft {
+function newScheduleDraft(
+  type: ScheduleEntryType,
+  timezone: string,
+  key = scheduleKey()
+): ScheduleDraft {
   return {
     cronExpression: type === "cron" ? "0 9 * * 1-5" : "",
     endsAt: "",
     everyMinutes: "60",
     isActive: true,
-    key: scheduleKey(),
+    key,
     monthDays: ["1"],
     name: "",
     scheduleType: type,
@@ -478,7 +505,7 @@ function taskFormState(
     return {
       name: "",
       instructions: "",
-      schedules: [newScheduleDraft("daily", timezone)],
+      schedules: [newScheduleDraft("daily", timezone, "draft-schedule-1")],
       selectedRoutes: ["chat"],
       notificationRoutes: ["chat"],
       approvalRoutes: ["chat"],
@@ -778,6 +805,72 @@ function failedRetryableDeliveries(run: WorkspaceScheduledTaskRunRead) {
   );
 }
 
+function scheduleDisplayName(schedule: ScheduleDraft, index: number) {
+  return schedule.name.trim() || `Execution ${index + 1}`;
+}
+
+function weekdayShortLabel(value: string) {
+  return weekdays.find((weekday) => weekday.value === value)?.label.slice(0, 3) ?? value;
+}
+
+function monthDayLabel(value: string) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed.toString() : value;
+}
+
+function scheduleDraftSummary(schedule: ScheduleDraft) {
+  if (!schedule.isActive) {
+    return "Paused";
+  }
+  if (schedule.scheduleType === "interval") {
+    return `Runs every ${schedule.everyMinutes || "60"} minutes`;
+  }
+  if (schedule.scheduleType === "cron") {
+    return `Runs from cron expression ${schedule.cronExpression || "not set"}`;
+  }
+  const times = schedule.times.length ? schedule.times.join(", ") : "no run time";
+  if (schedule.scheduleType === "weekdays") {
+    return `Runs Monday through Friday at ${times}`;
+  }
+  if (schedule.scheduleType === "weekly") {
+    const days = schedule.weekdays.length
+      ? schedule.weekdays.map(weekdayShortLabel).join(", ")
+      : "no weekdays";
+    return `Runs ${days} at ${times}`;
+  }
+  if (schedule.scheduleType === "monthly") {
+    const days = schedule.monthDays.length
+      ? schedule.monthDays.map(monthDayLabel).join(", ")
+      : "no month days";
+    return `Runs monthly on day ${days} at ${times}`;
+  }
+  return `Runs every day at ${times}`;
+}
+
+function choiceButtonClass(active: boolean) {
+  return cn(
+    "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors",
+    active
+      ? "border-teal-600 bg-teal-50 text-teal-900 shadow-[inset_0_0_0_1px_rgb(13_148_136/0.12)]"
+      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+  );
+}
+
+function sectionPanelClass(extra?: string) {
+  return cn("rounded-md border border-slate-200 bg-white shadow-[var(--shadow-card)]", extra);
+}
+
+function sectionHeaderClass(extra?: string) {
+  return cn("border-b border-slate-200 px-4 py-3", extra);
+}
+
+function fieldTextAreaClass(extra?: string) {
+  return cn(
+    "w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60",
+    extra
+  );
+}
+
 function metricValue(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
@@ -868,6 +961,7 @@ export function ScheduledTaskFormClient({
     null
   );
   const [routeTests, setRouteTests] = useState<Record<string, RouteTestState>>({});
+  const [activeSection, setActiveSection] = useState<EditorSectionId>("schedule");
   const isTestingRoutes = Object.values(routeTests).some((test) => test.status === "testing");
 
   function routeForKey(key: string) {
@@ -1028,9 +1122,14 @@ export function ScheduledTaskFormClient({
     });
   }
 
+  const maxAttemptsInput = Number(form.maxAttempts || 0);
   const canSave = Boolean(
     form.name.trim() &&
       form.instructions.trim() &&
+      form.selectedRoutes.length > 0 &&
+      Number.isInteger(maxAttemptsInput) &&
+      maxAttemptsInput >= 1 &&
+      maxAttemptsInput <= 10 &&
       form.schedules.every((schedule) => scheduleDraftIsValid(schedule))
   );
 
@@ -1113,75 +1212,295 @@ export function ScheduledTaskFormClient({
     }
   }
 
+  const invalidScheduleCount = form.schedules.filter(
+    (schedule) => !scheduleDraftIsValid(schedule)
+  ).length;
+  const activeNotificationCount = Object.values(form.notificationRules).filter(Boolean).length;
+  const failedRouteTests = Object.entries(routeTests).filter(
+    ([key, state]) => form.selectedRoutes.includes(key) && state.status === "failed"
+  );
+  const selectedOutputLabels = form.selectedRoutes.map((key) =>
+    routeLabelForKey(key, providerOptions)
+  );
+  const selectedNotificationLabels = form.notificationRoutes.map((key) =>
+    routeLabelForKey(key, providerOptions)
+  );
+  const selectedApprovalLabels = form.approvalRoutes.map((key) =>
+    routeLabelForKey(key, providerOptions)
+  );
+  const maxAttemptsValue = maxAttemptsInput;
+  const canPreview = form.schedules.length > 0 && invalidScheduleCount === 0;
+  const validationIssues = [
+    !form.name.trim() ? "Task name is required." : null,
+    !form.instructions.trim() ? "Instructions are required." : null,
+    invalidScheduleCount > 0
+      ? `${invalidScheduleCount} schedule${invalidScheduleCount === 1 ? "" : "s"} need attention.`
+      : null,
+    form.selectedRoutes.length === 0 ? "Select at least one output destination." : null,
+    failedRouteTests.length > 0
+      ? `${failedRouteTests.length} selected destination test${
+          failedRouteTests.length === 1 ? "" : "s"
+        } failed.`
+      : null,
+    !Number.isInteger(maxAttemptsValue) || maxAttemptsValue < 1 || maxAttemptsValue > 10
+      ? "Attempts must be between 1 and 10."
+      : null,
+  ].filter((issue): issue is string => Boolean(issue));
+  const sectionSummaries = {
+    basics: form.name.trim() || "Name required",
+    instructions: form.instructions.trim()
+      ? `${metricValue(form.instructions.trim().length)} chars`
+      : "Required",
+    monitoring: form.monitoringConfig.enabled ? "Watch mode on" : "Standard run",
+    notifications: `${activeNotificationCount} rules`,
+    outputs: selectedOutputLabels.length
+      ? `${selectedOutputLabels.length} destination${selectedOutputLabels.length === 1 ? "" : "s"}`
+      : "No destination",
+    review: validationIssues.length ? `${validationIssues.length} issue${validationIssues.length === 1 ? "" : "s"}` : "Ready",
+    schedule:
+      form.schedules.length > 0
+        ? `${form.schedules.length} execution${form.schedules.length === 1 ? "" : "s"}`
+        : "Manual",
+  };
+  const sectionComplete = {
+    basics: Boolean(form.name.trim()) && Number.isInteger(maxAttemptsValue) && maxAttemptsValue > 0,
+    instructions: Boolean(form.instructions.trim()),
+    monitoring: true,
+    notifications: activeNotificationCount > 0,
+    outputs: form.selectedRoutes.length > 0 && failedRouteTests.length === 0,
+    review: validationIssues.length === 0,
+    schedule: invalidScheduleCount === 0,
+  };
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <Button asChild variant="outline">
-          <Link href={scheduledTasksHref}>
-            <ArrowLeft className="size-4" />
-            Back
-          </Link>
-        </Button>
-        <Badge variant={form.isActive ? "success" : "secondary"}>
-          {form.isActive ? "Active" : "Paused"}
-        </Badge>
+    <form
+      className="space-y-4 bg-slate-50/60 pb-2 text-slate-900"
+      id="scheduled-task-form"
+      onSubmit={submitTask}
+    >
+      <div className="sticky top-0 z-20 -mx-2 border-b border-slate-200 bg-white/95 px-2 py-3 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button asChild size="icon" title="Back to scheduled tasks" variant="outline">
+              <Link href={scheduledTasksHref}>
+                <ArrowLeft className="size-4" />
+              </Link>
+            </Button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-lg font-semibold leading-7 text-slate-950">
+                  {editingTask ? "Edit scheduled task" : "New scheduled task"}
+                </h1>
+                <Badge
+                  className={
+                    form.isActive
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-100 text-slate-600"
+                  }
+                  variant="outline"
+                >
+                  {form.isActive ? "Active" : "Paused"}
+                </Badge>
+                {validationIssues.length ? (
+                  <Badge className="border-amber-200 bg-amber-50 text-amber-800" variant="outline">
+                    {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
+                  </Badge>
+                ) : (
+                  <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline">
+                    Ready
+                  </Badge>
+                )}
+              </div>
+              <div className="mt-0.5 truncate text-xs text-slate-500">
+                {form.name.trim() || "Untitled task"} · {sectionSummaries.schedule} ·{" "}
+                {sectionSummaries.outputs}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild type="button" variant="outline">
+              <Link href={scheduledTasksHref}>Cancel</Link>
+            </Button>
+            <Button
+              disabled={isTestingRoutes || form.selectedRoutes.length === 0}
+              onClick={testSelectedRoutes}
+              type="button"
+              variant="outline"
+            >
+              {isTestingRoutes ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : (
+                <Send className="size-4" />
+              )}
+              Test routes
+            </Button>
+            <Button
+              className="bg-teal-700 text-white hover:bg-teal-800"
+              disabled={!canSave || isSaving}
+              type="submit"
+            >
+              {isSaving ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : (
+                <Save className="size-4" />
+              )}
+              {editingTask ? "Save" : "Create"}
+            </Button>
+          </div>
+        </div>
+        <nav className="mt-3 flex gap-1 overflow-x-auto border-t border-slate-200 pt-2">
+          {editorSections.map((section) => {
+            const Icon = section.icon;
+            const complete = sectionComplete[section.id];
+            const active = activeSection === section.id;
+            return (
+              <button
+                className={cn(
+                  "flex h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-left text-sm transition-colors",
+                  active
+                    ? "border-teal-600 bg-teal-50 text-teal-950"
+                    : "border-transparent bg-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"
+                )}
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                type="button"
+              >
+                <Icon className="size-4" />
+                <span className="font-medium">{section.label}</span>
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    complete ? "bg-teal-600" : "bg-amber-500"
+                  )}
+                />
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {feedback ? (
         <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
       ) : null}
 
-      <form className="space-y-5" onSubmit={submitTask}>
-          <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-            <div className="space-y-2">
-              <Label htmlFor="scheduled-task-name">Name</Label>
-              <Input
-                id="scheduled-task-name"
-                maxLength={120}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-                required
-                value={form.name}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="scheduled-task-active">State</Label>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <main className="min-w-0 space-y-4">
+          <section
+            className={sectionPanelClass(activeSection === "basics" ? undefined : "hidden")}
+            id="task-basics"
+          >
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Basics</h2>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  Name, state, attempts, and chat history.
+                </div>
+              </div>
               <button
                 className={cn(
-                  "flex h-9 w-full items-center justify-between rounded-md border px-3 text-sm",
+                  "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-sm font-medium",
                   form.isActive
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-border bg-muted text-muted-foreground"
+                    : "border-slate-200 bg-slate-100 text-slate-600"
                 )}
                 id="scheduled-task-active"
                 onClick={() => setForm({ ...form, isActive: !form.isActive })}
                 type="button"
               >
-                <span>{form.isActive ? "Active" : "Paused"}</span>
                 {form.isActive ? <CheckCircle2 className="size-4" /> : <Pause className="size-4" />}
+                {form.isActive ? "Active" : "Paused"}
               </button>
             </div>
-          </div>
+            <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-task-name">Task name</Label>
+                <Input
+                  className="bg-white"
+                  id="scheduled-task-name"
+                  maxLength={120}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                  placeholder="Daily SEO report"
+                  required
+                  value={form.name}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="scheduled-task-max-attempts">Attempts</Label>
+                  <Input
+                    className="bg-white"
+                    id="scheduled-task-max-attempts"
+                    max={10}
+                    min={1}
+                    onChange={(event) => setForm({ ...form, maxAttempts: event.target.value })}
+                    type="number"
+                    value={form.maxAttempts}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="scheduled-task-conversation-policy">Chat history</Label>
+                  <Select
+                    onValueChange={(value) =>
+                      setForm({ ...form, conversationPolicy: value as ConversationPolicy })
+                    }
+                    value={form.conversationPolicy}
+                  >
+                    <SelectTrigger className="bg-white" id="scheduled-task-conversation-policy">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="reuse">Reuse</SelectItem>
+                      <SelectItem value="new_each_run">New each run</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          <div className="space-y-2">
-            <Label htmlFor="scheduled-task-instructions">Instructions</Label>
-            <textarea
-              className="min-h-32 w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
-              id="scheduled-task-instructions"
-              maxLength={20000}
-              onChange={(event) => setForm({ ...form, instructions: event.target.value })}
-              required
-              value={form.instructions}
-            />
-          </div>
+          <section
+            className={sectionPanelClass(activeSection === "instructions" ? undefined : "hidden")}
+            id="task-instructions"
+          >
+            <div className={sectionHeaderClass()}>
+              <h2 className="text-sm font-semibold text-slate-950">Instructions</h2>
+              <div className="mt-0.5 text-xs text-slate-500">
+                The assistant prompt for each scheduled run.
+              </div>
+            </div>
+            <div className="p-4">
+              <textarea
+                className={fieldTextAreaClass("min-h-44 font-sans leading-6")}
+                id="scheduled-task-instructions"
+                maxLength={20000}
+                onChange={(event) => setForm({ ...form, instructions: event.target.value })}
+                required
+                value={form.instructions}
+              />
+            </div>
+          </section>
 
-          <div className="grid gap-4 rounded-md border border-border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <CalendarClock className="size-4 text-muted-foreground" />
-                Schedules
-                <Badge variant="secondary">{form.schedules.length || "Manual"}</Badge>
+          <section
+            className={sectionPanelClass(activeSection === "schedule" ? undefined : "hidden")}
+            id="task-schedule"
+          >
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-3")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Schedule</h2>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {sectionSummaries.schedule}
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => setForm({ ...form, schedules: [] })}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <Play className="size-4" />
+                  Manual
+                </Button>
                 {schedulePresets.map((preset) => {
                   const PresetIcon = preset.icon;
                   return (
@@ -1199,78 +1518,57 @@ export function ScheduledTaskFormClient({
                 })}
               </div>
             </div>
+            <div className="grid gap-3 p-4">
+              {form.schedules.length === 0 ? (
+                <div className="flex min-h-16 items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm text-slate-600">
+                  <Play className="size-4" />
+                  <span>Manual run only</span>
+                </div>
+              ) : null}
 
-            {form.schedules.length === 0 ? (
-              <div className="flex items-center gap-3 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                <Play className="size-4" />
-                <span>Manual run only</span>
-              </div>
-            ) : null}
-
-            {form.schedules.map((schedule, index) => {
-              const typePreset = schedulePresets.find((preset) => preset.type === schedule.scheduleType);
-              const TypeIcon = typePreset?.icon ?? Clock3;
-              return (
-                <div className="grid gap-3 rounded-md border border-border bg-card p-3" key={schedule.key}>
-                  <div className="grid gap-2 md:grid-cols-[1fr_180px_92px_40px]">
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-name-${schedule.key}`}>Label</Label>
-                      <Input
-                        id={`schedule-name-${schedule.key}`}
-                        maxLength={120}
-                        onChange={(event) => updateSchedule(schedule.key, { name: event.target.value })}
-                        placeholder={`Schedule ${index + 1}`}
-                        value={schedule.name}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-type-${schedule.key}`}>Type</Label>
-                      <Select
-                        onValueChange={(value) => {
-                          const nextType = value as ScheduleEntryType;
-                          const defaults = newScheduleDraft(nextType, schedule.timezone);
-                          updateSchedule(schedule.key, {
-                            cronExpression: defaults.cronExpression,
-                            everyMinutes: defaults.everyMinutes,
-                            monthDays: defaults.monthDays,
-                            scheduleType: nextType,
-                            times: defaults.times,
-                            weekdays: defaults.weekdays,
-                          });
-                        }}
-                        value={schedule.scheduleType}
-                      >
-                        <SelectTrigger id={`schedule-type-${schedule.key}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {schedulePresets.map((preset) => (
-                            <SelectItem key={preset.type} value={preset.type}>
-                              {preset.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>State</Label>
-                      <button
+              {form.schedules.map((schedule, index) => (
+                <div
+                  className="overflow-hidden rounded-md border border-slate-200 bg-white"
+                  key={schedule.key}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span
                         className={cn(
-                          "flex h-9 w-full items-center justify-center gap-2 rounded-md border text-sm",
+                          "flex size-7 items-center justify-center rounded-md border",
                           schedule.isActive
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-border bg-muted text-muted-foreground"
+                            : "border-slate-200 bg-white text-slate-500"
                         )}
-                        onClick={() => updateSchedule(schedule.key, { isActive: !schedule.isActive })}
+                      >
+                        <CalendarClock className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">
+                          {scheduleDisplayName(schedule, index)}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {scheduleDraftSummary(schedule)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className={cn(
+                          "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium",
+                          schedule.isActive
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-white text-slate-500"
+                        )}
+                        onClick={() =>
+                          updateSchedule(schedule.key, { isActive: !schedule.isActive })
+                        }
                         type="button"
                       >
-                        <TypeIcon className="size-4" />
                         {schedule.isActive ? "On" : "Off"}
                       </button>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="opacity-0">Remove</Label>
                       <Button
+                        className="border-red-200 text-red-700 hover:bg-red-50"
                         onClick={() => removeSchedule(schedule.key)}
                         size="icon"
                         title="Remove schedule"
@@ -1282,229 +1580,305 @@ export function ScheduledTaskFormClient({
                     </div>
                   </div>
 
-                  {schedule.scheduleType === "interval" ? (
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-interval-${schedule.key}`}>Every minutes</Label>
-                      <Input
-                        id={`schedule-interval-${schedule.key}`}
-                        max={10080}
-                        min={1}
-                        onChange={(event) =>
-                          updateSchedule(schedule.key, { everyMinutes: event.target.value })
-                        }
-                        type="number"
-                        value={schedule.everyMinutes}
-                      />
+                  <div className="grid gap-4 p-3">
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,auto)]">
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-name-${schedule.key}`}>Label</Label>
+                        <Input
+                          className="bg-white"
+                          id={`schedule-name-${schedule.key}`}
+                          maxLength={120}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { name: event.target.value })
+                          }
+                          placeholder={`Execution ${index + 1}`}
+                          value={schedule.name}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Type</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {schedulePresets.map((preset) => {
+                            const PresetIcon = preset.icon;
+                            return (
+                              <button
+                                className={choiceButtonClass(
+                                  schedule.scheduleType === preset.type
+                                )}
+                                key={preset.type}
+                                onClick={() => {
+                                  const defaults = newScheduleDraft(preset.type, schedule.timezone);
+                                  updateSchedule(schedule.key, {
+                                    cronExpression: defaults.cronExpression,
+                                    everyMinutes: defaults.everyMinutes,
+                                    monthDays: defaults.monthDays,
+                                    scheduleType: preset.type,
+                                    times: defaults.times,
+                                    weekdays: defaults.weekdays,
+                                  });
+                                }}
+                                type="button"
+                              >
+                                <PresetIcon className="size-3.5" />
+                                {preset.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
 
-                  {schedule.scheduleType === "cron" ? (
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-cron-${schedule.key}`}>Cron</Label>
-                      <Input
-                        id={`schedule-cron-${schedule.key}`}
-                        onChange={(event) =>
-                          updateSchedule(schedule.key, { cronExpression: event.target.value })
-                        }
-                        placeholder="0 9 * * 1-5"
-                        value={schedule.cronExpression}
-                      />
+                    <div className="rounded-md border border-teal-100 bg-teal-50/70 px-3 py-2 text-sm text-teal-900">
+                      {scheduleDraftSummary(schedule)}
                     </div>
-                  ) : null}
 
-                  {schedule.scheduleType !== "interval" && schedule.scheduleType !== "cron" ? (
-                    <div className="grid gap-2">
-                      <Label>Run times</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {schedule.times.map((timeValue) => (
-                          <button
-                            className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-muted px-2 text-xs"
-                            key={timeValue}
-                            onClick={() => removeRunTime(schedule, timeValue)}
-                            type="button"
-                          >
-                            {timeValue}
-                            <X className="size-3" />
-                          </button>
-                        ))}
-                        <div className="flex gap-2">
+                    {schedule.scheduleType === "interval" ? (
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-interval-${schedule.key}`}>Every minutes</Label>
+                        <Input
+                          className="max-w-48 bg-white"
+                          id={`schedule-interval-${schedule.key}`}
+                          max={10080}
+                          min={1}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { everyMinutes: event.target.value })
+                          }
+                          type="number"
+                          value={schedule.everyMinutes}
+                        />
+                      </div>
+                    ) : null}
+
+                    {schedule.scheduleType === "cron" ? (
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-cron-${schedule.key}`}>Cron expression</Label>
+                        <Input
+                          className="font-mono bg-white"
+                          id={`schedule-cron-${schedule.key}`}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { cronExpression: event.target.value })
+                          }
+                          placeholder="0 9 * * 1-5"
+                          value={schedule.cronExpression}
+                        />
+                      </div>
+                    ) : null}
+
+                    {schedule.scheduleType !== "interval" && schedule.scheduleType !== "cron" ? (
+                      <div className="grid gap-2">
+                        <Label>Run times</Label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {schedule.times.map((timeValue) => (
+                            <button
+                              className="inline-flex h-8 items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-2.5 text-xs font-medium text-teal-900"
+                              key={timeValue}
+                              onClick={() => removeRunTime(schedule, timeValue)}
+                              type="button"
+                            >
+                              {timeValue}
+                              <X className="size-3" />
+                            </button>
+                          ))}
                           <Input
-                            className="w-28"
+                            className="h-8 w-28 bg-white text-xs"
                             onChange={(event) =>
                               updateSchedule(schedule.key, { timeInput: event.target.value })
                             }
                             type="time"
                             value={schedule.timeInput}
                           />
-                          <Button onClick={() => addRunTime(schedule)} size="sm" type="button" variant="outline">
+                          <Button
+                            onClick={() => addRunTime(schedule)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
                             <Plus className="size-4" />
                             Add
                           </Button>
                         </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  {schedule.scheduleType === "weekly" ? (
-                    <div className="grid gap-2">
-                      <Label>Weekdays</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {weekdays.map((weekday) => (
-                          <button
-                            className={cn(
-                              "h-8 rounded-md border px-2 text-xs",
-                              schedule.weekdays.includes(weekday.value)
-                                ? "border-ring bg-sidebar-accent text-foreground"
-                                : "border-border bg-card text-muted-foreground"
-                            )}
-                            key={weekday.value}
-                            onClick={() => toggleValue(schedule, "weekdays", weekday.value)}
-                            type="button"
+                    {schedule.scheduleType === "weekly" ? (
+                      <div className="grid gap-2">
+                        <Label>Weekdays</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {weekdays.map((weekday) => (
+                            <button
+                              className={choiceButtonClass(
+                                schedule.weekdays.includes(weekday.value)
+                              )}
+                              key={weekday.value}
+                              onClick={() => toggleValue(schedule, "weekdays", weekday.value)}
+                              type="button"
+                            >
+                              {weekday.label.slice(0, 3)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {schedule.scheduleType === "weekdays" ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {["Mon", "Tue", "Wed", "Thu", "Fri"].map((weekday) => (
+                          <span
+                            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-600"
+                            key={weekday}
                           >
-                            {weekday.label.slice(0, 3)}
-                          </button>
+                            {weekday}
+                          </span>
                         ))}
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  {schedule.scheduleType === "monthly" ? (
-                    <div className="grid gap-2">
-                      <Label>Month days</Label>
-                      <div className="grid grid-cols-7 gap-1 sm:grid-cols-10">
-                        {Array.from({ length: 31 }, (_, day) => String(day + 1)).map((day) => (
-                          <button
-                            className={cn(
-                              "h-8 rounded-md border text-xs",
-                              schedule.monthDays.includes(day)
-                                ? "border-ring bg-sidebar-accent text-foreground"
-                                : "border-border bg-card text-muted-foreground"
-                            )}
-                            key={day}
-                            onClick={() => toggleValue(schedule, "monthDays", day)}
-                            type="button"
-                          >
-                            {day}
-                          </button>
-                        ))}
+                    {schedule.scheduleType === "monthly" ? (
+                      <div className="grid gap-2">
+                        <Label>Month days</Label>
+                        <div className="grid grid-cols-7 gap-1 sm:grid-cols-10">
+                          {Array.from({ length: 31 }, (_, day) => String(day + 1)).map((day) => (
+                            <button
+                              className={choiceButtonClass(schedule.monthDays.includes(day))}
+                              key={day}
+                              onClick={() => toggleValue(schedule, "monthDays", day)}
+                              type="button"
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-timezone-${schedule.key}`}>Timezone</Label>
-                      <Input
-                        id={`schedule-timezone-${schedule.key}`}
-                        onChange={(event) =>
-                          updateSchedule(schedule.key, { timezone: event.target.value })
-                        }
-                        value={schedule.timezone}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-start-${schedule.key}`}>Start</Label>
-                      <Input
-                        id={`schedule-start-${schedule.key}`}
-                        onChange={(event) =>
-                          updateSchedule(schedule.key, { startsAt: event.target.value })
-                        }
-                        type="datetime-local"
-                        value={schedule.startsAt}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`schedule-end-${schedule.key}`}>End</Label>
-                      <Input
-                        id={`schedule-end-${schedule.key}`}
-                        onChange={(event) =>
-                          updateSchedule(schedule.key, { endsAt: event.target.value })
-                        }
-                        type="datetime-local"
-                        value={schedule.endsAt}
-                      />
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-timezone-${schedule.key}`}>Timezone</Label>
+                        <Input
+                          className="bg-white"
+                          id={`schedule-timezone-${schedule.key}`}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { timezone: event.target.value })
+                          }
+                          value={schedule.timezone}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-start-${schedule.key}`}>Start</Label>
+                        <Input
+                          className="bg-white"
+                          id={`schedule-start-${schedule.key}`}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { startsAt: event.target.value })
+                          }
+                          type="datetime-local"
+                          value={schedule.startsAt}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`schedule-end-${schedule.key}`}>End</Label>
+                        <Input
+                          className="bg-white"
+                          id={`schedule-end-${schedule.key}`}
+                          onChange={(event) =>
+                            updateSchedule(schedule.key, { endsAt: event.target.value })
+                          }
+                          type="datetime-local"
+                          value={schedule.endsAt}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              );
-            })}
-
-            <div className="grid gap-2 rounded-md border border-dashed border-border p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium">Next 5 runs</div>
-                <Button
-                  disabled={isPreviewing || !canSave}
-                  onClick={previewSchedules}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {isPreviewing ? <RefreshCw className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  Preview
-                </Button>
-              </div>
-              {previewRuns.length > 0 ? (
-                <div className="grid gap-1 text-sm">
-                  {previewRuns.map((run) => (
-                    <div className="rounded-md bg-muted px-2 py-1" key={run}>
-                      {formatDate(run)}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">No upcoming runs.</div>
-              )}
+              ))}
             </div>
-          </div>
+          </section>
 
-          <div className="grid gap-4 md:grid-cols-[1fr_220px]">
-            <div className="rounded-md border border-border">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Route className="size-4 text-muted-foreground" />
-                  Output
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">{form.selectedRoutes.length}</Badge>
+          <section
+            className={sectionPanelClass(activeSection === "outputs" ? undefined : "hidden")}
+            id="task-outputs"
+          >
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Outputs</h2>
+                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.outputs}</div>
+              </div>
+              <Button
+                disabled={isTestingRoutes || form.selectedRoutes.length === 0}
+                onClick={testSelectedRoutes}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isTestingRoutes ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <Send className="size-4" />
+                )}
+                Test selected
+              </Button>
+            </div>
+            <div className="grid gap-2 p-4">
+              <div className="flex min-h-12 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                  <input
+                    checked={form.selectedRoutes.includes("chat")}
+                    className="size-4 accent-teal-700"
+                    onChange={() => toggleRoute("chat")}
+                    type="checkbox"
+                  />
+                  <MessageSquare className="size-4 text-slate-500" />
+                  <span className="font-medium text-slate-800">Built-in chat</span>
+                </label>
+                {form.selectedRoutes.includes("chat") ? routeTestBadge("chat") : null}
+                {form.selectedRoutes.includes("chat") ? (
                   <Button
-                    disabled={isTestingRoutes || form.selectedRoutes.length === 0}
-                    onClick={testSelectedRoutes}
-                    size="sm"
+                    disabled={routeTestStatus("chat").status === "testing"}
+                    onClick={() => testRoute("chat")}
+                    size="icon"
+                    title="Test built-in chat route"
                     type="button"
                     variant="outline"
                   >
-                    {isTestingRoutes ? (
+                    {routeTestStatus("chat").status === "testing" ? (
                       <RefreshCw className="size-4 animate-spin" />
                     ) : (
                       <Send className="size-4" />
                     )}
-                    Test
                   </Button>
-                </div>
+                ) : null}
               </div>
-              <div className="grid gap-2 p-3">
-                <div className="flex min-h-11 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
+              {providerOptions.map((option) => (
+                <div
+                  className="flex min-h-14 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  key={option.key}
+                >
                   <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                     <input
-                      checked={form.selectedRoutes.includes("chat")}
-                      className="size-4"
-                      onChange={() => toggleRoute("chat")}
+                      checked={form.selectedRoutes.includes(option.key)}
+                      className="size-4 accent-teal-700"
+                      onChange={() => toggleRoute(option.key)}
                       type="checkbox"
                     />
-                    <MessageSquare className="size-4 text-muted-foreground" />
-                    <span>Built-in chat</span>
+                    <Webhook className="size-4 text-slate-500" />
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-800">
+                        {option.label}
+                      </span>
+                      <span className="block truncate text-xs text-slate-500">{option.source}</span>
+                    </span>
                   </label>
-                  {form.selectedRoutes.includes("chat") ? routeTestBadge("chat") : null}
-                  {form.selectedRoutes.includes("chat") ? (
+                  {form.selectedRoutes.includes(option.key) ? routeTestBadge(option.key) : null}
+                  {form.selectedRoutes.includes(option.key) ? (
                     <Button
-                      disabled={routeTestStatus("chat").status === "testing"}
-                      onClick={() => testRoute("chat")}
+                      disabled={routeTestStatus(option.key).status === "testing"}
+                      onClick={() => testRoute(option.key)}
                       size="icon"
-                      title="Test built-in chat route"
+                      title={`Test ${routeLabelForKey(option.key, providerOptions)}`}
                       type="button"
                       variant="outline"
                     >
-                      {routeTestStatus("chat").status === "testing" ? (
+                      {routeTestStatus(option.key).status === "testing" ? (
                         <RefreshCw className="size-4 animate-spin" />
                       ) : (
                         <Send className="size-4" />
@@ -1512,436 +1886,522 @@ export function ScheduledTaskFormClient({
                     </Button>
                   ) : null}
                 </div>
-                {providerOptions.map((option) => (
-                  <div
-                    className="flex min-h-12 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm"
+              ))}
+              {providerOptions.length === 0 ? (
+                <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-600">
+                  Connect a provider and receive a message before selecting an external route.
+                </div>
+              ) : null}
+              {failedRouteTests.length > 0 ? (
+                <div className="grid gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {failedRouteTests.map(([key, state]) => (
+                    <div className="min-w-0 truncate" key={key}>
+                      {routeLabelForKey(key, providerOptions)}: {state.error || "Test failed."}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section
+            className={sectionPanelClass(
+              activeSection === "notifications" ? undefined : "hidden"
+            )}
+            id="task-notifications"
+          >
+            <div className={sectionHeaderClass()}>
+              <h2 className="text-sm font-semibold text-slate-950">Notifications</h2>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {activeNotificationCount} enabled rule{activeNotificationCount === 1 ? "" : "s"}
+              </div>
+            </div>
+            <div className="grid gap-4 p-4">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {notificationRuleOptions.map((option) => (
+                  <button
+                    className={cn(
+                      "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors",
+                      form.notificationRules[option.key]
+                        ? "border-teal-200 bg-teal-50 text-teal-900"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    )}
                     key={option.key}
+                    onClick={() => toggleNotificationRule(option.key)}
+                    type="button"
                   >
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                    <span>{option.label}</span>
+                    {form.notificationRules[option.key] ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-md border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                    <div className="text-sm font-medium text-slate-900">Notification route</div>
+                    <Badge variant="secondary">{form.notificationRoutes.length}</Badge>
+                  </div>
+                  <div className="grid gap-2 p-3">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
                       <input
-                        checked={form.selectedRoutes.includes(option.key)}
-                        className="size-4"
-                        onChange={() => toggleRoute(option.key)}
+                        checked={form.notificationRoutes.includes("chat")}
+                        className="size-4 accent-teal-700"
+                        onChange={() => toggleNotificationRoute("chat")}
                         type="checkbox"
                       />
-                      <Webhook className="size-4 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{option.label}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {option.source}
-                        </span>
-                      </span>
+                      <MessageSquare className="size-4 text-slate-500" />
+                      <span>Built-in chat</span>
                     </label>
-                    {form.selectedRoutes.includes(option.key) ? routeTestBadge(option.key) : null}
-                    {form.selectedRoutes.includes(option.key) ? (
-                      <Button
-                        disabled={routeTestStatus(option.key).status === "testing"}
-                        onClick={() => testRoute(option.key)}
-                        size="icon"
-                        title={`Test ${routeLabelForKey(option.key, providerOptions)}`}
-                        type="button"
-                        variant="outline"
+                    {providerOptions.map((option) => (
+                      <label
+                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm"
+                        key={option.key}
                       >
-                        {routeTestStatus(option.key).status === "testing" ? (
-                          <RefreshCw className="size-4 animate-spin" />
-                        ) : (
-                          <Send className="size-4" />
-                        )}
-                      </Button>
-                    ) : null}
+                        <input
+                          checked={form.notificationRoutes.includes(option.key)}
+                          className="size-4 accent-teal-700"
+                          onChange={() => toggleNotificationRoute(option.key)}
+                          type="checkbox"
+                        />
+                        <Webhook className="size-4 text-slate-500" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{option.label}</span>
+                          <span className="block truncate text-xs text-slate-500">
+                            {option.source}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
                   </div>
-                ))}
-                {providerOptions.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                    Connect a provider and receive a message before selecting an external route.
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                    <div className="text-sm font-medium text-slate-900">Approval route</div>
+                    <Badge variant="secondary">{form.approvalRoutes.length}</Badge>
                   </div>
-                ) : null}
-                {Object.entries(routeTests).some(
-                  ([key, state]) =>
-                    form.selectedRoutes.includes(key) && state.status === "failed"
-                ) ? (
-                  <div className="grid gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                    {Object.entries(routeTests)
-                      .filter(
-                        ([key, state]) =>
-                          form.selectedRoutes.includes(key) && state.status === "failed"
-                      )
-                      .map(([key, state]) => (
-                        <div className="min-w-0 truncate" key={key}>
-                          {routeLabelForKey(key, providerOptions)}: {state.error || "Test failed."}
-                        </div>
-                      ))}
+                  <div className="grid gap-2 p-3">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                      <input
+                        checked={form.approvalRoutes.includes("chat")}
+                        className="size-4 accent-teal-700"
+                        onChange={() => toggleApprovalRoute("chat")}
+                        type="checkbox"
+                      />
+                      <MessageSquare className="size-4 text-slate-500" />
+                      <span>Built-in chat</span>
+                    </label>
+                    {providerOptions.map((option) => (
+                      <label
+                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm"
+                        key={option.key}
+                      >
+                        <input
+                          checked={form.approvalRoutes.includes(option.key)}
+                          className="size-4 accent-teal-700"
+                          onChange={() => toggleApprovalRoute(option.key)}
+                          type="checkbox"
+                        />
+                        <ShieldCheck className="size-4 text-slate-500" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{option.label}</span>
+                          <span className="block truncate text-xs text-slate-500">
+                            {option.source}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
                   </div>
-                ) : null}
+                </div>
               </div>
             </div>
+          </section>
 
-            <div className="grid gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="scheduled-task-conversation-policy">Chat history</Label>
-                <Select
-                  onValueChange={(value) =>
-                    setForm({ ...form, conversationPolicy: value as ConversationPolicy })
-                  }
-                  value={form.conversationPolicy}
-                >
-                  <SelectTrigger id="scheduled-task-conversation-policy">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="reuse">Reuse task chat</SelectItem>
-                    <SelectItem value="new_each_run">New chat each run</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="scheduled-task-max-attempts">Attempts</Label>
-                <Input
-                  id="scheduled-task-max-attempts"
-                  max={10}
-                  min={1}
-                  onChange={(event) => setForm({ ...form, maxAttempts: event.target.value })}
-                  type="number"
-                  value={form.maxAttempts}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 rounded-md border border-border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Eye className="size-4 text-muted-foreground" />
-                Monitoring
+          <section
+            className={sectionPanelClass(activeSection === "monitoring" ? undefined : "hidden")}
+            id="task-monitoring"
+          >
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Monitoring</h2>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {sectionSummaries.monitoring}
+                </div>
               </div>
               <Badge variant={form.monitoringConfig.enabled ? "success" : "secondary"}>
                 {form.monitoringConfig.enabled ? "On" : "Off"}
               </Badge>
             </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <button
-                className={cn(
-                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                  form.monitoringConfig.enabled
-                    ? "border-ring bg-sidebar-accent text-foreground"
-                    : "border-border bg-card text-muted-foreground"
-                )}
-                onClick={() =>
-                  updateMonitoringConfig({ enabled: !form.monitoringConfig.enabled })
-                }
-                type="button"
-              >
-                <span>Watch mode</span>
-                <CheckCircle2
-                  className={cn(
-                    "size-4",
-                    form.monitoringConfig.enabled ? "opacity-100" : "opacity-0"
-                  )}
-                />
-              </button>
-              <button
-                className={cn(
-                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                  form.monitoringConfig.notifyOnChange
-                    ? "border-ring bg-sidebar-accent text-foreground"
-                    : "border-border bg-card text-muted-foreground"
-                )}
-                disabled={!form.monitoringConfig.enabled}
-                onClick={() =>
-                  updateMonitoringConfig({
-                    notifyOnChange: !form.monitoringConfig.notifyOnChange,
-                  })
-                }
-                type="button"
-              >
-                <span>Notify on change</span>
-                <BellRing className="size-4" />
-              </button>
-              <button
-                className={cn(
-                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                  form.monitoringConfig.deliverOnChangeOnly
-                    ? "border-ring bg-sidebar-accent text-foreground"
-                    : "border-border bg-card text-muted-foreground"
-                )}
-                disabled={!form.monitoringConfig.enabled}
-                onClick={() =>
-                  updateMonitoringConfig({
-                    deliverOnChangeOnly: !form.monitoringConfig.deliverOnChangeOnly,
-                  })
-                }
-                type="button"
-              >
-                <span>Deliver on change</span>
-                <Route className="size-4" />
-              </button>
-              <button
-                className={cn(
-                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                  form.monitoringConfig.baselineOnFirstRun
-                    ? "border-ring bg-sidebar-accent text-foreground"
-                    : "border-border bg-card text-muted-foreground"
-                )}
-                disabled={!form.monitoringConfig.enabled}
-                onClick={() =>
-                  updateMonitoringConfig({
-                    baselineOnFirstRun: !form.monitoringConfig.baselineOnFirstRun,
-                  })
-                }
-                type="button"
-              >
-                <span>Baseline first run</span>
-                <CheckCircle2 className="size-4" />
-              </button>
-            </div>
-
-            {form.monitoringConfig.enabled ? (
-              <div className="grid gap-4 lg:grid-cols-[1fr_240px]">
-                <div className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-4">
-                  <button
-                    className={cn(
-                      "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                      form.monitoringConfig.stopAfterFirstChange
-                        ? "border-ring bg-sidebar-accent text-foreground"
-                        : "border-border bg-card text-muted-foreground"
-                    )}
-                    onClick={() =>
+            <div className="grid gap-4 p-4">
+              <div className="grid gap-2 md:grid-cols-4">
+                {[
+                  {
+                    active: form.monitoringConfig.enabled,
+                    disabled: false,
+                    icon: CheckCircle2,
+                    label: "Watch mode",
+                    onClick: () =>
+                      updateMonitoringConfig({ enabled: !form.monitoringConfig.enabled }),
+                  },
+                  {
+                    active: form.monitoringConfig.notifyOnChange,
+                    disabled: !form.monitoringConfig.enabled,
+                    icon: BellRing,
+                    label: "Notify on change",
+                    onClick: () =>
                       updateMonitoringConfig({
-                        stopAfterFirstChange: !form.monitoringConfig.stopAfterFirstChange,
-                      })
-                    }
-                    type="button"
-                  >
-                    <span>Stop on change</span>
-                    <Pause className="size-4" />
-                  </button>
-                  <div className="space-y-2">
-                    <Label htmlFor="monitoring-stop-change-count">Change count</Label>
-                    <Input
-                      id="monitoring-stop-change-count"
-                      min={1}
-                      onChange={(event) =>
-                        updateMonitoringConfig({
-                          stopAfterChangeCount: event.target.value,
-                        })
-                      }
-                      placeholder="No limit"
-                      type="number"
-                      value={form.monitoringConfig.stopAfterChangeCount}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="monitoring-stop-run-count">Run count</Label>
-                    <Input
-                      id="monitoring-stop-run-count"
-                      min={1}
-                      onChange={(event) =>
-                        updateMonitoringConfig({ stopAfterRunCount: event.target.value })
-                      }
-                      placeholder="No limit"
-                      type="number"
-                      value={form.monitoringConfig.stopAfterRunCount}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="monitoring-stop-unchanged-count">Unchanged count</Label>
-                    <Input
-                      id="monitoring-stop-unchanged-count"
-                      min={1}
-                      onChange={(event) =>
-                        updateMonitoringConfig({
-                          stopAfterUnchangedCount: event.target.value,
-                        })
-                      }
-                      placeholder="No limit"
-                      type="number"
-                      value={form.monitoringConfig.stopAfterUnchangedCount}
-                    />
-                  </div>
-                </div>
+                        notifyOnChange: !form.monitoringConfig.notifyOnChange,
+                      }),
+                  },
+                  {
+                    active: form.monitoringConfig.deliverOnChangeOnly,
+                    disabled: !form.monitoringConfig.enabled,
+                    icon: Route,
+                    label: "Deliver on change",
+                    onClick: () =>
+                      updateMonitoringConfig({
+                        deliverOnChangeOnly: !form.monitoringConfig.deliverOnChangeOnly,
+                      }),
+                  },
+                  {
+                    active: form.monitoringConfig.baselineOnFirstRun,
+                    disabled: !form.monitoringConfig.enabled,
+                    icon: CheckCircle2,
+                    label: "Baseline first run",
+                    onClick: () =>
+                      updateMonitoringConfig({
+                        baselineOnFirstRun: !form.monitoringConfig.baselineOnFirstRun,
+                      }),
+                  },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      className={cn(
+                        "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                        item.active
+                          ? "border-teal-200 bg-teal-50 text-teal-900"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      )}
+                      disabled={item.disabled}
+                      key={item.label}
+                      onClick={item.onClick}
+                      type="button"
+                    >
+                      <span>{item.label}</span>
+                      <Icon className="size-4" />
+                    </button>
+                  );
+                })}
+              </div>
 
-                {editingTask ? (
-                  <div className="grid gap-3 rounded-md border border-border p-3">
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <div className="text-xs text-muted-foreground">State</div>
-                        <div className="mt-1 font-medium">
-                          {taskMonitoringLabel(editingTask)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground">Changes</div>
-                        <div className="mt-1 font-medium">
-                          {metricValue(monitoringChangeCount(editingTask))}
-                        </div>
-                      </div>
-                    </div>
-                    <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
-                      <input
-                        checked={form.resetMonitoringState}
-                        className="size-4"
-                        onChange={() =>
-                          setForm({
-                            ...form,
-                            resetMonitoringState: !form.resetMonitoringState,
+              {form.monitoringConfig.enabled ? (
+                <div className="grid gap-4 lg:grid-cols-[1fr_240px]">
+                  <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
+                    <button
+                      className={cn(
+                        "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                        form.monitoringConfig.stopAfterFirstChange
+                          ? "border-teal-200 bg-teal-50 text-teal-900"
+                          : "border-slate-200 bg-white text-slate-600"
+                      )}
+                      onClick={() =>
+                        updateMonitoringConfig({
+                          stopAfterFirstChange: !form.monitoringConfig.stopAfterFirstChange,
+                        })
+                      }
+                      type="button"
+                    >
+                      <span>Stop on change</span>
+                      <Pause className="size-4" />
+                    </button>
+                    <div className="space-y-2">
+                      <Label htmlFor="monitoring-stop-change-count">Change count</Label>
+                      <Input
+                        className="bg-white"
+                        id="monitoring-stop-change-count"
+                        min={1}
+                        onChange={(event) =>
+                          updateMonitoringConfig({
+                            stopAfterChangeCount: event.target.value,
                           })
                         }
-                        type="checkbox"
+                        placeholder="No limit"
+                        type="number"
+                        value={form.monitoringConfig.stopAfterChangeCount}
                       />
-                      <RefreshCw className="size-4 text-muted-foreground" />
-                      <span>Reset baseline</span>
-                    </label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="monitoring-stop-run-count">Run count</Label>
+                      <Input
+                        className="bg-white"
+                        id="monitoring-stop-run-count"
+                        min={1}
+                        onChange={(event) =>
+                          updateMonitoringConfig({ stopAfterRunCount: event.target.value })
+                        }
+                        placeholder="No limit"
+                        type="number"
+                        value={form.monitoringConfig.stopAfterRunCount}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="monitoring-stop-unchanged-count">Unchanged count</Label>
+                      <Input
+                        className="bg-white"
+                        id="monitoring-stop-unchanged-count"
+                        min={1}
+                        onChange={(event) =>
+                          updateMonitoringConfig({
+                            stopAfterUnchangedCount: event.target.value,
+                          })
+                        }
+                        placeholder="No limit"
+                        type="number"
+                        value={form.monitoringConfig.stopAfterUnchangedCount}
+                      />
+                    </div>
                   </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
 
-          <div className="grid gap-4 rounded-md border border-border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <BellRing className="size-4 text-muted-foreground" />
-                Notifications
-              </div>
-              <Badge variant="secondary">
-                {
-                  Object.values(form.notificationRules).filter((enabled) => enabled)
-                    .length
-                }
-              </Badge>
+                  {editingTask ? (
+                    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-xs text-slate-500">State</div>
+                          <div className="mt-1 font-medium">{taskMonitoringLabel(editingTask)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-500">Changes</div>
+                          <div className="mt-1 font-medium">
+                            {metricValue(monitoringChangeCount(editingTask))}
+                          </div>
+                        </div>
+                      </div>
+                      <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                        <input
+                          checked={form.resetMonitoringState}
+                          className="size-4 accent-teal-700"
+                          onChange={() =>
+                            setForm({
+                              ...form,
+                              resetMonitoringState: !form.resetMonitoringState,
+                            })
+                          }
+                          type="checkbox"
+                        />
+                        <RefreshCw className="size-4 text-slate-500" />
+                        <span>Reset baseline</span>
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-
-            <div className="grid gap-3 md:grid-cols-5">
-              {[
-                ["onFailure", "Failure"],
-                ["onWaitingApproval", "Waiting approval"],
-                ["onNoOutput", "No output"],
-                ["onDeliveryFailure", "Delivery failure"],
-                ["onMeaningfulUpdate", "Meaningful update"],
-              ].map(([key, label]) => (
-                <button
-                  className={cn(
-                    "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
-                    form.notificationRules[key as keyof FormState["notificationRules"]]
-                      ? "border-ring bg-sidebar-accent text-foreground"
-                      : "border-border bg-card text-muted-foreground"
+          </section>
+          <section
+            className={sectionPanelClass(activeSection === "review" ? undefined : "hidden")}
+            id="task-review-main"
+          >
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Review and Save</h2>
+                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.review}</div>
+              </div>
+              <Button
+                className="bg-teal-700 text-white hover:bg-teal-800"
+                disabled={!canSave || isSaving}
+                type="submit"
+              >
+                {isSaving ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                {editingTask ? "Save task" : "Create task"}
+              </Button>
+            </div>
+            <div className="grid gap-4 p-4 lg:grid-cols-2">
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Configuration</div>
+                <div className="mt-3 grid gap-3 text-sm">
+                  {editorSections
+                    .filter((section) => section.id !== "review")
+                    .map((section) => {
+                      const Icon = section.icon;
+                      return (
+                        <button
+                          className="grid grid-cols-[24px_1fr_auto] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition-colors hover:bg-slate-50"
+                          key={section.id}
+                          onClick={() => setActiveSection(section.id)}
+                          type="button"
+                        >
+                          <Icon className="size-4 text-slate-500" />
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-slate-900">
+                              {section.label}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">
+                              {sectionSummaries[section.id]}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "size-2 rounded-full",
+                              sectionComplete[section.id] ? "bg-teal-600" : "bg-amber-500"
+                            )}
+                          />
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
+                <div className="mt-3 grid gap-2">
+                  {validationIssues.length > 0 ? (
+                    validationIssues.map((issue) => (
+                      <div
+                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        key={issue}
+                      >
+                        {issue}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+                      Ready to save.
+                    </div>
                   )}
-                  key={key}
-                  onClick={() =>
-                    toggleNotificationRule(key as keyof FormState["notificationRules"])
-                  }
-                  type="button"
-                >
-                  <span>{label}</span>
-                  <span
-                    className={cn(
-                      "flex size-4 items-center justify-center rounded border",
-                      form.notificationRules[key as keyof FormState["notificationRules"]]
-                        ? "border-ring bg-ring text-primary-foreground"
-                        : "border-border bg-background"
-                    )}
-                  >
-                    {form.notificationRules[key as keyof FormState["notificationRules"]] ? (
-                      <CheckCircle2 className="size-3" />
-                    ) : null}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-md border border-border">
-                <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                  <div className="text-sm font-medium">Notification route</div>
-                  <Badge variant="secondary">{form.notificationRoutes.length}</Badge>
                 </div>
-                <div className="grid gap-2 p-3">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
-                    <input
-                      checked={form.notificationRoutes.includes("chat")}
-                      className="size-4"
-                      onChange={() => toggleNotificationRoute("chat")}
-                      type="checkbox"
-                    />
-                    <MessageSquare className="size-4 text-muted-foreground" />
-                    <span>Built-in chat</span>
-                  </label>
-                  {providerOptions.map((option) => (
-                    <label
-                      className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
-                      key={option.key}
-                    >
-                      <input
-                        checked={form.notificationRoutes.includes(option.key)}
-                        className="size-4"
-                        onChange={() => toggleNotificationRoute(option.key)}
-                        type="checkbox"
-                      />
-                      <Webhook className="size-4 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{option.label}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {option.source}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <aside className="space-y-3 xl:sticky xl:top-32 xl:self-start" id="task-review">
+          <div className={sectionPanelClass()}>
+            <div className={sectionHeaderClass("flex items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Review</h2>
+                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.review}</div>
+              </div>
+              <Button
+                disabled={isPreviewing || !canPreview}
+                onClick={previewSchedules}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isPreviewing ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                Preview
+              </Button>
+            </div>
+            <div className="grid gap-4 p-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-slate-500">Schedules</div>
+                  <div className="mt-1 font-medium text-slate-900">{sectionSummaries.schedule}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Attempts</div>
+                  <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Chat history</div>
+                  <div className="mt-1 font-medium text-slate-900">
+                    {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Monitoring</div>
+                  <div className="mt-1 font-medium text-slate-900">
+                    {form.monitoringConfig.enabled ? "On" : "Off"}
+                  </div>
                 </div>
               </div>
 
-              <div className="rounded-md border border-border">
-                <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                  <div className="text-sm font-medium">Approval route</div>
-                  <Badge variant="secondary">{form.approvalRoutes.length}</Badge>
-                </div>
-                <div className="grid gap-2 p-3">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
-                    <input
-                      checked={form.approvalRoutes.includes("chat")}
-                      className="size-4"
-                      onChange={() => toggleApprovalRoute("chat")}
-                      type="checkbox"
-                    />
-                    <MessageSquare className="size-4 text-muted-foreground" />
-                    <span>Built-in chat</span>
-                  </label>
-                  {providerOptions.map((option) => (
-                    <label
-                      className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
-                      key={option.key}
-                    >
-                      <input
-                        checked={form.approvalRoutes.includes(option.key)}
-                        className="size-4"
-                        onChange={() => toggleApprovalRoute(option.key)}
-                        type="checkbox"
-                      />
-                      <ShieldCheck className="size-4 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{option.label}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {option.source}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
+                {validationIssues.length > 0 ? (
+                  <div className="grid gap-2">
+                    {validationIssues.map((issue) => (
+                      <div
+                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                        key={issue}
+                      >
+                        {issue}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                    Ready to save.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase text-slate-500">Next 5 runs</div>
+                {previewRuns.length > 0 ? (
+                  <div className="grid gap-1 text-sm">
+                    {previewRuns.map((run) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-2 py-1.5"
+                        key={run}
+                      >
+                        <span className="truncate text-slate-700">{formatDate(run)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-500">
+                    No upcoming runs.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
+                {selectedOutputLabels.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedOutputLabels.map((label) => (
+                      <Badge className="max-w-full truncate" key={label} variant="secondary">
+                        {label}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">None selected</div>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
+                <div className="grid gap-1 text-xs text-slate-600">
+                  <div>
+                    Notifications:{" "}
+                    {selectedNotificationLabels.length
+                      ? selectedNotificationLabels.join(", ")
+                      : "None"}
+                  </div>
+                  <div>
+                    Approvals:{" "}
+                    {selectedApprovalLabels.length ? selectedApprovalLabels.join(", ") : "None"}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
-          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-5">
-            <Button asChild type="button" variant="outline">
-              <Link href={scheduledTasksHref}>Cancel</Link>
-            </Button>
-            <Button disabled={!canSave || isSaving} type="submit">
-              {isSaving ? <RefreshCw className="size-4 animate-spin" /> : <Save className="size-4" />}
-              {editingTask ? "Save task" : "Create task"}
-            </Button>
-          </div>
-        </form>
-    </div>
+        </aside>
+      </div>
+    </form>
   );
 }
 
