@@ -8,6 +8,7 @@ from sqlalchemy.dialects import postgresql
 from app.modules.agents.models import AgentRun, WorkspaceConversation
 from app.modules.chat_providers.models import ChatProviderConnection
 from app.modules.scheduled_tasks import repository, service
+from app.modules.scheduled_tasks.exceptions import ScheduledTaskNotFoundError
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
@@ -290,6 +291,71 @@ def test_task_response_includes_schedule_rows_and_preview() -> None:
     assert response.schedules[0].id == schedule.id
     assert response.schedules[0].schedule_config == {"times": ["09:00", "17:00"]}
     assert len(response.next_run_preview) == 5
+
+
+@pytest.mark.asyncio
+async def test_get_task_run_returns_deliveries_and_notifications(monkeypatch) -> None:
+    task = make_task()
+    run = make_run(task)
+    delivery = make_delivery(task, run)
+    user = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    captured = SimpleNamespace(member_checked=False, run_id=None)
+
+    async def require_member(*args, **kwargs):
+        captured.member_checked = True
+
+    async def get_run(*args, **kwargs):
+        captured.run_id = kwargs["run_id"]
+        return run
+
+    async def list_run_deliveries(*args, **kwargs):
+        return {run.id: [delivery]}
+
+    async def list_run_notifications(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr(service, "require_workspace_member", require_member)
+    monkeypatch.setattr(service.repository, "get_run", get_run)
+    monkeypatch.setattr(service.repository, "list_run_deliveries", list_run_deliveries)
+    monkeypatch.setattr(service.repository, "list_run_notifications", list_run_notifications)
+
+    response = await service.get_workspace_scheduled_task_run(
+        FakeSession(),
+        user,
+        task.organization_id,
+        task.workspace_id,
+        run.id,
+    )
+
+    assert captured.member_checked is True
+    assert captured.run_id == run.id
+    assert response.id == run.id
+    assert response.status == "running"
+    assert response.deliveries[0].id == delivery.id
+
+
+@pytest.mark.asyncio
+async def test_get_task_run_raises_when_missing(monkeypatch) -> None:
+    task = make_task()
+    user = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+
+    async def require_member(*args, **kwargs):
+        return None
+
+    async def get_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "require_workspace_member", require_member)
+    monkeypatch.setattr(service.repository, "get_run", get_run)
+
+    with pytest.raises(ScheduledTaskNotFoundError):
+        await service.get_workspace_scheduled_task_run(
+            FakeSession(),
+            user,
+            task.organization_id,
+            task.workspace_id,
+            uuid4(),
+        )
 
 
 @pytest.mark.asyncio

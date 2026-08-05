@@ -1680,6 +1680,31 @@ async def list_workspace_scheduled_task_runs(
     )
 
 
+async def get_workspace_scheduled_task_run(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> WorkspaceScheduledTaskRunRead:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    run = await repository.get_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        run_id=run_id,
+    )
+    if run is None:
+        raise ScheduledTaskNotFoundError("scheduled task run not found")
+    deliveries_by_run = await repository.list_run_deliveries(session, run_ids=[run.id])
+    notifications_by_run = await repository.list_run_notifications(session, run_ids=[run.id])
+    return run_response(
+        run,
+        deliveries=deliveries_by_run.get(run.id, []),
+        notifications=notifications_by_run.get(run.id, []),
+    )
+
+
 async def test_workspace_scheduled_task_route(
     session: AsyncSession,
     user: User,

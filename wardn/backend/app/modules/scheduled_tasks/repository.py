@@ -265,6 +265,25 @@ async def get_task_run(
     return result.scalar_one_or_none()
 
 
+async def get_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    for_update: bool = False,
+) -> WorkspaceScheduledTaskRun | None:
+    statement = select(WorkspaceScheduledTaskRun).where(
+        WorkspaceScheduledTaskRun.id == run_id,
+        WorkspaceScheduledTaskRun.organization_id == organization_id,
+        WorkspaceScheduledTaskRun.workspace_id == workspace_id,
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
 async def get_delivery(
     session: AsyncSession,
     *,

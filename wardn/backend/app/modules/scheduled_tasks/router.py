@@ -23,6 +23,7 @@ from app.modules.scheduled_tasks.service import (
     delete_workspace_scheduled_task,
     enqueue_workspace_scheduled_task_run,
     get_workspace_scheduled_task,
+    get_workspace_scheduled_task_run,
     list_workspace_scheduled_task_runs,
     list_workspace_scheduled_tasks,
     preview_workspace_scheduled_task_schedules,
@@ -166,6 +167,31 @@ async def list_workspace_scheduled_task_runs_route(
         workspace_id,
         task_id,
         limit=limit,
+    )
+
+
+@workspace_router.get(
+    "/runs/{run_id}",
+    response_model=WorkspaceScheduledTaskRunRead,
+    operation_id="workspace_scheduled_tasks_get_run",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def get_workspace_scheduled_task_run_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceScheduledTaskRunRead:
+    return await get_workspace_scheduled_task_run(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        run_id,
     )
 
 

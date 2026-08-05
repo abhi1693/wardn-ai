@@ -957,6 +957,12 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
   )}/agent-runs/${encodeURIComponent(runId)}`;
 }
 
+function scheduledTaskRunHref(organizationId: string, workspaceId: string, runId: string) {
+  return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+    workspaceId
+  )}/scheduled-tasks/runs/${encodeURIComponent(runId)}`;
+}
+
 type ScheduledTaskFormClientProps = {
   connections: ChatProviderConnectionRead[];
   organizationId: string;
@@ -3041,14 +3047,10 @@ export function ScheduledTasksClient({
             runRows.map((run) => {
               const task = taskRows.find((row) => row.id === run.taskId);
               const retryableDeliveries = failedRetryableDeliveries(run);
-              const runDetailHref = run.agentRunId
-                ? runHref(organizationId, workspaceId, run.agentRunId)
-                : null;
+              const runDetailHref = scheduledTaskRunHref(organizationId, workspaceId, run.id);
               const runRowClassName = cn(
                 "grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]",
-                runDetailHref
-                  ? "transition-colors hover:border-teal-300 hover:bg-teal-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                  : ""
+                "transition-colors hover:border-teal-300 hover:bg-teal-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               );
               const rowContent = (
                 <>
@@ -3074,30 +3076,24 @@ export function ScheduledTasksClient({
                   </div>
                   <div className="flex items-center justify-between gap-2 md:justify-end">
                     <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
-                    {runDetailHref ? (
-                      <span
-                        aria-hidden="true"
-                        className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
-                      >
-                        <Clock3 className="size-4" />
-                      </span>
-                    ) : null}
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
+                    >
+                      <Clock3 className="size-4" />
+                    </span>
                   </div>
                 </>
               );
               return (
                 <div className="space-y-2" key={run.id}>
-                  {runDetailHref ? (
-                    <Link
-                      aria-label={`Open run ${run.id}`}
-                      className={runRowClassName}
-                      href={runDetailHref}
-                    >
-                      {rowContent}
-                    </Link>
-                  ) : (
-                    <div className={runRowClassName}>{rowContent}</div>
-                  )}
+                  <Link
+                    aria-label={`Open scheduled task run ${run.id}`}
+                    className={runRowClassName}
+                    href={runDetailHref}
+                  >
+                    {rowContent}
+                  </Link>
                   {retryableDeliveries.length > 0 ? (
                     <div className="grid gap-2">
                       {retryableDeliveries.map((delivery) => (

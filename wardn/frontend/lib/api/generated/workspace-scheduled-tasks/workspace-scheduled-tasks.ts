@@ -131,6 +131,33 @@ export const workspaceScheduledTasksListRuns = async (organizationId: string,
 );}
 
 
+export const getWorkspaceScheduledTasksGetRunUrl = (organizationId: string,
+    workspaceId: string,
+    runId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/scheduled-tasks/runs/${runId}`
+}
+
+/**
+ * @summary Get Workspace Scheduled Task Run Route
+ */
+export const workspaceScheduledTasksGetRun = async (organizationId: string,
+    workspaceId: string,
+    runId: string, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRunRead> => {
+
+  return apiRequest<WorkspaceScheduledTaskRunRead>(getWorkspaceScheduledTasksGetRunUrl(organizationId,workspaceId,runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
 export const getWorkspaceScheduledTasksTestRouteUrl = (organizationId: string,
     workspaceId: string,) => {
 
