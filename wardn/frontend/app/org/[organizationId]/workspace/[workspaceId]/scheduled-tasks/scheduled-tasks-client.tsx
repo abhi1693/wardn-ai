@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  ArrowRight,
   BellRing,
   CalendarClock,
   CalendarDays,
@@ -187,12 +188,12 @@ const timezoneOptions = [
 ];
 
 const editorSections = [
-  { id: "instructions", icon: MessageSquare, label: "Instructions" },
-  { id: "schedule", icon: CalendarClock, label: "Schedule" },
-  { id: "outputs", icon: Route, label: "Outputs" },
-  { id: "notifications", icon: BellRing, label: "Notifications" },
-  { id: "monitoring", icon: Eye, label: "Monitoring" },
-  { id: "review", icon: ShieldCheck, label: "Review" },
+  { id: "instructions", label: "Instructions" },
+  { id: "schedule", label: "Schedule" },
+  { id: "outputs", label: "Outputs" },
+  { id: "notifications", label: "Notifications" },
+  { id: "monitoring", label: "Monitoring" },
+  { id: "review", label: "Review" },
 ] as const;
 
 type EditorSectionId = (typeof editorSections)[number]["id"];
@@ -1297,18 +1298,6 @@ export function ScheduledTaskFormClient({
         ? `${form.schedules.length} execution${form.schedules.length === 1 ? "" : "s"}`
         : "Manual",
   };
-  const sectionComplete = {
-    instructions:
-      Boolean(form.name.trim()) &&
-      Boolean(form.instructions.trim()) &&
-      Number.isInteger(maxAttemptsValue) &&
-      maxAttemptsValue > 0,
-    monitoring: true,
-    notifications: activeNotificationCount > 0,
-    outputs: form.selectedRoutes.length > 0 && failedRouteTests.length === 0,
-    review: validationIssues.length === 0,
-    schedule: invalidScheduleCount === 0,
-  };
   const activeSchedule =
     form.schedules.find((schedule) => schedule.key === activeScheduleKey) ??
     form.schedules[0] ??
@@ -1321,6 +1310,9 @@ export function ScheduledTaskFormClient({
       ? "max-w-7xl"
       : "max-w-6xl"
   );
+  const activeSectionIndex = editorSections.findIndex((section) => section.id === activeSection);
+  const nextSection = editorSections[activeSectionIndex + 1]?.id ?? "review";
+  const isReviewSection = activeSection === "review";
 
   return (
     <form
@@ -1383,42 +1375,45 @@ export function ScheduledTaskFormClient({
             </Button>
             <Button
               className="bg-teal-700 text-white hover:bg-teal-800"
-              disabled={!canSave || isSaving}
+              disabled={isReviewSection ? !canSave || isSaving : isSaving}
+              onClick={
+                isReviewSection
+                  ? undefined
+                  : () => {
+                      setActiveSection(nextSection);
+                    }
+              }
               size="sm"
-              type="submit"
+              type={isReviewSection ? "submit" : "button"}
             >
               {isSaving ? (
                 <RefreshCw className="size-4 animate-spin" />
-              ) : (
+              ) : isReviewSection ? (
                 <Save className="size-4" />
+              ) : (
+                <ArrowRight className="size-4" />
               )}
-              {editingTask ? "Save" : "Create"}
+              {isReviewSection ? (editingTask ? "Save" : "Create") : "Next"}
             </Button>
           </div>
         </div>
         <nav className="mt-2 flex h-8 gap-5 overflow-x-auto border-t border-slate-200 pt-2 text-xs">
           {editorSections.map((section) => {
-            const complete = sectionComplete[section.id];
             const active = activeSection === section.id;
             return (
               <button
                 className={cn(
-                  "flex shrink-0 items-center gap-1.5 border-b-2 px-0.5 pb-1 transition-colors",
+                  "flex shrink-0 items-center border-b-2 px-0.5 pb-1 transition-colors",
                   active
                     ? "border-teal-600 text-slate-950"
                     : "border-transparent text-slate-500 hover:text-slate-900"
                 )}
+                aria-current={active ? "step" : undefined}
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 type="button"
               >
                 <span className="font-medium">{section.label}</span>
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    complete ? "bg-teal-600" : "bg-amber-500"
-                  )}
-                />
               </button>
             );
           })}
@@ -2193,6 +2188,56 @@ export function ScheduledTaskFormClient({
                   </div>
                 </div>
               </div>
+
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">
+                  How notifications work
+                </div>
+                <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-3">
+                  <div>
+                    <div className="font-medium text-slate-900">Failure</div>
+                    <p className="mt-1">
+                      Sends a notification when the assistant run fails before producing a usable
+                      result.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Waiting approval</div>
+                    <p className="mt-1">
+                      Sends approval requests to the approval route when a tool call needs a human
+                      decision.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">No output</div>
+                    <p className="mt-1">
+                      Sends a notification when the run completes but has nothing meaningful to
+                      deliver.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Delivery failure</div>
+                    <p className="mt-1">
+                      Sends a notification when the assistant succeeds but one or more selected
+                      destinations fail.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Meaningful update</div>
+                    <p className="mt-1">
+                      Sends a notification only when monitoring finds a meaningful change from the
+                      saved baseline.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Routes</div>
+                    <p className="mt-1">
+                      Notification routes receive status updates. Approval routes receive pending
+                      approval prompts.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -2377,6 +2422,56 @@ export function ScheduledTaskFormClient({
                   ) : null}
                 </div>
               ) : null}
+
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">
+                  How monitoring works
+                </div>
+                <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-3">
+                  <div>
+                    <div className="font-medium text-slate-900">Watch mode</div>
+                    <p className="mt-1">
+                      Compares each run against the saved baseline and records whether something
+                      meaningful changed.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Notify on change</div>
+                    <p className="mt-1">
+                      Uses the notification route when a change is detected. No-change runs stay
+                      quiet.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Deliver on change</div>
+                    <p className="mt-1">
+                      Sends output destinations only when the result changed, instead of delivering
+                      every run.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Baseline first run</div>
+                    <p className="mt-1">
+                      Treats the first run as the starting snapshot, then compares later runs
+                      against it.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Stop conditions</div>
+                    <p className="mt-1">
+                      Pauses the task after a selected number of changes, total runs, unchanged
+                      runs, or the first change.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium text-slate-900">Reset baseline</div>
+                    <p className="mt-1">
+                      Clears the stored comparison state so the next run can establish a fresh
+                      baseline.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
           <section
