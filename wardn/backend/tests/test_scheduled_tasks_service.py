@@ -793,6 +793,44 @@ def test_monitoring_detects_change_and_stop_condition_pauses_task() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_deliver_task_run_output_can_force_delivery_for_approval_baseline(
+    monkeypatch,
+) -> None:
+    task = make_task()
+    task.monitoring_config = service.normalize_monitoring_config({"enabled": True})
+    run = make_run(task)
+    conversation_id = uuid4()
+    recorded: dict[str, object] = {}
+
+    async def reply_for_task_run(*args, **kwargs):
+        return service.TaskRunReply(text="Baseline result", kind="assistant")
+
+    async def record_chat_delivery(*args, **kwargs):
+        recorded["conversation_id"] = kwargs["conversation_id"]
+
+    async def list_run_deliveries(*args, **kwargs):
+        return {run.id: [make_delivery(task, run, status="sent", text="Baseline result")]}
+
+    monkeypatch.setattr(service, "reply_for_task_run", reply_for_task_run)
+    monkeypatch.setattr(service, "record_chat_delivery", record_chat_delivery)
+    monkeypatch.setattr(service.repository, "list_run_deliveries", list_run_deliveries)
+
+    summary = await service.deliver_task_run_output(
+        FakeSession(),
+        task=task,
+        run=run,
+        conversation_id=conversation_id,
+        force_delivery=True,
+    )
+
+    assert recorded["conversation_id"] == conversation_id
+    assert summary["sent"] == 1
+    assert summary["deliveryForcedByApproval"] is True
+    assert summary["monitoring"]["status"] == "baseline"
+    assert summary["monitoring"]["changed"] is False
+
+
 def test_notification_events_include_enabled_run_conditions() -> None:
     task = make_task()
     task.notification_rules = service.normalize_notification_rules(

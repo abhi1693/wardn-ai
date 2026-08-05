@@ -2628,11 +2628,12 @@ async def deliver_task_run_output(
     task: WorkspaceScheduledTask,
     run: WorkspaceScheduledTaskRun,
     conversation_id: uuid.UUID,
+    force_delivery: bool = False,
 ) -> dict[str, Any]:
     reply = await reply_for_task_run(session, task=task, conversation_id=conversation_id)
     monitoring = evaluate_monitoring_result(task=task, run=run, reply=reply)
     routes = task.output_routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)]
-    if monitoring.deliver_output:
+    if force_delivery or monitoring.deliver_output:
         for route in routes:
             if route.get("route_type") == "chat_provider":
                 await send_provider_delivery(
@@ -2657,6 +2658,7 @@ async def deliver_task_run_output(
         "failed": sum(1 for delivery in run_deliveries if delivery.status == "failed"),
         **reply_summary(reply),
         **monitoring.summary,
+        **({"deliveryForcedByApproval": True} if force_delivery else {}),
     }
 
 
@@ -2757,6 +2759,7 @@ async def finalize_waiting_task_run(
                 task=task,
                 run=run,
                 conversation_id=run.conversation_id,
+                force_delivery=True,
             )
     status = scheduled_task_run_status(agent_status, delivery_summary)
     completed = await repository.complete_waiting_run(
