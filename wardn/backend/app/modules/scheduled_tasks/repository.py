@@ -9,6 +9,7 @@ from sqlalchemy.orm import aliased
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
+    WorkspaceScheduledTaskNotification,
     WorkspaceScheduledTaskRun,
     WorkspaceScheduledTaskSchedule,
 )
@@ -174,6 +175,9 @@ async def create_task(
     schedule_config: dict,
     timezone: str,
     output_routes: list[dict],
+    notification_rules: dict,
+    notification_routes: list[dict],
+    approval_routes: list[dict],
     conversation_policy: str,
     is_active: bool,
     next_run_at: datetime | None,
@@ -190,6 +194,10 @@ async def create_task(
         schedule_config=schedule_config,
         timezone=timezone,
         output_routes=output_routes,
+        notification_rules=notification_rules,
+        notification_routes=notification_routes,
+        approval_routes=approval_routes,
+        notification_state={},
         conversation_policy=conversation_policy,
         is_active=is_active,
         next_run_at=next_run_at if is_active else None,
@@ -251,6 +259,27 @@ async def list_run_deliveries(
     for delivery in result.scalars().all():
         deliveries.setdefault(delivery.task_run_id, []).append(delivery)
     return deliveries
+
+
+async def list_run_notifications(
+    session: AsyncSession,
+    *,
+    run_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[WorkspaceScheduledTaskNotification]]:
+    if not run_ids:
+        return {}
+    result = await session.execute(
+        select(WorkspaceScheduledTaskNotification)
+        .where(WorkspaceScheduledTaskNotification.task_run_id.in_(run_ids))
+        .order_by(
+            WorkspaceScheduledTaskNotification.created_at.asc(),
+            WorkspaceScheduledTaskNotification.id.asc(),
+        )
+    )
+    notifications: dict[uuid.UUID, list[WorkspaceScheduledTaskNotification]] = {}
+    for notification in result.scalars().all():
+        notifications.setdefault(notification.task_run_id, []).append(notification)
+    return notifications
 
 
 def task_has_active_run_condition(candidate) -> Any:
@@ -584,3 +613,46 @@ async def add_delivery(
     session.add(delivery)
     await session.flush()
     return delivery
+
+
+async def add_notification(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    task_run_id: uuid.UUID,
+    event_type: str,
+    route_type: str,
+    status: str,
+    title: str,
+    message: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str = "",
+    external_thread_id: str = "",
+    display_name: str = "",
+    payload: dict | None = None,
+    error: str = "",
+    delivered_at: datetime | None = None,
+) -> WorkspaceScheduledTaskNotification:
+    notification = WorkspaceScheduledTaskNotification(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        task_run_id=task_run_id,
+        connection_id=connection_id,
+        event_type=event_type,
+        route_type=route_type,
+        provider=provider,
+        external_thread_id=external_thread_id,
+        display_name=display_name,
+        status=status,
+        title=title,
+        message=message,
+        payload=payload or {},
+        error=error,
+        delivered_at=delivered_at,
+    )
+    session.add(notification)
+    await session.flush()
+    return notification

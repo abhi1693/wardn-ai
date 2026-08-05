@@ -57,6 +57,10 @@ def make_task() -> WorkspaceScheduledTask:
         schedule_config={"time": "09:30"},
         timezone="UTC",
         output_routes=[{"route_type": "chat"}],
+        notification_rules=service.normalize_notification_rules(None),
+        notification_routes=[{"route_type": "chat"}],
+        approval_routes=[{"route_type": "chat"}],
+        notification_state={},
         conversation_policy="reuse",
         is_active=True,
         next_run_at=now,
@@ -306,6 +310,74 @@ def test_output_routes_default_to_builtin_chat() -> None:
     ]
 
 
+def test_notification_rules_default_to_failure_approval_and_delivery_failure() -> None:
+    assert service.normalize_notification_rules(None) == {
+        "on_failure": True,
+        "on_waiting_approval": True,
+        "on_no_output": False,
+        "on_delivery_failure": True,
+        "on_meaningful_update": False,
+    }
+
+
+def test_notification_events_include_enabled_run_conditions() -> None:
+    task = make_task()
+    task.notification_rules = service.normalize_notification_rules(
+        {
+            "onFailure": True,
+            "onWaitingApproval": True,
+            "onNoOutput": True,
+            "onDeliveryFailure": True,
+            "onMeaningfulUpdate": True,
+        }
+    )
+
+    events = service.notification_events_for_run(
+        task=task,
+        status="partially_delivered",
+        delivery_summary={
+            "failed": 1,
+            "outputKind": "assistant",
+            "outputHash": service.output_text_hash("New result"),
+            "outputPreview": "New result",
+        },
+    )
+
+    assert events == ["delivery_failure", "meaningful_update"]
+    assert task.notification_state["lastMeaningfulOutputHash"] == service.output_text_hash(
+        "New result"
+    )
+
+    assert (
+        service.notification_events_for_run(
+            task=task,
+            status="succeeded",
+            delivery_summary={
+                "failed": 0,
+                "outputKind": "assistant",
+                "outputHash": service.output_text_hash("New result"),
+                "outputPreview": "New result",
+            },
+        )
+        == []
+    )
+
+
+def test_notification_events_include_no_output_when_enabled() -> None:
+    task = make_task()
+    task.notification_rules = service.normalize_notification_rules(
+        {
+            "onNoOutput": True,
+        }
+    )
+
+    assert service.notification_events_for_run(
+        task=task,
+        status="succeeded",
+        delivery_summary={"failed": 0, "outputKind": "empty"},
+    ) == ["no_output"]
+
+
 def test_output_route_requires_provider_conversation() -> None:
     with pytest.raises(ValueError, match="conversation"):
         WorkspaceScheduledTaskOutputRoute(
@@ -423,11 +495,19 @@ async def test_execute_claimed_task_run_records_partial_delivery(monkeypatch) ->
         captured["delivery_summary"] = kwargs["delivery_summary"]
         return True
 
+    async def dispatch_task_run_notifications(*args, **kwargs):
+        captured["notification_status"] = kwargs["status"]
+
     monkeypatch.setattr(service.repository, "get_task", get_task)
     monkeypatch.setattr(service, "resolve_task_actor", resolve_task_actor)
     monkeypatch.setattr(service, "prepare_agent_run_for_task", prepare_agent_run_for_task)
     monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
     monkeypatch.setattr(service.repository, "complete_run", complete_run)
+    monkeypatch.setattr(
+        service,
+        "dispatch_task_run_notifications",
+        dispatch_task_run_notifications,
+    )
 
     session = FakeExecutionSession(agent_run)
     await service.execute_claimed_task_run(
@@ -441,4 +521,96 @@ async def test_execute_claimed_task_run_records_partial_delivery(monkeypatch) ->
     assert session.refreshed is True
     assert captured["run_id"] == run.id
     assert captured["status"] == "partially_delivered"
+    assert captured["notification_status"] == "partially_delivered"
     assert captured["delivery_summary"] == {"total": 2, "sent": 1, "failed": 1}
+
+
+@pytest.mark.asyncio
+async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
+    monkeypatch,
+) -> None:
+    task = make_task()
+    run = make_run(task)
+    actor = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    conversation_id = uuid4()
+    approval_id = uuid4()
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=conversation_id,
+        triggered_by_id=actor.id,
+        trigger_type=service.SCHEDULED_AGENT_TRIGGER,
+        status="waiting_confirmation",
+        started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
+        error="",
+    )
+    captured = {}
+
+    async def get_task(*args, **kwargs):
+        return task
+
+    async def resolve_task_actor(*args, **kwargs):
+        return actor
+
+    async def prepare_agent_run_for_task(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"tool-result","status":"requires_confirmation"}\n\n'
+
+        return conversation_id, agent_run.id, stream()
+
+    async def reply_for_task_run(*args, **kwargs):
+        return service.TaskRunReply(
+            text="Open approval: https://ai.home/approval",
+            kind="approval",
+            approval_id=approval_id,
+        )
+
+    async def complete_run(session, run_id, **kwargs):
+        run.status = kwargs["status"]
+        run.agent_run_id = kwargs["agent_run_id"]
+        run.conversation_id = kwargs["conversation_id"]
+        captured["status"] = kwargs["status"]
+        captured["delivery_summary"] = kwargs["delivery_summary"]
+        return True
+
+    async def dispatch_task_run_notifications(*args, **kwargs):
+        captured["notification_status"] = kwargs["status"]
+        captured["notification_summary"] = kwargs["delivery_summary"]
+
+    async def deliver_task_run_output(*args, **kwargs):
+        raise AssertionError("waiting approvals should not use output delivery")
+
+    monkeypatch.setattr(service.repository, "get_task", get_task)
+    monkeypatch.setattr(service, "resolve_task_actor", resolve_task_actor)
+    monkeypatch.setattr(service, "prepare_agent_run_for_task", prepare_agent_run_for_task)
+    monkeypatch.setattr(service, "reply_for_task_run", reply_for_task_run)
+    monkeypatch.setattr(service.repository, "complete_run", complete_run)
+    monkeypatch.setattr(
+        service,
+        "dispatch_task_run_notifications",
+        dispatch_task_run_notifications,
+    )
+    monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
+
+    session = FakeExecutionSession(agent_run)
+    await service.execute_claimed_task_run(
+        session,
+        run=run,
+        worker_id="worker-1",
+        session_factory=object(),
+    )
+
+    assert captured["status"] == "waiting_confirmation"
+    assert captured["delivery_summary"] == {
+        "total": 0,
+        "sent": 0,
+        "failed": 0,
+        "outputKind": "approval",
+        "hasOutput": False,
+        "outputHash": "",
+        "outputPreview": "Open approval: https://ai.home/approval",
+        "approvalId": str(approval_id),
+    }
+    assert captured["notification_status"] == "waiting_confirmation"

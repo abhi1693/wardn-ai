@@ -10,6 +10,8 @@ from app.db.base import Base
 from app.db.domain_types import (
     WorkspaceScheduledTaskConversationPolicy,
     WorkspaceScheduledTaskDeliveryStatus,
+    WorkspaceScheduledTaskNotificationEvent,
+    WorkspaceScheduledTaskNotificationStatus,
     WorkspaceScheduledTaskRunStatus,
     WorkspaceScheduledTaskScheduleType,
 )
@@ -107,6 +109,26 @@ class WorkspaceScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     output_routes: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         default=list,
+        nullable=False,
+    )
+    notification_rules: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+    notification_routes: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=False,
+    )
+    approval_routes: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=False,
+    )
+    notification_state: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
         nullable=False,
     )
     conversation_policy: Mapped[WorkspaceScheduledTaskConversationPolicy] = mapped_column(
@@ -345,6 +367,81 @@ class WorkspaceScheduledTaskDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkspaceScheduledTaskNotification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "workspace_scheduled_task_notifications"
+    __table_args__ = (
+        Index(
+            "ix_workspace_scheduled_task_notifications_run_event",
+            "task_run_id",
+            "event_type",
+        ),
+        CheckConstraint(
+            "event_type IN ('failure', 'waiting_approval', 'no_output', "
+            "'delivery_failure', 'meaningful_update')",
+            name="ck_workspace_scheduled_task_notifications_event_type",
+        ),
+        CheckConstraint(
+            "route_type IN ('chat', 'chat_provider')",
+            name="ck_workspace_scheduled_task_notifications_route_type",
+        ),
+        CheckConstraint(
+            "status IN ('sent', 'failed', 'skipped')",
+            name="ck_workspace_scheduled_task_notifications_status",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_scheduled_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_scheduled_task_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_provider_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_type: Mapped[WorkspaceScheduledTaskNotificationEvent] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    route_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    external_thread_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    status: Mapped[WorkspaceScheduledTaskNotificationStatus] = mapped_column(
+        String(32),
+        default=WorkspaceScheduledTaskNotificationStatus.SENT,
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

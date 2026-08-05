@@ -7,10 +7,12 @@
 import type { WorkspaceScheduledTaskCreateConversationPolicy } from './workspaceScheduledTaskCreateConversationPolicy';
 import type { WorkspaceScheduledTaskCreateScheduleConfig } from './workspaceScheduledTaskCreateScheduleConfig';
 import type { WorkspaceScheduledTaskCreateScheduleType } from './workspaceScheduledTaskCreateScheduleType';
+import type { WorkspaceScheduledTaskNotificationRules } from './workspaceScheduledTaskNotificationRules';
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
 import type { WorkspaceScheduledTaskScheduleCreate } from './workspaceScheduledTaskScheduleCreate';
 
 export interface WorkspaceScheduledTaskCreate {
+  approvalRoutes?: WorkspaceScheduledTaskOutputRoute[] | null;
   conversationPolicy?: WorkspaceScheduledTaskCreateConversationPolicy;
   /**
      * @minLength 1
@@ -28,6 +30,8 @@ export interface WorkspaceScheduledTaskCreate {
      * @maxLength 120
      */
   name: string;
+  notificationRoutes?: WorkspaceScheduledTaskOutputRoute[] | null;
+  notificationRules?: WorkspaceScheduledTaskNotificationRules;
   outputRoutes?: WorkspaceScheduledTaskOutputRoute[];
   scheduleConfig?: WorkspaceScheduledTaskCreateScheduleConfig;
   scheduleType?: WorkspaceScheduledTaskCreateScheduleType;

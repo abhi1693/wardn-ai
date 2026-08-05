@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ArrowLeft,
+  BellRing,
   CalendarClock,
   CalendarDays,
   CalendarRange,
@@ -14,6 +16,7 @@ import {
   Plus,
   RefreshCw,
   Route,
+  Save,
   ShieldCheck,
   TimerReset,
   Trash2,
@@ -28,14 +31,6 @@ import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -98,6 +93,15 @@ type FormState = {
   instructions: string;
   schedules: ScheduleDraft[];
   selectedRoutes: string[];
+  notificationRoutes: string[];
+  approvalRoutes: string[];
+  notificationRules: {
+    onDeliveryFailure: boolean;
+    onFailure: boolean;
+    onMeaningfulUpdate: boolean;
+    onNoOutput: boolean;
+    onWaitingApproval: boolean;
+  };
   conversationPolicy: ConversationPolicy;
   isActive: boolean;
   maxAttempts: string;
@@ -353,16 +357,35 @@ function outputRouteKey(route: WorkspaceScheduledTaskOutputRoute) {
   return `${route.connectionId ?? ""}:${route.externalThreadId ?? ""}`;
 }
 
+function routeKeys(routes?: WorkspaceScheduledTaskOutputRoute[] | null) {
+  const keys = (routes ?? []).map(outputRouteKey).filter(Boolean);
+  return keys.length ? keys : ["chat"];
+}
+
+function defaultNotificationRules() {
+  return {
+    onDeliveryFailure: true,
+    onFailure: true,
+    onMeaningfulUpdate: false,
+    onNoOutput: false,
+    onWaitingApproval: true,
+  };
+}
+
 function taskFormState(
   task: WorkspaceScheduledTaskRead | null,
   timezone: string
 ): FormState {
+  const notificationRules = defaultNotificationRules();
   if (!task) {
     return {
       name: "",
       instructions: "",
       schedules: [newScheduleDraft("daily", timezone)],
       selectedRoutes: ["chat"],
+      notificationRoutes: ["chat"],
+      approvalRoutes: ["chat"],
+      notificationRules,
       conversationPolicy: "reuse",
       isActive: true,
       maxAttempts: "3",
@@ -375,7 +398,13 @@ function taskFormState(
       task.schedules && task.schedules.length > 0
         ? task.schedules.map((schedule) => draftFromSchedule(schedule, timezone))
         : legacyDraftFromTask(task, timezone),
-    selectedRoutes: (task.outputRoutes ?? []).map(outputRouteKey),
+    selectedRoutes: routeKeys(task.outputRoutes),
+    notificationRoutes: routeKeys(task.notificationRoutes),
+    approvalRoutes: routeKeys(task.approvalRoutes),
+    notificationRules: {
+      ...notificationRules,
+      ...(task.notificationRules ?? {}),
+    },
     conversationPolicy: task.conversationPolicy as ConversationPolicy,
     isActive: task.isActive,
     maxAttempts: String(task.maxAttempts || 3),
@@ -620,6 +649,11 @@ function metricValue(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function enabledNotificationRuleCount(task: WorkspaceScheduledTaskRead) {
+  const rules = { ...defaultNotificationRules(), ...(task.notificationRules ?? {}) };
+  return Object.values(rules).filter((enabled) => enabled).length;
+}
+
 function taskHref(organizationId: string, workspaceId: string, conversationId: string) {
   return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
@@ -632,33 +666,34 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
   )}/agent-runs/${encodeURIComponent(runId)}`;
 }
 
-function TaskDialog({
-  defaultTimezone,
-  editingTask,
-  form,
-  isPreviewing,
-  isSaving,
-  onChange,
-  onOpenChange,
-  onPreview,
-  onSubmit,
-  open,
-  previewRuns,
-  providerOptions,
-}: {
-  defaultTimezone: string;
-  editingTask: WorkspaceScheduledTaskRead | null;
-  form: FormState;
-  isPreviewing: boolean;
-  isSaving: boolean;
-  onChange: (next: FormState) => void;
-  onOpenChange: (open: boolean) => void;
-  onPreview: () => Promise<void>;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  open: boolean;
-  previewRuns: string[];
-  providerOptions: ProviderRouteOption[];
-}) {
+type ScheduledTaskFormClientProps = {
+  connections: ChatProviderConnectionRead[];
+  organizationId: string;
+  task?: WorkspaceScheduledTaskRead | null;
+  workspaceId: string;
+};
+
+export function ScheduledTaskFormClient({
+  connections,
+  organizationId,
+  task = null,
+  workspaceId,
+}: ScheduledTaskFormClientProps) {
+  const router = useRouter();
+  const providerOptions = useMemo(() => providerRouteOptions(connections), [connections]);
+  const defaultTimezone = useMemo(() => browserTimezone(), []);
+  const editingTask = task;
+  const scheduledTasksHref = `/org/${encodeURIComponent(
+    organizationId
+  )}/workspace/${encodeURIComponent(workspaceId)}/scheduled-tasks`;
+  const [form, setForm] = useState<FormState>(() => taskFormState(task, defaultTimezone));
+  const [previewRuns, setPreviewRuns] = useState<string[]>(task?.nextRunPreview ?? []);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
+    null
+  );
+
   function toggleRoute(key: string) {
     const selected = new Set(form.selectedRoutes);
     if (selected.has(key)) {
@@ -666,16 +701,46 @@ function TaskDialog({
     } else {
       selected.add(key);
     }
-    onChange({ ...form, selectedRoutes: Array.from(selected) });
+    setForm({ ...form, selectedRoutes: Array.from(selected) });
+  }
+
+  function toggleNotificationRoute(key: string) {
+    const selected = new Set(form.notificationRoutes);
+    if (selected.has(key)) {
+      selected.delete(key);
+    } else {
+      selected.add(key);
+    }
+    setForm({ ...form, notificationRoutes: Array.from(selected) });
+  }
+
+  function toggleApprovalRoute(key: string) {
+    const selected = new Set(form.approvalRoutes);
+    if (selected.has(key)) {
+      selected.delete(key);
+    } else {
+      selected.add(key);
+    }
+    setForm({ ...form, approvalRoutes: Array.from(selected) });
+  }
+
+  function toggleNotificationRule(key: keyof FormState["notificationRules"]) {
+    setForm({
+      ...form,
+      notificationRules: {
+        ...form.notificationRules,
+        [key]: !form.notificationRules[key],
+      },
+    });
   }
 
   function addSchedule(type: ScheduleEntryType) {
     const timezone = form.schedules[0]?.timezone || defaultTimezone;
-    onChange({ ...form, schedules: [...form.schedules, newScheduleDraft(type, timezone)] });
+    setForm({ ...form, schedules: [...form.schedules, newScheduleDraft(type, timezone)] });
   }
 
   function updateSchedule(key: string, patch: Partial<ScheduleDraft>) {
-    onChange({
+    setForm({
       ...form,
       schedules: form.schedules.map((schedule) =>
         schedule.key === key ? { ...schedule, ...patch } : schedule
@@ -684,7 +749,7 @@ function TaskDialog({
   }
 
   function removeSchedule(key: string) {
-    onChange({ ...form, schedules: form.schedules.filter((schedule) => schedule.key !== key) });
+    setForm({ ...form, schedules: form.schedules.filter((schedule) => schedule.key !== key) });
   }
 
   function addRunTime(schedule: ScheduleDraft) {
@@ -719,22 +784,109 @@ function TaskDialog({
       form.schedules.every((schedule) => scheduleDraftIsValid(schedule))
   );
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{editingTask ? "Edit scheduled task" : "New scheduled task"}</DialogTitle>
-          <DialogDescription>Workspace agent trigger and delivery route.</DialogDescription>
-        </DialogHeader>
+  async function previewSchedules() {
+    setIsPreviewing(true);
+    setFeedback(null);
+    try {
+      const response = await workspaceScheduledTasksPreview(organizationId, workspaceId, {
+        isActive: form.isActive,
+        schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
+      });
+      setPreviewRuns(response.nextRuns ?? []);
+    } catch (error) {
+      setFeedback({
+        variant: "error",
+        text: error instanceof Error ? error.message : "Could not preview scheduled runs.",
+      });
+    } finally {
+      setIsPreviewing(false);
+    }
+  }
 
-        <form className="space-y-5" onSubmit={onSubmit}>
+  async function submitTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    setFeedback(null);
+    const aggregateScheduleType: ScheduleType =
+      form.schedules.length === 0
+        ? "manual"
+        : form.schedules.length === 1
+          ? form.schedules[0].scheduleType
+          : "multiple";
+    const basePayload = {
+      approvalRoutes: buildOutputRoutes(form.approvalRoutes, providerOptions),
+      conversationPolicy: form.conversationPolicy,
+      instructions: form.instructions.trim(),
+      isActive: form.isActive,
+      maxAttempts: Number(form.maxAttempts || 3),
+      name: form.name.trim(),
+      notificationRoutes: buildOutputRoutes(form.notificationRoutes, providerOptions),
+      notificationRules: form.notificationRules,
+      outputRoutes: buildOutputRoutes(form.selectedRoutes, providerOptions),
+      scheduleConfig: form.schedules[0] ? scheduleDraftConfig(form.schedules[0]) : {},
+      scheduleType: aggregateScheduleType,
+      timezone: normalizeTimezone(form.schedules[0]?.timezone ?? defaultTimezone),
+    };
+
+    try {
+      if (editingTask) {
+        const updatePayload: WorkspaceScheduledTaskUpdate = {
+          ...basePayload,
+          schedules: schedulePayloads(form, { includeIds: true }) as WorkspaceScheduledTaskScheduleUpdate[],
+        };
+        await workspaceScheduledTasksUpdate(
+          organizationId,
+          workspaceId,
+          editingTask.id,
+          updatePayload
+        );
+        setFeedback({ variant: "success", text: "Scheduled task updated." });
+      } else {
+        const payload: WorkspaceScheduledTaskCreate = {
+          ...basePayload,
+          schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
+        };
+        await workspaceScheduledTasksCreate(organizationId, workspaceId, payload);
+        setFeedback({ variant: "success", text: "Scheduled task created." });
+      }
+      router.push(scheduledTasksHref);
+      router.refresh();
+    } catch (error) {
+      setFeedback({
+        variant: "error",
+        text: error instanceof Error ? error.message : "Scheduled task request failed.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <Button asChild variant="outline">
+          <Link href={scheduledTasksHref}>
+            <ArrowLeft className="size-4" />
+            Back
+          </Link>
+        </Button>
+        <Badge variant={form.isActive ? "success" : "secondary"}>
+          {form.isActive ? "Active" : "Paused"}
+        </Badge>
+      </div>
+
+      {feedback ? (
+        <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
+      ) : null}
+
+      <form className="space-y-5" onSubmit={submitTask}>
           <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
             <div className="space-y-2">
               <Label htmlFor="scheduled-task-name">Name</Label>
               <Input
                 id="scheduled-task-name"
                 maxLength={120}
-                onChange={(event) => onChange({ ...form, name: event.target.value })}
+                onChange={(event) => setForm({ ...form, name: event.target.value })}
                 required
                 value={form.name}
               />
@@ -749,7 +901,7 @@ function TaskDialog({
                     : "border-border bg-muted text-muted-foreground"
                 )}
                 id="scheduled-task-active"
-                onClick={() => onChange({ ...form, isActive: !form.isActive })}
+                onClick={() => setForm({ ...form, isActive: !form.isActive })}
                 type="button"
               >
                 <span>{form.isActive ? "Active" : "Paused"}</span>
@@ -764,7 +916,7 @@ function TaskDialog({
               className="min-h-32 w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
               id="scheduled-task-instructions"
               maxLength={20000}
-              onChange={(event) => onChange({ ...form, instructions: event.target.value })}
+              onChange={(event) => setForm({ ...form, instructions: event.target.value })}
               required
               value={form.instructions}
             />
@@ -1030,7 +1182,7 @@ function TaskDialog({
                 <div className="text-sm font-medium">Next 5 runs</div>
                 <Button
                   disabled={isPreviewing || !canSave}
-                  onClick={onPreview}
+                  onClick={previewSchedules}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -1106,7 +1258,7 @@ function TaskDialog({
                 <Label htmlFor="scheduled-task-conversation-policy">Chat history</Label>
                 <Select
                   onValueChange={(value) =>
-                    onChange({ ...form, conversationPolicy: value as ConversationPolicy })
+                    setForm({ ...form, conversationPolicy: value as ConversationPolicy })
                   }
                   value={form.conversationPolicy}
                 >
@@ -1125,7 +1277,7 @@ function TaskDialog({
                   id="scheduled-task-max-attempts"
                   max={10}
                   min={1}
-                  onChange={(event) => onChange({ ...form, maxAttempts: event.target.value })}
+                  onChange={(event) => setForm({ ...form, maxAttempts: event.target.value })}
                   type="number"
                   value={form.maxAttempts}
                 />
@@ -1133,18 +1285,150 @@ function TaskDialog({
             </div>
           </div>
 
-          <DialogFooter>
-            <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
-              Cancel
+          <div className="grid gap-4 rounded-md border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <BellRing className="size-4 text-muted-foreground" />
+                Notifications
+              </div>
+              <Badge variant="secondary">
+                {
+                  Object.values(form.notificationRules).filter((enabled) => enabled)
+                    .length
+                }
+              </Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-5">
+              {[
+                ["onFailure", "Failure"],
+                ["onWaitingApproval", "Waiting approval"],
+                ["onNoOutput", "No output"],
+                ["onDeliveryFailure", "Delivery failure"],
+                ["onMeaningfulUpdate", "Meaningful update"],
+              ].map(([key, label]) => (
+                <button
+                  className={cn(
+                    "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                    form.notificationRules[key as keyof FormState["notificationRules"]]
+                      ? "border-ring bg-sidebar-accent text-foreground"
+                      : "border-border bg-card text-muted-foreground"
+                  )}
+                  key={key}
+                  onClick={() =>
+                    toggleNotificationRule(key as keyof FormState["notificationRules"])
+                  }
+                  type="button"
+                >
+                  <span>{label}</span>
+                  <span
+                    className={cn(
+                      "flex size-4 items-center justify-center rounded border",
+                      form.notificationRules[key as keyof FormState["notificationRules"]]
+                        ? "border-ring bg-ring text-primary-foreground"
+                        : "border-border bg-background"
+                    )}
+                  >
+                    {form.notificationRules[key as keyof FormState["notificationRules"]] ? (
+                      <CheckCircle2 className="size-3" />
+                    ) : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-md border border-border">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                  <div className="text-sm font-medium">Notification route</div>
+                  <Badge variant="secondary">{form.notificationRoutes.length}</Badge>
+                </div>
+                <div className="grid gap-2 p-3">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
+                    <input
+                      checked={form.notificationRoutes.includes("chat")}
+                      className="size-4"
+                      onChange={() => toggleNotificationRoute("chat")}
+                      type="checkbox"
+                    />
+                    <MessageSquare className="size-4 text-muted-foreground" />
+                    <span>Built-in chat</span>
+                  </label>
+                  {providerOptions.map((option) => (
+                    <label
+                      className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
+                      key={option.key}
+                    >
+                      <input
+                        checked={form.notificationRoutes.includes(option.key)}
+                        className="size-4"
+                        onChange={() => toggleNotificationRoute(option.key)}
+                        type="checkbox"
+                      />
+                      <Webhook className="size-4 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{option.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {option.source}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                  <div className="text-sm font-medium">Approval route</div>
+                  <Badge variant="secondary">{form.approvalRoutes.length}</Badge>
+                </div>
+                <div className="grid gap-2 p-3">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
+                    <input
+                      checked={form.approvalRoutes.includes("chat")}
+                      className="size-4"
+                      onChange={() => toggleApprovalRoute("chat")}
+                      type="checkbox"
+                    />
+                    <MessageSquare className="size-4 text-muted-foreground" />
+                    <span>Built-in chat</span>
+                  </label>
+                  {providerOptions.map((option) => (
+                    <label
+                      className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
+                      key={option.key}
+                    >
+                      <input
+                        checked={form.approvalRoutes.includes(option.key)}
+                        className="size-4"
+                        onChange={() => toggleApprovalRoute(option.key)}
+                        type="checkbox"
+                      />
+                      <ShieldCheck className="size-4 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{option.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {option.source}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-5">
+            <Button asChild type="button" variant="outline">
+              <Link href={scheduledTasksHref}>Cancel</Link>
             </Button>
             <Button disabled={!canSave || isSaving} type="submit">
-              {isSaving ? <RefreshCw className="size-4 animate-spin" /> : <Plus className="size-4" />}
+              {isSaving ? <RefreshCw className="size-4 animate-spin" /> : <Save className="size-4" />}
               {editingTask ? "Save task" : "Create task"}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
 
@@ -1157,20 +1441,17 @@ export function ScheduledTasksClient({
 }: ScheduledTasksClientProps) {
   const router = useRouter();
   const providerOptions = useMemo(() => providerRouteOptions(connections), [connections]);
-  const timezone = useMemo(() => browserTimezone(), []);
   const [nowMs] = useState(() => Date.now());
   const [taskRows, setTaskRows] = useState(tasks);
   const [runRows, setRunRows] = useState(runs);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<WorkspaceScheduledTaskRead | null>(null);
-  const [form, setForm] = useState<FormState>(() => taskFormState(null, timezone));
-  const [previewRuns, setPreviewRuns] = useState<string[]>([]);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
+  const newTaskHref = `/org/${encodeURIComponent(
+    organizationId
+  )}/workspace/${encodeURIComponent(workspaceId)}/scheduled-tasks/new`;
+  const scheduledTasksHref = newTaskHref.replace(/\/new$/, "");
 
   const stats = useMemo(() => {
     const day = 24 * 60 * 60 * 1000;
@@ -1189,104 +1470,6 @@ export function ScheduledTasksClient({
       waiting: runRows.filter((run) => run.status === "waiting_confirmation").length,
     };
   }, [nowMs, runRows, taskRows]);
-
-  function openCreateDialog() {
-    setEditingTask(null);
-    setForm(taskFormState(null, timezone));
-    setPreviewRuns([]);
-    setDialogOpen(true);
-  }
-
-  function openEditDialog(task: WorkspaceScheduledTaskRead) {
-    setEditingTask(task);
-    setForm(taskFormState(task, timezone));
-    setPreviewRuns(task.nextRunPreview ?? []);
-    setDialogOpen(true);
-  }
-
-  async function previewSchedules() {
-    setIsPreviewing(true);
-    setFeedback(null);
-    try {
-      const response = await workspaceScheduledTasksPreview(organizationId, workspaceId, {
-        isActive: form.isActive,
-        schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
-      });
-      setPreviewRuns(response.nextRuns ?? []);
-    } catch (error) {
-      setFeedback({
-        variant: "error",
-        text: error instanceof Error ? error.message : "Could not preview scheduled runs.",
-      });
-    } finally {
-      setIsPreviewing(false);
-    }
-  }
-
-  async function submitTask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsSaving(true);
-    setFeedback(null);
-    const aggregateScheduleType: ScheduleType =
-      form.schedules.length === 0
-        ? "manual"
-        : form.schedules.length === 1
-          ? form.schedules[0].scheduleType
-          : "multiple";
-    const basePayload = {
-      conversationPolicy: form.conversationPolicy,
-      instructions: form.instructions.trim(),
-      isActive: form.isActive,
-      maxAttempts: Number(form.maxAttempts || 3),
-      name: form.name.trim(),
-      outputRoutes: buildOutputRoutes(form.selectedRoutes, providerOptions),
-      scheduleConfig: form.schedules[0] ? scheduleDraftConfig(form.schedules[0]) : {},
-      scheduleType: aggregateScheduleType,
-      timezone: normalizeTimezone(form.schedules[0]?.timezone ?? timezone),
-    };
-
-    try {
-      if (editingTask) {
-        const updatePayload: WorkspaceScheduledTaskUpdate = {
-          ...basePayload,
-          schedules: schedulePayloads(form, { includeIds: true }) as WorkspaceScheduledTaskScheduleUpdate[],
-        };
-        const updated = await workspaceScheduledTasksUpdate(
-          organizationId,
-          workspaceId,
-          editingTask.id,
-          updatePayload
-        );
-        setTaskRows((current) =>
-          current.map((task) => (task.id === updated.id ? updated : task))
-        );
-        setPreviewRuns(updated.nextRunPreview ?? []);
-        setFeedback({ variant: "success", text: "Scheduled task updated." });
-      } else {
-        const payload: WorkspaceScheduledTaskCreate = {
-          ...basePayload,
-          schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
-        };
-        const created = await workspaceScheduledTasksCreate(
-          organizationId,
-          workspaceId,
-          payload
-        );
-        setTaskRows((current) => [created, ...current]);
-        setPreviewRuns(created.nextRunPreview ?? []);
-        setFeedback({ variant: "success", text: "Scheduled task created." });
-      }
-      setDialogOpen(false);
-      router.refresh();
-    } catch (error) {
-      setFeedback({
-        variant: "error",
-        text: error instanceof Error ? error.message : "Scheduled task request failed.",
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  }
 
   async function toggleTask(task: WorkspaceScheduledTaskRead) {
     setBusyTaskId(task.id);
@@ -1402,9 +1585,11 @@ export function ScheduledTasksClient({
             Workspace assistant schedules and delivery routes.
           </div>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="size-4" />
-          New task
+        <Button asChild>
+          <Link href={newTaskHref}>
+            <Plus className="size-4" />
+            New task
+          </Link>
         </Button>
       </div>
 
@@ -1417,6 +1602,7 @@ export function ScheduledTasksClient({
           {taskRows.map((task) => {
             const outputs = taskOutputLabels(task, providerOptions);
             const busy = busyTaskId === task.id;
+            const notificationCount = enabledNotificationRuleCount(task);
             return (
               <Card key={task.id}>
                 <CardHeader className="gap-3">
@@ -1428,6 +1614,9 @@ export function ScheduledTasksClient({
                           {task.isActive ? "Active" : "Paused"}
                         </Badge>
                         <Badge variant="outline">{scheduleLabel(task)}</Badge>
+                        <Badge variant="secondary">
+                          {notificationCount} notifications
+                        </Badge>
                         <Badge variant={statusVariant(task.lastStatus)}>
                           {statusLabel(task.lastStatus)}
                         </Badge>
@@ -1443,14 +1632,10 @@ export function ScheduledTasksClient({
                       >
                         <Play className="size-4" />
                       </Button>
-                      <Button
-                        disabled={busy}
-                        onClick={() => openEditDialog(task)}
-                        size="icon"
-                        title="Edit"
-                        variant="outline"
-                      >
-                        <Pencil className="size-4" />
+                      <Button asChild disabled={busy} size="icon" title="Edit" variant="outline">
+                        <Link href={`${scheduledTasksHref}/${encodeURIComponent(task.id)}/edit`}>
+                          <Pencil className="size-4" />
+                        </Link>
                       </Button>
                       <Button
                         disabled={busy}
@@ -1562,9 +1747,11 @@ export function ScheduledTasksClient({
             <div className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
               Create a task that wakes the workspace assistant and sends the result to chat.
             </div>
-            <Button className="mt-4" onClick={openCreateDialog}>
-              <Plus className="size-4" />
-              New task
+            <Button asChild className="mt-4">
+              <Link href={newTaskHref}>
+                <Plus className="size-4" />
+                New task
+              </Link>
             </Button>
           </CardContent>
         </Card>
@@ -1580,7 +1767,7 @@ export function ScheduledTasksClient({
               const task = taskRows.find((row) => row.id === run.taskId);
               return (
                 <div
-                  className="grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_120px]"
+                  className="grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]"
                   key={run.id}
                 >
                   <div className="min-w-0">
@@ -1600,6 +1787,12 @@ export function ScheduledTasksClient({
                       {Number(record(run.deliverySummary).failed ?? 0) > 0
                         ? `, ${String(record(run.deliverySummary).failed)} failed`
                         : ""}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Notifications</div>
+                    <div className="mt-0.5">
+                      {String(run.notifications?.length ?? 0)} routed
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-2 md:justify-end">
@@ -1623,20 +1816,6 @@ export function ScheduledTasksClient({
         </CardContent>
       </Card>
 
-      <TaskDialog
-        defaultTimezone={timezone}
-        editingTask={editingTask}
-        form={form}
-        isPreviewing={isPreviewing}
-        isSaving={isSaving}
-        onChange={setForm}
-        onOpenChange={setDialogOpen}
-        onPreview={previewSchedules}
-        onSubmit={submitTask}
-        open={dialogOpen}
-        previewRuns={previewRuns}
-        providerOptions={providerOptions}
-      />
     </div>
   );
 }

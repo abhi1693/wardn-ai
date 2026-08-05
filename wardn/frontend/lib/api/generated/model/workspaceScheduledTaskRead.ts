@@ -4,12 +4,14 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { WorkspaceScheduledTaskNotificationRules } from './workspaceScheduledTaskNotificationRules';
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
 import type { WorkspaceScheduledTaskReadScheduleConfig } from './workspaceScheduledTaskReadScheduleConfig';
 import type { WorkspaceScheduledTaskScheduleRead } from './workspaceScheduledTaskScheduleRead';
 
 export interface WorkspaceScheduledTaskRead {
   agentId: string;
+  approvalRoutes?: WorkspaceScheduledTaskOutputRoute[];
   conversationId?: string | null;
   conversationPolicy: string;
   createdAt: string;
@@ -26,6 +28,8 @@ export interface WorkspaceScheduledTaskRead {
   name: string;
   nextRunAt?: string | null;
   nextRunPreview?: string[];
+  notificationRoutes?: WorkspaceScheduledTaskOutputRoute[];
+  notificationRules?: WorkspaceScheduledTaskNotificationRules;
   organizationId: string;
   outputRoutes?: WorkspaceScheduledTaskOutputRoute[];
   scheduleConfig?: WorkspaceScheduledTaskReadScheduleConfig;

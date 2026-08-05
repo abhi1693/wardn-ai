@@ -19,6 +19,21 @@ ScheduleType = Literal[
 ]
 ConversationPolicy = Literal["reuse", "new_each_run"]
 RouteType = Literal["chat", "chat_provider"]
+NotificationEvent = Literal[
+    "failure",
+    "waiting_approval",
+    "no_output",
+    "delivery_failure",
+    "meaningful_update",
+]
+
+
+class WorkspaceScheduledTaskNotificationRules(APIModel):
+    on_failure: bool = True
+    on_waiting_approval: bool = True
+    on_no_output: bool = False
+    on_delivery_failure: bool = True
+    on_meaningful_update: bool = False
 
 
 class WorkspaceScheduledTaskOutputRoute(APIModel):
@@ -107,6 +122,17 @@ class WorkspaceScheduledTaskCreate(APIModel):
         max_length=12,
     )
     output_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
+    notification_rules: WorkspaceScheduledTaskNotificationRules = Field(
+        default_factory=WorkspaceScheduledTaskNotificationRules,
+    )
+    notification_routes: list[WorkspaceScheduledTaskOutputRoute] | None = Field(
+        default=None,
+        max_length=12,
+    )
+    approval_routes: list[WorkspaceScheduledTaskOutputRoute] | None = Field(
+        default=None,
+        max_length=12,
+    )
     conversation_policy: ConversationPolicy = "reuse"
     is_active: bool = True
     max_attempts: int = Field(default=3, ge=1, le=10)
@@ -133,6 +159,15 @@ class WorkspaceScheduledTaskUpdate(APIModel):
         max_length=12,
     )
     output_routes: list[WorkspaceScheduledTaskOutputRoute] | None = None
+    notification_rules: WorkspaceScheduledTaskNotificationRules | None = None
+    notification_routes: list[WorkspaceScheduledTaskOutputRoute] | None = Field(
+        default=None,
+        max_length=12,
+    )
+    approval_routes: list[WorkspaceScheduledTaskOutputRoute] | None = Field(
+        default=None,
+        max_length=12,
+    )
     conversation_policy: ConversationPolicy | None = None
     is_active: bool | None = None
     max_attempts: int | None = Field(default=None, ge=1, le=10)
@@ -167,6 +202,28 @@ class WorkspaceScheduledTaskDeliveryRead(APIModel):
     updated_at: datetime
 
 
+class WorkspaceScheduledTaskNotificationRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    task_run_id: uuid.UUID
+    connection_id: uuid.UUID | None = None
+    event_type: str
+    route_type: str
+    provider: str
+    external_thread_id: str
+    display_name: str
+    status: str
+    title: str
+    message: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    error: str
+    delivered_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class WorkspaceScheduledTaskRunRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -190,6 +247,7 @@ class WorkspaceScheduledTaskRunRead(APIModel):
     error: str
     delivery_summary: dict[str, Any] = Field(default_factory=dict)
     deliveries: list[WorkspaceScheduledTaskDeliveryRead] = Field(default_factory=list)
+    notifications: list[WorkspaceScheduledTaskNotificationRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -213,6 +271,11 @@ class WorkspaceScheduledTaskRead(APIModel):
     schedules: list[WorkspaceScheduledTaskScheduleRead] = Field(default_factory=list)
     next_run_preview: list[datetime] = Field(default_factory=list)
     output_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
+    notification_rules: WorkspaceScheduledTaskNotificationRules = Field(
+        default_factory=WorkspaceScheduledTaskNotificationRules,
+    )
+    notification_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
+    approval_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
     conversation_policy: str
     is_active: bool
     next_run_at: datetime | None = None

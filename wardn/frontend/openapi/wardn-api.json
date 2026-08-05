@@ -8530,6 +8530,21 @@
       },
       "WorkspaceScheduledTaskCreate": {
         "properties": {
+          "approvalRoutes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvalroutes"
+          },
           "conversationPolicy": {
             "default": "reuse",
             "enum": [
@@ -8562,6 +8577,24 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "notificationRoutes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notificationroutes"
+          },
+          "notificationRules": {
+            "$ref": "#/components/schemas/WorkspaceScheduledTaskNotificationRules"
           },
           "outputRoutes": {
             "items": {
@@ -8733,6 +8766,149 @@
         "title": "WorkspaceScheduledTaskListResponse",
         "type": "object"
       },
+      "WorkspaceScheduledTaskNotificationRead": {
+        "properties": {
+          "connectionId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connectionid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "deliveredAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliveredat"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "eventType": {
+            "title": "Eventtype",
+            "type": "string"
+          },
+          "externalThreadId": {
+            "title": "Externalthreadid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "routeType": {
+            "title": "Routetype",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "taskId": {
+            "format": "uuid",
+            "title": "Taskid",
+            "type": "string"
+          },
+          "taskRunId": {
+            "format": "uuid",
+            "title": "Taskrunid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "taskRunId",
+          "eventType",
+          "routeType",
+          "provider",
+          "externalThreadId",
+          "displayName",
+          "status",
+          "title",
+          "message",
+          "error",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "WorkspaceScheduledTaskNotificationRead",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskNotificationRules": {
+        "properties": {
+          "onDeliveryFailure": {
+            "default": true,
+            "title": "Ondeliveryfailure",
+            "type": "boolean"
+          },
+          "onFailure": {
+            "default": true,
+            "title": "Onfailure",
+            "type": "boolean"
+          },
+          "onMeaningfulUpdate": {
+            "default": false,
+            "title": "Onmeaningfulupdate",
+            "type": "boolean"
+          },
+          "onNoOutput": {
+            "default": false,
+            "title": "Onnooutput",
+            "type": "boolean"
+          },
+          "onWaitingApproval": {
+            "default": true,
+            "title": "Onwaitingapproval",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkspaceScheduledTaskNotificationRules",
+        "type": "object"
+      },
       "WorkspaceScheduledTaskOutputRoute": {
         "properties": {
           "connectionId": {
@@ -8780,6 +8956,13 @@
             "format": "uuid",
             "title": "Agentid",
             "type": "string"
+          },
+          "approvalRoutes": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+            },
+            "title": "Approvalroutes",
+            "type": "array"
           },
           "conversationId": {
             "anyOf": [
@@ -8898,6 +9081,16 @@
             },
             "title": "Nextrunpreview",
             "type": "array"
+          },
+          "notificationRoutes": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+            },
+            "title": "Notificationroutes",
+            "type": "array"
+          },
+          "notificationRules": {
+            "$ref": "#/components/schemas/WorkspaceScheduledTaskNotificationRules"
           },
           "organizationId": {
             "format": "uuid",
@@ -9059,6 +9252,13 @@
           "maxAttempts": {
             "title": "Maxattempts",
             "type": "integer"
+          },
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScheduledTaskNotificationRead"
+            },
+            "title": "Notifications",
+            "type": "array"
           },
           "organizationId": {
             "format": "uuid",
@@ -9426,6 +9626,21 @@
       },
       "WorkspaceScheduledTaskUpdate": {
         "properties": {
+          "approvalRoutes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvalroutes"
+          },
           "conversationPolicy": {
             "anyOf": [
               {
@@ -9490,6 +9705,31 @@
               }
             ],
             "title": "Name"
+          },
+          "notificationRoutes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskOutputRoute"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notificationroutes"
+          },
+          "notificationRules": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceScheduledTaskNotificationRules"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "outputRoutes": {
             "anyOf": [

@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.0.1
  */
 import type { WorkspaceScheduledTaskDeliveryRead } from './workspaceScheduledTaskDeliveryRead';
+import type { WorkspaceScheduledTaskNotificationRead } from './workspaceScheduledTaskNotificationRead';
 import type { WorkspaceScheduledTaskRunReadDeliverySummary } from './workspaceScheduledTaskRunReadDeliverySummary';
 
 export interface WorkspaceScheduledTaskRunRead {
@@ -20,6 +21,7 @@ export interface WorkspaceScheduledTaskRunRead {
   finishedAt?: string | null;
   id: string;
   maxAttempts: number;
+  notifications?: WorkspaceScheduledTaskNotificationRead[];
   organizationId: string;
   requestedById?: string | null;
   scheduledFor: string;

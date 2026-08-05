@@ -82,6 +82,20 @@ class WorkspaceScheduledTaskDeliveryStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class WorkspaceScheduledTaskNotificationEvent(StrEnum):
+    FAILURE = "failure"
+    WAITING_APPROVAL = "waiting_approval"
+    NO_OUTPUT = "no_output"
+    DELIVERY_FAILURE = "delivery_failure"
+    MEANINGFUL_UPDATE = "meaningful_update"
+
+
+class WorkspaceScheduledTaskNotificationStatus(StrEnum):
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class LLMProviderVisibility(StrEnum):
     ORGANIZATION = "organization"
     WORKSPACE = "workspace"

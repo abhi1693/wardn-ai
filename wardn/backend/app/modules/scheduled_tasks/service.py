@@ -2,6 +2,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from hashlib import sha256
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -28,6 +29,7 @@ from app.modules.scheduled_tasks.exceptions import (
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
+    WorkspaceScheduledTaskNotification,
     WorkspaceScheduledTaskRun,
     WorkspaceScheduledTaskSchedule,
 )
@@ -35,6 +37,8 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskCreate,
     WorkspaceScheduledTaskDeliveryRead,
     WorkspaceScheduledTaskListResponse,
+    WorkspaceScheduledTaskNotificationRead,
+    WorkspaceScheduledTaskNotificationRules,
     WorkspaceScheduledTaskOutputRoute,
     WorkspaceScheduledTaskRead,
     WorkspaceScheduledTaskRunListResponse,
@@ -53,6 +57,14 @@ TASK_UNIQUE_CONSTRAINTS = {"uq_workspace_scheduled_tasks_workspace_name"}
 DEFAULT_OUTPUT_ROUTES = [WorkspaceScheduledTaskOutputRoute(route_type="chat")]
 SCHEDULED_AGENT_TRIGGER = "scheduled"
 PROVIDER_EMPTY_REPLY = "The scheduled task completed, but the assistant did not return text."
+DEFAULT_NOTIFICATION_RULES = WorkspaceScheduledTaskNotificationRules()
+NOTIFICATION_EVENT_TO_RULE_KEY = {
+    "failure": "on_failure",
+    "waiting_approval": "on_waiting_approval",
+    "no_output": "on_no_output",
+    "delivery_failure": "on_delivery_failure",
+    "meaningful_update": "on_meaningful_update",
+}
 ENTRY_SCHEDULE_TYPES = {"interval", "daily", "weekly", "weekdays", "monthly", "cron"}
 MAX_SCHEDULES_PER_TASK = 12
 MAX_TIMES_PER_SCHEDULE = 12
@@ -99,6 +111,13 @@ class ScheduleSpec:
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     is_active: bool = True
+
+
+@dataclass(frozen=True)
+class TaskRunReply:
+    text: str
+    kind: str
+    approval_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -611,11 +630,71 @@ def normalize_output_routes(
     return deduped
 
 
+def normalize_route_payloads(
+    routes: list[WorkspaceScheduledTaskOutputRoute] | None,
+    *,
+    fallback: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    if routes is None:
+        return list(fallback or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)])
+    return normalize_output_routes(routes)
+
+
 def route_reads(routes: list[dict[str, Any]] | None) -> list[WorkspaceScheduledTaskOutputRoute]:
     return [
         WorkspaceScheduledTaskOutputRoute.model_validate(route)
         for route in (routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)])
     ]
+
+
+def normalize_notification_rules(
+    rules: WorkspaceScheduledTaskNotificationRules | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if rules is None:
+        return DEFAULT_NOTIFICATION_RULES.model_dump(by_alias=False)
+    if isinstance(rules, WorkspaceScheduledTaskNotificationRules):
+        return rules.model_dump(by_alias=False)
+    return WorkspaceScheduledTaskNotificationRules.model_validate(rules).model_dump(
+        by_alias=False
+    )
+
+
+def notification_rule_enabled(
+    rules: Mapping[str, Any] | None,
+    event_type: str,
+) -> bool:
+    key = NOTIFICATION_EVENT_TO_RULE_KEY[event_type]
+    normalized = normalize_notification_rules(rules)
+    return bool(normalized.get(key))
+
+
+def normalized_output_text(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def output_text_hash(text: str) -> str:
+    return sha256(normalized_output_text(text).encode("utf-8")).hexdigest()
+
+
+def output_text_preview(text: str, *, limit: int = 500) -> str:
+    normalized = " ".join(text.strip().split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 12].rstrip() + " [truncated]"
+
+
+def reply_summary(reply: TaskRunReply) -> dict[str, Any]:
+    text = reply.text.strip()
+    has_assistant_output = reply.kind == "assistant" and bool(text)
+    return {
+        "outputKind": reply.kind,
+        "hasOutput": has_assistant_output,
+        "outputHash": output_text_hash(text) if has_assistant_output else "",
+        "outputPreview": output_text_preview(text)
+        if reply.kind in {"assistant", "approval"} and text
+        else "",
+        "approvalId": str(reply.approval_id) if reply.approval_id else "",
+    }
 
 
 def schedule_response(
@@ -905,10 +984,35 @@ def delivery_response(
     )
 
 
+def notification_response(
+    notification: WorkspaceScheduledTaskNotification,
+) -> WorkspaceScheduledTaskNotificationRead:
+    return WorkspaceScheduledTaskNotificationRead(
+        id=notification.id,
+        taskId=notification.task_id,
+        taskRunId=notification.task_run_id,
+        connectionId=notification.connection_id,
+        eventType=notification.event_type,
+        routeType=notification.route_type,
+        provider=notification.provider,
+        externalThreadId=notification.external_thread_id,
+        displayName=notification.display_name,
+        status=notification.status,
+        title=notification.title,
+        message=notification.message,
+        payload=notification.payload,
+        error=notification.error,
+        deliveredAt=notification.delivered_at,
+        createdAt=notification.created_at,
+        updatedAt=notification.updated_at,
+    )
+
+
 def run_response(
     run: WorkspaceScheduledTaskRun,
     *,
     deliveries: list[WorkspaceScheduledTaskDelivery] | None = None,
+    notifications: list[WorkspaceScheduledTaskNotification] | None = None,
 ) -> WorkspaceScheduledTaskRunRead:
     return WorkspaceScheduledTaskRunRead(
         id=run.id,
@@ -931,6 +1035,9 @@ def run_response(
         error=run.error,
         deliverySummary=run.delivery_summary,
         deliveries=[delivery_response(delivery) for delivery in (deliveries or [])],
+        notifications=[
+            notification_response(notification) for notification in (notifications or [])
+        ],
         createdAt=run.created_at,
         updatedAt=run.updated_at,
     )
@@ -968,6 +1075,11 @@ def task_response(
         schedules=[schedule_response(schedule) for schedule in schedule_rows],
         nextRunPreview=preview,
         outputRoutes=route_reads(task.output_routes),
+        notificationRules=WorkspaceScheduledTaskNotificationRules.model_validate(
+            normalize_notification_rules(task.notification_rules)
+        ),
+        notificationRoutes=route_reads(task.notification_routes),
+        approvalRoutes=route_reads(task.approval_routes),
         conversationPolicy=task.conversation_policy,
         isActive=task.is_active,
         nextRunAt=task.next_run_at,
@@ -1061,11 +1173,29 @@ async def create_workspace_scheduled_task(
     zoneinfo_for(timezone)
     schedule_entries = create_payload_schedules(payload)
     routes = normalize_output_routes(payload.output_routes)
+    notification_routes = normalize_route_payloads(payload.notification_routes, fallback=routes)
+    approval_routes = normalize_route_payloads(
+        payload.approval_routes,
+        fallback=notification_routes,
+    )
+    notification_rules = normalize_notification_rules(payload.notification_rules)
     await validate_output_routes(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
-            routes=routes,
+        routes=routes,
+    )
+    await validate_output_routes(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        routes=notification_routes,
+    )
+    await validate_output_routes(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        routes=approval_routes,
     )
     now = utc_now()
     try:
@@ -1081,6 +1211,9 @@ async def create_workspace_scheduled_task(
             schedule_config={},
             timezone=timezone,
             output_routes=routes,
+            notification_rules=notification_rules,
+            notification_routes=notification_routes,
+            approval_routes=approval_routes,
             conversation_policy=payload.conversation_policy,
             is_active=payload.is_active,
             next_run_at=None,
@@ -1130,6 +1263,26 @@ async def update_workspace_scheduled_task(
             routes=routes,
         )
         task.output_routes = routes
+    if payload.notification_rules is not None:
+        task.notification_rules = normalize_notification_rules(payload.notification_rules)
+    if payload.notification_routes is not None:
+        notification_routes = normalize_route_payloads(payload.notification_routes)
+        await validate_output_routes(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            routes=notification_routes,
+        )
+        task.notification_routes = notification_routes
+    if payload.approval_routes is not None:
+        approval_routes = normalize_route_payloads(payload.approval_routes)
+        await validate_output_routes(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            routes=approval_routes,
+        )
+        task.approval_routes = approval_routes
     if payload.conversation_policy is not None:
         task.conversation_policy = payload.conversation_policy
         if payload.conversation_policy == "new_each_run":
@@ -1231,9 +1384,17 @@ async def list_workspace_scheduled_task_runs(
         session,
         run_ids=[run.id for run in runs],
     )
+    notifications_by_run = await repository.list_run_notifications(
+        session,
+        run_ids=[run.id for run in runs],
+    )
     return WorkspaceScheduledTaskRunListResponse(
         runs=[
-            run_response(run, deliveries=deliveries_by_run.get(run.id, []))
+            run_response(
+                run,
+                deliveries=deliveries_by_run.get(run.id, []),
+                notifications=notifications_by_run.get(run.id, []),
+            )
             for run in runs
         ]
     )
@@ -1356,15 +1517,15 @@ async def prepare_agent_run_for_task(
     return conversation.id, agent_run.id if agent_run is not None else None, stream
 
 
-async def reply_text_for_task_run(
+async def reply_for_task_run(
     session: AsyncSession,
     *,
     task: WorkspaceScheduledTask,
     conversation_id: uuid.UUID,
-) -> str:
+) -> TaskRunReply:
     text = await chat_provider_service.latest_assistant_text(session, conversation_id)
     if text:
-        return text
+        return TaskRunReply(text=text, kind="assistant")
     approval = await agent_repository.latest_pending_tool_approval_by_conversation(
         session,
         organization_id=task.organization_id,
@@ -1372,8 +1533,12 @@ async def reply_text_for_task_run(
         conversation_id=conversation_id,
     )
     if approval is not None:
-        return chat_provider_service.approval_reply_text(approval)
-    return PROVIDER_EMPTY_REPLY
+        return TaskRunReply(
+            text=chat_provider_service.approval_reply_text(approval),
+            kind="approval",
+            approval_id=approval.id,
+        )
+    return TaskRunReply(text=PROVIDER_EMPTY_REPLY, kind="empty")
 
 
 async def provider_route_connection(
@@ -1500,6 +1665,307 @@ async def send_provider_delivery(
     )
 
 
+async def record_chat_notification(
+    session: AsyncSession,
+    *,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    event_type: str,
+    title: str,
+    message: str,
+) -> None:
+    now = utc_now()
+    if run.conversation_id is None:
+        await repository.add_notification(
+            session,
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            task_id=task.id,
+            task_run_id=run.id,
+            event_type=event_type,
+            route_type="chat",
+            status="skipped",
+            title=title,
+            message=message,
+            error="Scheduled task run has no conversation.",
+        )
+        return
+    await agent_repository.append_conversation_message(
+        session,
+        conversation_id=run.conversation_id,
+        role="assistant",
+        content=message,
+        parts=text_parts(message),
+        agent_run_id=run.agent_run_id,
+    )
+    await repository.add_notification(
+        session,
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        task_id=task.id,
+        task_run_id=run.id,
+        event_type=event_type,
+        route_type="chat",
+        status="sent",
+        title=title,
+        message=message,
+        payload={"conversationId": str(run.conversation_id)},
+        delivered_at=now,
+    )
+
+
+async def send_provider_notification(
+    session: AsyncSession,
+    *,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    event_type: str,
+    route: dict[str, Any],
+    title: str,
+    message: str,
+) -> None:
+    now = utc_now()
+    connection = await provider_route_connection(session, task=task, route=route)
+    external_thread_id = str(route.get("external_thread_id") or "").strip()
+    display_name = str(route.get("display_name") or "").strip()
+    if connection is None or not connection.is_active:
+        await repository.add_notification(
+            session,
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            task_id=task.id,
+            task_run_id=run.id,
+            event_type=event_type,
+            route_type="chat_provider",
+            status="failed",
+            provider=str(route.get("provider") or ""),
+            external_thread_id=external_thread_id,
+            display_name=display_name,
+            title=title,
+            message=message,
+            error="Chat provider connection is not active.",
+        )
+        return
+    try:
+        payload = await chat_provider_service.send_provider_text_message(
+            session,
+            connection,
+            external_thread_id=external_thread_id,
+            text=message,
+        )
+    except Exception as exc:
+        await repository.add_notification(
+            session,
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            task_id=task.id,
+            task_run_id=run.id,
+            event_type=event_type,
+            route_type="chat_provider",
+            status="failed",
+            connection_id=connection.id,
+            provider=connection.provider,
+            external_thread_id=external_thread_id,
+            display_name=display_name,
+            title=title,
+            message=message,
+            error=str(exc),
+        )
+        return
+    outbound_message_id = chat_provider_service.provider_response_message_id(connection, payload)
+    session.add(
+        ChatProviderEvent(
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            connection_id=connection.id,
+            conversation_id=run.conversation_id,
+            provider=connection.provider,
+            external_event_id=outbound_message_id
+            or f"scheduled-notification:{run.id}:{event_type}:{external_thread_id}",
+            direction="outbound",
+            event_type="scheduled_task.notification",
+            status="sent",
+            payload={connection.provider: payload, "scheduledTaskRunId": str(run.id)},
+            processed_at=now,
+        )
+    )
+    await repository.add_notification(
+        session,
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        task_id=task.id,
+        task_run_id=run.id,
+        event_type=event_type,
+        route_type="chat_provider",
+        status="sent",
+        connection_id=connection.id,
+        provider=connection.provider,
+        external_thread_id=external_thread_id,
+        display_name=display_name,
+        title=title,
+        message=message,
+        payload={connection.provider: payload},
+        delivered_at=now,
+    )
+
+
+async def send_task_notification(
+    session: AsyncSession,
+    *,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    event_type: str,
+    title: str,
+    message: str,
+    routes: Sequence[dict[str, Any]],
+) -> None:
+    for route in routes:
+        if route.get("route_type") == "chat_provider":
+            await send_provider_notification(
+                session,
+                task=task,
+                run=run,
+                event_type=event_type,
+                route=route,
+                title=title,
+                message=message,
+            )
+        else:
+            await record_chat_notification(
+                session,
+                task=task,
+                run=run,
+                event_type=event_type,
+                title=title,
+                message=message,
+            )
+
+
+def notification_title(event_type: str) -> str:
+    if event_type == "failure":
+        return "Scheduled task failed"
+    if event_type == "waiting_approval":
+        return "Scheduled task needs approval"
+    if event_type == "no_output":
+        return "Scheduled task had no output"
+    if event_type == "delivery_failure":
+        return "Scheduled task delivery failed"
+    if event_type == "meaningful_update":
+        return "Scheduled task found an update"
+    return "Scheduled task notification"
+
+
+def notification_message(
+    *,
+    event_type: str,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    error: str,
+    delivery_summary: Mapping[str, Any],
+) -> str:
+    if event_type == "waiting_approval":
+        approval_text = str(delivery_summary.get("outputPreview") or "").strip()
+        if approval_text:
+            return approval_text
+        approval_id = str(delivery_summary.get("approvalId") or "").strip()
+        suffix = f"\n\nApproval ID: {approval_id}" if approval_id else ""
+        return f"{task.name} is waiting for tool approval before it can continue.{suffix}"
+    if event_type == "failure":
+        reason = error.strip() or "The assistant run failed."
+        return (
+            f"{task.name} failed for the run scheduled at "
+            f"{run.scheduled_for.isoformat()}.\n\n{reason}"
+        )
+    if event_type == "no_output":
+        return f"{task.name} completed, but the assistant did not return text."
+    if event_type == "delivery_failure":
+        sent = delivery_summary_count(delivery_summary, "sent")
+        failed = delivery_summary_count(delivery_summary, "failed")
+        return f"{task.name} had output delivery failures. Sent: {sent}. Failed: {failed}."
+    if event_type == "meaningful_update":
+        preview = str(delivery_summary.get("outputPreview") or "").strip()
+        if preview:
+            return f"{task.name} found a meaningful update.\n\n{preview}"
+        return f"{task.name} found a meaningful update."
+    return f"{task.name} has a scheduled task notification."
+
+
+def notification_events_for_run(
+    *,
+    task: WorkspaceScheduledTask,
+    status: str,
+    delivery_summary: Mapping[str, Any],
+) -> list[str]:
+    events: list[str] = []
+    if status == "failed" and notification_rule_enabled(task.notification_rules, "failure"):
+        events.append("failure")
+    if status == "waiting_confirmation" and notification_rule_enabled(
+        task.notification_rules,
+        "waiting_approval",
+    ):
+        events.append("waiting_approval")
+    if delivery_summary.get("outputKind") == "empty" and notification_rule_enabled(
+        task.notification_rules,
+        "no_output",
+    ):
+        events.append("no_output")
+    if delivery_summary_count(delivery_summary, "failed") > 0 and notification_rule_enabled(
+        task.notification_rules,
+        "delivery_failure",
+    ):
+        events.append("delivery_failure")
+    if notification_rule_enabled(task.notification_rules, "meaningful_update"):
+        output_hash = str(delivery_summary.get("outputHash") or "").strip()
+        if output_hash:
+            state = task.notification_state or {}
+            previous_hash = str(state.get("lastMeaningfulOutputHash") or "")
+            if previous_hash != output_hash:
+                events.append("meaningful_update")
+            task.notification_state = {
+                **state,
+                "lastMeaningfulOutputHash": output_hash,
+                "lastMeaningfulOutputAt": utc_now().isoformat(),
+            }
+    return events
+
+
+async def dispatch_task_run_notifications(
+    session: AsyncSession,
+    *,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    status: str,
+    error: str,
+    delivery_summary: Mapping[str, Any],
+) -> None:
+    events = notification_events_for_run(
+        task=task,
+        status=status,
+        delivery_summary=delivery_summary,
+    )
+    for event_type in events:
+        routes = (
+            task.approval_routes
+            if event_type == "waiting_approval"
+            else task.notification_routes
+        )
+        await send_task_notification(
+            session,
+            task=task,
+            run=run,
+            event_type=event_type,
+            title=notification_title(event_type),
+            message=notification_message(
+                event_type=event_type,
+                task=task,
+                run=run,
+                error=error,
+                delivery_summary=delivery_summary,
+            ),
+            routes=routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)],
+        )
+
+
 async def deliver_task_run_output(
     session: AsyncSession,
     *,
@@ -1507,11 +1973,17 @@ async def deliver_task_run_output(
     run: WorkspaceScheduledTaskRun,
     conversation_id: uuid.UUID,
 ) -> dict[str, Any]:
-    text = await reply_text_for_task_run(session, task=task, conversation_id=conversation_id)
+    reply = await reply_for_task_run(session, task=task, conversation_id=conversation_id)
     routes = task.output_routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)]
     for route in routes:
         if route.get("route_type") == "chat_provider":
-            await send_provider_delivery(session, task=task, run=run, route=route, text=text)
+            await send_provider_delivery(
+                session,
+                task=task,
+                run=run,
+                route=route,
+                text=reply.text,
+            )
         else:
             await record_chat_delivery(
                 session,
@@ -1525,6 +1997,7 @@ async def deliver_task_run_output(
         "total": len(run_deliveries),
         "sent": sum(1 for delivery in run_deliveries if delivery.status == "sent"),
         "failed": sum(1 for delivery in run_deliveries if delivery.status == "failed"),
+        **reply_summary(reply),
     }
 
 
@@ -1576,12 +2049,26 @@ async def execute_claimed_task_run(
     else:
         status = "failed"
         error = "Scheduled task did not create an agent run."
-    delivery_summary = await deliver_task_run_output(
-        session,
-        task=task,
-        run=run,
-        conversation_id=conversation_id,
-    )
+    if status == "waiting_confirmation":
+        delivery_summary = {
+            "total": 0,
+            "sent": 0,
+            "failed": 0,
+            **reply_summary(
+                await reply_for_task_run(
+                    session,
+                    task=task,
+                    conversation_id=conversation_id,
+                )
+            ),
+        }
+    else:
+        delivery_summary = await deliver_task_run_output(
+            session,
+            task=task,
+            run=run,
+            conversation_id=conversation_id,
+        )
     status = scheduled_task_run_status(status, delivery_summary)
     completed = await repository.complete_run(
         session,
@@ -1596,6 +2083,14 @@ async def execute_claimed_task_run(
     )
     if not completed:
         raise InvalidScheduledTaskError("scheduled task run lease was lost")
+    await dispatch_task_run_notifications(
+        session,
+        task=task,
+        run=run,
+        status=status,
+        error=error,
+        delivery_summary=delivery_summary,
+    )
 
 
 async def enqueue_due_task_runs(
