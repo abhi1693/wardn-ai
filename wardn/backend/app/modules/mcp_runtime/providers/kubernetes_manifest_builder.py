@@ -11,7 +11,10 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.modules.mcp_registry.models import MCPServerInstallation
-from app.modules.mcp_registry.python_runtime import resolve_python_runtime_requirement
+from app.modules.mcp_registry.python_runtime import (
+    python_runtime_dependency_values,
+    resolve_python_runtime_requirement,
+)
 from app.modules.mcp_runtime.models import MCPRuntimeSession
 from app.modules.mcp_runtime.provider import (
     RUNTIME_TRANSPORT_STREAMABLE_HTTP,
@@ -1176,24 +1179,16 @@ def npm_package_directory(identifier: str) -> str:
     return f"{KUBERNETES_NPM_PACKAGE_MOUNT_PATH}/node_modules/{identifier}"
 
 
-PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
-
 def pypi_runtime_dependencies(runtime_config: dict[str, Any]) -> list[str]:
-    dependencies: list[str] = []
     sources: list[dict[str, Any]] = [runtime_config]
     package = runtime_config.get("package")
     if isinstance(package, dict):
         sources.append(package)
-    for source in sources:
-        for field_name in PYTHON_RUNTIME_DEPENDENCY_FIELDS:
-            raw_dependencies = source.get(field_name)
-            if not isinstance(raw_dependencies, list):
-                continue
-            for dependency in raw_dependencies:
-                value = str(dependency or "").strip()
-                if value and value not in dependencies:
-                    dependencies.append(value)
-    return dependencies
+    return python_runtime_dependency_values(
+        *sources,
+        identifier=runtime_package_identifier(runtime_config),
+        version=runtime_package_version(runtime_config),
+    )
 
 def pypi_runtime_dependency_args(runtime_config: dict[str, Any]) -> list[str]:
     args: list[str] = []

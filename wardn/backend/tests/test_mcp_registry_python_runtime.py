@@ -25,3 +25,13 @@ def test_python_runtime_requirement_ignores_currently_supported_python(monkeypat
 
     assert requirement.requires_python == ">=3.10"
     assert requirement.python_version == ""
+
+
+def test_python_runtime_dependency_values_adds_gsc_compatibility_dependency() -> None:
+    dependencies = python_runtime.python_runtime_dependency_values(
+        {},
+        identifier="mcp_google_search_console",
+        version="2.0.2",
+    )
+
+    assert dependencies == ["mcp<2"]

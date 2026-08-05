@@ -24,23 +24,21 @@ from app.modules.mcp_registry.installers.support import (
 from app.modules.mcp_registry.models import MCPServerVersion
 from app.modules.mcp_registry.python_runtime import (
     apply_python_runtime_requirement,
+    python_runtime_dependency_values,
     resolve_python_runtime_requirement,
 )
 
-PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
 
-
-def python_runtime_dependencies(package: dict[str, Any]) -> list[str]:
-    dependencies: list[str] = []
-    for field_name in PYTHON_RUNTIME_DEPENDENCY_FIELDS:
-        raw_dependencies = package.get(field_name)
-        if not isinstance(raw_dependencies, list):
-            continue
-        for dependency in raw_dependencies:
-            value = str(dependency or "").strip()
-            if value and value not in dependencies:
-                dependencies.append(value)
-    return dependencies
+def python_runtime_dependencies(
+    package: dict[str, Any],
+    *,
+    version: str = "",
+) -> list[str]:
+    return python_runtime_dependency_values(
+        package,
+        identifier=str(package.get("identifier") or "").strip(),
+        version=normalized_package_version(version or package.get("version")),
+    )
 
 
 def package_stdio_transport(package: dict[str, Any]) -> tuple[str, list[str]]:
@@ -116,7 +114,7 @@ def build_pypi_install(
     pip_path = venv_path / "bin" / "pip"
     python_path = venv_path / "bin" / "python"
     package_spec = identifier if version == "latest" else f"{identifier}=={version}"
-    python_dependencies = python_runtime_dependencies(package)
+    python_dependencies = python_runtime_dependencies(package, version=version)
     create_pypi_virtualenv(install_path, venv_path, python_requirement.python_version)
     try:
         run_install_command(
@@ -166,6 +164,8 @@ def build_pypi_install(
         public_package_config(package, env_vars, package_args, config_values),
         python_requirement,
     )
+    if python_dependencies:
+        public_package.setdefault("pythonDependencies", python_dependencies)
     secret_config = package_secret_config(
         env_vars,
         package_args,

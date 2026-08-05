@@ -2609,7 +2609,8 @@ def test_kubernetes_runtime_manifest_uses_pypi_declared_uvx_command(
     )
 
     assert supergateway_stdio_arg(manifest) == (
-        "uvx --from mcp-google-search-console==2.0.2 mcp-google-search-console"
+        "uvx --from mcp-google-search-console==2.0.2 --with 'mcp<2' "
+        "mcp-google-search-console"
     )
     assert manifest.pod.spec.containers[0].image == "registry.example/supergateway:test"
 

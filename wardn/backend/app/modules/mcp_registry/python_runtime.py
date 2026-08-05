@@ -14,6 +14,11 @@ PYTHON_REQUIRES_FIELDS = (
     "pythonRequires",
     "python_requires",
 )
+PYTHON_RUNTIME_DEPENDENCY_FIELDS = ("runtimeDependencies", "pythonDependencies")
+PYTHON_RUNTIME_COMPATIBILITY_DEPENDENCIES = {
+    # mcp-google-search-console 2.0.2 imports mcp.server.fastmcp but only declares mcp>=1.0.0.
+    ("mcp-google-search-console", "2.0.2"): ("mcp<2",),
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,10 @@ def normalized_python_version(value: Any) -> str:
     major = match.group("major")
     minor = match.group("minor")
     return f"{major}.{minor}" if minor is not None else major
+
+
+def normalized_python_package_name(value: Any) -> str:
+    return re.sub(r"[-_.]+", "-", str(value or "").strip()).casefold()
 
 
 def python_version_tuple(value: str) -> tuple[int, int]:
@@ -154,3 +163,44 @@ def apply_python_runtime_requirement(
     if requirement.python_version:
         updated_package.setdefault("pythonVersion", requirement.python_version)
     return updated_package
+
+
+def python_runtime_compatibility_dependencies(
+    *,
+    identifier: str,
+    version: str,
+) -> list[str]:
+    package_name = normalized_python_package_name(identifier)
+    package_version = str(version or "").strip()
+    return list(
+        PYTHON_RUNTIME_COMPATIBILITY_DEPENDENCIES.get(
+            (package_name, package_version),
+            (),
+        )
+    )
+
+
+def python_runtime_dependency_values(
+    *sources: dict[str, Any],
+    identifier: str,
+    version: str,
+) -> list[str]:
+    dependencies: list[str] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for field_name in PYTHON_RUNTIME_DEPENDENCY_FIELDS:
+            raw_dependencies = source.get(field_name)
+            if not isinstance(raw_dependencies, list):
+                continue
+            for dependency in raw_dependencies:
+                value = str(dependency or "").strip()
+                if value and value not in dependencies:
+                    dependencies.append(value)
+    for dependency in python_runtime_compatibility_dependencies(
+        identifier=identifier,
+        version=version,
+    ):
+        if dependency not in dependencies:
+            dependencies.append(dependency)
+    return dependencies
