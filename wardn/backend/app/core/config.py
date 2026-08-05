@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     mcp_runtime_kubernetes_read_only_root_filesystem: bool = True
     mcp_runtime_kubernetes_tmp_size_limit: str = Field(default="512Mi", max_length=32)
     mcp_runtime_kubernetes_network_policy_enabled: bool = True
+    mcp_runtime_kubernetes_network_policy_backend: Literal[
+        "auto",
+        "network_policy",
+        "cilium",
+        "calico",
+    ] = "auto"
     mcp_runtime_kubernetes_allow_public_egress: bool = True
     mcp_runtime_kubernetes_public_egress_ports: list[int] = [80, 443]
     mcp_runtime_kubernetes_control_plane_namespace: str = Field(

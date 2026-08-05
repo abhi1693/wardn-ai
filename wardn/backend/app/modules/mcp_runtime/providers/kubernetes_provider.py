@@ -169,9 +169,15 @@ class KubernetesRuntimeProvider:
                 "kubernetes MCP runtime tool discovery requires a runtime session; "
                 "use a tracked runtime call path before invocation"
             )
-        manifest = build_runtime_manifests(installation, runtime_session)
+        client_set = self._client_factory.load()
+        network_discovery = discover_kubernetes_network(client_set)
+        manifest = build_runtime_manifests(
+            installation,
+            runtime_session,
+            network_discovery=network_discovery,
+        )
         settings = get_settings()
-        reconciler = self._new_reconciler()
+        reconciler = self._new_reconciler(client_set)
         reconcile_result = reconciler.reconcile(manifest)
         runtime_session.namespace = manifest.names.namespace
         runtime_session.pod_name = manifest.names.pod_name
@@ -206,9 +212,15 @@ class KubernetesRuntimeProvider:
             raise NotImplementedError(
                 "kubernetes MCP runtime reconciliation requires a runtime session"
             )
-        manifest = build_runtime_manifests(installation, runtime_session)
+        client_set = self._client_factory.load()
+        network_discovery = discover_kubernetes_network(client_set)
+        manifest = build_runtime_manifests(
+            installation,
+            runtime_session,
+            network_discovery=network_discovery,
+        )
         settings = get_settings()
-        reconciler = self._new_reconciler()
+        reconciler = self._new_reconciler(client_set)
         reconcile_result = reconciler.reconcile(manifest)
         runtime_session.namespace = manifest.names.namespace
         runtime_session.pod_name = manifest.names.pod_name

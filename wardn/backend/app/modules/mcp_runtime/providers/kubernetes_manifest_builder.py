@@ -107,6 +107,10 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
 RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 20
+KUBERNETES_NETWORK_POLICY_BACKEND_AUTO = "auto"
+KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD = "network_policy"
+KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM = "cilium"
+KUBERNETES_NETWORK_POLICY_BACKEND_CALICO = "calico"
 KUBERNETES_STRUCTURED_CONTENT_PROXY_PATH = (
     "/opt/wardn-runtime/structured-content-proxy.mjs"
 )
@@ -796,6 +800,44 @@ def list_kube_system_pods(core_v1: Any, *, label_selector: str) -> list[Any]:
     return kubernetes_items(response)
 
 
+def configured_network_policy_backend(settings=None) -> str:
+    runtime_settings = settings or get_settings()
+    return str(
+        getattr(
+            runtime_settings,
+            "mcp_runtime_kubernetes_network_policy_backend",
+            KUBERNETES_NETWORK_POLICY_BACKEND_AUTO,
+        )
+        or KUBERNETES_NETWORK_POLICY_BACKEND_AUTO
+    ).strip().lower()
+
+
+def cni_provider_from_network_policy_backend(
+    backend: str,
+) -> tuple[str, bool, bool] | None:
+    if backend == KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM:
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM, True, False
+    if backend == KUBERNETES_NETWORK_POLICY_BACKEND_CALICO:
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CALICO, False, True
+    if backend == KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD:
+        return KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD, False, False
+    return None
+
+
+def apply_network_policy_backend_override(
+    cni_provider: str,
+    supports_cilium: bool,
+    supports_calico: bool,
+    *,
+    settings=None,
+) -> tuple[str, bool, bool]:
+    configured_backend = configured_network_policy_backend(settings)
+    override = cni_provider_from_network_policy_backend(configured_backend)
+    if override is not None:
+        return override
+    return cni_provider, supports_cilium, supports_calico
+
+
 def discover_kubernetes_cni_provider(client_set: Any) -> tuple[str, bool, bool]:
     core_v1 = getattr(client_set, "core_v1", None)
     cilium_pods = [
@@ -803,16 +845,16 @@ def discover_kubernetes_cni_provider(client_set: Any) -> tuple[str, bool, bool]:
         *list_kube_system_pods(core_v1, label_selector="app.kubernetes.io/name=cilium-agent"),
     ]
     if cilium_pods:
-        return "cilium", True, False
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM, True, False
 
     calico_pods = [
         *list_kube_system_pods(core_v1, label_selector="k8s-app=calico-node"),
         *list_kube_system_pods(core_v1, label_selector="app=calico-node"),
     ]
     if calico_pods:
-        return "calico", False, True
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CALICO, False, True
 
-    return "network_policy", False, False
+    return KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD, False, False
 
 
 def discover_kubernetes_pod_cidrs(client_set: Any) -> tuple[str, ...]:
@@ -874,23 +916,32 @@ def discover_kubernetes_service_cidrs(
     return unique_tuple(fallback)
 
 
-def default_kubernetes_network_discovery() -> KubernetesNetworkDiscovery:
+def default_kubernetes_network_discovery(*, settings=None) -> KubernetesNetworkDiscovery:
     api_host = os.environ.get("KUBERNETES_SERVICE_HOST", "").strip()
     api_cidrs = []
     if cidr := in_cluster_kubernetes_api_cidr():
         api_cidrs.append(cidr)
     service_ports = in_cluster_kubernetes_api_service_ports()
     endpoint_ports = in_cluster_kubernetes_api_endpoint_ports()
+    cni_provider, supports_cilium, supports_calico = apply_network_policy_backend_override(
+        KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD,
+        False,
+        False,
+        settings=settings,
+    )
     return KubernetesNetworkDiscovery(
         kubernetes_api_host=api_host,
         kubernetes_api_cidrs=tuple(api_cidrs),
         kubernetes_api_service_ports=tuple(service_ports),
         kubernetes_api_endpoint_ports=tuple(endpoint_ports),
+        cni_provider=cni_provider,
+        supports_cilium=supports_cilium,
+        supports_calico=supports_calico,
     )
 
 
-def discover_kubernetes_network(client_set: Any) -> KubernetesNetworkDiscovery:
-    discovery = default_kubernetes_network_discovery()
+def discover_kubernetes_network(client_set: Any, *, settings=None) -> KubernetesNetworkDiscovery:
+    discovery = default_kubernetes_network_discovery(settings=settings)
     core_v1 = getattr(client_set, "core_v1", None)
 
     api_service = call_kubernetes_discovery(
@@ -924,7 +975,10 @@ def discover_kubernetes_network(client_set: Any) -> KubernetesNetworkDiscovery:
         client_set,
         fallback=[*api_cidrs, *dns_service_cidrs],
     )
-    cni_provider, supports_cilium, supports_calico = discover_kubernetes_cni_provider(client_set)
+    cni_provider, supports_cilium, supports_calico = apply_network_policy_backend_override(
+        *discover_kubernetes_cni_provider(client_set),
+        settings=settings,
+    )
 
     return KubernetesNetworkDiscovery(
         dns_namespace=KUBE_SYSTEM_NAMESPACE_NAME,
@@ -2345,14 +2399,23 @@ def build_calico_kubernetes_api_egress_network_policy(
     )
 
 
-def network_policy_backend(discovery: KubernetesNetworkDiscovery | None) -> str:
+def network_policy_backend(
+    discovery: KubernetesNetworkDiscovery | None,
+    *,
+    settings=None,
+) -> str:
+    override = cni_provider_from_network_policy_backend(
+        configured_network_policy_backend(settings)
+    )
+    if override is not None:
+        return override[0]
     if discovery is None:
-        return "network_policy"
+        return KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD
     if discovery.supports_cilium:
-        return "cilium"
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM
     if discovery.supports_calico:
-        return "calico"
-    return "network_policy"
+        return KUBERNETES_NETWORK_POLICY_BACKEND_CALICO
+    return KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD
 
 
 def remote_destination_ip_block_rules(
@@ -2464,7 +2527,7 @@ def build_custom_network_policy_manifests(
     if not policy_config["isolationEnabled"]:
         return []
 
-    backend = network_policy_backend(network_discovery)
+    backend = network_policy_backend(network_discovery, settings=runtime_settings)
     cilium_kube_ref, calico_kube_ref, cilium_remote_ref, cilium_custom_ref = (
         runtime_custom_network_policy_refs(names)
     )
@@ -2515,10 +2578,13 @@ def build_custom_network_policy_manifests(
 def standard_kubernetes_api_policy_allowed(
     policy_config: dict[str, Any],
     network_discovery: KubernetesNetworkDiscovery | None,
+    *,
+    settings=None,
 ) -> bool:
     return (
         bool(policy_config["allowKubernetesApi"])
-        and network_policy_backend(network_discovery) == "network_policy"
+        and network_policy_backend(network_discovery, settings=settings)
+        == KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD
     )
 
 
@@ -2646,7 +2712,7 @@ def build_network_policy_manifests(
         ]
 
     client = kubernetes_client_module(client_module)
-    backend = network_policy_backend(network_discovery)
+    backend = network_policy_backend(network_discovery, settings=runtime_settings)
     policies = [
         build_default_deny_network_policy(
             names=names,
@@ -2690,7 +2756,11 @@ def build_network_policy_manifests(
                 client_module=client,
             )
         )
-    if standard_kubernetes_api_policy_allowed(policy_config, network_discovery):
+    if standard_kubernetes_api_policy_allowed(
+        policy_config,
+        network_discovery,
+        settings=runtime_settings,
+    ):
         kubernetes_api_policy = build_kubernetes_api_egress_network_policy(
             names=names,
             labels=labels,

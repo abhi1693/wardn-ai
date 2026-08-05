@@ -90,6 +90,7 @@ class FakeSettings:
     mcp_runtime_kubernetes_read_only_root_filesystem = True
     mcp_runtime_kubernetes_tmp_size_limit = "512Mi"
     mcp_runtime_kubernetes_network_policy_enabled = True
+    mcp_runtime_kubernetes_network_policy_backend = "auto"
     mcp_runtime_kubernetes_allow_public_egress = True
     mcp_runtime_kubernetes_public_egress_ports = [80, 443]
     mcp_runtime_kubernetes_control_plane_namespace = "wardn"
@@ -144,6 +145,10 @@ class IngressUnverifiedTlsSettings(IngressSettings):
 
 class DisabledProbeSettings(FakeSettings):
     mcp_runtime_kubernetes_probe_enabled = False
+
+
+class CiliumNetworkPolicyBackendSettings(FakeSettings):
+    mcp_runtime_kubernetes_network_policy_backend = "cilium"
 
 
 class FakeKubernetesModel:
@@ -361,6 +366,20 @@ def test_kubernetes_network_discovery_reads_cluster_network_details() -> None:
     assert discovery.pod_cidrs == ("10.42.0.0/24", "fd00:10:42::/64")
     assert discovery.cni_provider == "cilium"
     assert discovery.supports_cilium is True
+
+
+def test_kubernetes_network_discovery_honors_configured_policy_backend() -> None:
+    discovery = discover_kubernetes_network(
+        SimpleNamespace(
+            core_v1=FakeCoreV1Api(),
+            networking_v1=FakeCoreV1Api(),
+        ),
+        settings=CiliumNetworkPolicyBackendSettings(),
+    )
+
+    assert discovery.cni_provider == "cilium"
+    assert discovery.supports_cilium is True
+    assert discovery.supports_calico is False
 
 
 class FakeCustomObjectsApi:
@@ -1297,6 +1316,84 @@ def test_runtime_manifest_keeps_cilium_custom_domain_egress_rules(
     assert egress["toPorts"][0]["ports"] == [
         {"port": "443", "protocol": "TCP"},
         {"port": "8443", "protocol": "TCP"},
+    ]
+
+
+def test_runtime_manifest_uses_configured_cilium_backend_for_domain_egress(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {
+                        "label": "vendor-api",
+                        "destinationType": "domain",
+                        "domain": "api.example.com",
+                        "ports": [443],
+                    },
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=CiliumNetworkPolicyBackendSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert not any(
+        policy.metadata.name.endswith("-allow-custom-egress")
+        for policy in manifest.network_policies
+    )
+    cilium_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.name.endswith("-allow-cilium-custom-egress")
+    )
+    assert cilium_policy.body["spec"]["egress"] == [
+        {
+            "toFQDNs": [{"matchName": "api.example.com"}],
+            "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}],
+        }
     ]
 
 
