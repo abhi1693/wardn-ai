@@ -875,6 +875,152 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
     assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
 
 
+@pytest.mark.asyncio
+async def test_stream_agent_chat_syncs_workspace_tools_before_runtime_discovery(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-4o-mini",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        trigger_type="scheduled",
+        status="running",
+    )
+    enabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.github/github-mcp-server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+    )
+    disabled_installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.example/disabled",
+        config_name="default",
+        installed_version="1.0.0",
+        status="disabled",
+    )
+    events: list[str] = []
+
+    async def get_agent_model_for_run(*args, **kwargs):
+        return agent, credential
+
+    async def create_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def append_agent_run_step(*args, **kwargs):
+        return None
+
+    async def finish_agent_run(*args, **kwargs):
+        return None
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def get_workspace_conversation(*args, **kwargs):
+        raise AssertionError("client-generated chat ids must not be loaded as conversations")
+
+    async def list_installations(*args, **kwargs):
+        events.append("list_installations")
+        assert kwargs["workspace_id"] == workspace_id
+        return [disabled_installation, enabled_installation]
+
+    async def replace_agent_tools(*args, **kwargs):
+        events.append("replace_agent_tools")
+        assert kwargs["agent_id"] == agent.id
+        assert kwargs["server_assignments"] == [(enabled_installation, True, [])]
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        events.append("list_runtime_tools")
+        assert "replace_agent_tools" in events
+        return []
+
+    async def refresh_wildcard_agent_server_tools(*args, **kwargs):
+        return []
+
+    async def filter_agent_runtime_tools_for_guardrails(*args, **kwargs):
+        return AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={})
+
+    async def run_agent_chat(*args, **kwargs):
+        yield service.AgentChatTextEvent(text="ok")
+
+    monkeypatch.setattr(service, "get_agent_model_for_run", get_agent_model_for_run)
+    monkeypatch.setattr(service.repository, "create_agent_run", create_agent_run)
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service.repository,
+        "get_workspace_conversation",
+        get_workspace_conversation,
+    )
+    monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(service.repository, "replace_agent_tools", replace_agent_tools)
+    monkeypatch.setattr(
+        service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        service,
+        "refresh_wildcard_agent_server_tools",
+        refresh_wildcard_agent_server_tools,
+    )
+    monkeypatch.setattr(
+        service,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(service, "run_agent_chat", run_agent_chat)
+
+    stream = await service.stream_agent_chat(
+        FakeSession(),
+        user,
+        organization_id,
+        agent.id,
+        AgentChatRequest(
+            id="client-chat-scheduled",
+            messages=[
+                AgentChatMessage(role="user", parts=[{"type": "text", "text": "review PRs"}])
+            ],
+        ),
+        workspace_id=workspace_id,
+        session_factory=fake_session_factory(FakeSession()),
+        trigger_type="scheduled",
+    )
+    chunks = ui_stream_chunks([chunk async for chunk in stream])
+
+    assert events[:3] == ["list_installations", "replace_agent_tools", "list_runtime_tools"]
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+
+
 async def run_existing_conversation_chat_with_history(
     monkeypatch,
     *,

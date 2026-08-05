@@ -659,11 +659,13 @@ async def quick_start_agent_needs_model_selection(
     return False
 
 
-async def sync_quick_start_agent_tools(
+async def sync_workspace_agent_tools(
     session: AsyncSession,
     agent: Agent,
     workspace_id: uuid.UUID,
 ) -> None:
+    if agent.workspace_id != workspace_id:
+        return
     installations = await mcp_registry_repository.list_installations(
         session,
         workspace_id=workspace_id,
@@ -676,6 +678,9 @@ async def sync_quick_start_agent_tools(
         agent_id=agent.id,
         server_assignments=[(installation, True, []) for installation in enabled_installations],
     )
+
+
+sync_quick_start_agent_tools = sync_workspace_agent_tools
 
 
 def skill_permission_reads() -> list[AgentSkillPermissionRead]:
@@ -1573,7 +1578,7 @@ async def ensure_workspace_assistant_agent(
         if changed:
             await session.flush()
             await session.refresh(agent)
-    await sync_quick_start_agent_tools(session, agent, workspace_id)
+    await sync_workspace_agent_tools(session, agent, workspace_id)
     return agent
 
 
@@ -1639,7 +1644,7 @@ async def update_workspace_assistant_model(
         agent.is_active = True
     await session.flush()
     await session.refresh(agent)
-    await sync_quick_start_agent_tools(session, agent, workspace_id)
+    await sync_workspace_agent_tools(session, agent, workspace_id)
     logger.info(
         "Updated workspace assistant model.",
         extra={
@@ -2333,6 +2338,7 @@ async def stream_agent_chat(
             agent_run,
             session_factory=session_factory,
         )
+    await sync_workspace_agent_tools(session, agent, workspace_id)
     installed_tools = installed_agent_tools(
         await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
     )
