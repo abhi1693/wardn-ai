@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.0.1
  */
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
+import type { WorkspaceScheduledTaskScheduleUpdate } from './workspaceScheduledTaskScheduleUpdate';
 import type { WorkspaceScheduledTaskUpdateConversationPolicy } from './workspaceScheduledTaskUpdateConversationPolicy';
 import type { WorkspaceScheduledTaskUpdateScheduleConfig } from './workspaceScheduledTaskUpdateScheduleConfig';
 import type { WorkspaceScheduledTaskUpdateScheduleType } from './workspaceScheduledTaskUpdateScheduleType';
@@ -18,5 +19,6 @@ export interface WorkspaceScheduledTaskUpdate {
   outputRoutes?: WorkspaceScheduledTaskOutputRoute[] | null;
   scheduleConfig?: WorkspaceScheduledTaskUpdateScheduleConfig;
   scheduleType?: WorkspaceScheduledTaskUpdateScheduleType;
+  schedules?: WorkspaceScheduledTaskScheduleUpdate[] | null;
   timezone?: string | null;
 }

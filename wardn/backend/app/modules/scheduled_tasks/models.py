@@ -31,7 +31,12 @@ class WorkspaceScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "next_run_at",
         ),
         CheckConstraint(
-            "schedule_type IN ('manual', 'interval', 'daily', 'weekly')",
+            (
+                "schedule_type IN ("
+                "'manual', 'interval', 'daily', 'weekly', 'weekdays', 'monthly', "
+                "'cron', 'multiple'"
+                ")"
+            ),
             name="ck_workspace_scheduled_tasks_schedule_type",
         ),
         CheckConstraint(
@@ -124,6 +129,71 @@ class WorkspaceScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
 
 
+class WorkspaceScheduledTaskSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "workspace_scheduled_task_schedules"
+    __table_args__ = (
+        Index(
+            "ix_workspace_scheduled_task_schedules_due",
+            "is_active",
+            "next_run_at",
+        ),
+        Index(
+            "ix_workspace_scheduled_task_schedules_task_order",
+            "task_id",
+            "sort_order",
+        ),
+        CheckConstraint(
+            "schedule_type IN ('interval', 'daily', 'weekly', 'weekdays', 'monthly', 'cron')",
+            name="ck_workspace_scheduled_task_schedules_schedule_type",
+        ),
+        CheckConstraint("sort_order >= 0", name="ck_workspace_scheduled_task_schedules_sort_order"),
+        CheckConstraint(
+            "(starts_at IS NULL OR ends_at IS NULL OR ends_at > starts_at)",
+            name="ck_workspace_scheduled_task_schedules_window",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_scheduled_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    schedule_type: Mapped[WorkspaceScheduledTaskScheduleType] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    schedule_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+
 class WorkspaceScheduledTaskRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "workspace_scheduled_task_runs"
     __table_args__ = (
@@ -163,6 +233,12 @@ class WorkspaceScheduledTaskRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("workspace_scheduled_tasks.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    task_schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_scheduled_task_schedules.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     agent_id: Mapped[uuid.UUID] = mapped_column(

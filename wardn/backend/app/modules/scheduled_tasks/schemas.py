@@ -6,7 +6,17 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.core.schemas import APIModel
 
-ScheduleType = Literal["manual", "interval", "daily", "weekly"]
+ScheduleEntryType = Literal["interval", "daily", "weekly", "weekdays", "monthly", "cron"]
+ScheduleType = Literal[
+    "manual",
+    "interval",
+    "daily",
+    "weekly",
+    "weekdays",
+    "monthly",
+    "cron",
+    "multiple",
+]
 ConversationPolicy = Literal["reuse", "new_each_run"]
 RouteType = Literal["chat", "chat_provider"]
 
@@ -32,12 +42,70 @@ class WorkspaceScheduledTaskOutputRoute(APIModel):
         return self
 
 
+class WorkspaceScheduledTaskScheduleCreate(APIModel):
+    name: str = Field(default="", max_length=120)
+    schedule_type: ScheduleEntryType = "daily"
+    schedule_config: dict[str, Any] = Field(default_factory=dict)
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    is_active: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+    @field_validator("timezone")
+    @classmethod
+    def normalize_timezone_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class WorkspaceScheduledTaskScheduleUpdate(WorkspaceScheduledTaskScheduleCreate):
+    id: uuid.UUID | None = None
+
+
+class WorkspaceScheduledTaskScheduleRead(APIModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    name: str
+    schedule_type: str
+    schedule_config: dict[str, Any] = Field(default_factory=dict)
+    timezone: str
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    is_active: bool
+    sort_order: int
+    next_run_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceScheduledTaskSchedulePreviewRequest(APIModel):
+    schedules: list[WorkspaceScheduledTaskScheduleCreate] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+    is_active: bool = True
+
+
+class WorkspaceScheduledTaskSchedulePreviewResponse(APIModel):
+    next_runs: list[datetime] = Field(default_factory=list)
+
+
 class WorkspaceScheduledTaskCreate(APIModel):
     name: str = Field(min_length=1, max_length=120)
     instructions: str = Field(min_length=1, max_length=20000)
     schedule_type: ScheduleType = "daily"
     schedule_config: dict[str, Any] = Field(default_factory=dict)
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    schedules: list[WorkspaceScheduledTaskScheduleCreate] | None = Field(
+        default=None,
+        max_length=12,
+    )
     output_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
     conversation_policy: ConversationPolicy = "reuse"
     is_active: bool = True
@@ -60,6 +128,10 @@ class WorkspaceScheduledTaskUpdate(APIModel):
     schedule_type: ScheduleType | None = None
     schedule_config: dict[str, Any] | None = None
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    schedules: list[WorkspaceScheduledTaskScheduleUpdate] | None = Field(
+        default=None,
+        max_length=12,
+    )
     output_routes: list[WorkspaceScheduledTaskOutputRoute] | None = None
     conversation_policy: ConversationPolicy | None = None
     is_active: bool | None = None
@@ -102,6 +174,7 @@ class WorkspaceScheduledTaskRunRead(APIModel):
     organization_id: uuid.UUID
     workspace_id: uuid.UUID
     task_id: uuid.UUID
+    task_schedule_id: uuid.UUID | None = None
     agent_id: uuid.UUID
     conversation_id: uuid.UUID | None = None
     agent_run_id: uuid.UUID | None = None
@@ -137,6 +210,8 @@ class WorkspaceScheduledTaskRead(APIModel):
     schedule_type: str
     schedule_config: dict[str, Any] = Field(default_factory=dict)
     timezone: str
+    schedules: list[WorkspaceScheduledTaskScheduleRead] = Field(default_factory=list)
+    next_run_preview: list[datetime] = Field(default_factory=list)
     output_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
     conversation_policy: str
     is_active: bool

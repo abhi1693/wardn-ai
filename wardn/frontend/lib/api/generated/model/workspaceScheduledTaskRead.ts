@@ -6,6 +6,7 @@
  */
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
 import type { WorkspaceScheduledTaskReadScheduleConfig } from './workspaceScheduledTaskReadScheduleConfig';
+import type { WorkspaceScheduledTaskScheduleRead } from './workspaceScheduledTaskScheduleRead';
 
 export interface WorkspaceScheduledTaskRead {
   agentId: string;
@@ -24,10 +25,12 @@ export interface WorkspaceScheduledTaskRead {
   maxAttempts: number;
   name: string;
   nextRunAt?: string | null;
+  nextRunPreview?: string[];
   organizationId: string;
   outputRoutes?: WorkspaceScheduledTaskOutputRoute[];
   scheduleConfig?: WorkspaceScheduledTaskReadScheduleConfig;
   scheduleType: string;
+  schedules?: WorkspaceScheduledTaskScheduleRead[];
   timezone: string;
   updatedAt: string;
   workspaceId: string;

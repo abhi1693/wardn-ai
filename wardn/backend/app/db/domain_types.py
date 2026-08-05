@@ -54,6 +54,10 @@ class WorkspaceScheduledTaskScheduleType(StrEnum):
     INTERVAL = "interval"
     DAILY = "daily"
     WEEKLY = "weekly"
+    WEEKDAYS = "weekdays"
+    MONTHLY = "monthly"
+    CRON = "cron"
+    MULTIPLE = "multiple"
 
 
 class WorkspaceScheduledTaskConversationPolicy(StrEnum):

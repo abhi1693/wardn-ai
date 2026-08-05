@@ -13,4 +13,8 @@ export const WorkspaceScheduledTaskCreateScheduleType = {
   interval: 'interval',
   daily: 'daily',
   weekly: 'weekly',
+  weekdays: 'weekdays',
+  monthly: 'monthly',
+  cron: 'cron',
+  multiple: 'multiple',
 } as const;

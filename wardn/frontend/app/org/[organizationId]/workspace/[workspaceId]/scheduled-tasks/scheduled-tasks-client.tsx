@@ -2,6 +2,8 @@
 
 import {
   CalendarClock,
+  CalendarDays,
+  CalendarRange,
   CheckCircle2,
   Clock3,
   MessageSquare,
@@ -13,8 +15,10 @@ import {
   RefreshCw,
   Route,
   ShieldCheck,
+  TimerReset,
   Trash2,
   Webhook,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -47,17 +51,29 @@ import type {
   WorkspaceScheduledTaskOutputRoute,
   WorkspaceScheduledTaskRead,
   WorkspaceScheduledTaskRunRead,
+  WorkspaceScheduledTaskScheduleCreate,
+  WorkspaceScheduledTaskScheduleUpdate,
   WorkspaceScheduledTaskUpdate,
 } from "@/lib/api/generated/model";
 import {
   workspaceScheduledTasksCreate,
   workspaceScheduledTasksDelete,
+  workspaceScheduledTasksPreview,
   workspaceScheduledTasksRunNow,
   workspaceScheduledTasksUpdate,
 } from "@/lib/api/generated/workspace-scheduled-tasks/workspace-scheduled-tasks";
 import { cn } from "@/lib/utils";
 
-type ScheduleType = "manual" | "interval" | "daily" | "weekly";
+type ScheduleType =
+  | "manual"
+  | "interval"
+  | "daily"
+  | "weekly"
+  | "weekdays"
+  | "monthly"
+  | "cron"
+  | "multiple";
+type ScheduleEntryType = "interval" | "daily" | "weekly" | "weekdays" | "monthly" | "cron";
 type ConversationPolicy = "reuse" | "new_each_run";
 
 type ScheduledTasksClientProps = {
@@ -80,15 +96,28 @@ type ProviderRouteOption = {
 type FormState = {
   name: string;
   instructions: string;
-  scheduleType: ScheduleType;
-  everyMinutes: string;
-  time: string;
-  weekday: string;
-  timezone: string;
+  schedules: ScheduleDraft[];
   selectedRoutes: string[];
   conversationPolicy: ConversationPolicy;
   isActive: boolean;
   maxAttempts: string;
+};
+
+type ScheduleDraft = {
+  cronExpression: string;
+  endsAt: string;
+  everyMinutes: string;
+  id?: string;
+  isActive: boolean;
+  key: string;
+  monthDays: string[];
+  name: string;
+  scheduleType: ScheduleEntryType;
+  startsAt: string;
+  timeInput: string;
+  times: string[];
+  timezone: string;
+  weekdays: string[];
 };
 
 const weekdays = [
@@ -104,6 +133,15 @@ const weekdays = [
 const timezoneAliases: Record<string, string> = {
   "Asia/Calcutta": "Asia/Kolkata",
 };
+
+const schedulePresets: { label: string; type: ScheduleEntryType; icon: typeof Clock3 }[] = [
+  { label: "Daily", type: "daily", icon: Clock3 },
+  { label: "Weekdays", type: "weekdays", icon: CalendarDays },
+  { label: "Weekly", type: "weekly", icon: CalendarClock },
+  { label: "Monthly", type: "monthly", icon: CalendarRange },
+  { label: "Interval", type: "interval", icon: TimerReset },
+  { label: "Cron", type: "cron", icon: Clock3 },
+];
 
 function normalizeTimezone(value: string) {
   const timezone = value.trim() || "UTC";
@@ -138,6 +176,125 @@ function configNumber(config: unknown, key: string, fallback: number) {
     return value.trim();
   }
   return String(fallback);
+}
+
+function configNumberList(config: unknown, pluralKey: string, singularKey: string, fallback: number[]) {
+  const source = record(config);
+  const rawValue = source[pluralKey] ?? source[singularKey];
+  const values = Array.isArray(rawValue) ? rawValue : rawValue === undefined ? fallback : [rawValue];
+  const normalized = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value))
+    .map((value) => String(value));
+  return normalized.length ? Array.from(new Set(normalized)) : fallback.map(String);
+}
+
+function configTimes(config: unknown, fallback = ["09:00"]) {
+  const source = record(config);
+  const rawValue = source.times ?? source.time;
+  const values = Array.isArray(rawValue) ? rawValue : typeof rawValue === "string" ? [rawValue] : fallback;
+  const normalized = values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return normalized.length ? Array.from(new Set(normalized)).sort() : fallback;
+}
+
+function datetimeLocalValue(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function datetimeLocalToIso(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function scheduleKey() {
+  return `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newScheduleDraft(type: ScheduleEntryType, timezone: string): ScheduleDraft {
+  return {
+    cronExpression: type === "cron" ? "0 9 * * 1-5" : "",
+    endsAt: "",
+    everyMinutes: "60",
+    isActive: true,
+    key: scheduleKey(),
+    monthDays: ["1"],
+    name: "",
+    scheduleType: type,
+    startsAt: "",
+    timeInput: "09:00",
+    times: type === "interval" || type === "cron" ? [] : ["09:00"],
+    timezone,
+    weekdays: type === "weekdays" ? ["0", "1", "2", "3", "4"] : ["0"],
+  };
+}
+
+function draftFromSchedule(
+  schedule: NonNullable<WorkspaceScheduledTaskRead["schedules"]>[number],
+  timezone: string
+): ScheduleDraft {
+  const scheduleType = schedule.scheduleType as ScheduleEntryType;
+  return {
+    cronExpression: configString(schedule.scheduleConfig, "expression", "0 9 * * 1-5"),
+    endsAt: datetimeLocalValue(schedule.endsAt),
+    everyMinutes: configNumber(schedule.scheduleConfig, "everyMinutes", 60),
+    id: schedule.id,
+    isActive: schedule.isActive,
+    key: schedule.id,
+    monthDays: configNumberList(schedule.scheduleConfig, "monthDays", "monthDay", [1]),
+    name: schedule.name ?? "",
+    scheduleType,
+    startsAt: datetimeLocalValue(schedule.startsAt),
+    timeInput: configTimes(schedule.scheduleConfig)[0] ?? "09:00",
+    times:
+      scheduleType === "interval" || scheduleType === "cron"
+        ? []
+        : configTimes(schedule.scheduleConfig),
+    timezone: schedule.timezone || timezone,
+    weekdays:
+      scheduleType === "weekdays"
+        ? ["0", "1", "2", "3", "4"]
+        : configNumberList(schedule.scheduleConfig, "weekdays", "weekday", [0]),
+  };
+}
+
+function legacyDraftFromTask(task: WorkspaceScheduledTaskRead, timezone: string): ScheduleDraft[] {
+  const scheduleType = task.scheduleType as ScheduleType;
+  if (scheduleType === "manual" || scheduleType === "multiple") {
+    return [];
+  }
+  return [
+    draftFromSchedule(
+      {
+        createdAt: task.createdAt,
+        id: task.id,
+        isActive: true,
+        name: "",
+        nextRunAt: task.nextRunAt,
+        scheduleConfig: task.scheduleConfig,
+        scheduleType,
+        sortOrder: 0,
+        taskId: task.id,
+        timezone: task.timezone,
+        updatedAt: task.updatedAt,
+      },
+      timezone
+    ),
+  ];
 }
 
 function friendlyIdentityId(value?: string | null) {
@@ -204,11 +361,7 @@ function taskFormState(
     return {
       name: "",
       instructions: "",
-      scheduleType: "daily",
-      everyMinutes: "60",
-      time: "09:00",
-      weekday: "0",
-      timezone,
+      schedules: [newScheduleDraft("daily", timezone)],
       selectedRoutes: ["chat"],
       conversationPolicy: "reuse",
       isActive: true,
@@ -218,11 +371,10 @@ function taskFormState(
   return {
     name: task.name,
     instructions: task.instructions,
-    scheduleType: task.scheduleType as ScheduleType,
-    everyMinutes: configNumber(task.scheduleConfig, "everyMinutes", 60),
-    time: configString(task.scheduleConfig, "time", "09:00"),
-    weekday: configNumber(task.scheduleConfig, "weekday", 0),
-    timezone: task.timezone || timezone,
+    schedules:
+      task.schedules && task.schedules.length > 0
+        ? task.schedules.map((schedule) => draftFromSchedule(schedule, timezone))
+        : legacyDraftFromTask(task, timezone),
     selectedRoutes: (task.outputRoutes ?? []).map(outputRouteKey),
     conversationPolicy: task.conversationPolicy as ConversationPolicy,
     isActive: task.isActive,
@@ -230,17 +382,81 @@ function taskFormState(
   };
 }
 
-function scheduleConfig(form: FormState): Record<string, unknown> {
-  if (form.scheduleType === "manual") {
-    return {};
+function scheduleDraftConfig(draft: ScheduleDraft): Record<string, unknown> {
+  if (draft.scheduleType === "interval") {
+    return { everyMinutes: Number(draft.everyMinutes || 60) };
   }
-  if (form.scheduleType === "interval") {
-    return { everyMinutes: Number(form.everyMinutes || 60) };
+  if (draft.scheduleType === "weekly") {
+    return {
+      times: draft.times,
+      weekdays: draft.weekdays.map(Number).sort((left, right) => left - right),
+    };
   }
-  if (form.scheduleType === "weekly") {
-    return { time: form.time || "09:00", weekday: Number(form.weekday || 0) };
+  if (draft.scheduleType === "weekdays") {
+    return { times: draft.times };
   }
-  return { time: form.time || "09:00" };
+  if (draft.scheduleType === "monthly") {
+    return {
+      monthDays: draft.monthDays.map(Number).sort((left, right) => left - right),
+      times: draft.times,
+    };
+  }
+  if (draft.scheduleType === "cron") {
+    return { expression: draft.cronExpression.trim() };
+  }
+  return { times: draft.times };
+}
+
+function schedulePayload(
+  draft: ScheduleDraft,
+  options: { includeId: boolean }
+): WorkspaceScheduledTaskScheduleCreate | WorkspaceScheduledTaskScheduleUpdate {
+  const { includeId } = options;
+  return {
+    ...(includeId && draft.id ? { id: draft.id } : {}),
+    endsAt: datetimeLocalToIso(draft.endsAt),
+    isActive: draft.isActive,
+    name: draft.name.trim(),
+    scheduleConfig: scheduleDraftConfig(draft),
+    scheduleType: draft.scheduleType,
+    startsAt: datetimeLocalToIso(draft.startsAt),
+    timezone: normalizeTimezone(draft.timezone),
+  };
+}
+
+function schedulePayloads(
+  form: FormState,
+  options: { includeIds: boolean }
+): (WorkspaceScheduledTaskScheduleCreate | WorkspaceScheduledTaskScheduleUpdate)[] {
+  const { includeIds } = options;
+  return form.schedules.map((draft) => schedulePayload(draft, { includeId: includeIds }));
+}
+
+function scheduleDraftIsValid(draft: ScheduleDraft) {
+  if (!draft.timezone.trim()) {
+    return false;
+  }
+  if (draft.startsAt && draft.endsAt) {
+    const startsAt = new Date(draft.startsAt).getTime();
+    const endsAt = new Date(draft.endsAt).getTime();
+    if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
+      return false;
+    }
+  }
+  if (draft.scheduleType === "interval") {
+    const minutes = Number(draft.everyMinutes);
+    return Number.isInteger(minutes) && minutes >= 1 && minutes <= 10080;
+  }
+  if (draft.scheduleType === "cron") {
+    return draft.cronExpression.trim().split(/\s+/).length === 5;
+  }
+  if (draft.scheduleType === "weekly" && draft.weekdays.length === 0) {
+    return false;
+  }
+  if (draft.scheduleType === "monthly" && draft.monthDays.length === 0) {
+    return false;
+  }
+  return draft.times.length > 0;
 }
 
 function formatDate(value?: string | null) {
@@ -274,6 +490,13 @@ function shortDate(value?: string | null) {
 }
 
 function scheduleLabel(task: WorkspaceScheduledTaskRead) {
+  if (task.schedules && task.schedules.length > 1) {
+    return `${task.schedules.length} schedules`;
+  }
+  const schedule = task.schedules?.[0];
+  if (schedule) {
+    return scheduleEntryLabel(schedule.scheduleType as ScheduleEntryType, schedule.scheduleConfig);
+  }
   const config = record(task.scheduleConfig);
   if (task.scheduleType === "manual") {
     return "Manual";
@@ -282,10 +505,44 @@ function scheduleLabel(task: WorkspaceScheduledTaskRead) {
     return `Every ${String(config.everyMinutes ?? 60)} min`;
   }
   if (task.scheduleType === "weekly") {
-    const weekday = weekdays.find((day) => day.value === String(config.weekday ?? "0"));
-    return `${weekday?.label ?? "Weekly"} at ${String(config.time ?? "09:00")}`;
+    const weekdayValue = Array.isArray(config.weekdays) ? config.weekdays[0] : config.weekday;
+    const weekday = weekdays.find((day) => day.value === String(weekdayValue ?? "0"));
+    return `${weekday?.label ?? "Weekly"} at ${configTimes(config)[0] ?? "09:00"}`;
   }
-  return `Daily at ${String(config.time ?? "09:00")}`;
+  if (task.scheduleType === "weekdays") {
+    return `Weekdays at ${configTimes(config).join(", ")}`;
+  }
+  if (task.scheduleType === "monthly") {
+    return `Monthly at ${configTimes(config).join(", ")}`;
+  }
+  if (task.scheduleType === "cron") {
+    return `Cron ${String(config.expression ?? "")}`;
+  }
+  return `Daily at ${configTimes(config).join(", ")}`;
+}
+
+function scheduleEntryLabel(scheduleType: ScheduleEntryType, config: unknown) {
+  const values = record(config);
+  if (scheduleType === "interval") {
+    return `Every ${String(values.everyMinutes ?? 60)} min`;
+  }
+  if (scheduleType === "weekly") {
+    const selectedWeekdays = configNumberList(config, "weekdays", "weekday", [0])
+      .map((value) => weekdays.find((day) => day.value === value)?.label.slice(0, 3) ?? value)
+      .join(", ");
+    return `${selectedWeekdays} at ${configTimes(config).join(", ")}`;
+  }
+  if (scheduleType === "weekdays") {
+    return `Weekdays at ${configTimes(config).join(", ")}`;
+  }
+  if (scheduleType === "monthly") {
+    const monthDays = configNumberList(config, "monthDays", "monthDay", [1]).join(", ");
+    return `Monthly ${monthDays} at ${configTimes(config).join(", ")}`;
+  }
+  if (scheduleType === "cron") {
+    return `Cron ${String(values.expression ?? "")}`;
+  }
+  return `Daily at ${configTimes(config).join(", ")}`;
 }
 
 function statusVariant(status: string) {
@@ -364,22 +621,30 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
 }
 
 function TaskDialog({
+  defaultTimezone,
   editingTask,
   form,
+  isPreviewing,
   isSaving,
   onChange,
   onOpenChange,
+  onPreview,
   onSubmit,
   open,
+  previewRuns,
   providerOptions,
 }: {
+  defaultTimezone: string;
   editingTask: WorkspaceScheduledTaskRead | null;
   form: FormState;
+  isPreviewing: boolean;
   isSaving: boolean;
   onChange: (next: FormState) => void;
   onOpenChange: (open: boolean) => void;
+  onPreview: () => Promise<void>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   open: boolean;
+  previewRuns: string[];
   providerOptions: ProviderRouteOption[];
 }) {
   function toggleRoute(key: string) {
@@ -392,7 +657,55 @@ function TaskDialog({
     onChange({ ...form, selectedRoutes: Array.from(selected) });
   }
 
-  const canSave = Boolean(form.name.trim() && form.instructions.trim() && form.timezone.trim());
+  function addSchedule(type: ScheduleEntryType) {
+    const timezone = form.schedules[0]?.timezone || defaultTimezone;
+    onChange({ ...form, schedules: [...form.schedules, newScheduleDraft(type, timezone)] });
+  }
+
+  function updateSchedule(key: string, patch: Partial<ScheduleDraft>) {
+    onChange({
+      ...form,
+      schedules: form.schedules.map((schedule) =>
+        schedule.key === key ? { ...schedule, ...patch } : schedule
+      ),
+    });
+  }
+
+  function removeSchedule(key: string) {
+    onChange({ ...form, schedules: form.schedules.filter((schedule) => schedule.key !== key) });
+  }
+
+  function addRunTime(schedule: ScheduleDraft) {
+    const nextTime = schedule.timeInput.trim() || "09:00";
+    if (!nextTime || schedule.times.includes(nextTime)) {
+      return;
+    }
+    updateSchedule(schedule.key, { times: [...schedule.times, nextTime].sort() });
+  }
+
+  function removeRunTime(schedule: ScheduleDraft, timeValue: string) {
+    updateSchedule(schedule.key, {
+      times: schedule.times.filter((candidate) => candidate !== timeValue),
+    });
+  }
+
+  function toggleValue(schedule: ScheduleDraft, field: "weekdays" | "monthDays", value: string) {
+    const selected = new Set(schedule[field]);
+    if (selected.has(value)) {
+      selected.delete(value);
+    } else {
+      selected.add(value);
+    }
+    updateSchedule(schedule.key, {
+      [field]: Array.from(selected).sort((left, right) => Number(left) - Number(right)),
+    });
+  }
+
+  const canSave = Boolean(
+    form.name.trim() &&
+      form.instructions.trim() &&
+      form.schedules.every((schedule) => scheduleDraftIsValid(schedule))
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -446,118 +759,286 @@ function TaskDialog({
           </div>
 
           <div className="grid gap-4 rounded-md border border-border p-3">
-            <div className="grid gap-2 sm:grid-cols-4">
-              {(["daily", "weekly", "interval", "manual"] as ScheduleType[]).map((type) => (
-                <button
-                  className={cn(
-                    "flex h-10 items-center justify-center rounded-md border text-sm font-medium transition-colors",
-                    form.scheduleType === type
-                      ? "border-ring bg-sidebar-accent text-foreground"
-                      : "border-border bg-card text-muted-foreground hover:text-foreground"
-                  )}
-                  key={type}
-                  onClick={() => onChange({ ...form, scheduleType: type })}
-                  type="button"
-                >
-                  {type.replace("_", " ")}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <CalendarClock className="size-4 text-muted-foreground" />
+                Schedules
+                <Badge variant="secondary">{form.schedules.length || "Manual"}</Badge>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {schedulePresets.map((preset) => {
+                  const PresetIcon = preset.icon;
+                  return (
+                    <Button
+                      key={preset.type}
+                      onClick={() => addSchedule(preset.type)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <PresetIcon className="size-4" />
+                      {preset.label}
+                    </Button>
+                  );
+                })}
+              </div>
             </div>
 
-            {form.scheduleType === "interval" ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-interval">Every minutes</Label>
-                  <Input
-                    id="scheduled-task-interval"
-                    min={1}
-                    max={10080}
-                    onChange={(event) =>
-                      onChange({ ...form, everyMinutes: event.target.value })
-                    }
-                    type="number"
-                    value={form.everyMinutes}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-timezone-interval">Timezone</Label>
-                  <Input
-                    id="scheduled-task-timezone-interval"
-                    onChange={(event) => onChange({ ...form, timezone: event.target.value })}
-                    value={form.timezone}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {form.scheduleType === "daily" ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-time">Time</Label>
-                  <Input
-                    id="scheduled-task-time"
-                    onChange={(event) => onChange({ ...form, time: event.target.value })}
-                    type="time"
-                    value={form.time}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-timezone-daily">Timezone</Label>
-                  <Input
-                    id="scheduled-task-timezone-daily"
-                    onChange={(event) => onChange({ ...form, timezone: event.target.value })}
-                    value={form.timezone}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {form.scheduleType === "weekly" ? (
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-weekday">Day</Label>
-                  <Select
-                    onValueChange={(value) => onChange({ ...form, weekday: value })}
-                    value={form.weekday}
-                  >
-                    <SelectTrigger id="scheduled-task-weekday">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {weekdays.map((weekday) => (
-                        <SelectItem key={weekday.value} value={weekday.value}>
-                          {weekday.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-weekly-time">Time</Label>
-                  <Input
-                    id="scheduled-task-weekly-time"
-                    onChange={(event) => onChange({ ...form, time: event.target.value })}
-                    type="time"
-                    value={form.time}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-timezone-weekly">Timezone</Label>
-                  <Input
-                    id="scheduled-task-timezone-weekly"
-                    onChange={(event) => onChange({ ...form, timezone: event.target.value })}
-                    value={form.timezone}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {form.scheduleType === "manual" ? (
+            {form.schedules.length === 0 ? (
               <div className="flex items-center gap-3 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
                 <Play className="size-4" />
-                <span>Run from the task card when needed.</span>
+                <span>Manual run only</span>
               </div>
             ) : null}
+
+            {form.schedules.map((schedule, index) => {
+              const typePreset = schedulePresets.find((preset) => preset.type === schedule.scheduleType);
+              const TypeIcon = typePreset?.icon ?? Clock3;
+              return (
+                <div className="grid gap-3 rounded-md border border-border bg-card p-3" key={schedule.key}>
+                  <div className="grid gap-2 md:grid-cols-[1fr_180px_92px_40px]">
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-name-${schedule.key}`}>Label</Label>
+                      <Input
+                        id={`schedule-name-${schedule.key}`}
+                        maxLength={120}
+                        onChange={(event) => updateSchedule(schedule.key, { name: event.target.value })}
+                        placeholder={`Schedule ${index + 1}`}
+                        value={schedule.name}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-type-${schedule.key}`}>Type</Label>
+                      <Select
+                        onValueChange={(value) => {
+                          const nextType = value as ScheduleEntryType;
+                          const defaults = newScheduleDraft(nextType, schedule.timezone);
+                          updateSchedule(schedule.key, {
+                            cronExpression: defaults.cronExpression,
+                            everyMinutes: defaults.everyMinutes,
+                            monthDays: defaults.monthDays,
+                            scheduleType: nextType,
+                            times: defaults.times,
+                            weekdays: defaults.weekdays,
+                          });
+                        }}
+                        value={schedule.scheduleType}
+                      >
+                        <SelectTrigger id={`schedule-type-${schedule.key}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {schedulePresets.map((preset) => (
+                            <SelectItem key={preset.type} value={preset.type}>
+                              {preset.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>State</Label>
+                      <button
+                        className={cn(
+                          "flex h-9 w-full items-center justify-center gap-2 rounded-md border text-sm",
+                          schedule.isActive
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-border bg-muted text-muted-foreground"
+                        )}
+                        onClick={() => updateSchedule(schedule.key, { isActive: !schedule.isActive })}
+                        type="button"
+                      >
+                        <TypeIcon className="size-4" />
+                        {schedule.isActive ? "On" : "Off"}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="opacity-0">Remove</Label>
+                      <Button
+                        onClick={() => removeSchedule(schedule.key)}
+                        size="icon"
+                        title="Remove schedule"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {schedule.scheduleType === "interval" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-interval-${schedule.key}`}>Every minutes</Label>
+                      <Input
+                        id={`schedule-interval-${schedule.key}`}
+                        max={10080}
+                        min={1}
+                        onChange={(event) =>
+                          updateSchedule(schedule.key, { everyMinutes: event.target.value })
+                        }
+                        type="number"
+                        value={schedule.everyMinutes}
+                      />
+                    </div>
+                  ) : null}
+
+                  {schedule.scheduleType === "cron" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-cron-${schedule.key}`}>Cron</Label>
+                      <Input
+                        id={`schedule-cron-${schedule.key}`}
+                        onChange={(event) =>
+                          updateSchedule(schedule.key, { cronExpression: event.target.value })
+                        }
+                        placeholder="0 9 * * 1-5"
+                        value={schedule.cronExpression}
+                      />
+                    </div>
+                  ) : null}
+
+                  {schedule.scheduleType !== "interval" && schedule.scheduleType !== "cron" ? (
+                    <div className="grid gap-2">
+                      <Label>Run times</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {schedule.times.map((timeValue) => (
+                          <button
+                            className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-muted px-2 text-xs"
+                            key={timeValue}
+                            onClick={() => removeRunTime(schedule, timeValue)}
+                            type="button"
+                          >
+                            {timeValue}
+                            <X className="size-3" />
+                          </button>
+                        ))}
+                        <div className="flex gap-2">
+                          <Input
+                            className="w-28"
+                            onChange={(event) =>
+                              updateSchedule(schedule.key, { timeInput: event.target.value })
+                            }
+                            type="time"
+                            value={schedule.timeInput}
+                          />
+                          <Button onClick={() => addRunTime(schedule)} size="sm" type="button" variant="outline">
+                            <Plus className="size-4" />
+                            Add
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {schedule.scheduleType === "weekly" ? (
+                    <div className="grid gap-2">
+                      <Label>Weekdays</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {weekdays.map((weekday) => (
+                          <button
+                            className={cn(
+                              "h-8 rounded-md border px-2 text-xs",
+                              schedule.weekdays.includes(weekday.value)
+                                ? "border-ring bg-sidebar-accent text-foreground"
+                                : "border-border bg-card text-muted-foreground"
+                            )}
+                            key={weekday.value}
+                            onClick={() => toggleValue(schedule, "weekdays", weekday.value)}
+                            type="button"
+                          >
+                            {weekday.label.slice(0, 3)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {schedule.scheduleType === "monthly" ? (
+                    <div className="grid gap-2">
+                      <Label>Month days</Label>
+                      <div className="grid grid-cols-7 gap-1 sm:grid-cols-10">
+                        {Array.from({ length: 31 }, (_, day) => String(day + 1)).map((day) => (
+                          <button
+                            className={cn(
+                              "h-8 rounded-md border text-xs",
+                              schedule.monthDays.includes(day)
+                                ? "border-ring bg-sidebar-accent text-foreground"
+                                : "border-border bg-card text-muted-foreground"
+                            )}
+                            key={day}
+                            onClick={() => toggleValue(schedule, "monthDays", day)}
+                            type="button"
+                          >
+                            {day}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-timezone-${schedule.key}`}>Timezone</Label>
+                      <Input
+                        id={`schedule-timezone-${schedule.key}`}
+                        onChange={(event) =>
+                          updateSchedule(schedule.key, { timezone: event.target.value })
+                        }
+                        value={schedule.timezone}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-start-${schedule.key}`}>Start</Label>
+                      <Input
+                        id={`schedule-start-${schedule.key}`}
+                        onChange={(event) =>
+                          updateSchedule(schedule.key, { startsAt: event.target.value })
+                        }
+                        type="datetime-local"
+                        value={schedule.startsAt}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`schedule-end-${schedule.key}`}>End</Label>
+                      <Input
+                        id={`schedule-end-${schedule.key}`}
+                        onChange={(event) =>
+                          updateSchedule(schedule.key, { endsAt: event.target.value })
+                        }
+                        type="datetime-local"
+                        value={schedule.endsAt}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="grid gap-2 rounded-md border border-dashed border-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium">Next 5 runs</div>
+                <Button
+                  disabled={isPreviewing || !canSave}
+                  onClick={onPreview}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {isPreviewing ? <RefreshCw className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                  Preview
+                </Button>
+              </div>
+              {previewRuns.length > 0 ? (
+                <div className="grid gap-1 text-sm">
+                  {previewRuns.map((run) => (
+                    <div className="rounded-md bg-muted px-2 py-1" key={run}>
+                      {formatDate(run)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No upcoming runs.</div>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-[1fr_220px]">
@@ -671,6 +1152,8 @@ export function ScheduledTasksClient({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<WorkspaceScheduledTaskRead | null>(null);
   const [form, setForm] = useState<FormState>(() => taskFormState(null, timezone));
+  const [previewRuns, setPreviewRuns] = useState<string[]>([]);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
@@ -696,34 +1179,64 @@ export function ScheduledTasksClient({
   function openCreateDialog() {
     setEditingTask(null);
     setForm(taskFormState(null, timezone));
+    setPreviewRuns([]);
     setDialogOpen(true);
   }
 
   function openEditDialog(task: WorkspaceScheduledTaskRead) {
     setEditingTask(task);
     setForm(taskFormState(task, timezone));
+    setPreviewRuns(task.nextRunPreview ?? []);
     setDialogOpen(true);
+  }
+
+  async function previewSchedules() {
+    setIsPreviewing(true);
+    setFeedback(null);
+    try {
+      const response = await workspaceScheduledTasksPreview(organizationId, workspaceId, {
+        isActive: form.isActive,
+        schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
+      });
+      setPreviewRuns(response.nextRuns ?? []);
+    } catch (error) {
+      setFeedback({
+        variant: "error",
+        text: error instanceof Error ? error.message : "Could not preview scheduled runs.",
+      });
+    } finally {
+      setIsPreviewing(false);
+    }
   }
 
   async function submitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSaving(true);
     setFeedback(null);
-    const payload = {
+    const aggregateScheduleType: ScheduleType =
+      form.schedules.length === 0
+        ? "manual"
+        : form.schedules.length === 1
+          ? form.schedules[0].scheduleType
+          : "multiple";
+    const basePayload = {
       conversationPolicy: form.conversationPolicy,
       instructions: form.instructions.trim(),
       isActive: form.isActive,
       maxAttempts: Number(form.maxAttempts || 3),
       name: form.name.trim(),
       outputRoutes: buildOutputRoutes(form.selectedRoutes, providerOptions),
-      scheduleConfig: scheduleConfig(form),
-      scheduleType: form.scheduleType,
-      timezone: normalizeTimezone(form.timezone),
-    } satisfies WorkspaceScheduledTaskCreate;
+      scheduleConfig: form.schedules[0] ? scheduleDraftConfig(form.schedules[0]) : {},
+      scheduleType: aggregateScheduleType,
+      timezone: normalizeTimezone(form.schedules[0]?.timezone ?? timezone),
+    };
 
     try {
       if (editingTask) {
-        const updatePayload: WorkspaceScheduledTaskUpdate = payload;
+        const updatePayload: WorkspaceScheduledTaskUpdate = {
+          ...basePayload,
+          schedules: schedulePayloads(form, { includeIds: true }) as WorkspaceScheduledTaskScheduleUpdate[],
+        };
         const updated = await workspaceScheduledTasksUpdate(
           organizationId,
           workspaceId,
@@ -733,14 +1246,20 @@ export function ScheduledTasksClient({
         setTaskRows((current) =>
           current.map((task) => (task.id === updated.id ? updated : task))
         );
+        setPreviewRuns(updated.nextRunPreview ?? []);
         setFeedback({ variant: "success", text: "Scheduled task updated." });
       } else {
+        const payload: WorkspaceScheduledTaskCreate = {
+          ...basePayload,
+          schedules: schedulePayloads(form, { includeIds: false }) as WorkspaceScheduledTaskScheduleCreate[],
+        };
         const created = await workspaceScheduledTasksCreate(
           organizationId,
           workspaceId,
           payload
         );
         setTaskRows((current) => [created, ...current]);
+        setPreviewRuns(created.nextRunPreview ?? []);
         setFeedback({ variant: "success", text: "Scheduled task created." });
       }
       setDialogOpen(false);
@@ -944,10 +1463,10 @@ export function ScheduledTasksClient({
                   <div className="line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {task.instructions}
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div>
-                      <div className="text-xs text-muted-foreground">Next</div>
-                      <div className="mt-1 text-sm font-medium">{shortDate(task.nextRunAt)}</div>
+	                  <div className="grid gap-3 sm:grid-cols-3">
+	                    <div>
+	                      <div className="text-xs text-muted-foreground">Next</div>
+	                      <div className="mt-1 text-sm font-medium">{shortDate(task.nextRunAt)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Last run</div>
@@ -955,12 +1474,43 @@ export function ScheduledTasksClient({
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Attempts</div>
-                      <div className="mt-1 text-sm font-medium">{task.maxAttempts}</div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {outputs.map((output) => (
-                      <Badge key={output} variant="secondary">
+	                      <div className="mt-1 text-sm font-medium">{task.maxAttempts}</div>
+	                    </div>
+	                  </div>
+	                  {task.schedules && task.schedules.length > 0 ? (
+	                    <div className="grid gap-2">
+	                      <div className="text-xs text-muted-foreground">Attached schedules</div>
+	                      <div className="flex flex-wrap gap-2">
+	                        {task.schedules.map((schedule) => (
+	                          <Badge
+	                            key={schedule.id}
+	                            variant={schedule.isActive ? "outline" : "secondary"}
+	                          >
+	                            {schedule.name ? `${schedule.name}: ` : ""}
+	                            {scheduleEntryLabel(
+	                              schedule.scheduleType as ScheduleEntryType,
+	                              schedule.scheduleConfig
+	                            )}
+	                          </Badge>
+	                        ))}
+	                      </div>
+	                    </div>
+	                  ) : null}
+	                  {task.nextRunPreview && task.nextRunPreview.length > 0 ? (
+	                    <div className="grid gap-2">
+	                      <div className="text-xs text-muted-foreground">Next 5 runs</div>
+	                      <div className="grid gap-1 sm:grid-cols-2">
+	                        {task.nextRunPreview.slice(0, 5).map((run) => (
+	                          <div className="rounded-md bg-muted px-2 py-1 text-xs" key={run}>
+	                            {shortDate(run)}
+	                          </div>
+	                        ))}
+	                      </div>
+	                    </div>
+	                  ) : null}
+	                  <div className="flex flex-wrap gap-2">
+	                    {outputs.map((output) => (
+	                      <Badge key={output} variant="secondary">
                         {output}
                       </Badge>
                     ))}
@@ -1060,13 +1610,17 @@ export function ScheduledTasksClient({
       </Card>
 
       <TaskDialog
+        defaultTimezone={timezone}
         editingTask={editingTask}
         form={form}
+        isPreviewing={isPreviewing}
         isSaving={isSaving}
         onChange={setForm}
         onOpenChange={setDialogOpen}
+        onPreview={previewSchedules}
         onSubmit={submitTask}
         open={dialogOpen}
+        previewRuns={previewRuns}
         providerOptions={providerOptions}
       />
     </div>

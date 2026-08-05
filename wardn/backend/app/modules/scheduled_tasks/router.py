@@ -12,6 +12,8 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskRead,
     WorkspaceScheduledTaskRunListResponse,
     WorkspaceScheduledTaskRunRead,
+    WorkspaceScheduledTaskSchedulePreviewRequest,
+    WorkspaceScheduledTaskSchedulePreviewResponse,
     WorkspaceScheduledTaskUpdate,
 )
 from app.modules.scheduled_tasks.service import (
@@ -21,6 +23,7 @@ from app.modules.scheduled_tasks.service import (
     get_workspace_scheduled_task,
     list_workspace_scheduled_task_runs,
     list_workspace_scheduled_tasks,
+    preview_workspace_scheduled_task_schedules,
     update_workspace_scheduled_task,
 )
 from app.modules.users.dependencies import get_current_user
@@ -75,6 +78,32 @@ async def create_workspace_scheduled_task_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> WorkspaceScheduledTaskRead:
     return await create_workspace_scheduled_task(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
+
+
+@workspace_router.post(
+    "/preview",
+    response_model=WorkspaceScheduledTaskSchedulePreviewResponse,
+    operation_id="workspace_scheduled_tasks_preview",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def preview_workspace_scheduled_task_schedules_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: WorkspaceScheduledTaskSchedulePreviewRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceScheduledTaskSchedulePreviewResponse:
+    return await preview_workspace_scheduled_task_schedules(
         session,
         current_user,
         organization_id,

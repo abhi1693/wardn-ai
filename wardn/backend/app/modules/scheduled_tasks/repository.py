@@ -10,6 +10,7 @@ from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
     WorkspaceScheduledTaskRun,
+    WorkspaceScheduledTaskSchedule,
 )
 
 ACTIVE_RUN_STATUSES = ("queued", "running")
@@ -65,6 +66,97 @@ async def get_task_by_name(
             WorkspaceScheduledTask.workspace_id == workspace_id,
             WorkspaceScheduledTask.name == name,
         )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_task_schedules(
+    session: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    for_update: bool = False,
+) -> list[WorkspaceScheduledTaskSchedule]:
+    statement = (
+        select(WorkspaceScheduledTaskSchedule)
+        .where(WorkspaceScheduledTaskSchedule.task_id == task_id)
+        .order_by(
+            WorkspaceScheduledTaskSchedule.sort_order.asc(),
+            WorkspaceScheduledTaskSchedule.created_at.asc(),
+            WorkspaceScheduledTaskSchedule.id.asc(),
+        )
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
+    return list(result.scalars().all())
+
+
+async def list_task_schedules_for_tasks(
+    session: AsyncSession,
+    *,
+    task_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[WorkspaceScheduledTaskSchedule]]:
+    if not task_ids:
+        return {}
+    result = await session.execute(
+        select(WorkspaceScheduledTaskSchedule)
+        .where(WorkspaceScheduledTaskSchedule.task_id.in_(task_ids))
+        .order_by(
+            WorkspaceScheduledTaskSchedule.task_id.asc(),
+            WorkspaceScheduledTaskSchedule.sort_order.asc(),
+            WorkspaceScheduledTaskSchedule.created_at.asc(),
+            WorkspaceScheduledTaskSchedule.id.asc(),
+        )
+    )
+    schedules_by_task: dict[uuid.UUID, list[WorkspaceScheduledTaskSchedule]] = {}
+    for schedule in result.scalars().all():
+        schedules_by_task.setdefault(schedule.task_id, []).append(schedule)
+    return schedules_by_task
+
+
+async def get_due_task_schedule(
+    session: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    now: datetime,
+) -> WorkspaceScheduledTaskSchedule | None:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskSchedule)
+        .where(
+            WorkspaceScheduledTaskSchedule.task_id == task_id,
+            WorkspaceScheduledTaskSchedule.is_active.is_(True),
+            WorkspaceScheduledTaskSchedule.next_run_at.is_not(None),
+            WorkspaceScheduledTaskSchedule.next_run_at <= now,
+        )
+        .order_by(
+            WorkspaceScheduledTaskSchedule.next_run_at.asc(),
+            WorkspaceScheduledTaskSchedule.sort_order.asc(),
+            WorkspaceScheduledTaskSchedule.id.asc(),
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    return result.scalar_one_or_none()
+
+
+async def first_task_schedule_next_run(
+    session: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+) -> datetime | None:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskSchedule.next_run_at)
+        .where(
+            WorkspaceScheduledTaskSchedule.task_id == task_id,
+            WorkspaceScheduledTaskSchedule.is_active.is_(True),
+            WorkspaceScheduledTaskSchedule.next_run_at.is_not(None),
+        )
+        .order_by(
+            WorkspaceScheduledTaskSchedule.next_run_at.asc(),
+            WorkspaceScheduledTaskSchedule.sort_order.asc(),
+            WorkspaceScheduledTaskSchedule.id.asc(),
+        )
+        .limit(1)
     )
     return result.scalar_one_or_none()
 
@@ -192,17 +284,23 @@ async def enqueue_due_runs(
     session: AsyncSession,
     *,
     now: datetime,
-    next_run_for_task,
+    next_run_for_schedule,
     limit: int = 25,
 ) -> int:
     result = await session.execute(due_task_statement(now, limit=limit))
     tasks = list(result.scalars().all())
+    enqueued = 0
     for task in tasks:
-        scheduled_for = task.next_run_at or now
+        schedule = await get_due_task_schedule(session, task_id=task.id, now=now)
+        if schedule is None:
+            task.next_run_at = await first_task_schedule_next_run(session, task_id=task.id)
+            continue
+        scheduled_for = schedule.next_run_at or task.next_run_at or now
         run = WorkspaceScheduledTaskRun(
             organization_id=task.organization_id,
             workspace_id=task.workspace_id,
             task_id=task.id,
+            task_schedule_id=schedule.id,
             agent_id=task.agent_id,
             requested_by_id=task.created_by_id,
             trigger_source="scheduled",
@@ -218,9 +316,12 @@ async def enqueue_due_runs(
         task.last_run_at = now
         task.last_status = "queued"
         task.last_error = ""
-        task.next_run_at = next_run_for_task(task, scheduled_for)
+        schedule.next_run_at = next_run_for_schedule(schedule, scheduled_for)
+        await session.flush()
+        task.next_run_at = await first_task_schedule_next_run(session, task_id=task.id)
+        enqueued += 1
     await session.flush()
-    return len(tasks)
+    return enqueued
 
 
 async def create_task_run(
@@ -231,11 +332,13 @@ async def create_task_run(
     available_at: datetime,
     trigger_source: str,
     requested_by_id: uuid.UUID | None,
+    task_schedule_id: uuid.UUID | None = None,
 ) -> WorkspaceScheduledTaskRun:
     run = WorkspaceScheduledTaskRun(
         organization_id=task.organization_id,
         workspace_id=task.workspace_id,
         task_id=task.id,
+        task_schedule_id=task_schedule_id,
         agent_id=task.agent_id,
         requested_by_id=requested_by_id,
         trigger_source=trigger_source,

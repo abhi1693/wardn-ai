@@ -8581,10 +8581,29 @@
               "manual",
               "interval",
               "daily",
-              "weekly"
+              "weekly",
+              "weekdays",
+              "monthly",
+              "cron",
+              "multiple"
             ],
             "title": "Scheduletype",
             "type": "string"
+          },
+          "schedules": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskScheduleCreate"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedules"
           },
           "timezone": {
             "default": "UTC",
@@ -8872,6 +8891,14 @@
             ],
             "title": "Nextrunat"
           },
+          "nextRunPreview": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Nextrunpreview",
+            "type": "array"
+          },
           "organizationId": {
             "format": "uuid",
             "title": "Organizationid",
@@ -8892,6 +8919,13 @@
           "scheduleType": {
             "title": "Scheduletype",
             "type": "string"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScheduledTaskScheduleRead"
+            },
+            "title": "Schedules",
+            "type": "array"
           },
           "timezone": {
             "title": "Timezone",
@@ -9069,6 +9103,18 @@
             "title": "Taskid",
             "type": "string"
           },
+          "taskScheduleId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskscheduleid"
+          },
           "triggerSource": {
             "title": "Triggersource",
             "type": "string"
@@ -9101,6 +9147,281 @@
           "updatedAt"
         ],
         "title": "WorkspaceScheduledTaskRunRead",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskScheduleCreate": {
+        "properties": {
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "isActive": {
+            "default": true,
+            "title": "Isactive",
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Name",
+            "type": "string"
+          },
+          "scheduleConfig": {
+            "additionalProperties": true,
+            "title": "Scheduleconfig",
+            "type": "object"
+          },
+          "scheduleType": {
+            "default": "daily",
+            "enum": [
+              "interval",
+              "daily",
+              "weekly",
+              "weekdays",
+              "monthly",
+              "cron"
+            ],
+            "title": "Scheduletype",
+            "type": "string"
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startsat"
+          },
+          "timezone": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "WorkspaceScheduledTaskScheduleCreate",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskSchedulePreviewRequest": {
+        "properties": {
+          "isActive": {
+            "default": true,
+            "title": "Isactive",
+            "type": "boolean"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScheduledTaskScheduleCreate"
+            },
+            "maxItems": 12,
+            "title": "Schedules",
+            "type": "array"
+          }
+        },
+        "title": "WorkspaceScheduledTaskSchedulePreviewRequest",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskSchedulePreviewResponse": {
+        "properties": {
+          "nextRuns": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Nextruns",
+            "type": "array"
+          }
+        },
+        "title": "WorkspaceScheduledTaskSchedulePreviewResponse",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskScheduleRead": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "isActive": {
+            "title": "Isactive",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nextRunAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextrunat"
+          },
+          "scheduleConfig": {
+            "additionalProperties": true,
+            "title": "Scheduleconfig",
+            "type": "object"
+          },
+          "scheduleType": {
+            "title": "Scheduletype",
+            "type": "string"
+          },
+          "sortOrder": {
+            "title": "Sortorder",
+            "type": "integer"
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startsat"
+          },
+          "taskId": {
+            "format": "uuid",
+            "title": "Taskid",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "name",
+          "scheduleType",
+          "timezone",
+          "isActive",
+          "sortOrder",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "WorkspaceScheduledTaskScheduleRead",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskScheduleUpdate": {
+        "properties": {
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "isActive": {
+            "default": true,
+            "title": "Isactive",
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Name",
+            "type": "string"
+          },
+          "scheduleConfig": {
+            "additionalProperties": true,
+            "title": "Scheduleconfig",
+            "type": "object"
+          },
+          "scheduleType": {
+            "default": "daily",
+            "enum": [
+              "interval",
+              "daily",
+              "weekly",
+              "weekdays",
+              "monthly",
+              "cron"
+            ],
+            "title": "Scheduletype",
+            "type": "string"
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startsat"
+          },
+          "timezone": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "WorkspaceScheduledTaskScheduleUpdate",
         "type": "object"
       },
       "WorkspaceScheduledTaskUpdate": {
@@ -9203,7 +9524,11 @@
                   "manual",
                   "interval",
                   "daily",
-                  "weekly"
+                  "weekly",
+                  "weekdays",
+                  "monthly",
+                  "cron",
+                  "multiple"
                 ],
                 "type": "string"
               },
@@ -9212,6 +9537,21 @@
               }
             ],
             "title": "Scheduletype"
+          },
+          "schedules": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskScheduleUpdate"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedules"
           },
           "timezone": {
             "anyOf": [
@@ -20807,6 +21147,115 @@
           }
         },
         "summary": "Create Workspace Scheduled Task Route",
+        "tags": [
+          "workspace-scheduled-tasks"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/scheduled-tasks/preview": {
+      "post": {
+        "operationId": "workspace_scheduled_tasks_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceScheduledTaskSchedulePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceScheduledTaskSchedulePreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Workspace Scheduled Task Schedules Route",
         "tags": [
           "workspace-scheduled-tasks"
         ]

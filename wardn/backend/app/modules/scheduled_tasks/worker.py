@@ -33,6 +33,7 @@ def task_run_log_extra(run: WorkspaceScheduledTaskRun, *, worker_id: str) -> dic
     return {
         "scheduled_task_run_id": str(run.id),
         "scheduled_task_id": str(run.task_id),
+        "scheduled_task_schedule_id": str(run.task_schedule_id or ""),
         "organization_id": str(run.organization_id),
         "workspace_id": str(run.workspace_id),
         "agent_id": str(run.agent_id),

@@ -175,6 +175,10 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/preview"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/scheduled-tasks/{task_id}"
             ),
             (
@@ -679,6 +683,12 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
             "/scheduled-tasks/runs"
         )
     ]
+    preview = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/preview"
+        )
+    ]
     run_now = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -697,6 +707,10 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
     assert task["get"]["operationId"] == "workspace_scheduled_tasks_get"
     assert task["patch"]["operationId"] == "workspace_scheduled_tasks_update"
     assert task["delete"]["operationId"] == "workspace_scheduled_tasks_delete"
+    assert preview["post"]["operationId"] == "workspace_scheduled_tasks_preview"
+    assert preview["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskSchedulePreviewResponse"
+    }
     assert runs["get"]["operationId"] == "workspace_scheduled_tasks_list_runs"
     assert runs["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WorkspaceScheduledTaskRunListResponse"
@@ -705,6 +719,9 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
     assert run_now["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WorkspaceScheduledTaskRunRead"
     }
+    task_read = schema["components"]["schemas"]["WorkspaceScheduledTaskRead"]["properties"]
+    assert "schedules" in task_read
+    assert "nextRunPreview" in task_read
 
 
 def test_mcp_registry_openapi_contract() -> None:

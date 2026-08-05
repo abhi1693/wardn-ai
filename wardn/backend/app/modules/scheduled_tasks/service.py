@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,6 +29,7 @@ from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
     WorkspaceScheduledTaskRun,
+    WorkspaceScheduledTaskSchedule,
 )
 from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskCreate,
@@ -36,6 +39,11 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskRead,
     WorkspaceScheduledTaskRunListResponse,
     WorkspaceScheduledTaskRunRead,
+    WorkspaceScheduledTaskScheduleCreate,
+    WorkspaceScheduledTaskSchedulePreviewRequest,
+    WorkspaceScheduledTaskSchedulePreviewResponse,
+    WorkspaceScheduledTaskScheduleRead,
+    WorkspaceScheduledTaskScheduleUpdate,
     WorkspaceScheduledTaskUpdate,
 )
 from app.modules.users.models import User
@@ -45,9 +53,35 @@ TASK_UNIQUE_CONSTRAINTS = {"uq_workspace_scheduled_tasks_workspace_name"}
 DEFAULT_OUTPUT_ROUTES = [WorkspaceScheduledTaskOutputRoute(route_type="chat")]
 SCHEDULED_AGENT_TRIGGER = "scheduled"
 PROVIDER_EMPTY_REPLY = "The scheduled task completed, but the assistant did not return text."
+ENTRY_SCHEDULE_TYPES = {"interval", "daily", "weekly", "weekdays", "monthly", "cron"}
+MAX_SCHEDULES_PER_TASK = 12
+MAX_TIMES_PER_SCHEDULE = 12
+MAX_VALUES_PER_SCHEDULE = 31
+MAX_LOOKAHEAD_DAYS = 366 * 5
 TIMEZONE_ALIASES = {
     "Asia/Calcutta": "Asia/Kolkata",
 }
+
+
+@dataclass(frozen=True)
+class ScheduleSpec:
+    schedule_type: str
+    schedule_config: dict[str, Any]
+    timezone: str
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    is_active: bool = True
+
+
+@dataclass(frozen=True)
+class CronExpression:
+    minutes: set[int]
+    hours: set[int]
+    month_days: set[int]
+    months: set[int]
+    weekdays: set[int]
+    month_day_restricted: bool
+    weekday_restricted: bool
 
 
 def utc_now() -> datetime:
@@ -96,6 +130,170 @@ def normalize_schedule_time(value: Any) -> time:
     return time(hour=hour, minute=minute)
 
 
+def normalize_schedule_times(config: dict[str, Any]) -> list[str]:
+    raw_times = config_value(config, "times")
+    if raw_times is None:
+        raw_times = config_value(config, "time")
+    if isinstance(raw_times, str):
+        candidates: list[Any] = [raw_times]
+    elif isinstance(raw_times, list):
+        candidates = raw_times
+    else:
+        raise InvalidScheduledTaskError("schedule requires at least one run time")
+    times = sorted({normalize_schedule_time(value).strftime("%H:%M") for value in candidates})
+    if not times:
+        raise InvalidScheduledTaskError("schedule requires at least one run time")
+    if len(times) > MAX_TIMES_PER_SCHEDULE:
+        raise InvalidScheduledTaskError("a schedule can have at most 12 run times")
+    return times
+
+
+def normalize_integer_values(
+    config: dict[str, Any],
+    *,
+    plural_key: str,
+    singular_key: str | None,
+    minimum: int,
+    maximum: int,
+    label: str,
+    default: Sequence[int] | None = None,
+) -> list[int]:
+    raw_values = config_value(config, plural_key)
+    if raw_values is None and singular_key is not None:
+        raw_values = config_value(config, singular_key)
+    if raw_values is None and default is not None:
+        raw_values = list(default)
+    if isinstance(raw_values, list):
+        candidates: list[Any] = raw_values
+    elif raw_values is None:
+        raise InvalidScheduledTaskError(f"{label} is required")
+    else:
+        candidates = [raw_values]
+    values: set[int] = set()
+    for raw_value in candidates:
+        if isinstance(raw_value, bool):
+            raise InvalidScheduledTaskError(f"{label} must be a number")
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise InvalidScheduledTaskError(f"{label} must be a number") from exc
+        if not minimum <= value <= maximum:
+            raise InvalidScheduledTaskError(f"{label} must be between {minimum} and {maximum}")
+        values.add(value)
+    if not values:
+        raise InvalidScheduledTaskError(f"{label} is required")
+    if len(values) > MAX_VALUES_PER_SCHEDULE:
+        raise InvalidScheduledTaskError(f"{label} has too many values")
+    return sorted(values)
+
+
+def parse_cron_field(
+    raw_field: str,
+    *,
+    minimum: int,
+    maximum: int,
+    label: str,
+    allow_question: bool = False,
+) -> tuple[set[int], bool]:
+    field = raw_field.strip()
+    unrestricted_tokens = {"*"} | ({"?"} if allow_question else set())
+    if field in unrestricted_tokens:
+        return set(range(minimum, maximum + 1)), False
+
+    values: set[int] = set()
+    restricted = False
+    for token in field.split(","):
+        token = token.strip()
+        if not token:
+            raise InvalidScheduledTaskError("cron expression has an empty field")
+        if "/" in token:
+            base, raw_step = token.split("/", 1)
+            try:
+                step = int(raw_step)
+            except ValueError as exc:
+                raise InvalidScheduledTaskError("cron step must be a number") from exc
+            if step < 1:
+                raise InvalidScheduledTaskError("cron step must be at least 1")
+        else:
+            base = token
+            step = 1
+
+        if base in unrestricted_tokens:
+            start = minimum
+            end = maximum
+            restricted = restricted or step != 1
+        elif "-" in base:
+            raw_start, raw_end = base.split("-", 1)
+            try:
+                start = int(raw_start)
+                end = int(raw_end)
+            except ValueError as exc:
+                raise InvalidScheduledTaskError(f"cron {label} range must be numeric") from exc
+            restricted = True
+        else:
+            try:
+                start = int(base)
+            except ValueError as exc:
+                raise InvalidScheduledTaskError(f"cron {label} must be numeric") from exc
+            end = start
+            restricted = True
+
+        if start > end:
+            raise InvalidScheduledTaskError(f"cron {label} range is invalid")
+        if start < minimum or end > maximum:
+            raise InvalidScheduledTaskError(
+                f"cron {label} must be between {minimum} and {maximum}"
+            )
+        values.update(range(start, end + 1, step))
+
+    if not values:
+        raise InvalidScheduledTaskError(f"cron {label} has no values")
+    return values, restricted
+
+
+def parse_cron_expression(expression: str) -> CronExpression:
+    parts = expression.split()
+    if len(parts) != 5:
+        raise InvalidScheduledTaskError("cron expression must have 5 fields")
+    minutes, _ = parse_cron_field(parts[0], minimum=0, maximum=59, label="minute")
+    hours, _ = parse_cron_field(parts[1], minimum=0, maximum=23, label="hour")
+    month_days, month_day_restricted = parse_cron_field(
+        parts[2],
+        minimum=1,
+        maximum=31,
+        label="day of month",
+        allow_question=True,
+    )
+    months, _ = parse_cron_field(parts[3], minimum=1, maximum=12, label="month")
+    raw_weekdays, weekday_restricted = parse_cron_field(
+        parts[4],
+        minimum=0,
+        maximum=7,
+        label="day of week",
+        allow_question=True,
+    )
+    weekdays = {6 if value in {0, 7} else value - 1 for value in raw_weekdays}
+    return CronExpression(
+        minutes=minutes,
+        hours=hours,
+        month_days=month_days,
+        months=months,
+        weekdays=weekdays,
+        month_day_restricted=month_day_restricted,
+        weekday_restricted=weekday_restricted,
+    )
+
+
+def normalize_cron_expression(value: Any) -> str:
+    if not isinstance(value, str):
+        raise InvalidScheduledTaskError("cron schedule requires an expression")
+    expression = " ".join(value.strip().split())
+    if not expression:
+        raise InvalidScheduledTaskError("cron schedule requires an expression")
+    parse_cron_expression(expression)
+    return expression
+
+
 def normalize_schedule_config(schedule_type: str, config: dict[str, Any]) -> dict[str, Any]:
     if schedule_type == "manual":
         return {}
@@ -109,19 +307,125 @@ def normalize_schedule_config(schedule_type: str, config: dict[str, Any]) -> dic
             raise InvalidScheduledTaskError("interval minutes must be between 1 and 10080")
         return {"everyMinutes": minutes}
     if schedule_type == "daily":
-        scheduled_time = normalize_schedule_time(config_value(config, "time"))
-        return {"time": scheduled_time.strftime("%H:%M")}
+        return {"times": normalize_schedule_times(config)}
     if schedule_type == "weekly":
-        scheduled_time = normalize_schedule_time(config_value(config, "time"))
-        raw_weekday = config_value(config, "weekday")
-        try:
-            weekday = int(raw_weekday)
-        except (TypeError, ValueError) as exc:
-            raise InvalidScheduledTaskError("weekly schedule requires a weekday") from exc
-        if not 0 <= weekday <= 6:
-            raise InvalidScheduledTaskError("weekday must be between 0 and 6")
-        return {"time": scheduled_time.strftime("%H:%M"), "weekday": weekday}
+        return {
+            "times": normalize_schedule_times(config),
+            "weekdays": normalize_integer_values(
+                config,
+                plural_key="weekdays",
+                singular_key="weekday",
+                minimum=0,
+                maximum=6,
+                label="weekday",
+            ),
+        }
+    if schedule_type == "weekdays":
+        return {"times": normalize_schedule_times(config), "weekdays": [0, 1, 2, 3, 4]}
+    if schedule_type == "monthly":
+        return {
+            "times": normalize_schedule_times(config),
+            "monthDays": normalize_integer_values(
+                config,
+                plural_key="monthDays",
+                singular_key="monthDay",
+                minimum=1,
+                maximum=31,
+                label="month day",
+            ),
+        }
+    if schedule_type == "cron":
+        return {"expression": normalize_cron_expression(config_value(config, "expression", "cron"))}
     raise InvalidScheduledTaskError("unsupported schedule type")
+
+
+def next_calendar_run_at(
+    *,
+    schedule_type: str,
+    schedule_config: dict[str, Any],
+    timezone: str,
+    after: datetime | None = None,
+) -> datetime | None:
+    after = aware_utc(after or utc_now())
+    zone = zoneinfo_for(timezone)
+    local_after = after.astimezone(zone)
+    times = [normalize_schedule_time(value) for value in normalize_schedule_times(schedule_config)]
+    weekdays = (
+        set(
+            normalize_integer_values(
+                schedule_config,
+                plural_key="weekdays",
+                singular_key="weekday",
+                minimum=0,
+                maximum=6,
+                label="weekday",
+            )
+        )
+        if schedule_type == "weekly"
+        else set()
+    )
+    month_days = (
+        set(
+            normalize_integer_values(
+                schedule_config,
+                plural_key="monthDays",
+                singular_key="monthDay",
+                minimum=1,
+                maximum=31,
+                label="month day",
+            )
+        )
+        if schedule_type == "monthly"
+        else set()
+    )
+    start_date = local_after.date()
+    for day_offset in range(MAX_LOOKAHEAD_DAYS + 1):
+        candidate_date = start_date + timedelta(days=day_offset)
+        if schedule_type == "weekly" and candidate_date.weekday() not in weekdays:
+            continue
+        if schedule_type == "weekdays" and candidate_date.weekday() not in {0, 1, 2, 3, 4}:
+            continue
+        if schedule_type == "monthly" and candidate_date.day not in month_days:
+            continue
+        for scheduled_time in times:
+            candidate = datetime.combine(candidate_date, scheduled_time, tzinfo=zone)
+            if candidate > local_after:
+                return candidate.astimezone(UTC)
+    return None
+
+
+def next_cron_run_at(
+    *,
+    expression: str,
+    timezone: str,
+    after: datetime | None = None,
+) -> datetime | None:
+    cron = parse_cron_expression(expression)
+    after = aware_utc(after or utc_now())
+    zone = zoneinfo_for(timezone)
+    local_after = after.astimezone(zone)
+    start_date = local_after.date()
+    for day_offset in range(MAX_LOOKAHEAD_DAYS + 1):
+        candidate_date = start_date + timedelta(days=day_offset)
+        if candidate_date.month not in cron.months:
+            continue
+        month_day_matches = candidate_date.day in cron.month_days
+        weekday_matches = candidate_date.weekday() in cron.weekdays
+        if cron.month_day_restricted and cron.weekday_restricted:
+            if not (month_day_matches or weekday_matches):
+                continue
+        elif not month_day_matches or not weekday_matches:
+            continue
+        for hour in sorted(cron.hours):
+            for minute in sorted(cron.minutes):
+                candidate = datetime.combine(
+                    candidate_date,
+                    time(hour=hour, minute=minute),
+                    tzinfo=zone,
+                )
+                if candidate > local_after:
+                    return candidate.astimezone(UTC)
+    return None
 
 
 def next_run_at(
@@ -130,35 +434,110 @@ def next_run_at(
     schedule_config: dict[str, Any],
     timezone: str,
     after: datetime | None = None,
+    starts_at: datetime | None = None,
+    ends_at: datetime | None = None,
 ) -> datetime | None:
     if schedule_type == "manual":
         return None
     after = aware_utc(after or utc_now())
-    zone = zoneinfo_for(timezone)
-    local_after = after.astimezone(zone)
+    starts_at = aware_utc(starts_at) if starts_at is not None else None
+    ends_at = aware_utc(ends_at) if ends_at is not None else None
+    if starts_at is not None and ends_at is not None and ends_at <= starts_at:
+        raise InvalidScheduledTaskError("schedule end must be after the start")
+    if ends_at is not None and after >= ends_at:
+        return None
+    zoneinfo_for(timezone)
+    search_after = after
+    if starts_at is not None and after < starts_at:
+        search_after = starts_at - timedelta(seconds=1)
+
     if schedule_type == "interval":
         minutes = int(config_value(schedule_config, "everyMinutes", "every_minutes") or 0)
         if minutes < 1:
             raise InvalidScheduledTaskError("interval schedule requires minutes")
-        return after + timedelta(minutes=minutes)
+        candidate = (
+            starts_at
+            if starts_at is not None and after < starts_at
+            else after + timedelta(minutes=minutes)
+        )
+        return candidate if ends_at is None or candidate <= ends_at else None
 
-    scheduled_time = normalize_schedule_time(config_value(schedule_config, "time"))
-    if schedule_type == "daily":
-        candidate = datetime.combine(local_after.date(), scheduled_time, tzinfo=zone)
-        if candidate <= local_after:
-            candidate += timedelta(days=1)
-        return candidate.astimezone(UTC)
+    if schedule_type in {"daily", "weekly", "weekdays", "monthly"}:
+        candidate = next_calendar_run_at(
+            schedule_type=schedule_type,
+            schedule_config=schedule_config,
+            timezone=timezone,
+            after=search_after,
+        )
+        if candidate is None or (ends_at is not None and candidate > ends_at):
+            return None
+        return candidate
 
-    if schedule_type == "weekly":
-        weekday = int(config_value(schedule_config, "weekday"))
-        days_until = (weekday - local_after.weekday()) % 7
-        candidate_date = local_after.date() + timedelta(days=days_until)
-        candidate = datetime.combine(candidate_date, scheduled_time, tzinfo=zone)
-        if candidate <= local_after:
-            candidate += timedelta(days=7)
-        return candidate.astimezone(UTC)
+    if schedule_type == "cron":
+        candidate = next_cron_run_at(
+            expression=str(config_value(schedule_config, "expression") or ""),
+            timezone=timezone,
+            after=search_after,
+        )
+        if candidate is None or (ends_at is not None and candidate > ends_at):
+            return None
+        return candidate
 
     raise InvalidScheduledTaskError("unsupported schedule type")
+
+
+def schedule_spec_next_run_at(
+    spec: ScheduleSpec,
+    *,
+    after: datetime | None = None,
+) -> datetime | None:
+    if not spec.is_active:
+        return None
+    return next_run_at(
+        schedule_type=spec.schedule_type,
+        schedule_config=spec.schedule_config,
+        timezone=spec.timezone,
+        after=after,
+        starts_at=spec.starts_at,
+        ends_at=spec.ends_at,
+    )
+
+
+def schedule_model_spec(schedule: WorkspaceScheduledTaskSchedule) -> ScheduleSpec:
+    return ScheduleSpec(
+        schedule_type=schedule.schedule_type,
+        schedule_config=schedule.schedule_config or {},
+        timezone=schedule.timezone,
+        starts_at=schedule.starts_at,
+        ends_at=schedule.ends_at,
+        is_active=schedule.is_active,
+    )
+
+
+def next_runs_preview(
+    specs: Sequence[ScheduleSpec],
+    *,
+    after: datetime | None = None,
+    limit: int = 5,
+) -> list[datetime]:
+    if limit < 1:
+        return []
+    cursors: dict[int, datetime] = {}
+    base_after = aware_utc(after or utc_now())
+    for index, spec in enumerate(specs):
+        candidate = schedule_spec_next_run_at(spec, after=base_after)
+        if candidate is not None:
+            cursors[index] = candidate
+    preview: list[datetime] = []
+    while cursors and len(preview) < limit:
+        index, candidate = min(cursors.items(), key=lambda item: (item[1], item[0]))
+        preview.append(candidate)
+        next_candidate = schedule_spec_next_run_at(specs[index], after=candidate)
+        if next_candidate is None:
+            del cursors[index]
+        else:
+            cursors[index] = next_candidate
+    return preview
 
 
 def task_next_run_at(
@@ -166,6 +545,8 @@ def task_next_run_at(
     *,
     after: datetime | None = None,
 ) -> datetime | None:
+    if task.schedule_type == "multiple":
+        return task.next_run_at
     return next_run_at(
         schedule_type=task.schedule_type,
         schedule_config=task.schedule_config or {},
@@ -207,6 +588,242 @@ def route_reads(routes: list[dict[str, Any]] | None) -> list[WorkspaceScheduledT
         WorkspaceScheduledTaskOutputRoute.model_validate(route)
         for route in (routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)])
     ]
+
+
+def schedule_response(
+    schedule: WorkspaceScheduledTaskSchedule,
+) -> WorkspaceScheduledTaskScheduleRead:
+    return WorkspaceScheduledTaskScheduleRead(
+        id=schedule.id,
+        taskId=schedule.task_id,
+        name=schedule.name,
+        scheduleType=schedule.schedule_type,
+        scheduleConfig=schedule.schedule_config,
+        timezone=schedule.timezone,
+        startsAt=schedule.starts_at,
+        endsAt=schedule.ends_at,
+        isActive=schedule.is_active,
+        sortOrder=schedule.sort_order,
+        nextRunAt=schedule.next_run_at,
+        createdAt=schedule.created_at,
+        updatedAt=schedule.updated_at,
+    )
+
+
+def normalize_schedule_window(
+    starts_at: datetime | None,
+    ends_at: datetime | None,
+) -> tuple[datetime | None, datetime | None]:
+    starts_at = aware_utc(starts_at) if starts_at is not None else None
+    ends_at = aware_utc(ends_at) if ends_at is not None else None
+    if starts_at is not None and ends_at is not None and ends_at <= starts_at:
+        raise InvalidScheduledTaskError("schedule end must be after the start")
+    return starts_at, ends_at
+
+
+def normalize_schedule_entry_payload(
+    entry: WorkspaceScheduledTaskScheduleCreate | WorkspaceScheduledTaskScheduleUpdate,
+    *,
+    default_timezone: str,
+) -> dict[str, Any]:
+    if entry.schedule_type not in ENTRY_SCHEDULE_TYPES:
+        raise InvalidScheduledTaskError("unsupported schedule type")
+    timezone = normalize_timezone(entry.timezone or default_timezone or "UTC")
+    zoneinfo_for(timezone)
+    starts_at, ends_at = normalize_schedule_window(entry.starts_at, entry.ends_at)
+    schedule_config = normalize_schedule_config(entry.schedule_type, entry.schedule_config or {})
+    return {
+        "name": entry.name,
+        "schedule_type": entry.schedule_type,
+        "schedule_config": schedule_config,
+        "timezone": timezone,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "is_active": entry.is_active,
+    }
+
+
+def schedule_payload_spec(payload: dict[str, Any]) -> ScheduleSpec:
+    return ScheduleSpec(
+        schedule_type=payload["schedule_type"],
+        schedule_config=payload["schedule_config"],
+        timezone=payload["timezone"],
+        starts_at=payload["starts_at"],
+        ends_at=payload["ends_at"],
+        is_active=payload["is_active"],
+    )
+
+
+def legacy_payload_schedules(
+    *,
+    schedule_type: str,
+    schedule_config: dict[str, Any],
+    timezone: str,
+) -> list[WorkspaceScheduledTaskScheduleCreate]:
+    if schedule_type == "manual":
+        return []
+    if schedule_type == "multiple":
+        raise InvalidScheduledTaskError("multiple schedules must be edited with schedule rows")
+    if schedule_type not in ENTRY_SCHEDULE_TYPES:
+        raise InvalidScheduledTaskError("unsupported schedule type")
+    return [
+        WorkspaceScheduledTaskScheduleCreate(
+            scheduleType=schedule_type,
+            scheduleConfig=schedule_config or {},
+            timezone=timezone or "UTC",
+        )
+    ]
+
+
+def create_payload_schedules(
+    payload: WorkspaceScheduledTaskCreate,
+) -> list[WorkspaceScheduledTaskScheduleCreate]:
+    if payload.schedules is not None:
+        return payload.schedules
+    return legacy_payload_schedules(
+        schedule_type=payload.schedule_type,
+        schedule_config=payload.schedule_config,
+        timezone=payload.timezone,
+    )
+
+
+def update_payload_replaces_schedules(payload: WorkspaceScheduledTaskUpdate) -> bool:
+    return (
+        payload.schedules is not None
+        or payload.schedule_type is not None
+        or payload.schedule_config is not None
+    )
+
+
+def update_payload_schedules(
+    payload: WorkspaceScheduledTaskUpdate,
+    task: WorkspaceScheduledTask,
+) -> list[WorkspaceScheduledTaskScheduleUpdate | WorkspaceScheduledTaskScheduleCreate]:
+    if payload.schedules is not None:
+        return payload.schedules
+    return legacy_payload_schedules(
+        schedule_type=payload.schedule_type or task.schedule_type,
+        schedule_config=(
+            payload.schedule_config
+            if payload.schedule_config is not None
+            else task.schedule_config
+        ),
+        timezone=payload.timezone or task.timezone,
+    )
+
+
+def schedule_summary(schedule: WorkspaceScheduledTaskSchedule) -> dict[str, Any]:
+    return {
+        "id": str(schedule.id),
+        "name": schedule.name,
+        "scheduleType": schedule.schedule_type,
+        "scheduleConfig": schedule.schedule_config,
+        "timezone": schedule.timezone,
+        "isActive": schedule.is_active,
+    }
+
+
+def apply_task_schedule_summary(
+    task: WorkspaceScheduledTask,
+    schedules: Sequence[WorkspaceScheduledTaskSchedule],
+) -> None:
+    ordered_schedules = sorted(schedules, key=lambda item: (item.sort_order, str(item.id)))
+    active_next_runs = [
+        schedule.next_run_at
+        for schedule in ordered_schedules
+        if schedule.is_active and schedule.next_run_at is not None
+    ]
+    task.next_run_at = min(active_next_runs) if task.is_active and active_next_runs else None
+    if not ordered_schedules:
+        task.schedule_type = "manual"
+        task.schedule_config = {}
+        return
+    if len(ordered_schedules) == 1:
+        schedule = ordered_schedules[0]
+        task.schedule_type = schedule.schedule_type
+        task.schedule_config = schedule.schedule_config
+        task.timezone = schedule.timezone
+        return
+    task.schedule_type = "multiple"
+    task.schedule_config = {
+        "schedules": [schedule_summary(schedule) for schedule in ordered_schedules]
+    }
+    task.timezone = ordered_schedules[0].timezone
+
+
+async def sync_task_schedules(
+    session: AsyncSession,
+    task: WorkspaceScheduledTask,
+    entries: Sequence[WorkspaceScheduledTaskScheduleCreate | WorkspaceScheduledTaskScheduleUpdate],
+    *,
+    now: datetime,
+) -> list[WorkspaceScheduledTaskSchedule]:
+    if len(entries) > MAX_SCHEDULES_PER_TASK:
+        raise InvalidScheduledTaskError("a task can have at most 12 schedules")
+    existing = await repository.list_task_schedules(session, task_id=task.id, for_update=True)
+    existing_by_id = {schedule.id: schedule for schedule in existing}
+    seen_ids: set[uuid.UUID] = set()
+    schedules: list[WorkspaceScheduledTaskSchedule] = []
+    for sort_order, entry in enumerate(entries):
+        entry_id = entry.id if isinstance(entry, WorkspaceScheduledTaskScheduleUpdate) else None
+        if entry_id is not None:
+            if entry_id in seen_ids:
+                raise InvalidScheduledTaskError("schedule rows must not be duplicated")
+            schedule = existing_by_id.get(entry_id)
+            if schedule is None:
+                raise InvalidScheduledTaskError("schedule row does not belong to this task")
+            seen_ids.add(entry_id)
+        else:
+            schedule = WorkspaceScheduledTaskSchedule(
+                organization_id=task.organization_id,
+                workspace_id=task.workspace_id,
+                task_id=task.id,
+            )
+            session.add(schedule)
+        normalized = normalize_schedule_entry_payload(entry, default_timezone=task.timezone)
+        schedule.name = normalized["name"]
+        schedule.schedule_type = normalized["schedule_type"]
+        schedule.schedule_config = normalized["schedule_config"]
+        schedule.timezone = normalized["timezone"]
+        schedule.starts_at = normalized["starts_at"]
+        schedule.ends_at = normalized["ends_at"]
+        schedule.is_active = normalized["is_active"]
+        schedule.sort_order = sort_order
+        spec = schedule_payload_spec(normalized)
+        schedule.next_run_at = (
+            schedule_spec_next_run_at(spec, after=now)
+            if task.is_active and schedule.is_active
+            else None
+        )
+        schedules.append(schedule)
+
+    for schedule in existing:
+        if schedule.id not in seen_ids and schedule not in schedules:
+            await session.delete(schedule)
+
+    await session.flush()
+    apply_task_schedule_summary(task, schedules)
+    await session.flush()
+    return schedules
+
+
+async def refresh_task_schedules_next_runs(
+    session: AsyncSession,
+    task: WorkspaceScheduledTask,
+    *,
+    now: datetime,
+) -> list[WorkspaceScheduledTaskSchedule]:
+    schedules = await repository.list_task_schedules(session, task_id=task.id, for_update=True)
+    for schedule in schedules:
+        schedule.next_run_at = (
+            schedule_spec_next_run_at(schedule_model_spec(schedule), after=now)
+            if task.is_active and schedule.is_active
+            else None
+        )
+    await session.flush()
+    apply_task_schedule_summary(task, schedules)
+    await session.flush()
+    return schedules
 
 
 async def validate_output_routes(
@@ -270,6 +887,7 @@ def run_response(
         organizationId=run.organization_id,
         workspaceId=run.workspace_id,
         taskId=run.task_id,
+        taskScheduleId=run.task_schedule_id,
         agentId=run.agent_id,
         conversationId=run.conversation_id,
         agentRunId=run.agent_run_id,
@@ -290,7 +908,21 @@ def run_response(
     )
 
 
-def task_response(task: WorkspaceScheduledTask) -> WorkspaceScheduledTaskRead:
+def task_response(
+    task: WorkspaceScheduledTask,
+    *,
+    schedules: Sequence[WorkspaceScheduledTaskSchedule] | None = None,
+) -> WorkspaceScheduledTaskRead:
+    schedule_rows = list(schedules or [])
+    preview = (
+        next_runs_preview(
+            [schedule_model_spec(schedule) for schedule in schedule_rows],
+            after=utc_now(),
+            limit=5,
+        )
+        if task.is_active
+        else []
+    )
     return WorkspaceScheduledTaskRead(
         id=task.id,
         organizationId=task.organization_id,
@@ -305,6 +937,8 @@ def task_response(task: WorkspaceScheduledTask) -> WorkspaceScheduledTaskRead:
         scheduleType=task.schedule_type,
         scheduleConfig=task.schedule_config,
         timezone=task.timezone,
+        schedules=[schedule_response(schedule) for schedule in schedule_rows],
+        nextRunPreview=preview,
         outputRoutes=route_reads(task.output_routes),
         conversationPolicy=task.conversation_policy,
         isActive=task.is_active,
@@ -330,7 +964,16 @@ async def list_workspace_scheduled_tasks(
         organization_id=organization_id,
         workspace_id=workspace_id,
     )
-    return WorkspaceScheduledTaskListResponse(tasks=[task_response(task) for task in tasks])
+    schedules_by_task = await repository.list_task_schedules_for_tasks(
+        session,
+        task_ids=[task.id for task in tasks],
+    )
+    return WorkspaceScheduledTaskListResponse(
+        tasks=[
+            task_response(task, schedules=schedules_by_task.get(task.id, []))
+            for task in tasks
+        ]
+    )
 
 
 async def get_workspace_scheduled_task(
@@ -349,7 +992,27 @@ async def get_workspace_scheduled_task(
     )
     if task is None:
         raise ScheduledTaskNotFoundError("scheduled task not found")
-    return task_response(task)
+    schedules = await repository.list_task_schedules(session, task_id=task.id)
+    return task_response(task, schedules=schedules)
+
+
+async def preview_workspace_scheduled_task_schedules(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: WorkspaceScheduledTaskSchedulePreviewRequest,
+) -> WorkspaceScheduledTaskSchedulePreviewResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    if not payload.is_active:
+        return WorkspaceScheduledTaskSchedulePreviewResponse(nextRuns=[])
+    specs = [
+        schedule_payload_spec(normalize_schedule_entry_payload(entry, default_timezone="UTC"))
+        for entry in payload.schedules
+    ]
+    return WorkspaceScheduledTaskSchedulePreviewResponse(
+        nextRuns=next_runs_preview(specs, after=utc_now(), limit=5)
+    )
 
 
 async def create_workspace_scheduled_task(
@@ -366,26 +1029,17 @@ async def create_workspace_scheduled_task(
         organization_id,
         workspace_id,
     )
-    schedule_config = normalize_schedule_config(payload.schedule_type, payload.schedule_config)
     timezone = normalize_timezone(payload.timezone or "UTC")
     zoneinfo_for(timezone)
+    schedule_entries = create_payload_schedules(payload)
     routes = normalize_output_routes(payload.output_routes)
     await validate_output_routes(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
-        routes=routes,
+            routes=routes,
     )
-    next_at = (
-        next_run_at(
-            schedule_type=payload.schedule_type,
-            schedule_config=schedule_config,
-            timezone=timezone,
-            after=utc_now(),
-        )
-        if payload.is_active
-        else None
-    )
+    now = utc_now()
     try:
         task = await repository.create_task(
             session,
@@ -395,20 +1049,21 @@ async def create_workspace_scheduled_task(
             created_by_id=user.id,
             name=payload.name,
             instructions=payload.instructions,
-            schedule_type=payload.schedule_type,
-            schedule_config=schedule_config,
+            schedule_type="manual",
+            schedule_config={},
             timezone=timezone,
             output_routes=routes,
             conversation_policy=payload.conversation_policy,
             is_active=payload.is_active,
-            next_run_at=next_at,
+            next_run_at=None,
             max_attempts=payload.max_attempts,
         )
+        schedules = await sync_task_schedules(session, task, schedule_entries, now=now)
     except IntegrityError as exc:
         if is_constraint_violation(exc, TASK_UNIQUE_CONSTRAINTS):
             raise DuplicateScheduledTaskError("scheduled task name already exists") from exc
         raise
-    return task_response(task)
+    return task_response(task, schedules=schedules)
 
 
 async def update_workspace_scheduled_task(
@@ -429,19 +1084,15 @@ async def update_workspace_scheduled_task(
     if task is None:
         raise ScheduledTaskNotFoundError("scheduled task not found")
 
-    schedule_changed = False
+    schedule_replaced = update_payload_replaces_schedules(payload)
+    schedules: list[WorkspaceScheduledTaskSchedule] | None = None
     if payload.name is not None:
         task.name = payload.name
     if payload.instructions is not None:
         task.instructions = payload.instructions
-    if payload.schedule_type is not None:
-        task.schedule_type = payload.schedule_type
-        schedule_changed = True
-    if payload.schedule_config is not None:
-        schedule_changed = True
     if payload.timezone is not None:
         task.timezone = normalize_timezone(payload.timezone)
-        schedule_changed = True
+        zoneinfo_for(task.timezone)
     if payload.output_routes is not None:
         routes = normalize_output_routes(payload.output_routes)
         await validate_output_routes(
@@ -457,39 +1108,31 @@ async def update_workspace_scheduled_task(
             task.conversation_id = None
     if payload.is_active is not None:
         task.is_active = payload.is_active
-        schedule_changed = True
     if payload.max_attempts is not None:
         task.max_attempts = payload.max_attempts
 
-    if schedule_changed:
-        next_config = (
-            payload.schedule_config
-            if payload.schedule_config is not None
-            else task.schedule_config
-        )
-        task.schedule_config = normalize_schedule_config(task.schedule_type, next_config)
-        zoneinfo_for(task.timezone)
-        task.next_run_at = (
-            next_run_at(
-                schedule_type=task.schedule_type,
-                schedule_config=task.schedule_config,
-                timezone=task.timezone,
-                after=utc_now(),
-            )
-            if task.is_active
-            else None
-        )
-    elif task.is_active and task.next_run_at is None:
-        task.next_run_at = task_next_run_at(task, after=utc_now())
-
     try:
+        now = utc_now()
+        if schedule_replaced:
+            schedules = await sync_task_schedules(
+                session,
+                task,
+                update_payload_schedules(payload, task),
+                now=now,
+            )
+        elif payload.is_active is not None:
+            schedules = await refresh_task_schedules_next_runs(session, task, now=now)
         await session.flush()
         await session.refresh(task)
+        if schedules is None:
+            schedules = await repository.list_task_schedules(session, task_id=task.id)
+        elif schedule_replaced or payload.is_active is not None:
+            schedules = await repository.list_task_schedules(session, task_id=task.id)
     except IntegrityError as exc:
         if is_constraint_violation(exc, TASK_UNIQUE_CONSTRAINTS):
             raise DuplicateScheduledTaskError("scheduled task name already exists") from exc
         raise
-    return task_response(task)
+    return task_response(task, schedules=schedules)
 
 
 async def delete_workspace_scheduled_task(
@@ -938,5 +1581,8 @@ async def enqueue_due_task_runs(
         session,
         now=now,
         limit=limit,
-        next_run_for_task=lambda task, _scheduled_for: task_next_run_at(task, after=now),
+        next_run_for_schedule=lambda schedule, scheduled_for: schedule_spec_next_run_at(
+            schedule_model_spec(schedule),
+            after=scheduled_for,
+        ),
     )

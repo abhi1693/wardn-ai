@@ -10,6 +10,8 @@ import type {
   WorkspaceScheduledTaskRead,
   WorkspaceScheduledTaskRunListResponse,
   WorkspaceScheduledTaskRunRead,
+  WorkspaceScheduledTaskSchedulePreviewRequest,
+  WorkspaceScheduledTaskSchedulePreviewResponse,
   WorkspaceScheduledTaskUpdate,
   WorkspaceScheduledTasksListRunsParams
 } from '../model';
@@ -63,6 +65,32 @@ export const workspaceScheduledTasksCreate = async (organizationId: string,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(workspaceScheduledTaskCreate)
+  }
+);}
+
+
+export const getWorkspaceScheduledTasksPreviewUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/scheduled-tasks/preview`
+}
+
+/**
+ * @summary Preview Workspace Scheduled Task Schedules Route
+ */
+export const workspaceScheduledTasksPreview = async (organizationId: string,
+    workspaceId: string,
+    workspaceScheduledTaskSchedulePreviewRequest: WorkspaceScheduledTaskSchedulePreviewRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskSchedulePreviewResponse> => {
+
+  return apiRequest<WorkspaceScheduledTaskSchedulePreviewResponse>(getWorkspaceScheduledTasksPreviewUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceScheduledTaskSchedulePreviewRequest)
   }
 );}
 

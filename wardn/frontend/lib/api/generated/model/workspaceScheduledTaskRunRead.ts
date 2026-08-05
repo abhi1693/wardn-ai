@@ -26,6 +26,7 @@ export interface WorkspaceScheduledTaskRunRead {
   startedAt?: string | null;
   status: string;
   taskId: string;
+  taskScheduleId?: string | null;
   triggerSource: string;
   updatedAt: string;
   workspaceId: string;
