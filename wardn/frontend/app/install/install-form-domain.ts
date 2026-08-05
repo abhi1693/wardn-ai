@@ -49,8 +49,10 @@ export type CustomHeader = {
 
 export type NetworkPolicyCustomEgressFormState = {
   id: string;
+  destinationType: "cidr" | "domain";
   label: string;
   cidr: string;
+  domain: string;
   ports: string;
 };
 
@@ -275,8 +277,13 @@ function customEgressRows(value: unknown): NetworkPolicyCustomEgressFormState[] 
         .join(", ");
       return {
         id: `custom-egress-${index + 1}`,
+        destinationType:
+          stringValue(rule.destinationType) === "domain" || stringValue(rule.domain)
+            ? "domain"
+            : "cidr",
         label: stringValue(rule.label),
         cidr: stringValue(rule.cidr),
+        domain: stringValue(rule.domain),
         ports: ports || "443",
       };
     });
@@ -329,14 +336,18 @@ export function networkPolicyPayloadValue(
 ): MCPRuntimeNetworkPolicyConfig {
   const customEgress = value.customEgress
     .map((rule) => ({
+      destinationType: rule.destinationType,
       label: rule.label.trim(),
-      cidr: rule.cidr.trim(),
+      cidr: rule.destinationType === "cidr" ? rule.cidr.trim() : "",
+      domain: rule.destinationType === "domain" ? rule.domain.trim().replace(/\.$/, "").toLowerCase() : "",
       ports: parsePortList(rule.ports),
     }))
     .filter((rule) => rule.label || rule.cidr || rule.ports.length > 0);
-  const incompleteCustomEgress = customEgress.some((rule) => !rule.cidr);
+  const incompleteCustomEgress = customEgress.some((rule) =>
+    rule.destinationType === "domain" ? !rule.domain : !rule.cidr
+  );
   if (incompleteCustomEgress) {
-    throw new Error("Custom egress rules require a CIDR.");
+    throw new Error("Custom egress rules require a CIDR or domain.");
   }
   return {
     allowKubernetesApi: value.allowKubernetesApi,

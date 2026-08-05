@@ -101,6 +101,53 @@ def test_install_request_accepts_secret_handle_file_content() -> None:
     }
 
 
+def test_install_request_accepts_domain_custom_egress() -> None:
+    payload = MCPServerInstallRequest(
+        networkPolicy={
+            "denyOtherEgress": True,
+            "customEgress": [
+                {
+                    "destinationType": "domain",
+                    "label": "vendor-api",
+                    "domain": "API.Example.COM.",
+                    "ports": [443, 8443, 443],
+                },
+            ],
+        }
+    )
+
+    assert payload.model_dump(mode="json", by_alias=True)["networkPolicy"][
+        "customEgress"
+    ] == [
+        {
+            "destinationType": "domain",
+            "label": "vendor-api",
+            "cidr": "",
+            "domain": "api.example.com",
+            "ports": [443, 8443],
+        }
+    ]
+
+    error = None
+    try:
+        MCPServerInstallRequest(
+            networkPolicy={
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {
+                        "destinationType": "domain",
+                        "domain": "192.168.3.1",
+                        "ports": [443],
+                    },
+                ],
+            }
+        )
+    except ValueError as exc:
+        error = exc
+
+    assert error is not None
+
+
 def test_mcp_server_document_rejects_mcpb_packages() -> None:
     error = None
     try:

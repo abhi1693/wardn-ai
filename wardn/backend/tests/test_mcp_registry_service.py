@@ -1155,8 +1155,10 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
         "inClusterKubernetesApi": True,
         "customEgress": [
             {
+                "destinationType": "cidr",
                 "label": "unifi-access",
                 "cidr": "192.168.3.1/32",
+                "domain": "",
                 "ports": [443],
             }
         ],

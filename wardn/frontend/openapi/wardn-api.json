@@ -4907,9 +4907,24 @@
       "MCPRuntimeNetworkPolicyCustomEgress": {
         "properties": {
           "cidr": {
+            "default": "",
             "maxLength": 64,
-            "minLength": 1,
             "title": "Cidr",
+            "type": "string"
+          },
+          "destinationType": {
+            "default": "cidr",
+            "enum": [
+              "cidr",
+              "domain"
+            ],
+            "title": "Destinationtype",
+            "type": "string"
+          },
+          "domain": {
+            "default": "",
+            "maxLength": 253,
+            "title": "Domain",
             "type": "string"
           },
           "label": {
@@ -4928,9 +4943,6 @@
             "type": "array"
           }
         },
-        "required": [
-          "cidr"
-        ],
         "title": "MCPRuntimeNetworkPolicyCustomEgress",
         "type": "object"
       },

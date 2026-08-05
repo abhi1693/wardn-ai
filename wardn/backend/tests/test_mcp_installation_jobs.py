@@ -374,7 +374,13 @@ async def test_enqueue_installation_includes_network_policy(monkeypatch) -> None
         "privateEgressPorts": [80, 443],
         "inClusterKubernetesApi": False,
         "customEgress": [
-            {"label": "rancher", "cidr": "192.168.3.3/32", "ports": [443]},
+            {
+                "destinationType": "cidr",
+                "label": "rancher",
+                "cidr": "192.168.3.3/32",
+                "domain": "",
+                "ports": [443],
+            },
         ],
     }
     assert seen["network_policy_limits"]["network_policy_config"] == desired_state["networkPolicy"]

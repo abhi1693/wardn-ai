@@ -165,6 +165,7 @@ export * from './mCPRuntimeEventReadMetadata';
 export * from './mCPRuntimeInstallationControlResponse';
 export * from './mCPRuntimeNetworkPolicyConfig';
 export * from './mCPRuntimeNetworkPolicyCustomEgress';
+export * from './mCPRuntimeNetworkPolicyCustomEgressDestinationType';
 export * from './mCPRuntimeServerError';
 export * from './mCPRuntimeSessionHealthResponse';
 export * from './mCPRuntimeSessionHealthResponseDetails';

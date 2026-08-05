@@ -4,13 +4,14 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { MCPRuntimeNetworkPolicyCustomEgressDestinationType } from './mCPRuntimeNetworkPolicyCustomEgressDestinationType';
 
 export interface MCPRuntimeNetworkPolicyCustomEgress {
-  /**
-     * @minLength 1
-     * @maxLength 64
-     */
-  cidr: string;
+  /** @maxLength 64 */
+  cidr?: string;
+  destinationType?: MCPRuntimeNetworkPolicyCustomEgressDestinationType;
+  /** @maxLength 253 */
+  domain?: string;
   /** @maxLength 120 */
   label?: string;
   /**

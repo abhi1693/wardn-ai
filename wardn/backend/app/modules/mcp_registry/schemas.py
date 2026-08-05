@@ -1,9 +1,10 @@
 import ipaddress
+import re
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from app.core.pagination import CursorPageMetadata
 from app.core.schemas import APIModel
@@ -22,6 +23,7 @@ MCPOperationCleanupStatus = Literal[
     "succeeded",
     "failed",
 ]
+NETWORK_POLICY_DOMAIN_LABEL_PATTERN = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 
 
 class MCPSecretHandleConfigValue(APIModel):
@@ -41,17 +43,40 @@ MCPConfigValue = str | MCPFileConfigValue | MCPSecretHandleConfigValue
 
 
 class MCPRuntimeNetworkPolicyCustomEgress(APIModel):
+    destination_type: Literal["cidr", "domain"] = "cidr"
     label: str = Field(default="", max_length=120)
-    cidr: str = Field(min_length=1, max_length=64)
+    cidr: str = Field(default="", max_length=64)
+    domain: str = Field(default="", max_length=253)
     ports: list[int] = Field(default_factory=lambda: [443], min_length=1, max_length=16)
 
     @field_validator("cidr")
     @classmethod
     def validate_cidr(cls, value: str) -> str:
+        if not value.strip():
+            return ""
         try:
             return str(ipaddress.ip_network(value.strip(), strict=False))
         except ValueError as exc:
             raise ValueError("cidr must be a valid IP network") from exc
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        domain = value.strip().rstrip(".").lower()
+        if not domain:
+            return ""
+        if len(domain) > 253:
+            raise ValueError("domain must be 253 characters or fewer")
+        try:
+            ipaddress.ip_address(domain)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("domain must be a hostname")
+        labels = domain.split(".")
+        if any(not NETWORK_POLICY_DOMAIN_LABEL_PATTERN.fullmatch(label) for label in labels):
+            raise ValueError("domain must be a valid hostname")
+        return domain
 
     @field_validator("ports")
     @classmethod
@@ -63,6 +88,16 @@ class MCPRuntimeNetworkPolicyCustomEgress(APIModel):
             if port not in ports:
                 ports.append(port)
         return ports
+
+    @model_validator(mode="after")
+    def validate_destination(self) -> "MCPRuntimeNetworkPolicyCustomEgress":
+        if self.destination_type == "domain":
+            if not self.domain:
+                raise ValueError("domain is required for domain egress")
+            return self
+        if not self.cidr:
+            raise ValueError("cidr is required for cidr egress")
+        return self
 
 
 class MCPRuntimeNetworkPolicyConfig(APIModel):

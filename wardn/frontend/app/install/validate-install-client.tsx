@@ -140,7 +140,7 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   }
   const denyOtherEgress = rawPolicy.denyOtherEgress ?? rawPolicy.isolationEnabled;
   if (denyOtherEgress === false) {
-    return ["Default-deny egress off"];
+    return ["Allow all egress"];
   }
   const details = ["Default-deny egress"];
   if (rawPolicy.allowRemoteMcpEgress !== false) {

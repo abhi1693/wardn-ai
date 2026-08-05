@@ -320,8 +320,10 @@ export function InstallFormClient({
         ...current.customEgress,
         {
           id: `custom-egress-${customEgressId.current}`,
+          destinationType: "cidr",
           label: "",
           cidr: "",
+          domain: "",
           ports: "443",
         },
       ],
@@ -791,8 +793,8 @@ export function InstallFormClient({
 
                 {!networkPolicy.denyOtherEgress ? (
                   <AsyncFeedback variant="info">
-                    Saving with default-deny off removes Wardn-managed runtime NetworkPolicies
-                    for this connection.
+                    Saving with default-deny off creates a Wardn-managed allow-all egress
+                    policy for this connection.
                   </AsyncFeedback>
                 ) : null}
 
@@ -802,7 +804,7 @@ export function InstallFormClient({
                       <div>
                         <Label>Custom egress</Label>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Add CIDR-scoped destinations this runtime may reach.
+                          Add CIDR or domain destinations this runtime may reach.
                         </p>
                       </div>
                       <Button onClick={addCustomEgressRule} size="sm" type="button" variant="outline">
@@ -818,7 +820,28 @@ export function InstallFormClient({
                     ) : null}
 
                     {networkPolicy.customEgress.map((rule) => (
-                      <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(8rem,.7fr)_auto]" key={rule.id}>
+                      <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(8rem,.8fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(8rem,.7fr)_auto]" key={rule.id}>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`${rule.id}-type`}>Type</Label>
+                          <Select
+                            onValueChange={(value) =>
+                              updateCustomEgressRule(rule.id, {
+                                destinationType: value === "domain" ? "domain" : "cidr",
+                                cidr: value === "domain" ? "" : rule.cidr,
+                                domain: value === "domain" ? rule.domain : "",
+                              })
+                            }
+                            value={rule.destinationType}
+                          >
+                            <SelectTrigger id={`${rule.id}-type`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cidr">CIDR</SelectItem>
+                              <SelectItem value="domain">Domain</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <div className="space-y-1.5">
                           <Label htmlFor={`${rule.id}-label`}>Label</Label>
                           <Input
@@ -829,12 +852,21 @@ export function InstallFormClient({
                           />
                         </div>
                         <div className="space-y-1.5">
-                          <Label htmlFor={`${rule.id}-cidr`}>CIDR</Label>
+                          <Label htmlFor={`${rule.id}-destination`}>
+                            {rule.destinationType === "domain" ? "Domain" : "CIDR"}
+                          </Label>
                           <Input
-                            id={`${rule.id}-cidr`}
-                            onChange={(event) => updateCustomEgressRule(rule.id, { cidr: event.target.value })}
-                            placeholder="192.168.3.1/32"
-                            value={rule.cidr}
+                            id={`${rule.id}-destination`}
+                            onChange={(event) =>
+                              updateCustomEgressRule(
+                                rule.id,
+                                rule.destinationType === "domain"
+                                  ? { domain: event.target.value }
+                                  : { cidr: event.target.value },
+                              )
+                            }
+                            placeholder={rule.destinationType === "domain" ? "api.example.com" : "192.168.3.1/32"}
+                            value={rule.destinationType === "domain" ? rule.domain : rule.cidr}
                           />
                         </div>
                         <div className="space-y-1.5">

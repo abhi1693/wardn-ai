@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shlex
 import socket
 from ipaddress import ip_address, ip_network
@@ -71,6 +72,7 @@ from app.modules.mcp_runtime.providers.kubernetes_types import (
 )
 
 logger = logging.getLogger(__name__)
+NETWORK_POLICY_DOMAIN_LABEL_PATTERN = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 
 POD_SECURITY_RESTRICTED_LABELS = {
     "pod-security.kubernetes.io/enforce": "restricted",
@@ -487,6 +489,22 @@ def normalize_network_policy_ports(
     return ports
 
 
+def normalize_network_policy_domain(value: Any) -> str:
+    domain = str(value or "").strip().rstrip(".").lower()
+    if not domain:
+        return ""
+    if ip_cidr_for_address(domain) is not None:
+        raise KubernetesMetadataError("Kubernetes runtime custom egress domain must be a hostname")
+    if len(domain) > 253:
+        raise KubernetesMetadataError(
+            "Kubernetes runtime custom egress domain is too long"
+        )
+    labels = domain.split(".")
+    if any(not NETWORK_POLICY_DOMAIN_LABEL_PATTERN.fullmatch(label) for label in labels):
+        raise KubernetesMetadataError("Kubernetes runtime custom egress domain is invalid")
+    return domain
+
+
 def normalize_custom_egress_rules(raw_rules: Any) -> list[dict[str, Any]]:
     if raw_rules is None:
         return []
@@ -499,6 +517,38 @@ def normalize_custom_egress_rules(raw_rules: Any) -> list[dict[str, Any]]:
     for raw_rule in raw_rules:
         if not isinstance(raw_rule, dict):
             raise KubernetesMetadataError("Kubernetes runtime custom egress rule is invalid")
+        ports = normalize_network_policy_ports(
+            raw_rule.get("ports"),
+            default=[443],
+            field_name="Kubernetes runtime custom egress ports",
+        )
+        label = str(raw_rule.get("label") or "").strip()[:120]
+        destination_type = str(
+            raw_rule.get("destinationType") or raw_rule.get("destination_type") or ""
+        ).strip().casefold()
+        if not destination_type:
+            destination_type = "domain" if str(raw_rule.get("domain") or "").strip() else "cidr"
+        if destination_type not in {"cidr", "domain"}:
+            raise KubernetesMetadataError(
+                "Kubernetes runtime custom egress destination type is invalid"
+            )
+
+        if destination_type == "domain":
+            domain = normalize_network_policy_domain(raw_rule.get("domain"))
+            if not domain:
+                raise KubernetesMetadataError(
+                    "Kubernetes runtime custom egress domain is required"
+                )
+            rules.append(
+                {
+                    "label": label,
+                    "destinationType": "domain",
+                    "domain": domain,
+                    "ports": ports,
+                }
+            )
+            continue
+
         raw_cidr = str(raw_rule.get("cidr") or "").strip()
         if not raw_cidr:
             raise KubernetesMetadataError("Kubernetes runtime custom egress cidr is required")
@@ -508,13 +558,14 @@ def normalize_custom_egress_rules(raw_rules: Any) -> list[dict[str, Any]]:
             raise KubernetesMetadataError(
                 "Kubernetes runtime custom egress cidr is invalid"
             ) from exc
-        ports = normalize_network_policy_ports(
-            raw_rule.get("ports"),
-            default=[443],
-            field_name="Kubernetes runtime custom egress ports",
+        rules.append(
+            {
+                "label": label,
+                "destinationType": "cidr",
+                "cidr": cidr,
+                "ports": ports,
+            }
         )
-        label = str(raw_rule.get("label") or "").strip()[:120]
-        rules.append({"label": label, "cidr": cidr, "ports": ports})
     return rules
 
 
@@ -1897,6 +1948,7 @@ def runtime_network_policy_names(names: KubernetesRuntimeNames) -> tuple[str, ..
         safe_kubernetes_name(f"{names.pod_name}-allow-kubernetes-api-egress"),
         safe_kubernetes_name(f"{names.pod_name}-allow-custom-egress"),
         safe_kubernetes_name(f"{names.pod_name}-allow-remote-mcp-egress"),
+        safe_kubernetes_name(f"{names.pod_name}-allow-all-egress"),
     )
 
 
@@ -1924,6 +1976,13 @@ def runtime_custom_network_policy_refs(
             plural=CILIUM_NETWORK_POLICY_PLURAL,
             kind=CILIUM_NETWORK_POLICY_KIND,
             name=safe_kubernetes_name(f"{names.pod_name}-allow-cilium-remote-mcp-egress"),
+        ),
+        KubernetesCustomNetworkPolicyRef(
+            group=CILIUM_NETWORK_POLICY_GROUP,
+            version=CILIUM_NETWORK_POLICY_VERSION,
+            plural=CILIUM_NETWORK_POLICY_PLURAL,
+            kind=CILIUM_NETWORK_POLICY_KIND,
+            name=safe_kubernetes_name(f"{names.pod_name}-allow-cilium-custom-egress"),
         ),
     )
 
@@ -1964,6 +2023,29 @@ def build_default_deny_network_policy(
             egress=[],
         ),
     )
+
+
+def build_allow_all_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_name: str,
+    client_module: Any | None = None,
+) -> Any:
+    client = kubernetes_client_module(client_module)
+    return client.V1NetworkPolicy(
+        metadata=client.V1ObjectMeta(
+            name=policy_name,
+            namespace=names.namespace,
+            labels=labels,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=label_selector(service_selector(labels), client),
+            policy_types=["Egress"],
+            egress=[client.V1NetworkPolicyEgressRule()],
+        ),
+    )
+
 
 def build_runtime_ingress_network_policy(
     *,
@@ -2383,7 +2465,9 @@ def build_custom_network_policy_manifests(
         return []
 
     backend = network_policy_backend(network_discovery)
-    cilium_kube_ref, calico_kube_ref, cilium_remote_ref = runtime_custom_network_policy_refs(names)
+    cilium_kube_ref, calico_kube_ref, cilium_remote_ref, cilium_custom_ref = (
+        runtime_custom_network_policy_refs(names)
+    )
     custom_policies: list[KubernetesCustomNetworkPolicy] = []
     if policy_config["allowKubernetesApi"] and backend == "cilium":
         custom_policies.append(
@@ -2416,6 +2500,15 @@ def build_custom_network_policy_manifests(
         )
         if cilium_remote_policy is not None:
             custom_policies.append(cilium_remote_policy)
+    if backend == "cilium" and custom_egress_domain_rules(policy_config["customEgress"]):
+        cilium_custom_policy = build_cilium_custom_egress_network_policy(
+            names=names,
+            labels=labels,
+            policy_ref=cilium_custom_ref,
+            rules=custom_egress_domain_rules(policy_config["customEgress"]),
+        )
+        if cilium_custom_policy is not None:
+            custom_policies.append(cilium_custom_policy)
     return custom_policies
 
 
@@ -2446,6 +2539,87 @@ def build_custom_egress_network_policy(
     )
 
 
+def custom_egress_domain_rules(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        rule
+        for rule in rules
+        if rule.get("destinationType") == "domain" and str(rule.get("domain") or "").strip()
+    ]
+
+
+def custom_egress_ip_block_rules(
+    rules: list[dict[str, Any]],
+    *,
+    resolve_domains: bool,
+) -> list[dict[str, Any]]:
+    ip_rules: list[dict[str, Any]] = []
+    for rule in rules:
+        if rule.get("destinationType") == "domain":
+            if not resolve_domains:
+                continue
+            for cidr in resolve_remote_host_cidrs(rule["domain"]):
+                ip_rules.append(
+                    {
+                        "label": rule.get("label") or rule["domain"],
+                        "cidr": cidr,
+                        "ports": rule["ports"],
+                    }
+                )
+            continue
+        ip_rules.append(
+            {
+                "label": rule.get("label") or rule["cidr"],
+                "cidr": rule["cidr"],
+                "ports": rule["ports"],
+            }
+        )
+    return ip_rules
+
+
+def build_cilium_custom_egress_network_policy(
+    *,
+    names: KubernetesRuntimeNames,
+    labels: dict[str, str],
+    policy_ref: KubernetesCustomNetworkPolicyRef,
+    rules: list[dict[str, Any]],
+) -> KubernetesCustomNetworkPolicy | None:
+    egress = [
+        {
+            "toFQDNs": [{"matchName": rule["domain"]}],
+            "toPorts": [
+                {
+                    "ports": [
+                        {"port": str(port), "protocol": "TCP"}
+                        for port in rule["ports"]
+                    ],
+                }
+            ],
+        }
+        for rule in rules
+    ]
+    if not egress:
+        return None
+
+    return KubernetesCustomNetworkPolicy(
+        ref=policy_ref,
+        body={
+            "apiVersion": f"{policy_ref.group}/{policy_ref.version}",
+            "kind": policy_ref.kind,
+            "metadata": {
+                "name": policy_ref.name,
+                "namespace": names.namespace,
+                "labels": labels,
+            },
+            "spec": {
+                "endpointSelector": {
+                    "matchLabels": service_selector(labels),
+                },
+                "egress": egress,
+            },
+        },
+    )
+
+
 def build_network_policy_manifests(
     installation: MCPServerInstallation,
     *,
@@ -2460,11 +2634,19 @@ def build_network_policy_manifests(
     if not runtime_settings.mcp_runtime_kubernetes_network_policy_enabled:
         return []
     policy_config = network_policy_config(installation, settings=runtime_settings)
-    if not policy_config["isolationEnabled"]:
-        return []
-
     policy_names = runtime_network_policy_names(names)
+    if not policy_config["isolationEnabled"]:
+        return [
+            build_allow_all_egress_network_policy(
+                names=names,
+                labels=labels,
+                policy_name=policy_names[8],
+                client_module=client_module,
+            )
+        ]
+
     client = kubernetes_client_module(client_module)
+    backend = network_policy_backend(network_discovery)
     policies = [
         build_default_deny_network_policy(
             names=names,
@@ -2519,18 +2701,23 @@ def build_network_policy_manifests(
         if kubernetes_api_policy is not None:
             policies.append(kubernetes_api_policy)
     if policy_config["customEgress"]:
-        policies.append(
-            build_custom_egress_network_policy(
-                names=names,
-                labels=labels,
-                policy_name=policy_names[6],
-                rules=policy_config["customEgress"],
-                client_module=client,
-            )
+        custom_ip_rules = custom_egress_ip_block_rules(
+            policy_config["customEgress"],
+            resolve_domains=backend != "cilium",
         )
+        if custom_ip_rules:
+            policies.append(
+                build_custom_egress_network_policy(
+                    names=names,
+                    labels=labels,
+                    policy_name=policy_names[6],
+                    rules=custom_ip_rules,
+                    client_module=client,
+                )
+            )
     if (
         policy_config["allowRemoteMcpEgress"]
-        and network_policy_backend(network_discovery) != "cilium"
+        and backend != "cilium"
     ):
         remote_mcp_policy = build_remote_mcp_egress_network_policy(
             names=names,

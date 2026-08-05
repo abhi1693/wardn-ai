@@ -52,6 +52,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
 )
 from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
     package_transport_remote_destinations,
+    service_selector,
 )
 
 
@@ -1220,6 +1221,145 @@ def test_runtime_manifest_keeps_intent_custom_egress_rules(
     assert [(port.protocol, port.port) for port in custom_policy.spec.egress[0].ports] == [
         ("TCP", 443)
     ]
+
+
+def test_runtime_manifest_keeps_cilium_custom_domain_egress_rules(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {
+                        "label": "vendor-api",
+                        "destinationType": "domain",
+                        "domain": "api.example.com",
+                        "ports": [443, 8443],
+                    },
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        network_discovery=cilium_network_discovery(),
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    policy_names = {policy.metadata.name for policy in manifest.network_policies}
+    assert not any(name.endswith("-allow-custom-egress") for name in policy_names)
+    cilium_policy = next(
+        policy
+        for policy in manifest.custom_network_policies
+        if policy.ref.name.endswith("-allow-cilium-custom-egress")
+    )
+    egress = cilium_policy.body["spec"]["egress"][0]
+    assert egress["toFQDNs"] == [{"matchName": "api.example.com"}]
+    assert egress["toPorts"][0]["ports"] == [
+        {"port": "443", "protocol": "TCP"},
+        {"port": "8443", "protocol": "TCP"},
+    ]
+
+
+def test_runtime_manifest_allows_all_egress_when_default_deny_disabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: "/usr/bin/node",
+    )
+    installation = MCPServerInstallation(
+        workspace_id=uuid.uuid4(),
+        server_name="io.github.example/weather",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "command": "node",
+            "args": ["weather-mcp"],
+            "cwd": str(tmp_path),
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "denyOtherEgress": False,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=installation.workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert len(manifest.network_policies) == 1
+    allow_all_policy = manifest.network_policies[0]
+    assert allow_all_policy.metadata.name.endswith("-allow-all-egress")
+    assert allow_all_policy.spec.policy_types == ["Egress"]
+    assert allow_all_policy.spec.pod_selector.match_labels == service_selector(manifest.labels)
+    assert len(allow_all_policy.spec.egress) == 1
+    assert allow_all_policy.spec.egress[0].__dict__ == {}
 
 
 def test_runtime_manifest_can_create_ingress_for_traefik_and_external_dns(
