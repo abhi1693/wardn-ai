@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
-  Gauge,
   History,
   Loader2,
   Search,
@@ -15,9 +14,10 @@ import {
   UserRound,
   Wrench,
   XCircle,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,14 +56,12 @@ type SkillsClientProps = {
   workspaceId: string;
 };
 
-type SkillTab = "overview" | "agents" | "discover" | "activity" | "governance";
+type SkillTab = "overview" | "agents" | "evidence";
 
 const tabs: { id: SkillTab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "agents", label: "Agents" },
-  { id: "discover", label: "Discover" },
-  { id: "activity", label: "Activity" },
-  { id: "governance", label: "Governance" },
+  { id: "evidence", label: "Run Evidence" },
 ];
 
 function statusVariant(status?: string | null) {
@@ -79,6 +77,10 @@ function statusVariant(status?: string | null) {
 
 function formatCount(value?: number | null) {
   return new Intl.NumberFormat("en").format(value ?? 0);
+}
+
+function formatUnitCount(value: number, singular: string, plural = `${singular}s`) {
+  return `${formatCount(value)} ${value === 1 ? singular : plural}`;
 }
 
 function formatDate(value?: string | null) {
@@ -112,7 +114,7 @@ function MetricCard({
   value,
 }: {
   description: string;
-  icon: typeof Activity;
+  icon: LucideIcon;
   label: string;
   value: string;
 }) {
@@ -149,12 +151,41 @@ function ActivityBadge({ activity }: { activity: AgentSkillActivityRead }) {
     return <Badge variant="secondary">Search</Badge>;
   }
   if (eventType === "fetch") {
-    return <Badge variant="secondary">Fetch</Badge>;
+    return <Badge variant="success">Fetched</Badge>;
   }
   if (eventType === "selected") {
     return <Badge variant="outline">Selected</Badge>;
   }
   return <Badge variant="outline">Activity</Badge>;
+}
+
+function ActionCard({
+  action,
+  children,
+  icon: Icon,
+  title,
+}: {
+  action?: ReactNode;
+  children: ReactNode;
+  icon: LucideIcon;
+  title: string;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <Icon className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">{title}</div>
+            <div className="mt-1 text-sm leading-6 text-muted-foreground">{children}</div>
+          </div>
+        </div>
+        {action}
+      </div>
+    </div>
+  );
 }
 
 export function SkillsClient({
@@ -166,6 +197,8 @@ export function SkillsClient({
   const [activeTab, setActiveTab] = useState<SkillTab>("overview");
   const [query, setQuery] = useState("kubernetes ops");
   const [results, setResults] = useState<AgentSkillSearchResultRead[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [resultCount, setResultCount] = useState<number | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [updatingAgentId, setUpdatingAgentId] = useState("");
   const [error, setError] = useState("");
@@ -179,45 +212,51 @@ export function SkillsClient({
   const usage = catalog.usageSummary ?? {};
   const findSkills = skills.find((skill) => skill.id === FIND_SKILLS_SKILL_ID);
   const enabledAgents = agents.filter(skillEnabled);
+  const disabledAgents = agents.filter((agent) => !skillEnabled(agent));
+  const unusedEnabledAgents = enabledAgents.filter((agent) => (agent.callsLast7d ?? 0) === 0);
   const lastUsed = usage.lastUsedAt ?? recentActivity[0]?.createdAt ?? null;
 
-  const tabCounts = useMemo(
-    () => ({
-      overview: usage.skillEventsLast7d ?? 0,
-      agents: enabledAgents.length,
-      discover: results.length || recommendations.length,
-      activity: recentActivity.length,
-      governance: skills.length,
-    }),
-    [
-      enabledAgents.length,
-      recentActivity.length,
-      recommendations.length,
-      results.length,
-      skills.length,
-      usage.skillEventsLast7d,
-    ]
-  );
+  const previewShortcuts =
+    recommendations.length > 0
+      ? recommendations.map((recommendation) => ({
+          description: recommendation.description,
+          id: recommendation.id,
+          query: recommendation.query,
+          title: recommendation.title,
+        }))
+      : workflows.map((workflow) => ({
+          description: workflow.description,
+          id: workflow.id,
+          query: workflow.query,
+          title: workflow.title,
+        }));
+
+  const tabCounts = {
+    overview: usage.skillRunsLast7d ?? 0,
+    agents: enabledAgents.length,
+    evidence: recentActivity.length,
+  };
 
   async function runSearch(nextQuery: string) {
     const normalizedQuery = nextQuery.trim();
     if (normalizedQuery.length < 3) {
       return;
     }
-    setActiveTab("discover");
     setQuery(normalizedQuery);
     setIsSearching(true);
     setError("");
-    setNotice("");
+    setResultCount(null);
+    setHasSearched(true);
     try {
       const payload = await workspaceSkillsSearch(organizationId, workspaceId, {
         query: normalizedQuery,
         limit: 8,
       });
       setResults(normalizeResults(payload.results));
-      setNotice(`Found ${payload.count ?? 0} matching skill${payload.count === 1 ? "" : "s"}.`);
+      setResultCount(payload.count ?? 0);
     } catch (caught) {
       setResults([]);
+      setResultCount(0);
       setError(caught instanceof Error ? caught.message : "Skill search failed.");
     } finally {
       setIsSearching(false);
@@ -274,8 +313,8 @@ export function SkillsClient({
       });
       setNotice(
         enabled
-          ? `${updatedAgent.name} can now search Wardn Hub skills.`
-          : `${updatedAgent.name} will not use Wardn Hub skill discovery.`
+          ? `${updatedAgent.name} can now search Wardn Hub guidance during runs.`
+          : `${updatedAgent.name} will not search Wardn Hub guidance during runs.`
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update agent skills.");
@@ -311,48 +350,56 @@ export function SkillsClient({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Sparkles className="size-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold tracking-normal">Skill Operations</h2>
+              <h2 className="text-base font-semibold tracking-normal">Agent Skill Guidance</h2>
               <Badge variant={enabledAgents.length > 0 ? "success" : "secondary"}>
-                {formatCount(enabledAgents.length)} enabled
+                {formatCount(enabledAgents.length)} of {formatCount(agents.length)} agents enabled
               </Badge>
             </div>
-            <div className="mt-1 text-sm leading-5 text-muted-foreground">
-              Configured skills, observed usage, and Wardn Hub discovery in one place.
+            <div className="mt-1 max-w-4xl text-sm leading-5 text-muted-foreground">
+              Wardn currently has one runtime skill capability: Find Skills. It lets enabled agents
+              search Wardn Hub for vetted guidance during a run, then records whether that actually
+              happened.
             </div>
           </div>
           {findSkills?.url ? (
             <Button asChild size="sm" variant="outline">
               <a href={findSkills.url} rel="noreferrer" target="_blank">
-                Open Hub
+                Open Hub record
                 <ExternalLink className="size-4" />
               </a>
             </Button>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-1 border-b border-border/80 bg-muted/30 px-3 py-2">
-          {tabs.map((tab) => (
-            <button
-              className={cn(
-                "inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm transition-colors",
-                activeTab === tab.id
-                  ? "bg-card text-foreground shadow-[var(--shadow-card)]"
-                  : "text-muted-foreground hover:bg-card/70 hover:text-foreground"
-              )}
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              type="button"
-            >
-              {tab.label}
-              <span
+          {tabs.map((tab) => {
+            const selected = activeTab === tab.id;
+            return (
+              <button
+                aria-pressed={selected}
                 className={cn(
-                  "rounded-sm border border-border bg-muted px-1.5 py-0.5",
-                  "text-[11px] leading-none text-muted-foreground"
+                  "inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm transition-colors",
+                  selected
+                    ? "border-neutral-900 bg-neutral-900 font-medium text-white shadow-[var(--shadow-card)]"
+                    : "border-transparent text-muted-foreground hover:bg-card/70 hover:text-foreground"
                 )}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                type="button"
               >
-                {formatCount(tabCounts[tab.id])}
-              </span>
-            </button>
-          ))}
+                {tab.label}
+                <span
+                  className={cn(
+                    "rounded-sm border px-1.5 py-0.5 text-[11px] leading-none",
+                    selected
+                      ? "border-white/20 bg-white/15 text-white"
+                      : "border-border bg-muted text-muted-foreground"
+                  )}
+                >
+                  {formatCount(tabCounts[tab.id])}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -360,31 +407,27 @@ export function SkillsClient({
         <div className="space-y-4">
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
-              description={`${formatCount(usage.totalAgents ?? agents.length)} workspace agents.`}
+              description="Coverage decides which agents are allowed to retrieve Hub guidance."
               icon={UserRound}
-              label="Agents with skills"
-              value={`${formatCount(usage.enabledAgents ?? enabledAgents.length)}/${formatCount(
-                usage.totalAgents ?? agents.length
-              )}`}
+              label="Skill coverage"
+              value={`${formatCount(enabledAgents.length)}/${formatCount(agents.length)}`}
             />
             <MetricCard
-              description={`${formatCount(usage.skillRunsLast7d)} runs used at least one skill.`}
+              description="If this is zero, enabled agents have not needed or chosen skill guidance."
               icon={Activity}
-              label="Skill events"
-              value={formatCount(usage.skillEventsLast7d)}
+              label="Runs using guidance"
+              value={formatCount(usage.skillRunsLast7d)}
             />
             <MetricCard
-              description={`${formatCount(usage.searchesLast7d)} searches, ${formatCount(
-                usage.fetchesLast7d
-              )} fetches.`}
+              description="Searches find candidates; fetches load selected guidance into the run."
               icon={Search}
-              label="Discovery"
-              value={formatCount((usage.searchesLast7d ?? 0) + (usage.fetchesLast7d ?? 0))}
+              label="Search and fetch"
+              value={`${formatCount(usage.searchesLast7d)} / ${formatCount(usage.fetchesLast7d)}`}
             />
             <MetricCard
-              description={`Last observed ${formatDate(lastUsed)}.`}
-              icon={Gauge}
-              label="Failures"
+              description={`Last observed use: ${formatDate(lastUsed)}.`}
+              icon={ShieldCheck}
+              label="Skill issues"
               value={formatCount(usage.failuresLast7d)}
             />
           </section>
@@ -392,57 +435,210 @@ export function SkillsClient({
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
             <Card>
               <CardHeader>
-                <CardTitle>Installed Capability</CardTitle>
+                <CardTitle>What Needs Attention</CardTitle>
                 <CardDescription>
-                  Wardn currently exposes audited Hub discovery as the workspace skill capability.
+                  Actions are based on current coverage and observed run evidence.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {findSkills ? (
-                  <div className="rounded-md border border-border p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{findSkills.name}</div>
-                        <div className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {findSkills.description}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant={findSkills.installed ? "success" : "secondary"}>
-                          {findSkills.installed ? "Installed" : "Available"}
-                        </Badge>
-                        <Badge variant={statusVariant(findSkills.auditStatus)}>
-                          Audit {findSkills.auditStatus ?? "unknown"}
-                        </Badge>
-                        <Badge variant={statusVariant(findSkills.healthStatus)}>
-                          {findSkills.healthStatus ?? "unknown"}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                      {(findSkills.permissions ?? []).map((permission) => (
-                        <div className="rounded-md border border-border bg-muted/20 p-3" key={permission.key}>
-                          <div className="flex items-center gap-2 text-sm font-medium">
-                            <ShieldCheck className="size-4 text-muted-foreground" />
-                            {permission.label}
-                          </div>
-                          <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                            {permission.description}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+              <CardContent className="space-y-3">
+                {disabledAgents.length > 0 ? (
+                  <ActionCard
+                    action={
+                      <Button onClick={() => setActiveTab("agents")} size="sm" type="button">
+                        Review agents
+                        <ArrowRight className="size-4" />
+                      </Button>
+                    }
+                    icon={UserRound}
+                    title={`${formatUnitCount(disabledAgents.length, "agent")} cannot use Hub guidance`}
+                  >
+                    Enable Find Skills only for agents that handle specialist work such as
+                    Kubernetes, SEO, observability, marketing, or troubleshooting.
+                  </ActionCard>
                 ) : (
-                  <EmptyState>No skill capability is registered for this workspace.</EmptyState>
+                  <ActionCard icon={CheckCircle2} title="All agents can use Hub guidance">
+                    Coverage is complete. Use run evidence to confirm whether agents are actually
+                    searching when specialized work appears.
+                  </ActionCard>
+                )}
+
+                {enabledAgents.length > 0 && unusedEnabledAgents.length > 0 ? (
+                  <ActionCard
+                    action={
+                      <Button onClick={() => setActiveTab("agents")} size="sm" type="button" variant="outline">
+                        View agents
+                      </Button>
+                    }
+                    icon={History}
+                    title={`${formatUnitCount(
+                      unusedEnabledAgents.length,
+                      "enabled agent",
+                      "enabled agents"
+                    )} ${unusedEnabledAgents.length === 1 ? "has" : "have"} no recent usage`}
+                  >
+                    This is fine for general agents. For specialist agents, tune their instructions
+                    to search Wardn Hub before starting unfamiliar domain work.
+                  </ActionCard>
+                ) : null}
+
+                {(usage.failuresLast7d ?? 0) > 0 ? (
+                  <ActionCard
+                    action={
+                      <Button onClick={() => setActiveTab("evidence")} size="sm" type="button" variant="outline">
+                        Open evidence
+                      </Button>
+                    }
+                    icon={XCircle}
+                    title={`${formatUnitCount(
+                      usage.failuresLast7d ?? 0,
+                      "skill failure",
+                      "skill failures"
+                    )} in the last 7 days`}
+                  >
+                    Open the affected runs to see whether discovery failed, a bundle could not be
+                    fetched, or the agent selected guidance that was not usable.
+                  </ActionCard>
+                ) : (
+                  <ActionCard icon={ShieldCheck} title="No recent skill failures">
+                    The skill gateway is not showing errors in recent persisted run traces.
+                  </ActionCard>
                 )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Recent Skill Activity</CardTitle>
-                <CardDescription>Latest persisted skill events across agent runs.</CardDescription>
+                <CardTitle>How It Works</CardTitle>
+                <CardDescription>Find Skills is a gateway, not a separate app catalog.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <UserRound className="size-4 text-muted-foreground" />
+                    Enable on the right agents
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Disabled agents will never call Find Skills, even if the prompt asks for it.
+                  </div>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Search className="size-4 text-muted-foreground" />
+                    Search and fetch during runs
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    A search means the agent looked for guidance; a fetch means it loaded a specific
+                    skill bundle into context.
+                  </div>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Wrench className="size-4 text-muted-foreground" />
+                    Tool policy still applies
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Skills guide behavior. MCP tool execution still goes through Wardn access rules.
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Preview Hub Guidance</CardTitle>
+                <CardDescription>
+                  Check whether useful guidance exists before editing an agent or scheduled task.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <form className="flex gap-2" onSubmit={submitSearch}>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Label className="sr-only" htmlFor="skill-search">
+                      Search Wardn Hub guidance
+                    </Label>
+                    <Input
+                      id="skill-search"
+                      maxLength={120}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="kubernetes ops"
+                      value={query}
+                    />
+                  </div>
+                  <Button disabled={isSearching || query.trim().length < 3} type="submit">
+                    {isSearching ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Search className="size-4" />
+                    )}
+                    Preview
+                  </Button>
+                </form>
+
+                <div className="flex flex-wrap gap-2">
+                  {previewShortcuts.slice(0, 6).map((shortcut) => (
+                    <Button
+                      key={shortcut.id}
+                      onClick={() => void runSearch(shortcut.query)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {shortcut.title}
+                    </Button>
+                  ))}
+                </div>
+
+                {hasSearched && resultCount !== null ? (
+                  <div className="text-xs text-muted-foreground">
+                    {formatUnitCount(resultCount, "Hub result")} for &quot;{query}&quot;.
+                  </div>
+                ) : null}
+
+                {!hasSearched ? (
+                  <EmptyState>
+                    Search results will show whether an enabled agent has useful guidance to fetch.
+                  </EmptyState>
+                ) : results.length === 0 ? (
+                  <EmptyState>No matching Hub guidance was found for this query.</EmptyState>
+                ) : (
+                  <div className="space-y-3">
+                    {results.map((result) => (
+                      <div className="rounded-md border border-border p-3" key={result.id}>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium">{result.name || result.id}</div>
+                            <div className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
+                              {result.description}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Badge variant={statusVariant(result.auditStatus)}>
+                                Audit {result.auditStatus ?? "unknown"}
+                              </Badge>
+                              {result.isOfficial ? <Badge variant="success">Official</Badge> : null}
+                              <Badge variant="secondary">{result.sourceName || result.source}</Badge>
+                            </div>
+                          </div>
+                          {result.url ? (
+                            <Button asChild size="icon" title="Open Hub result" variant="outline">
+                              <a href={result.url} rel="noreferrer" target="_blank">
+                                <ExternalLink className="size-4" />
+                              </a>
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Evidence</CardTitle>
+                <CardDescription>Latest runs where Find Skills left a trace.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {recentActivity.length === 0 ? (
@@ -481,9 +677,9 @@ export function SkillsClient({
       {activeTab === "agents" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Agent Skill Controls</CardTitle>
+            <CardTitle>Agent Controls</CardTitle>
             <CardDescription>
-              Enable discovery where the agent benefits from reusable operational guidance.
+              Choose which agents are allowed to search Wardn Hub guidance during runs.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -491,11 +687,9 @@ export function SkillsClient({
               <TableHeader>
                 <TableRow>
                   <TableHead>Agent</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Calls 7d</TableHead>
-                  <TableHead className="text-right">Search</TableHead>
-                  <TableHead className="text-right">Fetch</TableHead>
-                  <TableHead>Last used</TableHead>
+                  <TableHead>Hub guidance</TableHead>
+                  <TableHead>Last 7 days</TableHead>
+                  <TableHead>Last evidence</TableHead>
                   <TableHead className="w-40 text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
@@ -508,26 +702,32 @@ export function SkillsClient({
                         <TableCell>
                           <div className="space-y-1">
                             <div className="font-medium">{agent.name}</div>
-                            <div className="max-w-80 truncate text-xs text-muted-foreground">
+                            <div className="max-w-96 truncate text-xs text-muted-foreground">
                               {(agent.observedSkillIds ?? []).length > 0
-                                ? (agent.observedSkillIds ?? []).join(", ")
+                                ? `Observed: ${(agent.observedSkillIds ?? []).join(", ")}`
                                 : "No observed skill usage"}
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={enabled ? "success" : "secondary"}>
-                            {enabled ? "Enabled" : "Disabled"}
+                            {enabled ? "Allowed" : "Blocked"}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCount(agent.callsLast7d)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCount(agent.searchesLast7d)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCount(agent.fetchesLast7d)}
+                        <TableCell>
+                          <div className="text-sm">
+                            {formatCount(agent.callsLast7d)} calls
+                            <span className="text-muted-foreground">
+                              {" "}
+                              / {formatCount(agent.searchesLast7d)} searches /{" "}
+                              {formatCount(agent.fetchesLast7d)} fetches
+                            </span>
+                          </div>
+                          {(agent.failuresLast7d ?? 0) > 0 ? (
+                            <div className="mt-1 text-xs text-red-600">
+                              {formatCount(agent.failuresLast7d)} failures
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -567,7 +767,7 @@ export function SkillsClient({
                   })
                 ) : (
                   <TableRow>
-                    <TableCell className="h-32 text-center text-muted-foreground" colSpan={7}>
+                    <TableCell className="h-32 text-center text-muted-foreground" colSpan={5}>
                       No workspace agents are available.
                     </TableCell>
                   </TableRow>
@@ -578,151 +778,36 @@ export function SkillsClient({
         </Card>
       ) : null}
 
-      {activeTab === "discover" ? (
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Discover Skills</CardTitle>
-              <CardDescription>Search audited public Wardn Hub guidance.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <form className="flex gap-2" onSubmit={submitSearch}>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <Label className="sr-only" htmlFor="skill-search">
-                    Search skills
-                  </Label>
-                  <Input
-                    id="skill-search"
-                    maxLength={120}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="kubernetes ops"
-                    value={query}
-                  />
-                </div>
-                <Button disabled={isSearching || query.trim().length < 3} type="submit">
-                  {isSearching ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Search className="size-4" />
-                  )}
-                  Search
-                </Button>
-              </form>
-
-              {results.length === 0 ? (
-                <EmptyState>Search results will appear here.</EmptyState>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Skill</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Audit</TableHead>
-                      <TableHead className="text-right">Installs</TableHead>
-                      <TableHead className="w-24 text-right">Open</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {results.map((result) => (
-                      <TableRow key={result.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="font-medium">{result.name || result.id}</div>
-                            <div className="max-w-xl truncate text-xs text-muted-foreground">
-                              {result.description}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{result.source || result.id}</TableCell>
-                        <TableCell>
-                          <Badge variant={statusVariant(result.auditStatus)}>
-                            {result.auditStatus ?? "unknown"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCount(result.installs)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {result.url ? (
-                            <Button asChild size="icon" title="Open skill" variant="outline">
-                              <a href={result.url} rel="noreferrer" target="_blank">
-                                <ExternalLink className="size-4" />
-                              </a>
-                            </Button>
-                          ) : null}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recommended Searches</CardTitle>
-                <CardDescription>Generated from enabled workspace connections.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {recommendations.length === 0 ? (
-                  <EmptyState>No connection-based recommendations are available.</EmptyState>
-                ) : (
-                  recommendations.map((recommendation) => (
-                    <button
-                      className={cn(
-                        "w-full rounded-md border border-border p-3 text-left",
-                        "transition-colors hover:border-neutral-300 hover:bg-muted/40"
-                      )}
-                      key={recommendation.id}
-                      onClick={() => void runSearch(recommendation.query)}
-                      type="button"
-                    >
-                      <div className="text-sm font-medium">{recommendation.title}</div>
-                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {recommendation.description}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Workflow Starters</CardTitle>
-                <CardDescription>Reusable searches for common agent work.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {workflows.map((workflow) => (
-                  <button
-                    className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-md border",
-                      "border-border px-3 py-2 text-left text-sm transition-colors",
-                      "hover:border-neutral-300 hover:bg-muted/40"
-                    )}
-                    key={workflow.id}
-                    onClick={() => void runSearch(workflow.query)}
-                    type="button"
-                  >
-                    <span className="min-w-0 truncate">{workflow.title}</span>
-                    <Search className="size-4 shrink-0 text-muted-foreground" />
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-      ) : null}
-
-      {activeTab === "activity" ? (
+      {activeTab === "evidence" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Skill Activity</CardTitle>
-            <CardDescription>Observed skill events from recent agent run traces.</CardDescription>
+            <CardTitle>Run Evidence</CardTitle>
+            <CardDescription>
+              Actual search, fetch, and selection events persisted from agent run traces.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-border p-3">
+                <div className="text-sm font-medium">Search</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  The agent looked for relevant Wardn Hub guidance.
+                </div>
+              </div>
+              <div className="rounded-md border border-border p-3">
+                <div className="text-sm font-medium">Fetched</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  The agent loaded a specific skill bundle into context.
+                </div>
+              </div>
+              <div className="rounded-md border border-border p-3">
+                <div className="text-sm font-medium">Selected</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  The agent considered a candidate before continuing the run.
+                </div>
+              </div>
+            </div>
+
             <Table>
               <TableHeader>
                 <TableRow>
@@ -789,106 +874,6 @@ export function SkillsClient({
             </Table>
           </CardContent>
         </Card>
-      ) : null}
-
-      {activeTab === "governance" ? (
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Governance</CardTitle>
-              <CardDescription>
-                Audit, source, and runtime boundary for enabled skill capability.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {skills.map((skill) => (
-                <div className="rounded-md border border-border p-4" key={skill.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-medium">{skill.name}</div>
-                      <div className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                        {skill.description}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant={statusVariant(skill.auditStatus)}>
-                        Audit {skill.auditStatus ?? "unknown"}
-                      </Badge>
-                      <Badge variant={statusVariant(skill.healthStatus)}>
-                        {skill.healthStatus ?? "unknown"}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-md bg-muted/40 p-3">
-                      <div className="text-xs font-medium uppercase text-muted-foreground">
-                        Source
-                      </div>
-                      <div className="mt-1 truncate text-sm font-medium">
-                        {skill.source || skill.id}
-                      </div>
-                    </div>
-                    <div className="rounded-md bg-muted/40 p-3">
-                      <div className="text-xs font-medium uppercase text-muted-foreground">
-                        Audit score
-                      </div>
-                      <div className="mt-1 text-sm font-medium">
-                        {skill.auditScore ?? "Unknown"}
-                        {skill.auditRank ? ` / ${skill.auditRank}` : ""}
-                      </div>
-                    </div>
-                    <div className="rounded-md bg-muted/40 p-3">
-                      <div className="text-xs font-medium uppercase text-muted-foreground">
-                        Enabled agents
-                      </div>
-                      <div className="mt-1 text-sm font-medium">
-                        {formatCount(skill.enabledAgentIds?.length)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Runtime Boundary</CardTitle>
-              <CardDescription>
-                Skills guide agent behavior; tools still execute through Wardn policy.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="rounded-md border border-border p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Wrench className="size-4 text-muted-foreground" />
-                  Tool execution
-                </div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  MCP calls remain gated by search_tools, run_tool, and access-rule evaluation.
-                </div>
-              </div>
-              <div className="rounded-md border border-border p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <ShieldCheck className="size-4 text-muted-foreground" />
-                  Audit status
-                </div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Unsafe skill bundles are rejected before their content reaches the agent.
-                </div>
-              </div>
-              <div className="rounded-md border border-border p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <History className="size-4 text-muted-foreground" />
-                  Run provenance
-                </div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Skill selections, searches, fetches, and failures are persisted in run traces.
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
       ) : null}
     </div>
   );
