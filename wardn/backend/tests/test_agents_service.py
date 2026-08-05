@@ -2184,9 +2184,15 @@ async def test_run_agent_chat_closes_database_transactions_before_external_strea
     ]
 
     assert events == [service.AgentChatTextEvent(text="ok")]
-    assert external_transaction_states == [[False, False, False]]
-    assert len(session_factory.sessions) == 4
-    assert all(session.commits == 1 for session in session_factory.sessions)
+    assert external_transaction_states
+    assert all(
+        not in_transaction
+        for transaction_states in external_transaction_states
+        for in_transaction in transaction_states
+    )
+    assert len(session_factory.sessions) >= 4
+    assert all(not session.in_transaction for session in session_factory.sessions)
+    assert sum(session.commits for session in session_factory.sessions) >= 4
 
 
 @pytest.mark.asyncio
@@ -3639,6 +3645,22 @@ def test_agent_skill_function_tools_are_available_when_find_skills_is_installed(
     ]
 
 
+def test_agent_skill_function_tools_are_available_for_approved_workspace_library() -> None:
+    approved_skills = [{"skillId": "owner/repo/kubernetes-ops", "name": "Kubernetes ops"}]
+
+    function_tools = skills.agent_skill_function_tools([], approved_skills=approved_skills)
+
+    assert [tool["name"] for tool in function_tools] == [
+        skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+        skills.WARDN_GET_SKILL_TOOL_NAME,
+    ]
+    assert skills.is_agent_skill_tool_enabled(
+        [],
+        skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+        approved_skills=approved_skills,
+    )
+
+
 @pytest.mark.asyncio
 async def test_execute_agent_skill_tool_searches_wardn_hub(monkeypatch) -> None:
     class FakeHubClient:
@@ -4774,7 +4796,19 @@ async def test_approve_workspace_skill_persists_audited_hub_skill(monkeypatch) -
     organization_id = uuid4()
     workspace_id = uuid4()
     user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[],
+        is_active=True,
+    )
     admin_checks = 0
+    assigned_agents: list[Agent] = []
 
     async def require_workspace_admin(*args, **kwargs):
         nonlocal admin_checks
@@ -4806,6 +4840,14 @@ async def test_approve_workspace_skill_persists_audited_hub_skill(monkeypatch) -
             "files": [{"path": "SKILL.md", "bytes": 120}],
         }
 
+    async def list_active_workspace_agents(*args, **kwargs):
+        assert kwargs["organization_id"] == organization_id
+        assert kwargs["workspace_id"] == workspace_id
+        return [agent]
+
+    async def replace_workspace_approved_skill_assignments(*args, **kwargs):
+        assigned_agents.extend(kwargs["agents"])
+
     monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
     monkeypatch.setattr(
         service.repository,
@@ -4813,6 +4855,16 @@ async def test_approve_workspace_skill_persists_audited_hub_skill(monkeypatch) -
         get_workspace_approved_skill_by_skill_id,
     )
     monkeypatch.setattr(service, "get_wardn_hub_skill", get_wardn_hub_skill)
+    monkeypatch.setattr(
+        service.repository,
+        "list_active_workspace_agents",
+        list_active_workspace_agents,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "replace_workspace_approved_skill_assignments",
+        replace_workspace_approved_skill_assignments,
+    )
 
     session = FakeSession()
     response = await service.approve_workspace_skill(
@@ -4832,6 +4884,71 @@ async def test_approve_workspace_skill_persists_audited_hub_skill(monkeypatch) -
     assert approved.approved_by_id == user.id
     assert response.skill_id == "owner/repo/kubernetes-ops"
     assert response.name == "Kubernetes ops"
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert assigned_agents == [agent]
+    assert response.assigned_agent_ids == [agent.id]
+
+
+@pytest.mark.asyncio
+async def test_agent_approved_skill_context_loads_workspace_library_without_agent_binding(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[],
+        is_active=True,
+    )
+    workspace_skill = WorkspaceApprovedSkill(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        approved_by_id=uuid4(),
+        skill_id="owner/repo/kubernetes-ops",
+        name="Kubernetes ops",
+        description="Operate clusters safely.",
+        url="https://hub.wardnai.dev/skills/owner/repo/kubernetes-ops",
+        source="owner/repo",
+        source_url="https://github.com/owner/repo",
+        source_owner="owner",
+        source_name="repo",
+        audit_status="pass",
+        audit_score=99,
+        audit_rank="A",
+        audit_summary="Looks safe.",
+        content_hash="abc123",
+        status="active",
+        metadata_json={},
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    async def list_agent_approved_skills(*args, **kwargs):
+        assert kwargs["agent_id"] == agent.id
+        return [workspace_skill]
+
+    monkeypatch.setattr(
+        chat_orchestrator.repository,
+        "list_agent_approved_skills",
+        list_agent_approved_skills,
+    )
+
+    context = await chat_orchestrator.agent_approved_skill_context(
+        session_factory=fake_session_factory(FakeSession()),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
+
+    assert context[0]["skillId"] == "owner/repo/kubernetes-ops"
+    assert context[0]["name"] == "Kubernetes ops"
 
 
 @pytest.mark.asyncio

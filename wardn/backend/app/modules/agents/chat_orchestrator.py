@@ -817,8 +817,6 @@ async def agent_approved_skill_context(
 ) -> list[AgentSkillContext]:
     if organization_id is None or workspace_id is None or agent is None:
         return []
-    if not agent_skill_function_tools(agent.skill_ids or []):
-        return []
     async with agent_stream_unit_of_work(session_factory) as session:
         approved_skills = await repository.list_agent_approved_skills(
             session,
@@ -1247,7 +1245,11 @@ async def execute_agent_dynamic_tool_call_stream(
         return
 
     target_name = run_tool_target_name(tool_call.arguments)
-    if is_agent_skill_tool_enabled(skill_ids or [], target_name):
+    if is_agent_skill_tool_enabled(
+        skill_ids or [],
+        target_name,
+        approved_skills=approved_skill_context,
+    ):
         raw_tool_args = run_tool_arguments(tool_call.arguments)
         if raw_tool_args is None:
             resolved = tool_execution_result(

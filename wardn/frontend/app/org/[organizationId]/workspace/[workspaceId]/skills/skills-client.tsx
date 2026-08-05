@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
@@ -39,14 +38,12 @@ import {
 } from "@/components/ui/table";
 import type {
   AgentSkillActivityRead,
-  AgentSkillAgentRead,
   AgentSkillCatalogResponse,
   AgentSkillSearchResultRead,
   WorkspaceApprovedSkillRead,
 } from "@/lib/api/generated/model";
 import {
   workspaceSkillsApprove,
-  workspaceSkillsAssignAgents,
   workspaceSkillsList,
   workspaceSkillsRemove,
   workspaceSkillsSearch,
@@ -177,9 +174,6 @@ export function SkillsClient({
   const recentActivity = catalog.recentActivity ?? [];
   const usage = catalog.usageSummary ?? {};
   const approvedSkillIds = useApprovedSkillIds(catalog);
-  const assignedAgentCount = agents.filter(
-    (agent) => (agent.assignedApprovedSkillIds ?? []).length > 0
-  ).length;
 
   const previewShortcuts =
     recommendations.length > 0
@@ -267,27 +261,6 @@ export function SkillsClient({
     }
   }
 
-  async function toggleAgent(skill: WorkspaceApprovedSkillRead, agent: AgentSkillAgentRead) {
-    const currentIds = skill.assignedAgentIds ?? [];
-    const assigned = currentIds.includes(agent.id);
-    const nextIds = assigned
-      ? currentIds.filter((agentId) => agentId !== agent.id)
-      : [...currentIds, agent.id];
-    setMutatingId(`${skill.id}:${agent.id}`);
-    setError("");
-    setNotice("");
-    try {
-      await workspaceSkillsAssignAgents(organizationId, workspaceId, skill.id, {
-        agentIds: nextIds,
-      });
-      await refreshCatalog();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update assignments.");
-    } finally {
-      setMutatingId("");
-    }
-  }
-
   return (
     <div className="space-y-4">
       {(error || notice) && (
@@ -316,8 +289,8 @@ export function SkillsClient({
               </Badge>
             </div>
             <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-              Search Wardn Hub, approve trusted guidance into this workspace, assign it to agents,
-              and verify usage from run evidence.
+              Search Wardn Hub, approve trusted guidance for this workspace, and verify whether
+              agents actually used it from run evidence.
             </p>
           </div>
           <div className="grid min-w-72 grid-cols-3 gap-2 text-sm">
@@ -326,10 +299,8 @@ export function SkillsClient({
               <div className="font-semibold">{formatCount(library.length)}</div>
             </div>
             <div className="rounded-md border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Agents</div>
-              <div className="font-semibold">
-                {formatCount(assignedAgentCount)}/{formatCount(agents.length)}
-              </div>
+              <div className="text-xs text-muted-foreground">Covered Agents</div>
+              <div className="font-semibold">{formatCount(agents.length)}</div>
             </div>
             <div className="rounded-md border border-border px-3 py-2">
               <div className="text-xs text-muted-foreground">Runs</div>
@@ -377,7 +348,7 @@ export function SkillsClient({
               <CardTitle>Discover Hub Skills</CardTitle>
               <CardDescription>
                 Search with broad catalog terms. Approving a skill adds it to this workspace
-                library; agents only prefer approved skills after assignment.
+                library and makes it available to the workspace agent immediately.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -499,17 +470,18 @@ export function SkillsClient({
                 </div>
                 <p className="mt-1 leading-6 text-muted-foreground">
                   Approved skills are the preferred library for this workspace. They keep audit,
-                  hash, source, and assignment metadata.
+                  hash, and source metadata so the agent can choose trusted guidance before
+                  temporary Hub fallback.
                 </p>
               </div>
               <div className="rounded-md border border-border p-3">
                 <div className="flex items-center gap-2 font-medium">
-                  <UserRound className="size-4 text-muted-foreground" />
-                  Agent assignment
+                  <CheckCircle2 className="size-4 text-muted-foreground" />
+                  Immediate availability
                 </div>
                 <p className="mt-1 leading-6 text-muted-foreground">
-                  Assign a skill to the agents that should prefer it. Assignment automatically
-                  enables the internal skill-search gateway for those agents.
+                  Approval automatically enables the internal read-only skill gateway for active
+                  workspace agents. There is no separate binding step.
                 </p>
               </div>
               <div className="rounded-md border border-border p-3">
@@ -532,8 +504,8 @@ export function SkillsClient({
           <CardHeader>
             <CardTitle>Workspace Library</CardTitle>
             <CardDescription>
-              Approved skills are workspace-level. Assign them to agents that should prefer this
-              guidance during runs.
+              Approved skills are available to the workspace agent automatically. Removing a skill
+              removes it from future workspace skill search results.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -560,9 +532,7 @@ export function SkillsClient({
                           <Badge variant={statusVariant(skill.auditStatus)}>
                             Audit {skill.auditStatus}
                           </Badge>
-                          <Badge variant="secondary">
-                            {formatCount(skill.assignedAgentIds?.length ?? 0)} agents
-                          </Badge>
+                          <Badge variant="success">Available</Badge>
                         </div>
                         <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
                           {skill.description || "No description is available for this skill."}
@@ -596,46 +566,40 @@ export function SkillsClient({
                         </Button>
                       </div>
                     </div>
-                    <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-                      {agents.length > 0 ? (
-                        agents.map((agent) => {
-                          const assigned = (skill.assignedAgentIds ?? []).includes(agent.id);
-                          const pending = mutatingId === `${skill.id}:${agent.id}`;
-                          return (
-                            <label
-                              className={cn(
-                                "flex cursor-pointer items-start gap-3 rounded-md border p-3",
-                                assigned
-                                  ? "border-emerald-200 bg-emerald-50"
-                                  : "border-border bg-card"
-                              )}
-                              key={agent.id}
-                            >
-                              <input
-                                checked={assigned}
-                                className="mt-1 size-4 accent-emerald-700"
-                                disabled={pending}
-                                onChange={() => void toggleAgent(skill, agent)}
-                                type="checkbox"
-                              />
-                              <span className="min-w-0">
-                                <span className="flex items-center gap-2 text-sm font-medium">
-                                  {agent.name}
-                                  {pending ? <Loader2 className="size-3 animate-spin" /> : null}
-                                </span>
-                                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                                  {(agent.assignedApprovedSkillIds ?? []).length} assigned skills,
-                                  last guidance use {formatDate(agent.lastUsedAt)}
-                                </span>
-                              </span>
-                            </label>
-                          );
-                        })
-                      ) : (
-                        <div className="text-sm text-muted-foreground">
-                          No workspace agents are available.
+                    <div className="grid gap-3 p-4 md:grid-cols-3">
+                      <div className="rounded-md border border-border bg-muted/20 p-3">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">
+                          Availability
                         </div>
-                      )}
+                        <div className="mt-1 text-sm font-medium">
+                          {agents.length > 0 ? "Workspace agent" : "No active agent"}
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          Approval enables this guidance without a separate agent binding step.
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-muted/20 p-3">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">
+                          Last Used
+                        </div>
+                        <div className="mt-1 text-sm font-medium">
+                          {formatDate(skill.lastUsedAt)}
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          Based on persisted run activity from this workspace.
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-muted/20 p-3">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">
+                          7 Day Usage
+                        </div>
+                        <div className="mt-1 text-sm font-medium">
+                          {formatCount(skill.usageCountLast7d)} guidance events
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          Searches, fetches, and selected skill events tied to recent runs.
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -667,10 +631,10 @@ export function SkillsClient({
               <div className="rounded-md border border-border p-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <BookOpenCheck className="size-4 text-muted-foreground" />
-                  {formatCount(usage.assignedApprovedSkills)} assignments
+                  {formatCount(usage.approvedSkills)} approved skills
                 </div>
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Agent-to-approved-skill assignments currently configured.
+                  Workspace library guidance available to the agent.
                 </div>
               </div>
               <div className="rounded-md border border-border p-3">

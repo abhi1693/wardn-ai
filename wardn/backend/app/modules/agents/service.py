@@ -905,17 +905,6 @@ def agent_skill_usage_by_skill(
     return usage
 
 
-def workspace_skill_assignment_indexes(
-    assignments: list[tuple[WorkspaceApprovedSkill, Any, Agent]],
-) -> tuple[dict[uuid.UUID, list[Agent]], dict[uuid.UUID, list[WorkspaceApprovedSkill]]]:
-    agents_by_skill: dict[uuid.UUID, list[Agent]] = {}
-    skills_by_agent: dict[uuid.UUID, list[WorkspaceApprovedSkill]] = {}
-    for skill, _assignment, agent in assignments:
-        agents_by_skill.setdefault(skill.id, []).append(agent)
-        skills_by_agent.setdefault(agent.id, []).append(skill)
-    return agents_by_skill, skills_by_agent
-
-
 def workspace_skill_context(skill: WorkspaceApprovedSkill) -> dict[str, Any]:
     metadata = skill.metadata_json if isinstance(skill.metadata_json, dict) else {}
     return {
@@ -935,6 +924,13 @@ def workspace_skill_context(skill: WorkspaceApprovedSkill) -> dict[str, Any]:
         "isOfficial": bool(metadata.get("isOfficial")),
         "installs": int(metadata.get("installs") or 0),
     }
+
+
+def ensure_find_skills_gateway_enabled(agents: list[Agent]) -> None:
+    for agent in agents:
+        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
+        if WARDN_FIND_SKILLS_ID not in skill_ids:
+            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
 
 
 def workspace_approved_skill_read(
@@ -989,16 +985,19 @@ def agent_skill_usage_summary(
         key=lambda activity: aware_utc(activity.created_at),
         default=None,
     )
+    enabled_agents = sum(
+        1
+        for agent in agents
+        if WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(agent.skill_ids or [])
+    )
+    if approved_skills:
+        enabled_agents = len(agents)
     return AgentSkillUsageSummaryRead(
         active_skills=active_skills,
         approved_skills=len(approved_skills or []),
         assigned_approved_skills=len(assignments or []),
         total_agents=len(agents),
-        enabled_agents=sum(
-            1
-            for agent in agents
-            if WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(agent.skill_ids or [])
-        ),
+        enabled_agents=enabled_agents,
         skill_events_last_7d=len(recent),
         skill_runs_last_7d=len({activity.agent_run_id for activity in recent}),
         searches_last_7d=sum(1 for activity in recent if activity.event_type == "search"),
@@ -1202,7 +1201,6 @@ async def list_workspace_skills(
         organization_id=organization_id,
         workspace_id=workspace_id,
     )
-    agents_by_skill, skills_by_agent = workspace_skill_assignment_indexes(assignments)
     audit_metadata = await find_skills_audit_metadata()
     skills = [find_skills_read(agents=agents, audit_metadata=audit_metadata)]
     return AgentSkillCatalogResponse(
@@ -1210,7 +1208,7 @@ async def list_workspace_skills(
         library=[
             workspace_approved_skill_read(
                 skill,
-                assigned_agents=agents_by_skill.get(skill.id, []),
+                assigned_agents=agents,
                 usage=usage_by_skill.get(skill.skill_id),
             )
             for skill in approved_skills
@@ -1219,7 +1217,7 @@ async def list_workspace_skills(
             agent_skill_agent_read(
                 agent,
                 usage=usage_by_agent.get(agent.id),
-                assigned_skills=skills_by_agent.get(agent.id),
+                assigned_skills=approved_skills,
             )
             for agent in agents
         ],
@@ -1316,8 +1314,20 @@ async def approve_workspace_skill(
         for key, value in fields.items():
             setattr(existing, key, value)
     await session.flush()
+    agents = await repository.list_active_workspace_agents(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    ensure_find_skills_gateway_enabled(agents)
+    await session.flush()
+    await repository.replace_workspace_approved_skill_assignments(
+        session,
+        workspace_skill_id=existing.id,
+        agents=agents,
+    )
     await session.refresh(existing)
-    return workspace_approved_skill_read(existing)
+    return workspace_approved_skill_read(existing, assigned_agents=agents)
 
 
 async def assign_workspace_skill_agents(
@@ -1348,10 +1358,8 @@ async def assign_workspace_skill_agents(
         )
         if agent is None:
             raise AgentNotFoundError("agent not found")
-        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
-        if WARDN_FIND_SKILLS_ID not in skill_ids:
-            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
         agents.append(agent)
+    ensure_find_skills_gateway_enabled(agents)
     await session.flush()
     await repository.replace_workspace_approved_skill_assignments(
         session,

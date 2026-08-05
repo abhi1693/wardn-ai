@@ -235,6 +235,24 @@ async def list_agents(
     return page, next_cursor
 
 
+async def list_active_workspace_agents(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> list[Agent]:
+    result = await session.execute(
+        select(Agent)
+        .where(
+            Agent.organization_id == organization_id,
+            Agent.workspace_id == workspace_id,
+            Agent.is_active.is_(True),
+        )
+        .order_by(Agent.name.asc(), Agent.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def count_active_agents_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
@@ -747,20 +765,23 @@ async def list_agent_approved_skills(
     workspace_id: uuid.UUID,
     agent_id: uuid.UUID,
 ) -> list[WorkspaceApprovedSkill]:
+    active_agent_exists = (
+        select(Agent.id)
+        .where(
+            Agent.id == agent_id,
+            Agent.organization_id == organization_id,
+            Agent.workspace_id == workspace_id,
+            Agent.is_active.is_(True),
+        )
+        .exists()
+    )
     result = await session.execute(
         select(WorkspaceApprovedSkill)
-        .join(
-            AgentApprovedSkillAssignment,
-            AgentApprovedSkillAssignment.workspace_skill_id == WorkspaceApprovedSkill.id,
-        )
-        .join(Agent, Agent.id == AgentApprovedSkillAssignment.agent_id)
         .where(
             WorkspaceApprovedSkill.organization_id == organization_id,
             WorkspaceApprovedSkill.workspace_id == workspace_id,
             WorkspaceApprovedSkill.status == "active",
-            Agent.id == agent_id,
-            Agent.workspace_id == workspace_id,
-            Agent.is_active.is_(True),
+            active_agent_exists,
         )
         .order_by(WorkspaceApprovedSkill.name.asc(), WorkspaceApprovedSkill.skill_id.asc())
     )

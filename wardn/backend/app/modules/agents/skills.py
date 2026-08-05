@@ -77,9 +77,9 @@ def agent_skill_function_tools(
     *,
     approved_skills: list[AgentSkillContext] | None = None,
 ) -> list[dict[str, Any]]:
-    if WARDN_FIND_SKILLS_ID not in normalize_agent_skill_ids(skill_ids):
-        return []
     approved_count = len(approved_skills or [])
+    if WARDN_FIND_SKILLS_ID not in normalize_agent_skill_ids(skill_ids) and approved_count == 0:
+        return []
     approved_context = (
         f" Search the {approved_count} approved workspace skill"
         f"{'' if approved_count == 1 else 's'} first; use public Hub fallback only when no"
@@ -142,10 +142,18 @@ def agent_skill_function_tools(
     ]
 
 
-def is_agent_skill_tool_enabled(skill_ids: list[str] | None, tool_name: str) -> bool:
+def is_agent_skill_tool_enabled(
+    skill_ids: list[str] | None,
+    tool_name: str,
+    *,
+    approved_skills: list[AgentSkillContext] | None = None,
+) -> bool:
     if tool_name not in {WARDN_SEARCH_SKILLS_TOOL_NAME, WARDN_GET_SKILL_TOOL_NAME}:
         return False
-    return WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(skill_ids)
+    return (
+        WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(skill_ids)
+        or len(approved_skills or []) > 0
+    )
 
 
 def agent_skill_tool_display_name(tool_name: str) -> str:
@@ -267,7 +275,7 @@ async def get_agent_skill(
             "approved": False,
             "temporary": False,
             "rejected": True,
-            "reason": "Skill is not assigned to this agent.",
+            "reason": "Skill is not approved for this workspace.",
             "skillMarkdown": "",
             "files": [],
         }
