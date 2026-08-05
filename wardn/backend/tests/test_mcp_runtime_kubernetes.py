@@ -561,6 +561,25 @@ def cilium_network_discovery() -> KubernetesNetworkDiscovery:
     )
 
 
+def cilium_dns_proxy_egress_rule() -> dict:
+    return {
+        "toEndpoints": [
+            {
+                "matchLabels": {
+                    "k8s:k8s-app": "kube-dns",
+                    "k8s:io.kubernetes.pod.namespace": "kube-system",
+                }
+            }
+        ],
+        "toPorts": [
+            {
+                "ports": [{"port": "53", "protocol": "ANY"}],
+                "rules": {"dns": [{"matchPattern": "*"}]},
+            }
+        ],
+    }
+
+
 def fake_pod(
     *,
     phase: str,
@@ -1170,7 +1189,12 @@ def test_runtime_manifest_honors_install_network_policy_controls(
         for policy in manifest.custom_network_policies
         if policy.ref.name != cilium_policy.ref.name
     )
-    remote_egress = remote_policy.body["spec"]["egress"][0]
+    assert remote_policy.body["spec"]["egress"][0] == cilium_dns_proxy_egress_rule()
+    remote_egress = next(
+        egress
+        for egress in remote_policy.body["spec"]["egress"]
+        if egress.get("toFQDNs") == [{"matchName": "hub.wardnai.dev"}]
+    )
     assert remote_egress["toFQDNs"] == [{"matchName": "hub.wardnai.dev"}]
     assert remote_egress["toPorts"][0]["ports"] == [{"port": "443", "protocol": "TCP"}]
 
@@ -1311,7 +1335,12 @@ def test_runtime_manifest_keeps_cilium_custom_domain_egress_rules(
         for policy in manifest.custom_network_policies
         if policy.ref.name.endswith("-allow-cilium-custom-egress")
     )
-    egress = cilium_policy.body["spec"]["egress"][0]
+    assert cilium_policy.body["spec"]["egress"][0] == cilium_dns_proxy_egress_rule()
+    egress = next(
+        egress
+        for egress in cilium_policy.body["spec"]["egress"]
+        if egress.get("toFQDNs") == [{"matchName": "api.example.com"}]
+    )
     assert egress["toFQDNs"] == [{"matchName": "api.example.com"}]
     assert egress["toPorts"][0]["ports"] == [
         {"port": "443", "protocol": "TCP"},
@@ -1389,12 +1418,11 @@ def test_runtime_manifest_uses_configured_cilium_backend_for_domain_egress(
         for policy in manifest.custom_network_policies
         if policy.ref.name.endswith("-allow-cilium-custom-egress")
     )
-    assert cilium_policy.body["spec"]["egress"] == [
-        {
-            "toFQDNs": [{"matchName": "api.example.com"}],
-            "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}],
-        }
-    ]
+    assert cilium_policy.body["spec"]["egress"][0] == cilium_dns_proxy_egress_rule()
+    assert {
+        tuple(match["matchName"] for match in egress.get("toFQDNs", []))
+        for egress in cilium_policy.body["spec"]["egress"]
+    } == {(), ("api.example.com",)}
 
 
 def test_runtime_manifest_allows_all_egress_when_default_deny_disabled(

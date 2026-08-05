@@ -2455,14 +2455,40 @@ def build_remote_mcp_egress_network_policy(
     )
 
 
+def cilium_dns_egress_rule(
+    network_discovery: KubernetesNetworkDiscovery | None,
+) -> dict[str, Any]:
+    discovery = network_discovery or default_kubernetes_network_discovery()
+    match_labels = {
+        f"k8s:{key}": value
+        for key, value in discovery.dns_selector.items()
+        if key and value
+    }
+    match_labels["k8s:io.kubernetes.pod.namespace"] = discovery.dns_namespace
+    return {
+        "toEndpoints": [{"matchLabels": match_labels}],
+        "toPorts": [
+            {
+                "ports": [
+                    {"port": str(port), "protocol": "ANY"}
+                    for port in discovery.dns_ports
+                ],
+                "rules": {"dns": [{"matchPattern": "*"}]},
+            }
+        ],
+    }
+
+
 def build_cilium_remote_mcp_egress_network_policy(
     *,
     names: KubernetesRuntimeNames,
     labels: dict[str, str],
     policy_ref: KubernetesCustomNetworkPolicyRef,
     destinations: list[dict[str, Any]],
+    network_discovery: KubernetesNetworkDiscovery | None = None,
 ) -> KubernetesCustomNetworkPolicy | None:
     egress: list[dict[str, Any]] = []
+    has_fqdn_rule = False
     for destination in destinations:
         port_rule = {
             "toPorts": [
@@ -2475,6 +2501,7 @@ def build_cilium_remote_mcp_egress_network_policy(
         }
         host = destination["host"]
         if ip_cidr_for_address(host) is None:
+            has_fqdn_rule = True
             egress.append(
                 {
                     "toFQDNs": [{"matchName": host}],
@@ -2491,6 +2518,8 @@ def build_cilium_remote_mcp_egress_network_policy(
             )
     if not egress:
         return None
+    if has_fqdn_rule:
+        egress.insert(0, cilium_dns_egress_rule(network_discovery))
 
     return KubernetesCustomNetworkPolicy(
         ref=policy_ref,
@@ -2560,6 +2589,7 @@ def build_custom_network_policy_manifests(
             labels=labels,
             policy_ref=cilium_remote_ref,
             destinations=policy_config["remoteDestinations"],
+            network_discovery=network_discovery,
         )
         if cilium_remote_policy is not None:
             custom_policies.append(cilium_remote_policy)
@@ -2569,6 +2599,7 @@ def build_custom_network_policy_manifests(
             labels=labels,
             policy_ref=cilium_custom_ref,
             rules=custom_egress_domain_rules(policy_config["customEgress"]),
+            network_discovery=network_discovery,
         )
         if cilium_custom_policy is not None:
             custom_policies.append(cilium_custom_policy)
@@ -2648,6 +2679,7 @@ def build_cilium_custom_egress_network_policy(
     labels: dict[str, str],
     policy_ref: KubernetesCustomNetworkPolicyRef,
     rules: list[dict[str, Any]],
+    network_discovery: KubernetesNetworkDiscovery | None = None,
 ) -> KubernetesCustomNetworkPolicy | None:
     egress = [
         {
@@ -2665,6 +2697,7 @@ def build_cilium_custom_egress_network_policy(
     ]
     if not egress:
         return None
+    egress.insert(0, cilium_dns_egress_rule(network_discovery))
 
     return KubernetesCustomNetworkPolicy(
         ref=policy_ref,
