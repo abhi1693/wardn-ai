@@ -3041,11 +3041,17 @@ export function ScheduledTasksClient({
             runRows.map((run) => {
               const task = taskRows.find((row) => row.id === run.taskId);
               const retryableDeliveries = failedRetryableDeliveries(run);
-              return (
-                <div
-                  className="grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]"
-                  key={run.id}
-                >
+              const runDetailHref = run.agentRunId
+                ? runHref(organizationId, workspaceId, run.agentRunId)
+                : null;
+              const runRowClassName = cn(
+                "grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]",
+                runDetailHref
+                  ? "transition-colors hover:border-teal-300 hover:bg-teal-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  : ""
+              );
+              const rowContent = (
+                <>
                   <div className="min-w-0">
                     <div className="truncate font-medium">{task?.name ?? "Scheduled task"}</div>
                     <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
@@ -3068,16 +3074,32 @@ export function ScheduledTasksClient({
                   </div>
                   <div className="flex items-center justify-between gap-2 md:justify-end">
                     <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
-                    {run.agentRunId ? (
-                      <Button asChild size="icon" title="Open run" variant="outline">
-                        <Link href={runHref(organizationId, workspaceId, run.agentRunId)}>
-                          <Clock3 className="size-4" />
-                        </Link>
-                      </Button>
+                    {runDetailHref ? (
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
+                      >
+                        <Clock3 className="size-4" />
+                      </span>
                     ) : null}
                   </div>
+                </>
+              );
+              return (
+                <div className="space-y-2" key={run.id}>
+                  {runDetailHref ? (
+                    <Link
+                      aria-label={`Open run ${run.id}`}
+                      className={runRowClassName}
+                      href={runDetailHref}
+                    >
+                      {rowContent}
+                    </Link>
+                  ) : (
+                    <div className={runRowClassName}>{rowContent}</div>
+                  )}
                   {retryableDeliveries.length > 0 ? (
-                    <div className="grid gap-2 border-t border-border pt-2 md:col-span-5">
+                    <div className="grid gap-2">
                       {retryableDeliveries.map((delivery) => (
                         <div
                           className="flex items-center justify-between gap-3 rounded-md bg-red-50 px-2 py-2 text-xs text-red-700"
