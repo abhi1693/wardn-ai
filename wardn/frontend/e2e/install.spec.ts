@@ -66,6 +66,37 @@ test.describe("MCP install runtime selection", () => {
     });
   });
 
+  test("submits streamable HTTP as the default runtime when available", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await authenticate(page.context(), baseURL ?? "");
+    await page.goto(
+      `/org/${organizationId}/workspace/${workspaceId}/install/new?serverName=${encodeURIComponent(
+        serverName
+      )}&version=1.0.0`
+    );
+
+    await expect(page.getByRole("heading", { name: "Add Connection" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Runtime" })).toContainText("Streamable HTTP");
+    await expect(page.getByTestId("install-target-details")).toContainText("gsc.example.com");
+
+    await page.getByRole("button", { exact: true, name: "Add" }).click();
+
+    const installRequest = (await backendRequests(request)).find(
+      (entry) =>
+        entry.method === "PUT" &&
+        entry.path ===
+          `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
+    );
+    expect(installRequest?.body).toMatchObject({
+      version: "1.0.0",
+      configName: "default",
+      installTarget: "remote",
+    });
+  });
+
   test("shows the selected package version and submits the switched runtime", async ({
     baseURL,
     page,
@@ -83,11 +114,11 @@ test.describe("MCP install runtime selection", () => {
       "href",
       "https://hub.wardnai.dev/servers/io.github.acamolese/google-search-console-mcp"
     );
-    await expect(page.getByRole("combobox", { name: "Runtime" })).toContainText("NPM");
+    await expect(page.getByRole("combobox", { name: "Runtime" })).toContainText("Streamable HTTP");
 
     const selectedPackage = page.getByTestId("install-target-details");
-    await expect(selectedPackage).toContainText("@acamolese/google-search-console-mcp");
-    await expect(selectedPackage).toContainText("Package version: 1.0.0");
+    await expect(selectedPackage).toContainText("gsc.example.com");
+    await expect(selectedPackage).toContainText("Connection version: 1.0.0");
 
     await page.getByRole("combobox", { name: "Runtime" }).click();
     await page.getByRole("option", { name: /UVX .* google-search-console-mcp/ }).click();
@@ -119,7 +150,7 @@ test.describe("MCP install runtime selection", () => {
     page,
     request,
   }) => {
-    await resetBackend(request, { packageRuntimeProvider: "kubernetes" });
+    await resetBackend(request, { packageRuntimeProvider: "kubernetes", serverRemotes: [] });
     await authenticate(page.context(), baseURL ?? "");
     await page.goto(
       `/org/${organizationId}/workspace/${workspaceId}/install/new?serverName=${encodeURIComponent(

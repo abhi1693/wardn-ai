@@ -138,7 +138,13 @@ const googleSearchConsoleServer = {
       ],
     },
   ],
-  remotes: [],
+  remotes: [
+    {
+      type: "streamable-http",
+      url: "https://gsc.example.com/mcp",
+      headers: [],
+    },
+  ],
 };
 
 const defaultSource = {
@@ -237,6 +243,11 @@ function initialState(overrides = {}) {
     organizationsStatus: overrides.organizationsStatus ?? 200,
     packageRuntimeProvider: overrides.packageRuntimeProvider ?? "local",
     requests: [],
+    server: overrides.server ?? {
+      ...googleSearchConsoleServer,
+      packages: overrides.serverPackages ?? googleSearchConsoleServer.packages,
+      remotes: overrides.serverRemotes ?? googleSearchConsoleServer.remotes,
+    },
     installations: overrides.installations ?? [],
     skillLibrary: overrides.skillLibrary ?? [],
     sources: overrides.sources ?? [{ ...defaultSource }],
@@ -359,34 +370,39 @@ function sourcePathMatch(pathname) {
 
 function installedServerFromPayload(body) {
   const installTarget = String(body.installTarget ?? "package");
-  const [, rawIndex = "0"] = installTarget.split(":");
-  const packageIndex = Number.parseInt(rawIndex, 10);
+  const [targetKind = "package", rawIndex = "0"] = installTarget.split(":");
+  const targetIndex = Number.parseInt(rawIndex, 10);
+  const safeTargetIndex = Number.isFinite(targetIndex) && targetIndex >= 0 ? targetIndex : 0;
+  const selectedServer = state.server;
   const packageDefinition =
-    googleSearchConsoleServer.packages[
-      Number.isFinite(packageIndex) && packageIndex >= 0 ? packageIndex : 0
-    ] ?? googleSearchConsoleServer.packages[0];
+    selectedServer.packages[safeTargetIndex] ?? selectedServer.packages[0];
+  const remoteDefinition =
+    selectedServer.remotes[safeTargetIndex] ?? selectedServer.remotes[0];
+  const isRemoteTarget = targetKind === "remote";
 
   return {
     id: "installation-1",
     workspaceId: workspace.id,
-    serverName: googleSearchConsoleServer.name,
+    serverName: selectedServer.name,
     configName: body.configName ?? "default",
-    installedVersion: body.version ?? googleSearchConsoleServer.version,
-    latestVersion: googleSearchConsoleServer.version,
+    installedVersion: body.version ?? selectedServer.version,
+    latestVersion: selectedServer.version,
     updateAvailable: false,
     status: "enabled",
-    installType: "package",
+    installType: isRemoteTarget ? "remote" : "package",
     installPath: "/tmp/wardn/mcp/google-search-console",
     runtimeConfig: {
-      kind: "package",
-      package: packageDefinition,
+      kind: isRemoteTarget ? "remote" : "package",
+      ...(isRemoteTarget
+        ? { transport: remoteDefinition }
+        : { package: packageDefinition }),
     },
     configuredValues: body.configValues ?? {},
     installError: null,
     installedAt: now,
     updatedAt: now,
-    server: googleSearchConsoleServer,
-    latestServer: googleSearchConsoleServer,
+    server: selectedServer,
+    latestServer: selectedServer,
   };
 }
 
@@ -669,10 +685,11 @@ async function handle(request) {
     url.pathname === `/api/v1/organizations/${organization.id}/mcp/registry/servers`
   ) {
     const search = url.searchParams.get("search")?.trim().toLowerCase() ?? "";
+    const selectedServer = state.server;
     const servers =
-      search && !googleSearchConsoleServer.title.toLowerCase().includes(search)
+      search && !selectedServer.title.toLowerCase().includes(search)
         ? []
-        : [registryServerResponse(googleSearchConsoleServer)];
+        : [registryServerResponse(selectedServer)];
     return json({ servers, metadata: { count: servers.length, nextCursor: "" } });
   }
 
@@ -682,13 +699,13 @@ async function handle(request) {
   if (
     request.method === "GET" &&
     serverVersionsMatch?.[1] === organization.id &&
-    decodeURIComponent(serverVersionsMatch[2]) === googleSearchConsoleServer.name
+    decodeURIComponent(serverVersionsMatch[2]) === state.server.name
   ) {
     const version = decodeURIComponent(serverVersionsMatch[3] ?? "");
-    if (version && version !== "latest" && version !== googleSearchConsoleServer.version) {
+    if (version && version !== "latest" && version !== state.server.version) {
       return json({ detail: "server version not found" }, 404);
     }
-    const response = registryServerResponse(googleSearchConsoleServer);
+    const response = registryServerResponse(state.server);
     return version ? json(response) : json({ servers: [response], metadata: { count: 1, nextCursor: "" } });
   }
 
@@ -711,7 +728,7 @@ async function handle(request) {
     request.method === "PUT" &&
     installServerMatch?.[1] === organization.id &&
     installServerMatch[2] === workspace.id &&
-    decodeURIComponent(installServerMatch[3]) === googleSearchConsoleServer.name
+    decodeURIComponent(installServerMatch[3]) === state.server.name
   ) {
     const installation = installedServerFromPayload(body ?? {});
     state.installations = [

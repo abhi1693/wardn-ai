@@ -203,8 +203,16 @@ export function installTargetOptions(entry: MCPRegistryServerResponse): InstallT
   return [...packageOptions, ...remoteOptions];
 }
 
+export function streamableHttpInstallTarget(entry: MCPRegistryServerResponse): InstallTarget | null {
+  const remoteIndex = (entry.server.remotes ?? []).findIndex((remote) => {
+    const remoteRecord = remote as Record<string, unknown>;
+    return stringValue(remoteRecord.type).trim().toLowerCase() === "streamable-http";
+  });
+  return remoteIndex >= 0 ? `remote:${remoteIndex}` : null;
+}
+
 export function defaultInstallTarget(entry: MCPRegistryServerResponse): InstallTarget {
-  return installTargetOptions(entry)[0]?.value ?? "package:0";
+  return streamableHttpInstallTarget(entry) ?? installTargetOptions(entry)[0]?.value ?? "package:0";
 }
 
 export function installTargetFromInstallation(installation: MCPServerInstallationRead): InstallTarget {

@@ -73,6 +73,15 @@ PACKAGE_INSTALLERS: dict[str, PackageInstaller] = {
 REMOTE_INSTALLER = RemoteInstaller()
 
 
+def streamable_http_remote_target(server: MCPServerVersion) -> str | None:
+    for index, remote in enumerate(server.remotes or []):
+        if not isinstance(remote, dict):
+            continue
+        if str(remote.get("type") or "").strip().casefold() == "streamable-http":
+            return "remote" if index == 0 else f"remote:{index}"
+    return None
+
+
 def build_remote_install(
     server: MCPServerVersion,
     install_path: Path,
@@ -114,6 +123,9 @@ def selected_install_target(server: MCPServerVersion, config_values: ConfigValue
         return "remote"
     if server.packages and not server.remotes:
         return "package"
+    streamable_http_target = streamable_http_remote_target(server)
+    if streamable_http_target:
+        return streamable_http_target
     if server.remotes and not server.packages:
         return "remote"
     if server.packages:
@@ -159,7 +171,12 @@ def install_server_runtime(
 
     try:
         parsed_target, target_index = parse_install_target(install_target)
-        selected_target = parsed_target or selected_install_target(server, config_values)
+        if parsed_target is None:
+            selected_target, target_index = parse_install_target(
+                selected_install_target(server, config_values)
+            )
+        else:
+            selected_target = parsed_target
         if selected_target == "remote" and server.remotes:
             runtime_install = build_remote_install(
                 server,

@@ -16,6 +16,7 @@ from app.modules.mcp_registry.installer import (
     parse_mcp_response_body,
     run_install_command,
     safe_path_component,
+    selected_install_target,
     send_remote_mcp_request,
     verify_remote_mcp_server,
 )
@@ -52,6 +53,72 @@ def server_version(
 
 def test_safe_path_component_removes_path_separators() -> None:
     assert safe_path_component("io.github.example/weather") == "io.github.example__weather"
+
+
+def test_selected_install_target_prefers_streamable_http_when_available() -> None:
+    server = server_version(
+        remotes=[
+            {"type": "sse", "url": "https://example.com/sse"},
+            {"type": "streamable-http", "url": "https://example.com/mcp"},
+        ],
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "@example/weather",
+                "version": "1.0.0",
+            }
+        ],
+    )
+
+    assert selected_install_target(server, {}) == "remote:1"
+
+    remote_only_server = server_version(
+        remotes=[
+            {"type": "sse", "url": "https://example.com/sse"},
+            {"type": "streamable-http", "url": "https://example.com/mcp"},
+        ],
+    )
+
+    assert selected_install_target(remote_only_server, {}) == "remote:1"
+
+
+def test_install_server_runtime_uses_streamable_http_fallback_target_index(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        remotes=[
+            {"type": "sse", "url": "https://example.com/sse"},
+            {"type": "streamable-http", "url": "https://example.com/mcp"},
+        ],
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "@example/weather",
+                "version": "1.0.0",
+            }
+        ],
+    )
+
+    def build_remote(_server, temporary_path, _config_values, target_index):
+        assert target_index == 1
+        return MCPRuntimeInstall(
+            install_type="remote",
+            install_path=str(temporary_path),
+            runtime_config={"kind": "remote", "targetIndex": target_index},
+            secret_config={},
+            status="enabled",
+        )
+
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installer.build_remote_install",
+        build_remote,
+    )
+
+    install = install_server_runtime(server, install_root=tmp_path)
+
+    assert install.install_type == "remote"
+    assert install.runtime_config["targetIndex"] == 1
 
 
 def test_install_commands_receive_minimal_environment(tmp_path, monkeypatch) -> None:
