@@ -2653,6 +2653,38 @@ def test_execute_agent_search_tools_returns_enabled_skills_as_dynamic_results() 
     assert payload["ranking"]["executable"][0]["toolType"] == "skill"
 
 
+def test_execute_agent_search_tools_ranks_approved_skills_for_domain_queries() -> None:
+    approved_skill = {
+        "workspaceSkillId": str(uuid4()),
+        "skillId": "owner/repo/github-pr-review",
+        "name": "GitHub PR Review",
+        "description": "Review pull requests with GitHub MCP tools and draft comments.",
+        "url": "https://hub.wardnai.dev/skills/owner/repo/github-pr-review",
+        "source": "owner/repo",
+        "auditStatus": "pass",
+        "auditScore": 94,
+        "auditRank": "A",
+    }
+
+    result = service.execute_agent_search_tools(
+        AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "github pr review", "limit": 5},
+        ),
+        skill_tools=skills.agent_skill_function_tools([], approved_skills=[approved_skill]),
+    )
+    payload = json.loads(result.output)
+
+    assert result.status == "completed"
+    assert payload["tools"][0]["toolName"] == skills.WARDN_SEARCH_SKILLS_TOOL_NAME
+    assert payload["tools"][0]["approvedSkillMatches"][0]["skillId"] == (
+        "owner/repo/github-pr-review"
+    )
+    assert "wardn_get_skill" in payload["tools"][0]["approvedSkillMatches"][0]["nextStep"]
+
+
 def test_dynamic_tools_report_policy_denied_tools_without_fallback() -> None:
     allowed_tool = make_agent_runtime_tool(
         wire_name="wardn_namespace",
@@ -3344,6 +3376,132 @@ async def test_stream_openai_responses_uses_dynamic_tools_and_runs_resolved_targ
 
 
 @pytest.mark.asyncio
+async def test_stream_openai_responses_injects_skill_guidance_for_scheduled_runs(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="OpenAI",
+        provider=service.OPENAI_API_KEY_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.1",
+        skill_ids=[],
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        triggered_by_id=uuid4(),
+        trigger_type="scheduled",
+        status="running",
+        started_at=datetime(2026, 8, 6, tzinfo=UTC),
+    )
+    workspace_skill = WorkspaceApprovedSkill(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        approved_by_id=uuid4(),
+        skill_id="owner/repo/github-pr-review",
+        name="GitHub PR Review",
+        description="Review pull requests with GitHub MCP tools and draft comments.",
+        url="https://hub.wardnai.dev/skills/owner/repo/github-pr-review",
+        source="owner/repo",
+        source_url="https://github.com/owner/repo",
+        source_owner="owner",
+        source_name="repo",
+        audit_status="pass",
+        audit_score=94,
+        audit_rank="A",
+        audit_summary="Looks safe.",
+        content_hash="abc123",
+        status="active",
+        metadata_json={},
+        created_at=datetime(2026, 8, 6, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 6, tzinfo=UTC),
+    )
+    sent_bodies: list[dict] = []
+
+    async def list_agent_approved_skills(*args, **kwargs):
+        assert kwargs["agent_id"] == agent.id
+        return [workspace_skill]
+
+    async def stream_response_events(*args, **kwargs):
+        sent_bodies.append(kwargs["body"])
+        yield {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "usage": {"input_tokens": 1, "output_tokens": 0},
+            },
+        }
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        chat_orchestrator.repository,
+        "list_agent_approved_skills",
+        list_agent_approved_skills,
+    )
+    monkeypatch.setattr(chat_orchestrator, "stream_response_events", stream_response_events)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+
+    events = [
+        event
+        async for event in chat_orchestrator.stream_openai_responses_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"Authorization": "Bearer sk-test"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "Review GitHub PRs assigned to me"}],
+                )
+            ],
+            tools=AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),
+            agent_run=agent_run,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+    ]
+
+    assert events == []
+    assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+        service.AGENT_RUN_TOOL_TOOL_NAME,
+    ]
+    assert "GitHub PR Review" in sent_bodies[0]["instructions"]
+    assert "scheduled run" in sent_bodies[0]["instructions"]
+    assert "search_tools" in sent_bodies[0]["instructions"]
+
+
+@pytest.mark.asyncio
 async def test_stream_openai_responses_uses_configured_tool_round_limit(
     monkeypatch,
 ) -> None:
@@ -3805,6 +3963,48 @@ def test_agent_skill_function_tools_are_available_for_approved_workspace_library
         skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
         approved_skills=approved_skills,
     )
+
+
+def test_agent_runtime_instructions_adds_scheduled_skill_guidance() -> None:
+    agent = Agent(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-5.1",
+        is_active=True,
+    )
+    run = AgentRun(
+        id=uuid4(),
+        organization_id=agent.organization_id,
+        workspace_id=agent.workspace_id,
+        agent_id=agent.id,
+        triggered_by_id=uuid4(),
+        trigger_type="scheduled",
+        status="running",
+        started_at=datetime(2026, 8, 6, tzinfo=UTC),
+    )
+    approved_skill = {
+        "workspaceSkillId": str(uuid4()),
+        "skillId": "owner/repo/github-pr-review",
+        "name": "GitHub PR Review",
+        "description": "Review pull requests with GitHub MCP tools.",
+    }
+
+    instructions = chat_orchestrator.agent_runtime_instructions(
+        agent,
+        skill_tools=skills.agent_skill_function_tools([], approved_skills=[approved_skill]),
+        approved_skill_context=[approved_skill],
+        agent_run=run,
+    )
+
+    assert instructions.startswith("Help.")
+    assert "Wardn runtime skills" in instructions
+    assert "scheduled run" in instructions
+    assert "GitHub PR Review (owner/repo/github-pr-review)" in instructions
+    assert "search_tools" in instructions
 
 
 @pytest.mark.asyncio

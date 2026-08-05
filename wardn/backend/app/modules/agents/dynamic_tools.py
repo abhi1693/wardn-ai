@@ -2,7 +2,11 @@ import json
 import re
 from typing import Any
 
-from app.modules.agents.skills import skill_tool_capability_metadata
+from app.modules.agents.skills import (
+    WARDN_GET_SKILL_TOOL_NAME,
+    WARDN_SEARCH_SKILLS_TOOL_NAME,
+    skill_tool_capability_metadata,
+)
 from app.modules.agents.tool_execution import tool_execution_result
 from app.modules.agents.types import (
     FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
@@ -254,6 +258,7 @@ def execute_agent_search_tools(
             "sortKey": skill_tool_sort_key(skill_tool),
             "payload": skill_tool_search_result(
                 skill_tool,
+                query=query,
                 rank=rank,
                 score=score,
             ),
@@ -758,12 +763,13 @@ def tool_search_result(
 def skill_tool_search_result(
     tool: dict[str, Any],
     *,
+    query: str = "",
     rank: int | None = None,
     score: int | None = None,
 ) -> dict[str, Any]:
     tool_name = str(tool.get("name") or "")
     description = str(tool.get("description") or "")
-    return {
+    result = {
         "toolType": "skill",
         "capabilityStatus": "allowed",
         "canRun": True,
@@ -787,6 +793,10 @@ def skill_tool_search_result(
         "params": summarize_input_schema(tool.get("parameters")),
         "skill": skill_tool_capability_metadata(tool_name),
     }
+    matches = approved_skill_matches_for_query(tool.get("approvedSkills"), query=query)
+    if matches:
+        result["approvedSkillMatches"] = matches
+    return result
 
 
 def installed_tool_search_result(
@@ -1136,6 +1146,65 @@ def score_skill_tool(tool: dict[str, Any], *, terms: list[str], query: str) -> i
         (1, schema_search_text(tool.get("parameters"))),
     ]
     score = 0
+    tool_name = str(tool.get("name") or "")
+    for weight, value in fields:
+        text = normalize_search_text(value)
+        if not text:
+            continue
+        if query_text and query_text in text:
+            score += weight * 4
+        for term in terms:
+            if term_matches_text(term, text):
+                score += weight
+    score += score_approved_skill_context(tool.get("approvedSkills"), terms=terms, query=query)
+    if tool_name == WARDN_SEARCH_SKILLS_TOOL_NAME and terms:
+        # Skill search can improve specialized workflows even when no approved skill matches yet.
+        score += 2
+    return score
+
+
+def skill_tool_title(tool_name: str) -> str:
+    if tool_name == WARDN_SEARCH_SKILLS_TOOL_NAME:
+        return "Search Wardn Hub skills"
+    if tool_name == WARDN_GET_SKILL_TOOL_NAME:
+        return "Fetch Wardn Hub skill"
+    return tool_name.replace("_", " ").strip().title() or "Wardn skill"
+
+
+def score_approved_skill_context(
+    value: Any,
+    *,
+    terms: list[str],
+    query: str,
+) -> int:
+    if not isinstance(value, list):
+        return 0
+    return max(
+        (
+            score_approved_skill(skill, terms=terms, query=query)
+            for skill in value
+            if isinstance(skill, dict)
+        ),
+        default=0,
+    )
+
+
+def score_approved_skill(
+    skill: dict[str, Any],
+    *,
+    terms: list[str],
+    query: str,
+) -> int:
+    query_text = normalize_search_text(query)
+    fields = [
+        (14, skill.get("skillId") or ""),
+        (12, skill.get("name") or ""),
+        (8, skill.get("source") or ""),
+        (5, skill.get("sourceOwner") or ""),
+        (5, skill.get("sourceName") or ""),
+        (4, skill.get("description") or ""),
+    ]
+    score = 0
     for weight, value in fields:
         text = normalize_search_text(value)
         if not text:
@@ -1148,12 +1217,47 @@ def score_skill_tool(tool: dict[str, Any], *, terms: list[str], query: str) -> i
     return score
 
 
-def skill_tool_title(tool_name: str) -> str:
-    if tool_name == "wardn_search_skills":
-        return "Search Wardn Hub skills"
-    if tool_name == "wardn_get_skill":
-        return "Fetch Wardn Hub skill"
-    return tool_name.replace("_", " ").strip().title() or "Wardn skill"
+def approved_skill_matches_for_query(value: Any, *, query: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    terms = query_terms(query)
+    if not terms:
+        return []
+    scored = [
+        (score_approved_skill(skill, terms=terms, query=query), skill)
+        for skill in value
+        if isinstance(skill, dict)
+    ]
+    matches = [(score, skill) for score, skill in scored if score > 0]
+    matches.sort(key=lambda item: (-item[0], approved_skill_sort_key(item[1])))
+    return [
+        approved_skill_match_result(skill, score=score)
+        for score, skill in matches[:AGENT_SEARCH_TOOLS_DEFAULT_LIMIT]
+    ]
+
+
+def approved_skill_match_result(skill: dict[str, Any], *, score: int) -> dict[str, Any]:
+    return {
+        "skillId": str(skill.get("skillId") or ""),
+        "workspaceSkillId": str(skill.get("workspaceSkillId") or ""),
+        "name": str(skill.get("name") or skill.get("skillId") or ""),
+        "description": truncate_text(str(skill.get("description") or ""), 500),
+        "url": str(skill.get("url") or ""),
+        "source": str(skill.get("source") or ""),
+        "auditStatus": skill.get("auditStatus"),
+        "auditScore": skill.get("auditScore"),
+        "auditRank": skill.get("auditRank"),
+        "score": score,
+        "nextStep": (
+            f"Run {AGENT_RUN_TOOL_TOOL_NAME} with tool_name={WARDN_SEARCH_SKILLS_TOOL_NAME!r} "
+            "and a one-to-three-term query, then fetch the selected skill with "
+            f"{WARDN_GET_SKILL_TOOL_NAME}."
+        ),
+    }
+
+
+def approved_skill_sort_key(skill: dict[str, Any]) -> tuple[str, str]:
+    return (str(skill.get("name") or ""), str(skill.get("skillId") or ""))
 
 
 def ranking_trace(result: dict[str, Any]) -> dict[str, Any]:

@@ -302,11 +302,12 @@ def chatgpt_codex_request_body(
     input_items: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     previous_response_id: str | None = None,
+    instructions: str | None = None,
 ) -> dict[str, Any]:
     body = {
         "type": "response.create",
         "model": agent.model_name,
-        "instructions": agent.instructions[:CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS],
+        "instructions": (instructions or agent.instructions)[:CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS],
         "input": input_items,
         "tools": tools,
         "tool_choice": "auto",
