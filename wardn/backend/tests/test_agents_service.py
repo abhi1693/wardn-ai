@@ -2626,6 +2626,75 @@ def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
     assert payload["ranking"]["executable"][0]["toolName"] == "wardn_namespace"
 
 
+def test_execute_agent_search_tools_does_not_treat_registry_prefix_as_github() -> None:
+    github_tool = make_agent_runtime_tool(
+        wire_name="wardn_github_prs",
+        tool_name="search_pull_requests",
+        server_name="io.github.github/github-mcp-server",
+        title="Search pull requests",
+        description="[READ] Search GitHub pull requests.",
+    )
+    k8s_tool = make_agent_runtime_tool(
+        wire_name="wardn_k8s_logs",
+        tool_name="pod_logs",
+        server_name="io.github.AIops-tools/k8s-aiops",
+        title="Read pod logs",
+        description="[READ] Read Kubernetes pod logs.",
+    )
+
+    result = service.execute_agent_search_tools(
+        {
+            github_tool.wire_name: github_tool,
+            k8s_tool.wire_name: k8s_tool,
+        },
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "github", "limit": 5},
+        ),
+    )
+    payload = json.loads(result.output)
+
+    assert payload["tools"][0]["mcpToolName"] == "search_pull_requests"
+    assert payload["mcpMatches"][0]["mcpToolName"] == "search_pull_requests"
+    assert payload["mcpMatchCount"] == 1
+    assert "Executable MCP tools matched" in payload["executionGuidance"]
+    assert all(tool["mcpToolName"] != "pod_logs" for tool in payload["tools"])
+
+
+def test_execute_agent_search_tools_keeps_exact_registry_server_lookup() -> None:
+    github_tool = make_agent_runtime_tool(
+        wire_name="wardn_github_prs",
+        tool_name="search_pull_requests",
+        server_name="io.github.github/github-mcp-server",
+        title="Search pull requests",
+        description="[READ] Search GitHub pull requests.",
+    )
+    k8s_tool = make_agent_runtime_tool(
+        wire_name="wardn_k8s_logs",
+        tool_name="pod_logs",
+        server_name="io.github.AIops-tools/k8s-aiops",
+        title="Read pod logs",
+        description="[READ] Read Kubernetes pod logs.",
+    )
+
+    result = service.execute_agent_search_tools(
+        {
+            github_tool.wire_name: github_tool,
+            k8s_tool.wire_name: k8s_tool,
+        },
+        service.AgentToolCall(
+            name=service.AGENT_SEARCH_TOOLS_TOOL_NAME,
+            call_id="call_1",
+            arguments={"query": "io.github.AIops-tools/k8s-aiops", "limit": 5},
+        ),
+    )
+    payload = json.loads(result.output)
+
+    assert payload["tools"][0]["mcpToolName"] == "pod_logs"
+    assert payload["tools"][0]["serverName"] == "io.github.AIops-tools/k8s-aiops"
+
+
 def test_execute_agent_search_tools_returns_enabled_skills_as_dynamic_results() -> None:
     result = service.execute_agent_search_tools(
         AgentRuntimeToolGuardrailFilter(allowed_tools={}, denied_tools={}),

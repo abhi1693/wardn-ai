@@ -303,6 +303,12 @@ def execute_agent_search_tools(
         )
     ]
     executable_matches = executable_rankings[:limit]
+    executable_mcp_matches = [
+        item for item in executable_matches if item["payload"].get("toolType") == "mcp"
+    ]
+    executable_skill_matches = [
+        item for item in executable_matches if item["payload"].get("toolType") == "skill"
+    ]
     blocked_matches = blocked_rankings[:limit]
     unassigned_matches = unassigned_rankings[:limit]
     output = {
@@ -313,6 +319,18 @@ def execute_agent_search_tools(
         "totalReachable": len(tools) + len(skill_tools or []),
         "totalBlockedByPolicy": len(denied_tools),
         "matchCount": len(executable_matches) + len(blocked_matches) + len(unassigned_matches),
+        "mcpMatchCount": len(executable_mcp_matches),
+        "skillMatchCount": len(executable_skill_matches),
+        "mcpMatches": [
+            ranking_trace(item["payload"])
+            for item in executable_mcp_matches[:AGENT_SEARCH_TOOLS_DEFAULT_LIMIT]
+        ],
+        "executionGuidance": search_execution_guidance(
+            mcp_match_count=len(executable_mcp_matches),
+            skill_match_count=len(executable_skill_matches),
+            blocked_match_count=len(blocked_matches),
+            unassigned_match_count=len(unassigned_matches),
+        ),
         "tools": [item["payload"] for item in executable_matches],
         "blockedTools": [payload for _score, payload in blocked_matches],
         "unassignedTools": [payload for _score, payload in unassigned_matches],
@@ -628,6 +646,31 @@ def search_hint(
     )
 
 
+def search_execution_guidance(
+    *,
+    mcp_match_count: int,
+    skill_match_count: int,
+    blocked_match_count: int,
+    unassigned_match_count: int,
+) -> str:
+    if mcp_match_count:
+        return (
+            "Executable MCP tools matched this query. Use run_tool with an exact toolName "
+            "from tools or mcpMatches; do not report the MCP server unavailable unless that "
+            "run_tool call fails."
+        )
+    if blocked_match_count:
+        return "Matching MCP tools are assigned but blocked by policy."
+    if unassigned_match_count:
+        return "Matching MCP tools are installed but not assigned to this agent."
+    if skill_match_count:
+        return (
+            "Only Wardn Hub skill guidance matched this query. Skills are advisory; search "
+            "again for the concrete MCP capability before claiming no MCP tool exists."
+        )
+    return "No executable MCP tool or skill matched this query."
+
+
 def score_tool(tool: AgentRuntimeTool, *, terms: list[str], query: str) -> int:
     query_text = normalize_search_text(query)
     fields = [
@@ -635,13 +678,23 @@ def score_tool(tool: AgentRuntimeTool, *, terms: list[str], query: str) -> int:
         (8, tool.tool_schema.tool_name),
         (7, tool.tool_schema.title or ""),
         (5, tool.installation.config_name),
-        (4, tool.tool_schema.server_name),
-        (4, tool.server.name),
+        (4, searchable_server_name(tool.tool_schema.server_name)),
+        (4, searchable_server_name(tool.server.name)),
         (2, tool.tool_schema.description or ""),
         (2, tool.server.description or ""),
         (1, schema_search_text(tool.tool_schema.input_schema)),
     ]
     score = 0
+    score += server_identity_exact_score(
+        tool.tool_schema.server_name,
+        query_text=query_text,
+        weight=4,
+    )
+    score += server_identity_exact_score(
+        tool.server.name,
+        query_text=query_text,
+        weight=4,
+    )
     for weight, value in fields:
         text = normalize_search_text(value)
         if not text:
@@ -678,6 +731,23 @@ def normalize_search_text(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
+
+
+def searchable_server_name(value: Any) -> str:
+    text = str(value or "")
+    for prefix in ("io.github.",):
+        if text.casefold().startswith(prefix):
+            return text[len(prefix):]
+    return text
+
+
+def server_identity_exact_score(value: Any, *, query_text: str, weight: int) -> int:
+    if len(query_text.split()) < 3:
+        return 0
+    text = normalize_search_text(value)
+    if query_text and query_text in text:
+        return weight * 4
+    return 0
 
 
 def schema_search_text(schema: Any) -> str:
@@ -1119,11 +1189,16 @@ def score_installed_tool(tool: AgentInstalledTool, *, terms: list[str], query: s
         (8, tool.tool_schema.tool_name),
         (7, tool.tool_schema.title or ""),
         (5, tool.installation.config_name),
-        (4, tool.tool_schema.server_name),
+        (4, searchable_server_name(tool.tool_schema.server_name)),
         (2, tool.tool_schema.description or ""),
         (1, schema_search_text(tool.tool_schema.input_schema)),
     ]
     score = 0
+    score += server_identity_exact_score(
+        tool.tool_schema.server_name,
+        query_text=query_text,
+        weight=4,
+    )
     for weight, value in fields:
         text = normalize_search_text(value)
         if not text:
