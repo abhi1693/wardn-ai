@@ -48,6 +48,7 @@ import {
   workspaceSkillsRemove,
   workspaceSkillsSearch,
 } from "@/lib/api/generated/workspace-skills/workspace-skills";
+import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type SkillsClientProps = {
@@ -80,13 +81,7 @@ function formatCount(value?: number | null) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "Never";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "Never", undefined, "en");
 }
 
 function runHref(organizationId: string, workspaceId: string, runId: string) {

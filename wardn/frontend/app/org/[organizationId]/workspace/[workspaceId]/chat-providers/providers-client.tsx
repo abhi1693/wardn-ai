@@ -58,6 +58,7 @@ import {
   workspaceChatProvidersResetPairingQr,
   workspaceChatProvidersUpdate,
 } from "@/lib/api/generated/workspace-chat-providers/workspace-chat-providers";
+import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type ProviderType = "whatsapp_local" | "telegram";
@@ -196,19 +197,12 @@ function providerOption(provider: string) {
 }
 
 function displayDate(value?: string | null) {
-  if (!value) {
-    return "Never";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  }).format(date);
+  return formatUserDateTime(
+    value,
+    "Never",
+    { day: "numeric", hour: "numeric", minute: "2-digit", month: "short" },
+    "en-US"
+  );
 }
 
 function displayHost(value: string) {

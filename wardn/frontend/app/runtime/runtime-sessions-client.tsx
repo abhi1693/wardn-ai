@@ -35,6 +35,7 @@ import {
   workspaceMcpRuntimeListSessions,
   workspaceMcpRuntimeStopSession,
 } from "@/lib/api/generated/workspace-mcp-runtime/workspace-mcp-runtime";
+import { formatUserDateTime } from "@/lib/date-time";
 
 type RuntimeSessionsClientProps = {
   initialSessions: MCPRuntimeSessionRead[];
@@ -115,13 +116,7 @@ function fallbackSummary(sessions: MCPRuntimeSessionRead[]): MCPRuntimeSummaryRe
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "", undefined, "en-US");
 }
 
 function formatPercent(value: number) {

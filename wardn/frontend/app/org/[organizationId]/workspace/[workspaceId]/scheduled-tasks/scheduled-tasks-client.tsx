@@ -65,7 +65,13 @@ import {
   workspaceScheduledTasksTestRoute,
   workspaceScheduledTasksUpdate,
 } from "@/lib/api/generated/workspace-scheduled-tasks/workspace-scheduled-tasks";
-import { formatUserDateTimeInputValue, parseUserDateTimeInputValue } from "@/lib/date-time";
+import {
+  formatUserDateTime,
+  formatUserDateTimeInputValue,
+  formatUserShortDateTime,
+  parseUserDateTime,
+  parseUserDateTimeInputValue,
+} from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type ScheduleType =
@@ -621,33 +627,11 @@ function scheduleDraftIsValid(draft: ScheduleDraft) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not scheduled";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return formatUserDateTime(value, "Not scheduled", undefined, "en");
 }
 
 function shortDate(value?: string | null) {
-  if (!value) {
-    return "None";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  }).format(date);
+  return formatUserShortDateTime(value, "None");
 }
 
 function scheduleLabel(task: WorkspaceScheduledTaskRead) {
@@ -2670,7 +2654,11 @@ export function ScheduledTasksClient({
         if (!task.nextRunAt || !task.isActive) {
           return false;
         }
-        const next = new Date(task.nextRunAt).getTime();
+        const nextDate = parseUserDateTime(task.nextRunAt);
+        if (!nextDate) {
+          return false;
+        }
+        const next = nextDate.getTime();
         return Number.isFinite(next) && next - nowMs <= day && next >= nowMs - 60_000;
       }).length,
       failed: taskRows.filter((task) =>

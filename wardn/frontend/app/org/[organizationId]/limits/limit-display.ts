@@ -3,6 +3,7 @@ import type {
   ResourceLimitRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { formatUserDateTime } from "@/lib/date-time";
 
 export type LimitScopeType = "organization" | "workspace";
 
@@ -173,10 +174,7 @@ export function limitValueHelp(value: string) {
 }
 
 export function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value);
 }
 
 export function scopeLabel(

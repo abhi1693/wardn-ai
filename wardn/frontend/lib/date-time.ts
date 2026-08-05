@@ -32,11 +32,22 @@ function twoDigit(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function parseInstant(value: DateTimeInput) {
+const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}/;
+const timezoneSuffixPattern = /(z|[+-]\d{2}:?\d{2})$/i;
+
+function normalizeApiDateTime(value: string) {
+  const trimmed = value.trim();
+  if (isoDateTimePattern.test(trimmed) && !timezoneSuffixPattern.test(trimmed)) {
+    return `${trimmed.replace(" ", "T")}Z`;
+  }
+  return trimmed;
+}
+
+export function parseUserDateTime(value: DateTimeInput) {
   if (!value) {
     return null;
   }
-  const date = new Date(value);
+  const date = new Date(normalizeApiDateTime(value));
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -54,7 +65,7 @@ export function formatUserDateTime(
   options: Intl.DateTimeFormatOptions = userDateTimeOptions,
   locale?: string | string[],
 ) {
-  const date = parseInstant(value);
+  const date = parseUserDateTime(value);
   return date ? formatWithOptions(date, options, locale) : fallback;
 }
 
@@ -71,7 +82,7 @@ export function formatUserDate(value: DateTimeInput, fallback = "Unknown") {
 }
 
 export function formatUserDateTimeInputValue(value: DateTimeInput) {
-  const date = parseInstant(value);
+  const date = parseUserDateTime(value);
   if (!date) {
     return "";
   }
@@ -92,7 +103,7 @@ export function parseUserDateTimeInputValue(value: string) {
 export function parseLocalDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
-    return parseInstant(value);
+    return parseUserDateTime(value);
   }
   const [, year, month, day] = match;
   return new Date(Number(year), Number(month) - 1, Number(day));

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MCPGatewayToolApprovalRead } from "@/lib/api/generated/model";
 import { workspaceMcpGatewayDecideToolApproval } from "@/lib/api/generated/workspace-mcp-gateway/workspace-mcp-gateway";
+import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type ConnectionApprovalsClientProps = {
@@ -23,10 +24,7 @@ function stringValue(value: unknown) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "Unknown", undefined, "en");
 }
 
 function jsonPreview(value: unknown) {

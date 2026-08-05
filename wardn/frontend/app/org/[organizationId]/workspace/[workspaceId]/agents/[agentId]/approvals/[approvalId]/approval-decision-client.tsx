@@ -23,6 +23,7 @@ import {
   workspaceAgentsGetToolApproval,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
 import { apiErrorMessage } from "@/lib/api/client";
+import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type ApprovalDecisionClientProps = {
@@ -58,13 +59,7 @@ function stringValue(value: unknown) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "Unknown", undefined, "en");
 }
 
 function formatJson(value: unknown) {

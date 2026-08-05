@@ -32,6 +32,7 @@ import type {
   UserAPITokenRead,
 } from "@/lib/api/generated/model";
 import { authDeleteApiToken } from "@/lib/api/generated/auth/auth";
+import { formatUserDateTime } from "@/lib/date-time";
 
 type AgentTokensClientProps = {
   initialTokens: UserAPITokenRead[];
@@ -39,13 +40,7 @@ type AgentTokensClientProps = {
 };
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return "Never";
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "Never");
 }
 
 function scopeLabel(token: UserAPITokenRead, organization: OrganizationRead) {

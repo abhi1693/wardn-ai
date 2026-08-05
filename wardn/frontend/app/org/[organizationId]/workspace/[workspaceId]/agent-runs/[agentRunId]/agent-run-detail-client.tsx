@@ -21,6 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiErrorMessage, apiRequest } from "@/lib/api/client";
 import type { AgentRunDetailResponse, AgentRunStepRead } from "@/lib/api/generated/model";
+import {
+  formatUserDateTime,
+  parseUserDateTime,
+  userDateTimeWithSecondsOptions,
+} from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type AgentRunDetailClientProps = {
@@ -51,21 +56,12 @@ function statusVariant(status: string) {
 }
 
 function parseTime(value?: string | null) {
-  if (!value) {
-    return null;
-  }
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
+  const date = parseUserDateTime(value);
+  return date ? date.getTime() : null;
 }
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not finished";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  }).format(new Date(value));
+  return formatUserDateTime(value, "Not finished", userDateTimeWithSecondsOptions, "en");
 }
 
 function formatDuration(ms: number) {
