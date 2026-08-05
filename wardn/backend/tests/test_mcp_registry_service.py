@@ -75,6 +75,7 @@ class FakeSession:
         self.flushed = False
         self.committed = False
         self.commit_count = 0
+        self.rollback_count = 0
         self.refreshed: list[object] = []
 
     def add(self, instance: object) -> None:
@@ -89,6 +90,9 @@ class FakeSession:
     async def commit(self) -> None:
         self.committed = True
         self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
 
     async def refresh(self, instance) -> None:
         now = datetime(2026, 6, 21, tzinfo=UTC)
@@ -536,6 +540,96 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     assert source.last_success_at is not None
     assert source.last_synced_updated_since > datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
     assert source.last_error == ""
+
+
+@pytest.mark.asyncio
+async def test_sync_catalog_source_failure_uses_cached_source_metadata_after_rollback(
+    monkeypatch,
+    caplog,
+) -> None:
+    class ExpiringCatalogSource:
+        def __init__(self) -> None:
+            self.id = uuid4()
+            self.organization_id = ORGANIZATION_ID
+            self.provider = "wardn_hub"
+            self.base_url = "https://hub.wardnai.dev"
+            self.auth_secret_handle_id = uuid4()
+            self.tenant_id = ""
+            self.sync_mode = "latest_only"
+            self.is_enabled = True
+            self.last_synced_updated_since = None
+            self.last_error = ""
+            self.expired = False
+
+        @property
+        def name(self) -> str:
+            if self.expired:
+                raise AssertionError("expired source name accessed")
+            return "Wardn Hub"
+
+    class ExpiringSession(FakeSession):
+        async def rollback(self) -> None:
+            await super().rollback()
+            source.expired = True
+
+    class TimeoutIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise TimeoutError("registry offline")
+
+    source = ExpiringCatalogSource()
+
+    async def get_catalog_source(*args, **kwargs):
+        return source
+
+    async def catalog_source_auth_headers(*args, **kwargs):
+        return {}
+
+    def registry_headers(*args, **kwargs):
+        return {"x-test": "1"}
+
+    def iter_supported_server_batches_from_registry_url(*args, **kwargs):
+        return TimeoutIterator()
+
+    from app.modules.mcp_registry import commands
+
+    monkeypatch.setattr(service.repository, "get_catalog_source", get_catalog_source)
+    monkeypatch.setattr(
+        catalog_service,
+        "catalog_source_auth_headers",
+        catalog_source_auth_headers,
+    )
+    monkeypatch.setattr(commands, "registry_headers", registry_headers)
+    monkeypatch.setattr(
+        commands,
+        "iter_supported_server_batches_from_registry_url",
+        iter_supported_server_batches_from_registry_url,
+    )
+    caplog.set_level(logging.WARNING, logger=catalog_service.logger.name)
+    session = ExpiringSession()
+
+    with pytest.raises(ValueError) as error:
+        await service.sync_catalog_source(session, ORGANIZATION_ID, source.id)
+
+    assert "registry offline" in str(error.value)
+    assert "expired source name accessed" not in str(error.value)
+    assert "registry offline" in source.last_error
+    assert session.rollback_count == 2
+    warning_records = [
+        record
+        for record in caplog.records
+        if record.message
+        in {
+            "MCP catalog source URL failed.",
+            "MCP catalog source sync failed.",
+        }
+    ]
+    assert [record.mcp_catalog_source_name for record in warning_records] == [
+        "Wardn Hub",
+        "Wardn Hub",
+    ]
 
 
 @pytest.mark.asyncio

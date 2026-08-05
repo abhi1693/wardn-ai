@@ -705,17 +705,24 @@ async def sync_catalog_source(
     if not source.is_enabled:
         raise ValueError("catalog source is disabled")
 
+    source_id_value = source.id
+    source_name = source.name
+    source_provider = source.provider
+    source_sync_mode = source.sync_mode
+    source_base_url = source.base_url
+    source_tenant_id = source.tenant_id
+
     from app.modules.mcp_registry.commands import (
         iter_supported_server_batches_from_registry_url,
         registry_headers,
     )
 
-    source_type = registry_source_type(source.provider)
-    version = "latest" if source.sync_mode == "latest_only" else None
+    source_type = registry_source_type(source_provider)
+    version = "latest" if source_sync_mode == "latest_only" else None
     updated_since = catalog_source_updated_since(source)
-    is_wardn_hub_source = source.provider == "wardn_hub"
+    is_wardn_hub_source = source_provider == "wardn_hub"
     source_urls = (
-        [wardn_hub_servers_url(source.base_url)]
+        [wardn_hub_servers_url(source_base_url)]
         if is_wardn_hub_source
         else catalog_source_urls(source)
     )
@@ -725,10 +732,10 @@ async def sync_catalog_source(
         "Starting MCP catalog source sync.",
         extra={
             "organization_id": str(organization_id),
-            "mcp_catalog_source_id": str(source.id),
-            "mcp_catalog_source_name": source.name,
-            "mcp_catalog_provider": source.provider,
-            "mcp_catalog_sync_mode": source.sync_mode,
+            "mcp_catalog_source_id": str(source_id_value),
+            "mcp_catalog_source_name": source_name,
+            "mcp_catalog_provider": source_provider,
+            "mcp_catalog_sync_mode": source_sync_mode,
             "mcp_catalog_updated_since": updated_since,
             "mcp_catalog_pagination": pagination,
             "mcp_catalog_source_url_count": len(source_urls),
@@ -736,7 +743,7 @@ async def sync_catalog_source(
     )
 
     try:
-        headers = registry_headers(source_type, api_key=None, tenant_id=source.tenant_id or None)
+        headers = registry_headers(source_type, api_key=None, tenant_id=source_tenant_id or None)
         headers.update(await catalog_source_auth_headers(session, organization_id, source))
         last_error: Exception | None = None
         synced_count = 0
@@ -749,9 +756,9 @@ async def sync_catalog_source(
                     "Fetching MCP catalog source URL.",
                     extra={
                         "organization_id": str(organization_id),
-                        "mcp_catalog_source_id": str(source.id),
-                        "mcp_catalog_source_name": source.name,
-                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_id": str(source_id_value),
+                        "mcp_catalog_source_name": source_name,
+                        "mcp_catalog_provider": source_provider,
                         "mcp_catalog_source_url": source_url,
                         "mcp_catalog_updated_since": updated_since,
                         "mcp_catalog_batch_size": CATALOG_SYNC_BATCH_SIZE,
@@ -786,7 +793,7 @@ async def sync_catalog_source(
                             session,
                             sourced_servers,
                             organization_id=organization_id,
-                            catalog_source_id=source.id,
+                            catalog_source_id=source_id_value,
                         )
                         synced_count += synced_batch_count
                         await session.commit()
@@ -794,9 +801,9 @@ async def sync_catalog_source(
                             "Synced MCP catalog source batch.",
                             extra={
                                 "organization_id": str(organization_id),
-                                "mcp_catalog_source_id": str(source.id),
-                                "mcp_catalog_source_name": source.name,
-                                "mcp_catalog_provider": source.provider,
+                                "mcp_catalog_source_id": str(source_id_value),
+                                "mcp_catalog_source_name": source_name,
+                                "mcp_catalog_provider": source_provider,
                                 "mcp_catalog_source_url": source_url,
                                 "mcp_catalog_batch_index": batch_index,
                                 "mcp_catalog_batch_size": len(batch),
@@ -811,9 +818,9 @@ async def sync_catalog_source(
                     "Finished MCP catalog source URL.",
                     extra={
                         "organization_id": str(organization_id),
-                        "mcp_catalog_source_id": str(source.id),
-                        "mcp_catalog_source_name": source.name,
-                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_id": str(source_id_value),
+                        "mcp_catalog_source_name": source_name,
+                        "mcp_catalog_provider": source_provider,
                         "mcp_catalog_source_url": source_url,
                         "mcp_catalog_source_count": source_batch_count,
                         "mcp_catalog_batch_count": batch_index,
@@ -827,9 +834,9 @@ async def sync_catalog_source(
                     "MCP catalog source URL failed.",
                     extra={
                         "organization_id": str(organization_id),
-                        "mcp_catalog_source_id": str(source.id),
-                        "mcp_catalog_source_name": source.name,
-                        "mcp_catalog_provider": source.provider,
+                        "mcp_catalog_source_id": str(source_id_value),
+                        "mcp_catalog_source_name": source_name,
+                        "mcp_catalog_provider": source_provider,
                         "mcp_catalog_source_url": source_url,
                         "mcp_catalog_source_count": source_batch_count,
                         "mcp_catalog_batch_count": batch_index,
@@ -840,7 +847,7 @@ async def sync_catalog_source(
                     raise
         if not loaded_source:
             raise ValueError(
-                f"no supported catalog API found at {source.base_url}: {last_error}"
+                f"no supported catalog API found at {source_base_url}: {last_error}"
             )
     except Exception as exc:
         await session.rollback()
@@ -849,8 +856,8 @@ async def sync_catalog_source(
             extra={
                 "organization_id": str(organization_id),
                 "mcp_catalog_source_id": str(source_id),
-                "mcp_catalog_source_name": getattr(source, "name", None),
-                "mcp_catalog_provider": getattr(source, "provider", None),
+                "mcp_catalog_source_name": source_name,
+                "mcp_catalog_provider": source_provider,
                 "error_type": exc.__class__.__name__,
             },
         )
