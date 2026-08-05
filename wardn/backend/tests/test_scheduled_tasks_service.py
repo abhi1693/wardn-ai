@@ -471,8 +471,9 @@ async def test_cancel_workspace_scheduled_task_run_marks_waiting_run_and_approva
     monkeypatch.setattr(service.repository, "list_run_deliveries", list_run_deliveries)
     monkeypatch.setattr(service.repository, "list_run_notifications", list_run_notifications)
 
+    session = FakeWaitingSession(task=task, run=run, agent_run=agent_run)
     response = await service.cancel_workspace_scheduled_task_run(
-        FakeWaitingSession(task=task, run=run, agent_run=agent_run),
+        session,
         actor,
         task.organization_id,
         task.workspace_id,
@@ -487,6 +488,7 @@ async def test_cancel_workspace_scheduled_task_run_marks_waiting_run_and_approva
         "status": "denied",
         "error": service.CANCELED_RUN_ERROR,
     }
+    assert run in session.refreshes
     assert approval.status == "denied"
     assert approval.decided_by_id == actor.id
     assert agent_run.status == "canceled"

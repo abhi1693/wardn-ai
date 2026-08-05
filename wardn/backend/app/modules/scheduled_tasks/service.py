@@ -1773,6 +1773,7 @@ async def cancel_workspace_scheduled_task_run(
                     data_update={"status": approval.status, "error": approval.error},
                 )
     await repository.cancel_run(session, run, now=now, error=CANCELED_RUN_ERROR)
+    await session.refresh(run)
     deliveries_by_run = await repository.list_run_deliveries(session, run_ids=[run.id])
     notifications_by_run = await repository.list_run_notifications(session, run_ids=[run.id])
     return run_response(
