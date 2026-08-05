@@ -179,11 +179,19 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/test-route"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/scheduled-tasks/{task_id}"
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/scheduled-tasks/{task_id}/runs"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/scheduled-tasks/{task_id}/runs/{run_id}/deliveries/{delivery_id}/retry"
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -689,10 +697,22 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
             "/scheduled-tasks/preview"
         )
     ]
+    test_route = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/test-route"
+        )
+    ]
     run_now = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/scheduled-tasks/{task_id}/runs"
+        )
+    ]
+    retry_delivery = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/scheduled-tasks/{task_id}/runs/{run_id}/deliveries/{delivery_id}/retry"
         )
     ]
 
@@ -711,6 +731,10 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
     assert preview["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WorkspaceScheduledTaskSchedulePreviewResponse"
     }
+    assert test_route["post"]["operationId"] == "workspace_scheduled_tasks_test_route"
+    assert test_route["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskRouteTestResponse"
+    }
     assert runs["get"]["operationId"] == "workspace_scheduled_tasks_list_runs"
     assert runs["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WorkspaceScheduledTaskRunListResponse"
@@ -719,12 +743,21 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
     assert run_now["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WorkspaceScheduledTaskRunRead"
     }
+    assert retry_delivery["post"]["operationId"] == "workspace_scheduled_tasks_retry_delivery"
+    assert retry_delivery["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceScheduledTaskRunRead"
+    }
     task_read = schema["components"]["schemas"]["WorkspaceScheduledTaskRead"]["properties"]
     assert "schedules" in task_read
     assert "nextRunPreview" in task_read
     assert "monitoringConfig" in task_read
     assert "monitoringState" in task_read
     assert "monitoringStatus" in task_read
+    delivery_read = schema["components"]["schemas"]["WorkspaceScheduledTaskDeliveryRead"][
+        "properties"
+    ]
+    assert "retryCount" in delivery_read
+    assert "canRetry" in delivery_read
 
 
 def test_mcp_registry_openapi_contract() -> None:

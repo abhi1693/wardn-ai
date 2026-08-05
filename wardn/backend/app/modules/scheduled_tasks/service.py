@@ -42,6 +42,8 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskNotificationRules,
     WorkspaceScheduledTaskOutputRoute,
     WorkspaceScheduledTaskRead,
+    WorkspaceScheduledTaskRouteTestRequest,
+    WorkspaceScheduledTaskRouteTestResponse,
     WorkspaceScheduledTaskRunListResponse,
     WorkspaceScheduledTaskRunRead,
     WorkspaceScheduledTaskScheduleCreate,
@@ -60,6 +62,8 @@ SCHEDULED_AGENT_TRIGGER = "scheduled"
 PROVIDER_EMPTY_REPLY = "The scheduled task completed, but the assistant did not return text."
 DEFAULT_NOTIFICATION_RULES = WorkspaceScheduledTaskNotificationRules()
 DEFAULT_MONITORING_CONFIG = WorkspaceScheduledTaskMonitoringConfig()
+DELIVERY_TEXT_PAYLOAD_KEY = "scheduledTaskDeliveryText"
+RETRYABLE_DELIVERY_RUN_STATUSES = {"succeeded", "partially_delivered", "delivery_failed"}
 NOTIFICATION_EVENT_TO_RULE_KEY = {
     "failure": "on_failure",
     "waiting_approval": "on_waiting_approval",
@@ -655,6 +659,48 @@ def route_reads(routes: list[dict[str, Any]] | None) -> list[WorkspaceScheduledT
     ]
 
 
+def delivery_payload_text(payload: Mapping[str, Any] | None) -> str:
+    value = (payload or {}).get(DELIVERY_TEXT_PAYLOAD_KEY)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def delivery_retry_count(payload: Mapping[str, Any] | None) -> int:
+    return monitoring_int((payload or {}).get("retryCount"))
+
+
+def delivery_can_retry(delivery: WorkspaceScheduledTaskDelivery) -> bool:
+    return (
+        delivery.route_type == "chat_provider"
+        and delivery.status == "failed"
+        and bool(delivery.connection_id)
+        and bool(delivery_payload_text(delivery.payload))
+    )
+
+
+def delivery_payload_with_text(
+    payload: Mapping[str, Any] | None = None,
+    *,
+    text: str,
+) -> dict[str, Any]:
+    return {**dict(payload or {}), DELIVERY_TEXT_PAYLOAD_KEY: text}
+
+
+def update_run_delivery_summary(
+    run: WorkspaceScheduledTaskRun,
+    deliveries: Sequence[WorkspaceScheduledTaskDelivery],
+) -> dict[str, Any]:
+    delivery_summary = dict(run.delivery_summary or {})
+    delivery_summary.update(
+        {
+            "total": len(deliveries),
+            "sent": sum(1 for delivery in deliveries if delivery.status == "sent"),
+            "failed": sum(1 for delivery in deliveries if delivery.status == "failed"),
+        }
+    )
+    run.delivery_summary = delivery_summary
+    return delivery_summary
+
+
 def normalize_notification_rules(
     rules: WorkspaceScheduledTaskNotificationRules | Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1191,6 +1237,8 @@ def delivery_response(
         status=delivery.status,
         payload=delivery.payload,
         error=delivery.error,
+        retryCount=delivery_retry_count(delivery.payload),
+        canRetry=delivery_can_retry(delivery),
         deliveredAt=delivery.delivered_at,
         createdAt=delivery.created_at,
         updatedAt=delivery.updated_at,
@@ -1629,6 +1677,228 @@ async def list_workspace_scheduled_task_runs(
     )
 
 
+async def test_workspace_scheduled_task_route(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: WorkspaceScheduledTaskRouteTestRequest,
+) -> WorkspaceScheduledTaskRouteTestResponse:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    route = normalize_output_routes([payload.route])[0]
+    route_read = WorkspaceScheduledTaskOutputRoute.model_validate(route)
+    now = utc_now()
+    if route.get("route_type") != "chat_provider":
+        return WorkspaceScheduledTaskRouteTestResponse(
+            route=route_read,
+            status="sent",
+            payload={"message": "Built-in chat output is available for scheduled task runs."},
+            sentAt=now,
+        )
+
+    external_thread_id = str(route.get("external_thread_id") or "").strip()
+    if not external_thread_id:
+        return WorkspaceScheduledTaskRouteTestResponse(
+            route=route_read,
+            status="failed",
+            error="Chat provider route requires a conversation.",
+        )
+    connection = await provider_route_connection_for_workspace(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        route=route,
+    )
+    if connection is None or not connection.is_active:
+        return WorkspaceScheduledTaskRouteTestResponse(
+            route=route_read,
+            status="failed",
+            error="Chat provider connection is not active.",
+        )
+
+    try:
+        provider_payload = await chat_provider_service.send_provider_text_message(
+            session,
+            connection,
+            external_thread_id=external_thread_id,
+            text=payload.message,
+        )
+    except Exception as exc:
+        return WorkspaceScheduledTaskRouteTestResponse(
+            route=route_read,
+            status="failed",
+            error=str(exc),
+        )
+
+    outbound_message_id = chat_provider_service.provider_response_message_id(
+        connection,
+        provider_payload,
+    )
+    session.add(
+        ChatProviderEvent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            provider=connection.provider,
+            external_event_id=outbound_message_id or f"scheduled-route-test:{uuid.uuid4()}",
+            direction="outbound",
+            event_type="scheduled_task.route_test",
+            status="sent",
+            payload={
+                connection.provider: provider_payload,
+                "scheduledTaskRouteTest": True,
+            },
+            processed_at=now,
+        )
+    )
+    return WorkspaceScheduledTaskRouteTestResponse(
+        route=route_read,
+        status="sent",
+        payload={connection.provider: provider_payload},
+        sentAt=now,
+    )
+
+
+async def retry_workspace_scheduled_task_delivery(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    run_id: uuid.UUID,
+    delivery_id: uuid.UUID,
+) -> WorkspaceScheduledTaskRunRead:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    task = await repository.get_task(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+    )
+    if task is None:
+        raise ScheduledTaskNotFoundError("scheduled task not found")
+    run = await repository.get_task_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        run_id=run_id,
+        for_update=True,
+    )
+    if run is None:
+        raise ScheduledTaskNotFoundError("scheduled task run not found")
+    if run.status not in RETRYABLE_DELIVERY_RUN_STATUSES:
+        raise InvalidScheduledTaskError("only completed assistant deliveries can be retried")
+    delivery = await repository.get_delivery(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        task_run_id=run_id,
+        delivery_id=delivery_id,
+        for_update=True,
+    )
+    if delivery is None:
+        raise ScheduledTaskNotFoundError("scheduled task delivery not found")
+    if delivery.route_type != "chat_provider":
+        raise InvalidScheduledTaskError("only chat provider deliveries can be retried")
+    if delivery.status != "failed":
+        raise InvalidScheduledTaskError("only failed deliveries can be retried")
+    text = delivery_payload_text(delivery.payload)
+    if not text:
+        raise InvalidScheduledTaskError("delivery has no saved message to retry")
+    if delivery.connection_id is None:
+        raise InvalidScheduledTaskError("delivery has no chat provider connection to retry")
+
+    now = utc_now()
+    retry_count = delivery_retry_count(delivery.payload) + 1
+    retry_payload = {
+        **delivery_payload_with_text(delivery.payload, text=text),
+        "retryCount": retry_count,
+        "lastRetryAt": now.isoformat(),
+    }
+    connection = await chat_provider_repository.get_connection(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=delivery.connection_id,
+    )
+    if connection is None or not connection.is_active:
+        delivery.status = "failed"
+        delivery.error = "Chat provider connection is not active."
+        delivery.payload = {
+            **retry_payload,
+            "lastRetryError": delivery.error,
+        }
+        delivery.delivered_at = None
+    else:
+        try:
+            provider_payload = await chat_provider_service.send_provider_text_message(
+                session,
+                connection,
+                external_thread_id=delivery.external_thread_id,
+                text=text,
+            )
+        except Exception as exc:
+            delivery.status = "failed"
+            delivery.error = str(exc)
+            delivery.payload = {
+                **retry_payload,
+                "lastRetryError": delivery.error,
+            }
+            delivery.delivered_at = None
+        else:
+            outbound_message_id = chat_provider_service.provider_response_message_id(
+                connection,
+                provider_payload,
+            )
+            session.add(
+                ChatProviderEvent(
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    connection_id=connection.id,
+                    conversation_id=run.conversation_id,
+                    provider=connection.provider,
+                    external_event_id=outbound_message_id
+                    or f"scheduled-retry:{delivery.id}:{retry_count}:{uuid.uuid4()}",
+                    direction="outbound",
+                    event_type="scheduled_task.delivery_retry",
+                    status="sent",
+                    payload={
+                        connection.provider: provider_payload,
+                        "scheduledTaskRunId": str(run.id),
+                        "scheduledTaskDeliveryId": str(delivery.id),
+                    },
+                    processed_at=now,
+                )
+            )
+            delivery.status = "sent"
+            delivery.error = ""
+            delivery.provider = connection.provider
+            delivery.payload = {
+                **retry_payload,
+                connection.provider: provider_payload,
+                "lastRetryError": "",
+            }
+            delivery.delivered_at = now
+
+    await session.flush()
+    deliveries_by_run = await repository.list_run_deliveries(session, run_ids=[run.id])
+    run_deliveries = deliveries_by_run.get(run.id, [])
+    delivery_summary = update_run_delivery_summary(run, run_deliveries)
+    run.status = scheduled_task_run_status("succeeded", delivery_summary)
+    if task.last_task_run_id == run.id:
+        task.last_status = run.status
+        task.last_error = run.error
+    await session.flush()
+    notifications_by_run = await repository.list_run_notifications(session, run_ids=[run.id])
+    return run_response(
+        run,
+        deliveries=run_deliveries,
+        notifications=notifications_by_run.get(run.id, []),
+    )
+
+
 async def latest_scheduled_agent_run(
     session: AsyncSession,
     *,
@@ -1787,17 +2057,32 @@ async def provider_route_connection(
     task: WorkspaceScheduledTask,
     route: dict[str, Any],
 ) -> ChatProviderConnection | None:
+    return await provider_route_connection_for_workspace(
+        session,
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        route=route,
+    )
+
+
+async def provider_route_connection_for_workspace(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    route: Mapping[str, Any],
+) -> ChatProviderConnection | None:
     connection_id = route.get("connection_id")
     if not connection_id:
         return None
     try:
         connection_uuid = uuid.UUID(str(connection_id))
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     return await chat_provider_repository.get_connection(
         session,
-        organization_id=task.organization_id,
-        workspace_id=task.workspace_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
         connection_id=connection_uuid,
     )
 
@@ -1846,6 +2131,7 @@ async def send_provider_delivery(
             provider=str(route.get("provider") or ""),
             external_thread_id=external_thread_id,
             display_name=display_name,
+            payload=delivery_payload_with_text(text=text),
             error="Chat provider connection is not active.",
         )
         return
@@ -1869,6 +2155,7 @@ async def send_provider_delivery(
             provider=connection.provider,
             external_thread_id=external_thread_id,
             display_name=display_name,
+            payload=delivery_payload_with_text(text=text),
             error=str(exc),
         )
         return
@@ -1900,7 +2187,7 @@ async def send_provider_delivery(
         provider=connection.provider,
         external_thread_id=external_thread_id,
         display_name=display_name,
-        payload={connection.provider: payload},
+        payload=delivery_payload_with_text({connection.provider: payload}, text=text),
         delivered_at=now,
     )
 

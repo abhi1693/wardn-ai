@@ -10,6 +10,8 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskCreate,
     WorkspaceScheduledTaskListResponse,
     WorkspaceScheduledTaskRead,
+    WorkspaceScheduledTaskRouteTestRequest,
+    WorkspaceScheduledTaskRouteTestResponse,
     WorkspaceScheduledTaskRunListResponse,
     WorkspaceScheduledTaskRunRead,
     WorkspaceScheduledTaskSchedulePreviewRequest,
@@ -24,6 +26,8 @@ from app.modules.scheduled_tasks.service import (
     list_workspace_scheduled_task_runs,
     list_workspace_scheduled_tasks,
     preview_workspace_scheduled_task_schedules,
+    retry_workspace_scheduled_task_delivery,
+    test_workspace_scheduled_task_route,
     update_workspace_scheduled_task,
 )
 from app.modules.users.dependencies import get_current_user
@@ -104,6 +108,32 @@ async def preview_workspace_scheduled_task_schedules_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> WorkspaceScheduledTaskSchedulePreviewResponse:
     return await preview_workspace_scheduled_task_schedules(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
+
+
+@workspace_router.post(
+    "/test-route",
+    response_model=WorkspaceScheduledTaskRouteTestResponse,
+    operation_id="workspace_scheduled_tasks_test_route",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def test_workspace_scheduled_task_route_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: WorkspaceScheduledTaskRouteTestRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceScheduledTaskRouteTestResponse:
+    return await test_workspace_scheduled_task_route(
         session,
         current_user,
         organization_id,
@@ -241,4 +271,34 @@ async def run_workspace_scheduled_task_now_route(
         organization_id,
         workspace_id,
         task_id,
+    )
+
+
+@workspace_router.post(
+    "/{task_id}/runs/{run_id}/deliveries/{delivery_id}/retry",
+    response_model=WorkspaceScheduledTaskRunRead,
+    operation_id="workspace_scheduled_tasks_retry_delivery",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def retry_workspace_scheduled_task_delivery_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    task_id: UUID,
+    run_id: UUID,
+    delivery_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceScheduledTaskRunRead:
+    return await retry_workspace_scheduled_task_delivery(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        task_id,
+        run_id,
+        delivery_id,
     )

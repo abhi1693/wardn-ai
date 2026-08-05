@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Route,
   Save,
+  Send,
   ShieldCheck,
   TimerReset,
   Trash2,
@@ -44,6 +45,7 @@ import {
 import type {
   ChatProviderConnectionRead,
   WorkspaceScheduledTaskCreate,
+  WorkspaceScheduledTaskDeliveryRead,
   WorkspaceScheduledTaskMonitoringConfig,
   WorkspaceScheduledTaskOutputRoute,
   WorkspaceScheduledTaskRead,
@@ -56,7 +58,9 @@ import {
   workspaceScheduledTasksCreate,
   workspaceScheduledTasksDelete,
   workspaceScheduledTasksPreview,
+  workspaceScheduledTasksRetryDelivery,
   workspaceScheduledTasksRunNow,
+  workspaceScheduledTasksTestRoute,
   workspaceScheduledTasksUpdate,
 } from "@/lib/api/generated/workspace-scheduled-tasks/workspace-scheduled-tasks";
 import { cn } from "@/lib/utils";
@@ -88,6 +92,13 @@ type ProviderRouteOption = {
   label: string;
   provider: string;
   source: string;
+};
+
+type RouteTestStatus = "idle" | "testing" | "sent" | "failed";
+
+type RouteTestState = {
+  error?: string;
+  status: RouteTestStatus;
 };
 
 type FormState = {
@@ -735,6 +746,38 @@ function buildOutputRoutes(
   return routes.length ? routes : [{ routeType: "chat" }];
 }
 
+function routeLabelForKey(key: string, providerOptions: ProviderRouteOption[]) {
+  if (key === "chat") {
+    return "Built-in chat";
+  }
+  const option = providerOptions.find((candidate) => candidate.key === key);
+  return option ? `${option.source} · ${option.label}` : "Provider conversation";
+}
+
+function deliveryRouteLabel(
+  delivery: WorkspaceScheduledTaskDeliveryRead,
+  providerOptions: ProviderRouteOption[]
+) {
+  if (delivery.routeType === "chat") {
+    return "Built-in chat";
+  }
+  const option = providerOptions.find(
+    (candidate) =>
+      candidate.connectionId === delivery.connectionId &&
+      candidate.externalThreadId === delivery.externalThreadId
+  );
+  if (option) {
+    return `${option.source} · ${option.label}`;
+  }
+  return delivery.displayName?.trim() || providerLabel(delivery.provider ?? "") || "Provider route";
+}
+
+function failedRetryableDeliveries(run: WorkspaceScheduledTaskRunRead) {
+  return (run.deliveries ?? []).filter(
+    (delivery) => delivery.status === "failed" && delivery.canRetry
+  );
+}
+
 function metricValue(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
@@ -824,6 +867,72 @@ export function ScheduledTaskFormClient({
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
+  const [routeTests, setRouteTests] = useState<Record<string, RouteTestState>>({});
+  const isTestingRoutes = Object.values(routeTests).some((test) => test.status === "testing");
+
+  function routeForKey(key: string) {
+    if (key !== "chat" && !providerOptions.some((option) => option.key === key)) {
+      return null;
+    }
+    return buildOutputRoutes([key], providerOptions)[0] ?? null;
+  }
+
+  function routeTestStatus(key: string) {
+    return routeTests[key] ?? { status: "idle" as const };
+  }
+
+  function routeTestBadge(key: string) {
+    const state = routeTestStatus(key);
+    if (state.status === "idle") {
+      return null;
+    }
+    if (state.status === "testing") {
+      return <Badge variant="secondary">Testing</Badge>;
+    }
+    if (state.status === "sent") {
+      return <Badge variant="success">Test sent</Badge>;
+    }
+    return <Badge variant="destructive">Test failed</Badge>;
+  }
+
+  async function testRoute(key: string) {
+    const route = routeForKey(key);
+    if (!route) {
+      setRouteTests((current) => ({
+        ...current,
+        [key]: { error: "Route is not available.", status: "failed" },
+      }));
+      return;
+    }
+    setRouteTests((current) => ({
+      ...current,
+      [key]: { status: "testing" },
+    }));
+    try {
+      const response = await workspaceScheduledTasksTestRoute(organizationId, workspaceId, {
+        message: `Wardn scheduled task route test: ${form.name.trim() || "Scheduled task"}`,
+        route,
+      });
+      const status = response.status === "sent" ? "sent" : "failed";
+      setRouteTests((current) => ({
+        ...current,
+        [key]: { error: response.error, status },
+      }));
+    } catch (error) {
+      setRouteTests((current) => ({
+        ...current,
+        [key]: {
+          error: error instanceof Error ? error.message : "Route test failed.",
+          status: "failed",
+        },
+      }));
+    }
+  }
+
+  async function testSelectedRoutes() {
+    setFeedback(null);
+    await Promise.all(form.selectedRoutes.map((key) => testRoute(key)));
+  }
 
   function toggleRoute(key: string) {
     const selected = new Set(form.selectedRoutes);
@@ -1355,42 +1464,113 @@ export function ScheduledTaskFormClient({
                   <Route className="size-4 text-muted-foreground" />
                   Output
                 </div>
-                <Badge variant="secondary">{form.selectedRoutes.length}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">{form.selectedRoutes.length}</Badge>
+                  <Button
+                    disabled={isTestingRoutes || form.selectedRoutes.length === 0}
+                    onClick={testSelectedRoutes}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {isTestingRoutes ? (
+                      <RefreshCw className="size-4 animate-spin" />
+                    ) : (
+                      <Send className="size-4" />
+                    )}
+                    Test
+                  </Button>
+                </div>
               </div>
               <div className="grid gap-2 p-3">
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
-                  <input
-                    checked={form.selectedRoutes.includes("chat")}
-                    className="size-4"
-                    onChange={() => toggleRoute("chat")}
-                    type="checkbox"
-                  />
-                  <MessageSquare className="size-4 text-muted-foreground" />
-                  <span>Built-in chat</span>
-                </label>
-                {providerOptions.map((option) => (
-                  <label
-                    className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
-                    key={option.key}
-                  >
+                <div className="flex min-h-11 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                     <input
-                      checked={form.selectedRoutes.includes(option.key)}
+                      checked={form.selectedRoutes.includes("chat")}
                       className="size-4"
-                      onChange={() => toggleRoute(option.key)}
+                      onChange={() => toggleRoute("chat")}
                       type="checkbox"
                     />
-                    <Webhook className="size-4 text-muted-foreground" />
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{option.label}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {option.source}
-                      </span>
-                    </span>
+                    <MessageSquare className="size-4 text-muted-foreground" />
+                    <span>Built-in chat</span>
                   </label>
+                  {form.selectedRoutes.includes("chat") ? routeTestBadge("chat") : null}
+                  {form.selectedRoutes.includes("chat") ? (
+                    <Button
+                      disabled={routeTestStatus("chat").status === "testing"}
+                      onClick={() => testRoute("chat")}
+                      size="icon"
+                      title="Test built-in chat route"
+                      type="button"
+                      variant="outline"
+                    >
+                      {routeTestStatus("chat").status === "testing" ? (
+                        <RefreshCw className="size-4 animate-spin" />
+                      ) : (
+                        <Send className="size-4" />
+                      )}
+                    </Button>
+                  ) : null}
+                </div>
+                {providerOptions.map((option) => (
+                  <div
+                    className="flex min-h-12 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm"
+                    key={option.key}
+                  >
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                      <input
+                        checked={form.selectedRoutes.includes(option.key)}
+                        className="size-4"
+                        onChange={() => toggleRoute(option.key)}
+                        type="checkbox"
+                      />
+                      <Webhook className="size-4 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{option.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {option.source}
+                        </span>
+                      </span>
+                    </label>
+                    {form.selectedRoutes.includes(option.key) ? routeTestBadge(option.key) : null}
+                    {form.selectedRoutes.includes(option.key) ? (
+                      <Button
+                        disabled={routeTestStatus(option.key).status === "testing"}
+                        onClick={() => testRoute(option.key)}
+                        size="icon"
+                        title={`Test ${routeLabelForKey(option.key, providerOptions)}`}
+                        type="button"
+                        variant="outline"
+                      >
+                        {routeTestStatus(option.key).status === "testing" ? (
+                          <RefreshCw className="size-4 animate-spin" />
+                        ) : (
+                          <Send className="size-4" />
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
                 ))}
                 {providerOptions.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                     Connect a provider and receive a message before selecting an external route.
+                  </div>
+                ) : null}
+                {Object.entries(routeTests).some(
+                  ([key, state]) =>
+                    form.selectedRoutes.includes(key) && state.status === "failed"
+                ) ? (
+                  <div className="grid gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {Object.entries(routeTests)
+                      .filter(
+                        ([key, state]) =>
+                          form.selectedRoutes.includes(key) && state.status === "failed"
+                      )
+                      .map(([key, state]) => (
+                        <div className="min-w-0 truncate" key={key}>
+                          {routeLabelForKey(key, providerOptions)}: {state.error || "Test failed."}
+                        </div>
+                      ))}
                   </div>
                 ) : null}
               </div>
@@ -1778,6 +1958,7 @@ export function ScheduledTasksClient({
   const [taskRows, setTaskRows] = useState(tasks);
   const [runRows, setRunRows] = useState(runs);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [busyDeliveryId, setBusyDeliveryId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
@@ -1848,6 +2029,40 @@ export function ScheduledTasksClient({
       });
     } finally {
       setBusyTaskId(null);
+    }
+  }
+
+  async function retryDelivery(
+    run: WorkspaceScheduledTaskRunRead,
+    delivery: WorkspaceScheduledTaskDeliveryRead
+  ) {
+    setBusyDeliveryId(delivery.id);
+    setFeedback(null);
+    try {
+      const updatedRun = await workspaceScheduledTasksRetryDelivery(
+        organizationId,
+        workspaceId,
+        run.taskId,
+        run.id,
+        delivery.id
+      );
+      setRunRows((current) =>
+        current.map((row) => (row.id === updatedRun.id ? updatedRun : row))
+      );
+      setTaskRows((current) =>
+        current.map((row) =>
+          row.lastTaskRunId === updatedRun.id ? { ...row, lastStatus: updatedRun.status } : row
+        )
+      );
+      setFeedback({ variant: "success", text: "Delivery retried." });
+      router.refresh();
+    } catch (error) {
+      setFeedback({
+        variant: "error",
+        text: error instanceof Error ? error.message : "Could not retry delivery.",
+      });
+    } finally {
+      setBusyDeliveryId(null);
     }
   }
 
@@ -2131,6 +2346,7 @@ export function ScheduledTasksClient({
           {runRows.length > 0 ? (
             runRows.map((run) => {
               const task = taskRows.find((row) => row.id === run.taskId);
+              const retryableDeliveries = failedRetryableDeliveries(run);
               return (
                 <div
                   className="grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]"
@@ -2166,6 +2382,46 @@ export function ScheduledTasksClient({
                       </Button>
                     ) : null}
                   </div>
+                  {retryableDeliveries.length > 0 ? (
+                    <div className="grid gap-2 border-t border-border pt-2 md:col-span-5">
+                      {retryableDeliveries.map((delivery) => (
+                        <div
+                          className="flex items-center justify-between gap-3 rounded-md bg-red-50 px-2 py-2 text-xs text-red-700"
+                          key={delivery.id}
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {deliveryRouteLabel(delivery, providerOptions)}
+                            </div>
+                            <div className="mt-0.5 truncate text-red-600">
+                              {delivery.error || "Delivery failed."}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {delivery.retryCount ? (
+                              <Badge variant="destructive">
+                                {delivery.retryCount} retries
+                              </Badge>
+                            ) : null}
+                            <Button
+                              disabled={busyDeliveryId === delivery.id}
+                              onClick={() => retryDelivery(run, delivery)}
+                              size="sm"
+                              title="Retry delivery"
+                              variant="outline"
+                            >
+                              {busyDeliveryId === delivery.id ? (
+                                <RefreshCw className="size-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="size-4" />
+                              )}
+                              Retry
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               );
             })

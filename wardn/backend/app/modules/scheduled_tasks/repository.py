@@ -244,6 +244,50 @@ async def list_task_runs(
     return list(result.scalars().all())
 
 
+async def get_task_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    run_id: uuid.UUID,
+    for_update: bool = False,
+) -> WorkspaceScheduledTaskRun | None:
+    statement = select(WorkspaceScheduledTaskRun).where(
+        WorkspaceScheduledTaskRun.id == run_id,
+        WorkspaceScheduledTaskRun.organization_id == organization_id,
+        WorkspaceScheduledTaskRun.workspace_id == workspace_id,
+        WorkspaceScheduledTaskRun.task_id == task_id,
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def get_delivery(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    task_run_id: uuid.UUID,
+    delivery_id: uuid.UUID,
+    for_update: bool = False,
+) -> WorkspaceScheduledTaskDelivery | None:
+    statement = select(WorkspaceScheduledTaskDelivery).where(
+        WorkspaceScheduledTaskDelivery.id == delivery_id,
+        WorkspaceScheduledTaskDelivery.organization_id == organization_id,
+        WorkspaceScheduledTaskDelivery.workspace_id == workspace_id,
+        WorkspaceScheduledTaskDelivery.task_id == task_id,
+        WorkspaceScheduledTaskDelivery.task_run_id == task_run_id,
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
 async def list_run_deliveries(
     session: AsyncSession,
     *,

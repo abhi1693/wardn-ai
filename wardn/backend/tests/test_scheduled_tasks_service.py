@@ -6,13 +6,18 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.modules.agents.models import AgentRun, WorkspaceConversation
+from app.modules.chat_providers.models import ChatProviderConnection
 from app.modules.scheduled_tasks import repository, service
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
+    WorkspaceScheduledTaskDelivery,
     WorkspaceScheduledTaskRun,
     WorkspaceScheduledTaskSchedule,
 )
-from app.modules.scheduled_tasks.schemas import WorkspaceScheduledTaskOutputRoute
+from app.modules.scheduled_tasks.schemas import (
+    WorkspaceScheduledTaskOutputRoute,
+    WorkspaceScheduledTaskRouteTestRequest,
+)
 from app.modules.users.models import User
 
 
@@ -20,6 +25,10 @@ class FakeSession:
     def __init__(self) -> None:
         self.flushed = False
         self.commits = 0
+        self.added: list[object] = []
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
 
     async def flush(self) -> None:
         self.flushed = True
@@ -92,6 +101,52 @@ def make_run(task: WorkspaceScheduledTask) -> WorkspaceScheduledTaskRun:
         worker_id="worker-1",
         error="",
         delivery_summary={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def make_delivery(
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    *,
+    connection_id=None,
+    status: str = "failed",
+    text: str = "Final answer",
+) -> WorkspaceScheduledTaskDelivery:
+    now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
+    return WorkspaceScheduledTaskDelivery(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        task_id=task.id,
+        task_run_id=run.id,
+        connection_id=connection_id,
+        route_type="chat_provider",
+        provider="telegram",
+        external_thread_id="thread-1",
+        display_name="Ops",
+        status=status,
+        payload=service.delivery_payload_with_text(text=text),
+        error="temporary failure" if status == "failed" else "",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def make_connection(task: WorkspaceScheduledTask) -> ChatProviderConnection:
+    now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
+    return ChatProviderConnection(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        created_by_id=task.created_by_id,
+        provider="telegram",
+        name="Telegram",
+        external_id="bot",
+        display_name="Telegram",
+        config={},
+        is_active=True,
         created_at=now,
         updated_at=now,
     )
@@ -469,6 +524,156 @@ def test_output_route_requires_provider_conversation() -> None:
             route_type="chat_provider",
             connection_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+async def test_route_test_sends_provider_message_without_task(monkeypatch) -> None:
+    task = make_task()
+    user = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    connection = make_connection(task)
+    route = WorkspaceScheduledTaskOutputRoute(
+        route_type="chat_provider",
+        connection_id=connection.id,
+        external_thread_id="thread-1",
+        display_name="Ops",
+    )
+    captured = {}
+
+    async def require_admin(*args, **kwargs):
+        captured["admin_checked"] = True
+
+    async def get_connection(*args, **kwargs):
+        return connection
+
+    async def send_provider_text_message(*args, **kwargs):
+        captured["text"] = kwargs["text"]
+        captured["thread"] = kwargs["external_thread_id"]
+        return {"message_id": "test-1"}
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(service.chat_provider_repository, "get_connection", get_connection)
+    monkeypatch.setattr(
+        service.chat_provider_service,
+        "send_provider_text_message",
+        send_provider_text_message,
+    )
+    monkeypatch.setattr(
+        service.chat_provider_service,
+        "provider_response_message_id",
+        lambda *_args, **_kwargs: "test-1",
+    )
+
+    session = FakeSession()
+    response = await service.test_workspace_scheduled_task_route(
+        session,
+        user,
+        task.organization_id,
+        task.workspace_id,
+        WorkspaceScheduledTaskRouteTestRequest(
+            route=route,
+            message="Test scheduled route",
+        ),
+    )
+
+    assert captured["admin_checked"] is True
+    assert captured["text"] == "Test scheduled route"
+    assert captured["thread"] == "thread-1"
+    assert response.status == "sent"
+    assert response.payload == {"telegram": {"message_id": "test-1"}}
+    assert len(session.added) == 1
+    assert session.added[0].event_type == "scheduled_task.route_test"
+
+
+@pytest.mark.asyncio
+async def test_retry_delivery_resends_saved_text_and_updates_run(monkeypatch) -> None:
+    task = make_task()
+    run = make_run(task)
+    run.status = "delivery_failed"
+    run.delivery_summary = {
+        "total": 1,
+        "sent": 0,
+        "failed": 1,
+        "outputKind": "assistant",
+        "outputPreview": "Final answer",
+    }
+    task.last_task_run_id = run.id
+    task.last_status = "delivery_failed"
+    user = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    connection = make_connection(task)
+    delivery = make_delivery(task, run, connection_id=connection.id, text="Final answer")
+    captured = {}
+
+    async def require_admin(*args, **kwargs):
+        captured["admin_checked"] = True
+
+    async def get_task(*args, **kwargs):
+        return task
+
+    async def get_task_run(*args, **kwargs):
+        captured["run_for_update"] = kwargs["for_update"]
+        return run
+
+    async def get_delivery(*args, **kwargs):
+        captured["delivery_for_update"] = kwargs["for_update"]
+        return delivery
+
+    async def list_run_deliveries(*args, **kwargs):
+        return {run.id: [delivery]}
+
+    async def list_run_notifications(*args, **kwargs):
+        return {}
+
+    async def get_connection(*args, **kwargs):
+        return connection
+
+    async def send_provider_text_message(*args, **kwargs):
+        captured["text"] = kwargs["text"]
+        captured["thread"] = kwargs["external_thread_id"]
+        return {"message_id": "retry-1"}
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(service.repository, "get_task", get_task)
+    monkeypatch.setattr(service.repository, "get_task_run", get_task_run)
+    monkeypatch.setattr(service.repository, "get_delivery", get_delivery)
+    monkeypatch.setattr(service.repository, "list_run_deliveries", list_run_deliveries)
+    monkeypatch.setattr(service.repository, "list_run_notifications", list_run_notifications)
+    monkeypatch.setattr(service.chat_provider_repository, "get_connection", get_connection)
+    monkeypatch.setattr(
+        service.chat_provider_service,
+        "send_provider_text_message",
+        send_provider_text_message,
+    )
+    monkeypatch.setattr(
+        service.chat_provider_service,
+        "provider_response_message_id",
+        lambda *_args, **_kwargs: "retry-1",
+    )
+
+    response = await service.retry_workspace_scheduled_task_delivery(
+        FakeSession(),
+        user,
+        task.organization_id,
+        task.workspace_id,
+        task.id,
+        run.id,
+        delivery.id,
+    )
+
+    assert captured["admin_checked"] is True
+    assert captured["run_for_update"] is True
+    assert captured["delivery_for_update"] is True
+    assert captured["text"] == "Final answer"
+    assert captured["thread"] == "thread-1"
+    assert delivery.status == "sent"
+    assert delivery.error == ""
+    assert delivery.payload["retryCount"] == 1
+    assert run.status == "succeeded"
+    assert run.delivery_summary["sent"] == 1
+    assert run.delivery_summary["failed"] == 0
+    assert task.last_status == "succeeded"
+    assert response.status == "succeeded"
+    assert response.deliveries[0].can_retry is False
+    assert response.deliveries[0].retry_count == 1
 
 
 @pytest.mark.asyncio

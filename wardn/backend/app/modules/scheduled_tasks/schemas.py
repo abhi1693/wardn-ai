@@ -219,6 +219,8 @@ class WorkspaceScheduledTaskDeliveryRead(APIModel):
     status: str
     payload: dict[str, Any] = Field(default_factory=dict)
     error: str
+    retry_count: int = 0
+    can_retry: bool = False
     delivered_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -272,6 +274,28 @@ class WorkspaceScheduledTaskRunRead(APIModel):
     notifications: list[WorkspaceScheduledTaskNotificationRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class WorkspaceScheduledTaskRouteTestRequest(APIModel):
+    route: WorkspaceScheduledTaskOutputRoute
+    message: str = Field(
+        default="Wardn scheduled task route test.",
+        min_length=1,
+        max_length=2000,
+    )
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value: str) -> str:
+        return value.strip()
+
+
+class WorkspaceScheduledTaskRouteTestResponse(APIModel):
+    route: WorkspaceScheduledTaskOutputRoute
+    status: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    sent_at: datetime | None = None
 
 
 class WorkspaceScheduledTaskRead(APIModel):

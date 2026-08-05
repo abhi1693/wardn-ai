@@ -8,6 +8,8 @@ import type {
   WorkspaceScheduledTaskCreate,
   WorkspaceScheduledTaskListResponse,
   WorkspaceScheduledTaskRead,
+  WorkspaceScheduledTaskRouteTestRequest,
+  WorkspaceScheduledTaskRouteTestResponse,
   WorkspaceScheduledTaskRunListResponse,
   WorkspaceScheduledTaskRunRead,
   WorkspaceScheduledTaskSchedulePreviewRequest,
@@ -129,6 +131,32 @@ export const workspaceScheduledTasksListRuns = async (organizationId: string,
 );}
 
 
+export const getWorkspaceScheduledTasksTestRouteUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/scheduled-tasks/test-route`
+}
+
+/**
+ * @summary Test Workspace Scheduled Task Route Route
+ */
+export const workspaceScheduledTasksTestRoute = async (organizationId: string,
+    workspaceId: string,
+    workspaceScheduledTaskRouteTestRequest: WorkspaceScheduledTaskRouteTestRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRouteTestResponse> => {
+
+  return apiRequest<WorkspaceScheduledTaskRouteTestResponse>(getWorkspaceScheduledTasksTestRouteUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceScheduledTaskRouteTestRequest)
+  }
+);}
+
+
 export const getWorkspaceScheduledTasksDeleteUrl = (organizationId: string,
     workspaceId: string,
     taskId: string,) => {
@@ -229,6 +257,37 @@ export const workspaceScheduledTasksRunNow = async (organizationId: string,
     taskId: string, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRunRead> => {
 
   return apiRequest<WorkspaceScheduledTaskRunRead>(getWorkspaceScheduledTasksRunNowUrl(organizationId,workspaceId,taskId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+export const getWorkspaceScheduledTasksRetryDeliveryUrl = (organizationId: string,
+    workspaceId: string,
+    taskId: string,
+    runId: string,
+    deliveryId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/scheduled-tasks/${taskId}/runs/${runId}/deliveries/${deliveryId}/retry`
+}
+
+/**
+ * @summary Retry Workspace Scheduled Task Delivery Route
+ */
+export const workspaceScheduledTasksRetryDelivery = async (organizationId: string,
+    workspaceId: string,
+    taskId: string,
+    runId: string,
+    deliveryId: string, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRunRead> => {
+
+  return apiRequest<WorkspaceScheduledTaskRunRead>(getWorkspaceScheduledTasksRetryDeliveryUrl(organizationId,workspaceId,taskId,runId,deliveryId),
   {
     ...options,
     method: 'POST'

@@ -7,6 +7,7 @@
 import type { WorkspaceScheduledTaskDeliveryReadPayload } from './workspaceScheduledTaskDeliveryReadPayload';
 
 export interface WorkspaceScheduledTaskDeliveryRead {
+  canRetry?: boolean;
   connectionId?: string | null;
   createdAt: string;
   deliveredAt?: string | null;
@@ -16,6 +17,7 @@ export interface WorkspaceScheduledTaskDeliveryRead {
   id: string;
   payload?: WorkspaceScheduledTaskDeliveryReadPayload;
   provider: string;
+  retryCount?: number;
   routeType: string;
   status: string;
   taskId: string;
