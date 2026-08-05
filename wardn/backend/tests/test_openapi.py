@@ -139,6 +139,10 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/skills"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}/chat"
         ),
         (
@@ -563,6 +567,12 @@ def test_workspace_agents_openapi_contract() -> None:
             "/agents/{agent_id}"
         )
     ]
+    agent_skills = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/{agent_id}/skills"
+        )
+    ]
     chat = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -608,6 +618,13 @@ def test_workspace_agents_openapi_contract() -> None:
         "$ref": "#/components/schemas/AgentRunDetailResponse"
     }
     assert agent["get"]["operationId"] == "workspace_agents_get"
+    assert agent_skills["patch"]["operationId"] == "workspace_agents_update_skills"
+    assert agent_skills["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentSkillUpdateRequest"
+    }
+    assert agent_skills["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentSkillAgentRead"
+    }
     assert chat["post"]["operationId"] == "workspace_agents_chat"
     assert chat["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentChatRequest"

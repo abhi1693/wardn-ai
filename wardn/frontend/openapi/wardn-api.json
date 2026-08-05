@@ -589,8 +589,122 @@
         "title": "AgentRunStepRead",
         "type": "object"
       },
+      "AgentSkillActivityRead": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "agentName": {
+            "title": "Agentname",
+            "type": "string"
+          },
+          "agentRunId": {
+            "format": "uuid",
+            "title": "Agentrunid",
+            "type": "string"
+          },
+          "auditStatus": {
+            "default": "",
+            "title": "Auditstatus",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "eventType": {
+            "default": "activity",
+            "enum": [
+              "selected",
+              "search",
+              "fetch",
+              "activity"
+            ],
+            "title": "Eventtype",
+            "type": "string"
+          },
+          "fetchedSkillId": {
+            "default": "",
+            "title": "Fetchedskillid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "resultCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultcount"
+          },
+          "skillId": {
+            "default": "",
+            "title": "Skillid",
+            "type": "string"
+          },
+          "skillName": {
+            "default": "",
+            "title": "Skillname",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "toolName": {
+            "default": "",
+            "title": "Toolname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentRunId",
+          "agentId",
+          "agentName",
+          "createdAt"
+        ],
+        "title": "AgentSkillActivityRead",
+        "type": "object"
+      },
       "AgentSkillAgentRead": {
         "properties": {
+          "availableSkillCount": {
+            "default": 0,
+            "title": "Availableskillcount",
+            "type": "integer"
+          },
+          "callsLast7d": {
+            "default": 0,
+            "title": "Callslast7D",
+            "type": "integer"
+          },
           "enabledSkillIds": {
             "items": {
               "type": "string"
@@ -598,14 +712,60 @@
             "title": "Enabledskillids",
             "type": "array"
           },
+          "failuresLast7d": {
+            "default": 0,
+            "title": "Failureslast7D",
+            "type": "integer"
+          },
+          "fetchesLast7d": {
+            "default": 0,
+            "title": "Fetcheslast7D",
+            "type": "integer"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastusedat"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "observedSkillIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Observedskillids",
+            "type": "array"
+          },
+          "recentRunId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recentrunid"
+          },
+          "searchesLast7d": {
+            "default": 0,
+            "title": "Searcheslast7D",
+            "type": "integer"
           }
         },
         "required": [
@@ -631,6 +791,13 @@
             "title": "Guidedworkflows",
             "type": "array"
           },
+          "recentActivity": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillActivityRead"
+            },
+            "title": "Recentactivity",
+            "type": "array"
+          },
           "recommendations": {
             "items": {
               "$ref": "#/components/schemas/AgentSkillRecommendationRead"
@@ -644,6 +811,9 @@
             },
             "title": "Skills",
             "type": "array"
+          },
+          "usageSummary": {
+            "$ref": "#/components/schemas/AgentSkillUsageSummaryRead"
           }
         },
         "title": "AgentSkillCatalogResponse",
@@ -981,6 +1151,77 @@
           "source"
         ],
         "title": "AgentSkillSearchResultRead",
+        "type": "object"
+      },
+      "AgentSkillUpdateRequest": {
+        "properties": {
+          "skillIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skillids",
+            "type": "array"
+          }
+        },
+        "title": "AgentSkillUpdateRequest",
+        "type": "object"
+      },
+      "AgentSkillUsageSummaryRead": {
+        "properties": {
+          "activeSkills": {
+            "default": 0,
+            "title": "Activeskills",
+            "type": "integer"
+          },
+          "enabledAgents": {
+            "default": 0,
+            "title": "Enabledagents",
+            "type": "integer"
+          },
+          "failuresLast7d": {
+            "default": 0,
+            "title": "Failureslast7D",
+            "type": "integer"
+          },
+          "fetchesLast7d": {
+            "default": 0,
+            "title": "Fetcheslast7D",
+            "type": "integer"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastusedat"
+          },
+          "searchesLast7d": {
+            "default": 0,
+            "title": "Searcheslast7D",
+            "type": "integer"
+          },
+          "skillEventsLast7d": {
+            "default": 0,
+            "title": "Skilleventslast7D",
+            "type": "integer"
+          },
+          "skillRunsLast7d": {
+            "default": 0,
+            "title": "Skillrunslast7D",
+            "type": "integer"
+          },
+          "totalAgents": {
+            "default": 0,
+            "title": "Totalagents",
+            "type": "integer"
+          }
+        },
+        "title": "AgentSkillUsageSummaryRead",
         "type": "object"
       },
       "AgentSkillWorkflowRead": {
@@ -17106,6 +17347,125 @@
           }
         },
         "summary": "Chat Workspace Agent Route",
+        "tags": [
+          "workspace-agents"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/agents/{agent_id}/skills": {
+      "patch": {
+        "operationId": "workspace_agents_update_skills",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillAgentRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Workspace Agent Skills Route",
         "tags": [
           "workspace-agents"
         ]

@@ -5,16 +5,14 @@
  * OpenAPI spec version: 0.0.1
  */
 
-export interface AgentSkillAgentRead {
-  availableSkillCount?: number;
-  callsLast7d?: number;
-  enabledSkillIds?: string[];
+export interface AgentSkillUsageSummaryRead {
+  activeSkills?: number;
+  enabledAgents?: number;
   failuresLast7d?: number;
   fetchesLast7d?: number;
-  id: string;
   lastUsedAt?: string | null;
-  name: string;
-  observedSkillIds?: string[];
-  recentRunId?: string | null;
   searchesLast7d?: number;
+  skillEventsLast7d?: number;
+  skillRunsLast7d?: number;
+  totalAgents?: number;
 }

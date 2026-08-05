@@ -10,6 +10,8 @@ import type {
   AgentConversationResponse,
   AgentListResponse,
   AgentRead,
+  AgentSkillAgentRead,
+  AgentSkillUpdateRequest,
   AgentToolApprovalDecisionRequest,
   AgentToolApprovalDecisionResponse,
   AgentToolApprovalRead,
@@ -207,6 +209,34 @@ export const workspaceAgentsChat = async (organizationId: string,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(agentChatRequest)
+  }
+);}
+
+
+export const getWorkspaceAgentsUpdateSkillsUrl = (organizationId: string,
+    workspaceId: string,
+    agentId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/${agentId}/skills`
+}
+
+/**
+ * @summary Update Workspace Agent Skills Route
+ */
+export const workspaceAgentsUpdateSkills = async (organizationId: string,
+    workspaceId: string,
+    agentId: string,
+    agentSkillUpdateRequest: AgentSkillUpdateRequest, options?: Parameters<typeof apiRequest>[1]): Promise<AgentSkillAgentRead> => {
+
+  return apiRequest<AgentSkillAgentRead>(getWorkspaceAgentsUpdateSkillsUrl(organizationId,workspaceId,agentId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentSkillUpdateRequest)
   }
 );}
 

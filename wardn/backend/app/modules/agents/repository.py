@@ -634,6 +634,27 @@ async def list_agent_run_steps(
     return list(result.scalars().all())
 
 
+async def list_recent_workspace_agent_run_steps(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    limit: int = 250,
+) -> list[tuple[AgentRunStep, AgentRun, Agent]]:
+    result = await session.execute(
+        select(AgentRunStep, AgentRun, Agent)
+        .join(AgentRun, AgentRunStep.agent_run_id == AgentRun.id)
+        .join(Agent, Agent.id == AgentRun.agent_id)
+        .where(
+            AgentRun.organization_id == organization_id,
+            AgentRun.workspace_id == workspace_id,
+        )
+        .order_by(AgentRunStep.created_at.desc(), AgentRunStep.sequence.desc())
+        .limit(limit)
+    )
+    return list(result.all())
+
+
 async def list_chat_provider_triggers_by_conversation(
     session: AsyncSession,
     *,

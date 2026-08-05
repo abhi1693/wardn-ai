@@ -16,6 +16,10 @@ class WorkspaceAgentModelUpdate(APIModel):
     model_name: str = Field(min_length=1, max_length=255)
 
 
+class AgentSkillUpdateRequest(APIModel):
+    skill_ids: list[str] = Field(default_factory=list)
+
+
 class AgentRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -193,6 +197,14 @@ class AgentSkillAgentRead(APIModel):
     id: uuid.UUID
     name: str
     enabled_skill_ids: list[str] = Field(default_factory=list)
+    available_skill_count: int = 0
+    observed_skill_ids: list[str] = Field(default_factory=list)
+    calls_last_7d: int = 0
+    searches_last_7d: int = 0
+    fetches_last_7d: int = 0
+    failures_last_7d: int = 0
+    recent_run_id: uuid.UUID | None = None
+    last_used_at: datetime | None = None
 
 
 class AgentSkillPermissionRead(APIModel):
@@ -265,11 +277,46 @@ class AgentSkillWorkflowRead(APIModel):
     required_connection_hints: list[str] = Field(default_factory=list)
 
 
+class AgentSkillUsageSummaryRead(APIModel):
+    active_skills: int = 0
+    total_agents: int = 0
+    enabled_agents: int = 0
+    skill_events_last_7d: int = 0
+    skill_runs_last_7d: int = 0
+    searches_last_7d: int = 0
+    fetches_last_7d: int = 0
+    failures_last_7d: int = 0
+    last_used_at: datetime | None = None
+
+
+class AgentSkillActivityRead(APIModel):
+    id: uuid.UUID
+    agent_run_id: uuid.UUID
+    agent_id: uuid.UUID
+    agent_name: str
+    skill_id: str = ""
+    skill_name: str = ""
+    tool_name: str = ""
+    event_type: Literal["selected", "search", "fetch", "activity"] = "activity"
+    status: str = ""
+    query: str = ""
+    result_count: int | None = None
+    fetched_skill_id: str = ""
+    audit_status: str = ""
+    source: str = ""
+    summary: str = ""
+    created_at: datetime
+
+
 class AgentSkillCatalogResponse(APIModel):
     skills: list[AgentSkillRead] = Field(default_factory=list)
     agents: list[AgentSkillAgentRead] = Field(default_factory=list)
     recommendations: list[AgentSkillRecommendationRead] = Field(default_factory=list)
     guided_workflows: list[AgentSkillWorkflowRead] = Field(default_factory=list)
+    usage_summary: AgentSkillUsageSummaryRead = Field(
+        default_factory=AgentSkillUsageSummaryRead
+    )
+    recent_activity: list[AgentSkillActivityRead] = Field(default_factory=list)
 
 
 class AgentChatMessage(APIModel):

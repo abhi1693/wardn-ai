@@ -9,6 +9,8 @@ import {
   Clock,
   Database,
   RefreshCw,
+  Search,
+  Sparkles,
   Timer,
   Wrench,
   XCircle,
@@ -152,6 +154,150 @@ function formatPayload(payload: AgentRunStepRead["payload"]) {
   return JSON.stringify(payload, null, 2);
 }
 
+type RunSkillEvent = {
+  id: string;
+  sequence: number;
+  eventType: "selected" | "search" | "fetch" | "activity";
+  toolName: string;
+  status: string;
+  skillName: string;
+  skillId: string;
+  query: string;
+  fetchedSkillId: string;
+  resultCount: number | null;
+  summary: string;
+  createdAt: string;
+};
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parsedJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string" || !value.trim().startsWith("{")) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return objectValue(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function skillEventSummary({
+  eventType,
+  query,
+  resultCount,
+  fetchedSkillId,
+  status,
+  error,
+}: {
+  eventType: RunSkillEvent["eventType"];
+  query: string;
+  resultCount: number | null;
+  fetchedSkillId: string;
+  status: string;
+  error: string;
+}) {
+  if (error) {
+    return error;
+  }
+  if (eventType === "selected") {
+    return "The model selected a Wardn skill capability through run_tool.";
+  }
+  if (eventType === "search") {
+    const countText =
+      resultCount === null
+        ? "results pending"
+        : `${resultCount} result${resultCount === 1 ? "" : "s"}`;
+    return `Searched Wardn Hub for "${query}" and returned ${countText}.`;
+  }
+  if (eventType === "fetch") {
+    return `Fetched ${fetchedSkillId || "a skill bundle"} for this run.`;
+  }
+  return `Recorded skill activity with status ${status || "unknown"}.`;
+}
+
+function skillEventFromStep(step: AgentRunStepRead): RunSkillEvent | null {
+  const payload = objectValue(step.payload);
+  const details = objectValue(payload.details);
+  const selection = objectValue(details.selection);
+  let skill = selection.toolType === "skill" ? objectValue(selection.skill) : {};
+  let eventType: RunSkillEvent["eventType"] = skill.skillId ? "selected" : "activity";
+
+  if (!skill.skillId) {
+    skill = objectValue(details.skill);
+    if (!skill.skillId) {
+      return null;
+    }
+    const rawToolName = stringValue(skill.toolName);
+    if (rawToolName === "wardn_search_skills") {
+      eventType = "search";
+    } else if (rawToolName === "wardn_get_skill") {
+      eventType = "fetch";
+    }
+  }
+
+  const argumentsPayload = objectValue(payload.arguments);
+  const result = parsedJsonObject(payload.result);
+  const query = stringValue(argumentsPayload.query) || stringValue(result.query);
+  const fetchedSkillId =
+    stringValue(argumentsPayload.skillId) || stringValue(result.id) || stringValue(result.skillId);
+  const resultCount = numberValue(result.count);
+  const status = stringValue(payload.status) || step.status;
+  const toolName =
+    stringValue(selection.displayName) || stringValue(payload.toolName) || step.title;
+
+  return {
+    id: step.id,
+    sequence: step.sequence,
+    eventType,
+    toolName,
+    status,
+    skillName: stringValue(skill.skillName) || "find-skills",
+    skillId: stringValue(skill.skillId) || "abhi1693/wardn-hub/find-skills",
+    query,
+    fetchedSkillId,
+    resultCount,
+    summary: skillEventSummary({
+      eventType,
+      query,
+      resultCount,
+      fetchedSkillId,
+      status,
+      error: stringValue(payload.error),
+    }),
+    createdAt: step.createdAt,
+  };
+}
+
+function SkillEventBadge({ event }: { event: RunSkillEvent }) {
+  if (event.eventType === "search") {
+    return <Badge variant="secondary">Search</Badge>;
+  }
+  if (event.eventType === "fetch") {
+    return <Badge variant="secondary">Fetch</Badge>;
+  }
+  if (event.eventType === "selected") {
+    return <Badge variant="outline">Selected</Badge>;
+  }
+  return <Badge variant="outline">Activity</Badge>;
+}
+
 function currentActivityLabel(detail: AgentRunDetailResponse, step: AgentRunStepRead | null) {
   if (!isActiveRun(detail.run.status)) {
     return detail.run.status === "succeeded" ? "Run completed" : "Run stopped";
@@ -247,6 +393,15 @@ export function AgentRunDetailClient({
   const started = parseTime(detail.run.startedAt) ?? now;
   const finished = parseTime(detail.run.finishedAt);
   const elapsed = (finished ?? now) - started;
+  const skillEvents = useMemo(
+    () =>
+      detail.steps
+        .map((runStep) => skillEventFromStep(runStep))
+        .filter((event): event is RunSkillEvent => event !== null),
+    [detail.steps]
+  );
+  const skillSearches = skillEvents.filter((event) => event.eventType === "search").length;
+  const skillFetches = skillEvents.filter((event) => event.eventType === "fetch").length;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -431,6 +586,71 @@ export function AgentRunDetailClient({
       </section>
 
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold tracking-normal">Skill Usage</h2>
+            </div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {skillEvents.length > 0
+                ? `${skillEvents.length} skill event${skillEvents.length === 1 ? "" : "s"} recorded.`
+                : "No skill was invoked in this run."}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={skillEvents.length > 0 ? "success" : "secondary"}>
+              {skillEvents.length > 0 ? "Used" : "Not used"}
+            </Badge>
+            <Badge variant="outline">{skillSearches} search</Badge>
+            <Badge variant="outline">{skillFetches} fetch</Badge>
+          </div>
+        </div>
+        {skillEvents.length === 0 ? (
+          <div className="px-5 py-8 text-sm leading-6 text-muted-foreground">
+            The agent had no persisted skill selection, Wardn Hub search, or skill fetch event for
+            this run. Tool calls and model activity are still shown in the full timeline below.
+          </div>
+        ) : (
+          <div className="divide-y divide-border/80">
+            {skillEvents.map((event) => (
+              <div
+                className="grid gap-4 px-5 py-4 lg:grid-cols-[180px_minmax(0,1fr)_140px]"
+                key={event.id}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    {event.eventType === "search" ? (
+                      <Search className="size-4 text-blue-600" />
+                    ) : (
+                      <Sparkles className="size-4 text-emerald-600" />
+                    )}
+                    Step {event.sequence}
+                  </div>
+                  <SkillEventBadge event={event} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold">{event.toolName}</h3>
+                    <Badge variant="outline">{event.skillName}</Badge>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{event.summary}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    {event.query ? <span>Query: {event.query}</span> : null}
+                    {event.fetchedSkillId ? <span>Skill: {event.fetchedSkillId}</span> : null}
+                    {event.resultCount !== null ? <span>Results: {event.resultCount}</span> : null}
+                  </div>
+                </div>
+                <div className="flex items-start justify-end">
+                  <Badge variant={statusVariant(event.status)}>{event.status || "recorded"}</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
         <div className="flex items-center justify-between gap-3 border-b border-border/80 px-5 py-4">
           <div>
             <h2 className="text-base font-semibold tracking-normal">Activity Timeline</h2>
@@ -481,7 +701,12 @@ export function AgentRunDetailClient({
                         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                           Payload
                         </summary>
-                        <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs leading-5">
+                        <pre
+                          className={cn(
+                            "mt-2 max-h-96 overflow-auto rounded-md border border-border",
+                            "bg-muted/40 p-3 text-xs leading-5"
+                          )}
+                        >
                           {payload}
                         </pre>
                       </details>

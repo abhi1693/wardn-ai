@@ -1,8 +1,10 @@
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -160,6 +162,7 @@ from app.modules.agents.schemas import (
     AgentRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
+    AgentSkillActivityRead,
     AgentSkillAgentRead,
     AgentSkillCatalogResponse,
     AgentSkillPermissionRead,
@@ -167,6 +170,8 @@ from app.modules.agents.schemas import (
     AgentSkillRecommendationRead,
     AgentSkillSearchResponse,
     AgentSkillSearchResultRead,
+    AgentSkillUpdateRequest,
+    AgentSkillUsageSummaryRead,
     AgentSkillWorkflowRead,
     WorkspaceAgentModelUpdate,
 )
@@ -177,6 +182,8 @@ from app.modules.agents.skills import (
     WARDN_FIND_SKILLS_SOURCE,
     WARDN_FIND_SKILLS_SOURCE_URL,
     WARDN_FIND_SKILLS_URL,
+    WARDN_GET_SKILL_TOOL_NAME,
+    WARDN_SEARCH_SKILLS_TOOL_NAME,
     fetch_wardn_hub_skill_audit,
     find_skills_permission_summaries,
     normalize_agent_skill_ids,
@@ -672,11 +679,248 @@ def skill_permission_reads() -> list[AgentSkillPermissionRead]:
     ]
 
 
-def agent_skill_agent_read(agent: Agent) -> AgentSkillAgentRead:
+def dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def string_value(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def decoded_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip().startswith("{"):
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def agent_skill_activity_summary(
+    *,
+    event_type: str,
+    status: str,
+    query: str,
+    result_count: int | None,
+    fetched_skill_id: str,
+    audit_status: str,
+    error: str,
+) -> str:
+    if error:
+        return error
+    if event_type == "selected":
+        return "The model selected a Wardn skill capability through run_tool."
+    if event_type == "search":
+        count_text = (
+            f"{result_count} result{'s' if result_count != 1 else ''}"
+            if result_count is not None
+            else "results pending"
+        )
+        return f'Searched Wardn Hub for "{query}" and returned {count_text}.'
+    if event_type == "fetch":
+        if audit_status:
+            return f"Fetched {fetched_skill_id or 'a skill bundle'} with audit {audit_status}."
+        return f"Fetched {fetched_skill_id or 'a skill bundle'}."
+    return f"Recorded skill activity with status {status or 'unknown'}."
+
+
+def agent_skill_activity_read(
+    step,
+    agent_run,
+    agent: Agent,
+) -> AgentSkillActivityRead | None:
+    payload = dict_value(step.payload)
+    details = dict_value(payload.get("details"))
+    selection = dict_value(details.get("selection"))
+    skill = dict_value(selection.get("skill")) if selection.get("toolType") == "skill" else {}
+    event_type: str = "selected" if skill else "activity"
+
+    if not skill:
+        skill = dict_value(details.get("skill"))
+        if not skill:
+            return None
+        raw_tool_name = string_value(skill.get("toolName"))
+        if raw_tool_name == WARDN_SEARCH_SKILLS_TOOL_NAME:
+            event_type = "search"
+        elif raw_tool_name == WARDN_GET_SKILL_TOOL_NAME:
+            event_type = "fetch"
+
+    arguments = dict_value(payload.get("arguments"))
+    result = decoded_json_object(payload.get("result"))
+    audit = dict_value(result.get("audit"))
+    query = string_value(arguments.get("query")) or string_value(result.get("query"))
+    fetched_skill_id = (
+        string_value(arguments.get("skillId"))
+        or string_value(result.get("id"))
+        or string_value(result.get("skillId"))
+    )
+    audit_status = (
+        string_value(audit.get("status"))
+        or string_value(result.get("auditStatus"))
+        or string_value(result.get("audit_status"))
+    )
+    source = string_value(result.get("source")) or string_value(skill.get("source"))
+    status = string_value(payload.get("status")) or step.status
+    result_count = int_or_none(result.get("count"))
+    tool_name = (
+        string_value(selection.get("displayName"))
+        or string_value(payload.get("toolName"))
+        or step.title
+    )
+    summary = agent_skill_activity_summary(
+        event_type=event_type,
+        status=status,
+        query=query,
+        result_count=result_count,
+        fetched_skill_id=fetched_skill_id,
+        audit_status=audit_status,
+        error=string_value(payload.get("error")),
+    )
+
+    return AgentSkillActivityRead(
+        id=step.id,
+        agent_run_id=agent_run.id,
+        agent_id=agent.id,
+        agent_name=agent.name,
+        skill_id=string_value(skill.get("skillId")) or WARDN_FIND_SKILLS_ID,
+        skill_name=string_value(skill.get("skillName")) or WARDN_FIND_SKILLS_NAME,
+        tool_name=tool_name,
+        event_type=event_type,
+        status=status,
+        query=query,
+        result_count=result_count,
+        fetched_skill_id=fetched_skill_id,
+        audit_status=audit_status,
+        source=source,
+        summary=summary,
+        created_at=step.created_at,
+    )
+
+
+def agent_skill_activity_reads(rows: list[tuple[Any, Any, Agent]]) -> list[AgentSkillActivityRead]:
+    activities: list[AgentSkillActivityRead] = []
+    seen_step_ids: set[uuid.UUID] = set()
+    for step, agent_run, agent in rows:
+        if step.id in seen_step_ids:
+            continue
+        activity = agent_skill_activity_read(step, agent_run, agent)
+        if activity is None:
+            continue
+        seen_step_ids.add(step.id)
+        activities.append(activity)
+    return activities
+
+
+def agent_skill_usage_by_agent(
+    activities: list[AgentSkillActivityRead],
+    *,
+    now: datetime | None = None,
+) -> dict[uuid.UUID, dict[str, Any]]:
+    week_start = (now or datetime.now(UTC)) - timedelta(days=7)
+    usage: dict[uuid.UUID, dict[str, Any]] = {}
+    for activity in sorted(activities, key=lambda item: aware_utc(item.created_at), reverse=True):
+        row = usage.setdefault(
+            activity.agent_id,
+            {
+                "observed_skill_ids": set(),
+                "calls_last_7d": 0,
+                "searches_last_7d": 0,
+                "fetches_last_7d": 0,
+                "failures_last_7d": 0,
+                "recent_run_id": None,
+                "last_used_at": None,
+            },
+        )
+        if row["recent_run_id"] is None:
+            row["recent_run_id"] = activity.agent_run_id
+        if row["last_used_at"] is None:
+            row["last_used_at"] = activity.created_at
+        if activity.skill_id:
+            row["observed_skill_ids"].add(activity.skill_id)
+        if activity.fetched_skill_id:
+            row["observed_skill_ids"].add(activity.fetched_skill_id)
+        if aware_utc(activity.created_at) < week_start:
+            continue
+        row["calls_last_7d"] += 1
+        if activity.event_type == "search":
+            row["searches_last_7d"] += 1
+        if activity.event_type == "fetch":
+            row["fetches_last_7d"] += 1
+        if activity.status in {"failed", "blocked"}:
+            row["failures_last_7d"] += 1
+    return usage
+
+
+def agent_skill_usage_summary(
+    *,
+    agents: list[Agent],
+    active_skills: int,
+    activities: list[AgentSkillActivityRead],
+    now: datetime | None = None,
+) -> AgentSkillUsageSummaryRead:
+    week_start = (now or datetime.now(UTC)) - timedelta(days=7)
+    recent = [
+        activity for activity in activities if aware_utc(activity.created_at) >= week_start
+    ]
+    last_activity = max(
+        activities,
+        key=lambda activity: aware_utc(activity.created_at),
+        default=None,
+    )
+    return AgentSkillUsageSummaryRead(
+        active_skills=active_skills,
+        total_agents=len(agents),
+        enabled_agents=sum(
+            1
+            for agent in agents
+            if WARDN_FIND_SKILLS_ID in normalize_agent_skill_ids(agent.skill_ids or [])
+        ),
+        skill_events_last_7d=len(recent),
+        skill_runs_last_7d=len({activity.agent_run_id for activity in recent}),
+        searches_last_7d=sum(1 for activity in recent if activity.event_type == "search"),
+        fetches_last_7d=sum(1 for activity in recent if activity.event_type == "fetch"),
+        failures_last_7d=sum(
+            1 for activity in recent if activity.status in {"failed", "blocked"}
+        ),
+        last_used_at=last_activity.created_at if last_activity else None,
+    )
+
+
+def agent_skill_agent_read(
+    agent: Agent,
+    usage: dict[str, Any] | None = None,
+) -> AgentSkillAgentRead:
+    usage = usage or {}
+    enabled_skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
     return AgentSkillAgentRead(
         id=agent.id,
         name=agent.name,
-        enabled_skill_ids=normalize_agent_skill_ids(agent.skill_ids or []),
+        enabled_skill_ids=enabled_skill_ids,
+        available_skill_count=len(enabled_skill_ids),
+        observed_skill_ids=sorted(usage.get("observed_skill_ids") or []),
+        calls_last_7d=int(usage.get("calls_last_7d") or 0),
+        searches_last_7d=int(usage.get("searches_last_7d") or 0),
+        fetches_last_7d=int(usage.get("fetches_last_7d") or 0),
+        failures_last_7d=int(usage.get("failures_last_7d") or 0),
+        recent_run_id=usage.get("recent_run_id"),
+        last_used_at=usage.get("last_used_at"),
     )
 
 
@@ -828,13 +1072,58 @@ async def list_workspace_skills(
         session,
         workspace_id=workspace_id,
     )
+    skill_step_rows = await repository.list_recent_workspace_agent_run_steps(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        limit=250,
+    )
+    recent_activity = agent_skill_activity_reads(skill_step_rows)
+    usage_by_agent = agent_skill_usage_by_agent(recent_activity)
     audit_metadata = await find_skills_audit_metadata()
+    skills = [find_skills_read(agents=agents, audit_metadata=audit_metadata)]
     return AgentSkillCatalogResponse(
-        skills=[find_skills_read(agents=agents, audit_metadata=audit_metadata)],
-        agents=[agent_skill_agent_read(agent) for agent in agents],
+        skills=skills,
+        agents=[
+            agent_skill_agent_read(agent, usage=usage_by_agent.get(agent.id))
+            for agent in agents
+        ],
         recommendations=workspace_skill_recommendations(installations),
         guided_workflows=workspace_guided_skill_workflows(),
+        usage_summary=agent_skill_usage_summary(
+            agents=agents,
+            active_skills=sum(1 for skill in skills if skill.installed),
+            activities=recent_activity,
+        ),
+        recent_activity=recent_activity[:50],
     )
+
+
+async def update_agent_skills(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    payload: AgentSkillUpdateRequest,
+) -> AgentSkillAgentRead:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    agent = await repository.get_agent(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
+    if agent is None:
+        raise AgentNotFoundError("agent not found")
+    try:
+        skill_ids = normalize_agent_skill_ids(payload.skill_ids)
+    except ValueError as exc:
+        raise InvalidAgentScopeError(str(exc)) from exc
+    agent.skill_ids = skill_ids
+    await session.flush()
+    await session.refresh(agent)
+    return agent_skill_agent_read(agent)
 
 
 def skill_search_result_read(item: dict[str, Any]) -> AgentSkillSearchResultRead:
@@ -975,10 +1264,6 @@ async def ensure_workspace_assistant_agent(
         if not agent.is_active:
             agent.is_active = True
             changed = True
-        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
-        if WARDN_FIND_SKILLS_ID not in skill_ids:
-            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
-            changed = True
         if changed:
             await session.flush()
             await session.refresh(agent)
@@ -1045,9 +1330,6 @@ async def update_workspace_assistant_model(
             agent.description = QUICK_START_AGENT_DESCRIPTION
         if not agent.instructions.strip():
             agent.instructions = QUICK_START_AGENT_INSTRUCTIONS
-        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
-        if WARDN_FIND_SKILLS_ID not in skill_ids:
-            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
         agent.is_active = True
     await session.flush()
     await session.refresh(agent)

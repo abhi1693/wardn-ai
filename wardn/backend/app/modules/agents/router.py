@@ -15,8 +15,10 @@ from app.modules.agents.schemas import (
     AgentRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
+    AgentSkillAgentRead,
     AgentSkillCatalogResponse,
     AgentSkillSearchResponse,
+    AgentSkillUpdateRequest,
     AgentToolApprovalDecisionRequest,
     AgentToolApprovalDecisionResponse,
     AgentToolApprovalRead,
@@ -35,6 +37,7 @@ from app.modules.agents.service import (
     quick_start_workspace_agent,
     search_workspace_skills,
     stream_agent_chat,
+    update_agent_skills,
     update_workspace_assistant_model,
 )
 from app.modules.users.dependencies import get_current_user, get_stream_current_user
@@ -286,6 +289,34 @@ async def update_workspace_assistant_model_route(
         current_user,
         organization_id,
         workspace_id,
+        payload,
+    )
+
+
+@workspace_router.patch(
+    "/{agent_id}/skills",
+    response_model=AgentSkillAgentRead,
+    operation_id="workspace_agents_update_skills",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def update_workspace_agent_skills_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_id: UUID,
+    payload: AgentSkillUpdateRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentSkillAgentRead:
+    return await update_agent_skills(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_id,
         payload,
     )
 

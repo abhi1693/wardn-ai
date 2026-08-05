@@ -4,14 +4,18 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { AgentSkillActivityRead } from './agentSkillActivityRead';
 import type { AgentSkillAgentRead } from './agentSkillAgentRead';
 import type { AgentSkillRead } from './agentSkillRead';
 import type { AgentSkillRecommendationRead } from './agentSkillRecommendationRead';
+import type { AgentSkillUsageSummaryRead } from './agentSkillUsageSummaryRead';
 import type { AgentSkillWorkflowRead } from './agentSkillWorkflowRead';
 
 export interface AgentSkillCatalogResponse {
   agents?: AgentSkillAgentRead[];
   guidedWorkflows?: AgentSkillWorkflowRead[];
+  recentActivity?: AgentSkillActivityRead[];
   recommendations?: AgentSkillRecommendationRead[];
   skills?: AgentSkillRead[];
+  usageSummary?: AgentSkillUsageSummaryRead;
 }

@@ -13,12 +13,14 @@ from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
     AgentRun,
+    AgentRunStep,
     ConversationMessage,
     WorkspaceConversation,
 )
 from app.modules.agents.schemas import (
     AgentChatMessage,
     AgentChatRequest,
+    AgentSkillUpdateRequest,
     WorkspaceAgentModelUpdate,
 )
 from app.modules.agents.types import AgentRuntimeTool, AgentRuntimeToolGuardrailFilter
@@ -4403,7 +4405,7 @@ async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) ->
     )
 
     assert response.agent.id == agent.id
-    assert response.agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.agent.skill_ids == []
     assert response.agent.provider_credential_id == credential.id
     assert response.agent.model_name == "gpt-4o-mini"
     assert isinstance(session.added[0], WorkspaceConversation)
@@ -4520,7 +4522,7 @@ async def test_update_workspace_assistant_model_updates_existing_agent(monkeypat
     assert agent.workspace_id == workspace_id
     assert agent.description == service.QUICK_START_AGENT_DESCRIPTION
     assert agent.instructions == service.QUICK_START_AGENT_INSTRUCTIONS
-    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert agent.skill_ids == []
     assert agent.is_active is True
     assert assigned_servers == [(installation, True, [])]
     assert response.provider_credential_id == credential.id
@@ -4633,6 +4635,7 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
         skill_ids=[skills.WARDN_FIND_SKILLS_ID],
         is_active=True,
     )
+    now = datetime.now(UTC)
     installation = MCPServerInstallation(
         id=uuid4(),
         workspace_id=workspace_id,
@@ -4641,6 +4644,52 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
         installed_version="1.0.0",
         status="enabled",
         runtime_config={"provider": "kubernetes"},
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        trigger_type="chat",
+        status="succeeded",
+        started_at=now,
+        finished_at=now,
+        error="",
+    )
+    skill_step = AgentRunStep(
+        id=uuid4(),
+        agent_run_id=agent_run.id,
+        sequence=1,
+        step_type="tool_result",
+        status="completed",
+        title="Wardn Hub skill search",
+        payload={
+            "toolName": "Wardn Hub skill search",
+            "status": "completed",
+            "arguments": {"query": "kubernetes ops", "limit": 8},
+            "result": json.dumps(
+                {
+                    "query": "kubernetes ops",
+                    "count": 1,
+                    "results": [
+                        {
+                            "id": "owner/repo/kubernetes-ops",
+                            "auditStatus": "pass",
+                        }
+                    ],
+                }
+            ),
+            "details": {
+                "skill": {
+                    "skillId": skills.WARDN_FIND_SKILLS_ID,
+                    "skillName": "find-skills",
+                    "source": "abhi1693/wardn-hub",
+                    "toolName": skills.WARDN_SEARCH_SKILLS_TOOL_NAME,
+                }
+            },
+        },
+        created_at=now,
+        updated_at=now,
     )
 
     async def require_workspace_member(*args, **kwargs):
@@ -4653,6 +4702,10 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
     async def list_installations(*args, **kwargs):
         assert kwargs["workspace_id"] == workspace_id
         return [installation]
+
+    async def list_recent_workspace_agent_run_steps(*args, **kwargs):
+        assert kwargs["workspace_id"] == workspace_id
+        return [(skill_step, agent_run, agent)]
 
     async def fetch_wardn_hub_skill_audit(*args, **kwargs):
         return {
@@ -4668,6 +4721,11 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
     monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
     monkeypatch.setattr(service.repository, "list_agents", list_agents)
     monkeypatch.setattr(service.mcp_registry_repository, "list_installations", list_installations)
+    monkeypatch.setattr(
+        service.repository,
+        "list_recent_workspace_agent_run_steps",
+        list_recent_workspace_agent_run_steps,
+    )
     monkeypatch.setattr(service, "fetch_wardn_hub_skill_audit", fetch_wardn_hub_skill_audit)
 
     response = await service.list_workspace_skills(
@@ -4685,6 +4743,17 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
     assert find_skills.health_status == "healthy"
     assert find_skills.enabled_agent_ids == [agent.id]
     assert find_skills.permissions[-1].key == "advisory_only"
+    assert response.usage_summary.enabled_agents == 1
+    assert response.usage_summary.skill_events_last_7d == 1
+    assert response.usage_summary.searches_last_7d == 1
+    assert response.usage_summary.skill_runs_last_7d == 1
+    assert response.agents[0].calls_last_7d == 1
+    assert response.agents[0].searches_last_7d == 1
+    assert response.agents[0].recent_run_id == agent_run.id
+    assert response.recent_activity[0].agent_run_id == agent_run.id
+    assert response.recent_activity[0].event_type == "search"
+    assert response.recent_activity[0].query == "kubernetes ops"
+    assert response.recent_activity[0].result_count == 1
     assert response.recommendations[0].id == "kubernetes-ops"
     assert response.recommendations[0].connection_names == [
         "io.github.example/rancher-kubernetes (rancher-qa)"
@@ -4695,6 +4764,51 @@ async def test_list_workspace_skills_returns_find_skills_status_and_recommendati
         "gsc-checks",
         "github-reviews",
     }
+
+
+@pytest.mark.asyncio
+async def test_update_agent_skills_toggles_find_skills(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-4o-mini",
+        skill_ids=[],
+        is_active=True,
+    )
+    admin_checks = 0
+
+    async def require_workspace_admin(*args, **kwargs):
+        nonlocal admin_checks
+        admin_checks += 1
+
+    async def get_agent(*args, **kwargs):
+        assert kwargs["agent_id"] == agent.id
+        assert kwargs["workspace_id"] == workspace_id
+        return agent
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_agent", get_agent)
+
+    response = await service.update_agent_skills(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        AgentSkillUpdateRequest(skillIds=[skills.WARDN_FIND_SKILLS_ID]),
+    )
+
+    assert admin_checks == 1
+    assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.enabled_skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.available_skill_count == 1
 
 
 @pytest.mark.asyncio
