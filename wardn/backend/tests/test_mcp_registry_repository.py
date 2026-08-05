@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -71,13 +72,41 @@ def server(
     )
 
 
+def sql(statement: object, *, literal_binds: bool = False) -> str:
+    return str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": literal_binds},
+        )
+    )
+
+
+def test_registry_search_normalization_drops_only_generic_catalog_terms() -> None:
+    assert repository.normalize_registry_search_query("argocd") == "argocd"
+    assert repository.normalize_registry_search_query("ArgoCD MCP Server") == "argocd"
+    assert (
+        repository.normalize_registry_search_query("ArgoCD Model Context Protocol server")
+        == "argocd"
+    )
+    assert repository.normalize_registry_search_query("mcp server") == "mcp server"
+    assert (
+        repository.normalize_registry_search_query("cloudformation best practices")
+        == "cloudformation best practices"
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     organization_id = uuid4()
-    rows = [
+    servers = [
         server("example/alpha", "1.0.0", quality_score=95),
         server("example/beta", "1.0.0", quality_score=84),
         server("example/gamma", "1.0.0"),
+    ]
+    rows = [
+        (servers[0], 0, 0.8, Decimal("-95")),
+        (servers[1], 1, 0.4, Decimal("-84")),
+        (servers[2], 3, 0.1, repository.NULL_QUALITY_SCORE_RANK),
     ]
     session = RecordingSession(rows)
 
@@ -86,26 +115,40 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
         cursor=None,
         limit=2,
         include_deleted=False,
-        search="weather forecast",
+        search="weather forecast mcp server",
         organization_id=organization_id,
     )
 
-    assert page == rows[:2]
-    assert decode_cursor(next_cursor, fields=4) == (
+    assert page == servers[:2]
+    assert decode_cursor(next_cursor, fields=6) == (
+        "1",
+        (0.4).hex(),
         "-84",
-        rows[1].name,
-        rows[1].version,
-        str(rows[1].id),
+        servers[1].name,
+        servers[1].version,
+        str(servers[1].id),
     )
-    sql = str(session.statements[0].compile(dialect=postgresql.dialect())).upper()
-    assert "SEARCH_VECTOR @@ WEBSEARCH_TO_TSQUERY" in sql
-    assert "JSONB_EXTRACT_PATH" in sql
-    assert "ORDER BY COALESCE(-COALESCE(" in sql
-    assert "MCP_SERVER_VERSIONS.NAME ASC" in sql
-    assert "MCP_SERVER_VERSIONS.ID ASC" in sql
-    assert " OFFSET " not in sql
+    statement_sql = sql(session.statements[0], literal_binds=True).upper()
+    assert (
+        "MCP_SERVER_VERSIONS.SEARCH_VECTOR @@ "
+        "WEBSEARCH_TO_TSQUERY('ENGLISH'::REGCONFIG, 'WEATHER FORECAST')" in statement_sql
+    )
+    assert (
+        "MCP_SERVER_VERSIONS.SEARCH_VECTOR @@ "
+        "WEBSEARCH_TO_TSQUERY('SIMPLE'::REGCONFIG, 'WEATHER FORECAST')" in statement_sql
+    )
+    assert "WEATHER FORECAST MCP SERVER" not in statement_sql
+    assert "TS_RANK_CD(MCP_SERVER_VERSIONS.SEARCH_VECTOR" in statement_sql
+    assert "LOWER(MCP_SERVER_VERSIONS.NAME)" in statement_sql
+    assert "LOWER(MCP_SERVER_VERSIONS.TITLE)" in statement_sql
+    assert "MCP_SERVER_VERSIONS.DESCRIPTION ILIKE" not in statement_sql
+    assert "CASE WHEN" in statement_sql
+    assert "ORDER BY MATCH_TIER ASC, TEXT_RANK DESC" in statement_sql
+    assert "MCP_SERVER_VERSIONS.NAME ASC" in statement_sql
+    assert "MCP_SERVER_VERSIONS.ID ASC" in statement_sql
+    assert " OFFSET " not in statement_sql
 
-    cursor = encode_cursor("-95", rows[0].name, rows[0].version, str(rows[0].id))
+    cursor = encode_cursor("-95", servers[0].name, servers[0].version, str(servers[0].id))
     session = RecordingSession([])
     await repository.list_servers(
         session,
@@ -114,11 +157,35 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
         include_deleted=False,
         organization_id=organization_id,
     )
-    sql = str(session.statements[0].compile(dialect=postgresql.dialect())).upper()
-    assert "(COALESCE(-COALESCE(" in sql
-    assert "MCP_SERVER_VERSIONS.NAME, MCP_SERVER_VERSIONS.VERSION, " in sql
-    assert ") > (" in sql
-    assert " OFFSET " not in sql
+    statement_sql = sql(session.statements[0]).upper()
+    assert "(COALESCE(-COALESCE(" in statement_sql
+    assert "MCP_SERVER_VERSIONS.NAME, MCP_SERVER_VERSIONS.VERSION, " in statement_sql
+    assert ") > (" in statement_sql
+    assert " OFFSET " not in statement_sql
+
+
+@pytest.mark.asyncio
+async def test_list_servers_search_cursor_uses_ranked_order() -> None:
+    organization_id = uuid4()
+    first = server("example/weather", "1.0.0", quality_score=90)
+    cursor = encode_cursor("1", (0.5).hex(), "-90", first.name, first.version, str(first.id))
+    session = RecordingSession([])
+
+    await repository.list_servers(
+        session,
+        cursor=cursor,
+        limit=2,
+        include_deleted=False,
+        search="weather",
+        organization_id=organization_id,
+    )
+
+    statement_sql = sql(session.statements[0], literal_binds=True).upper()
+    assert "TS_RANK_CD(MCP_SERVER_VERSIONS.SEARCH_VECTOR" in statement_sql
+    assert "CASE WHEN" in statement_sql
+    assert "TS_RANK_CD" in statement_sql and " < " in statement_sql
+    assert "MCP_SERVER_VERSIONS.NAME > 'EXAMPLE/WEATHER'" in statement_sql
+    assert " OFFSET " not in statement_sql
 
 
 @pytest.mark.asyncio
@@ -131,6 +198,21 @@ async def test_list_servers_rejects_invalid_keyset_uuid() -> None:
             cursor=cursor,
             limit=50,
             include_deleted=False,
+            organization_id=uuid4(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_servers_rejects_invalid_search_keyset_uuid() -> None:
+    cursor = encode_cursor("0", (0.5).hex(), "-42", "example/weather", "1.0.0", "bad")
+
+    with pytest.raises(InvalidCursorError):
+        await repository.list_servers(
+            RecordingSession(),
+            cursor=cursor,
+            limit=50,
+            include_deleted=False,
+            search="weather",
             organization_id=uuid4(),
         )
 

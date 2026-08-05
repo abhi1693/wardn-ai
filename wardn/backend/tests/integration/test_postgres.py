@@ -87,6 +87,8 @@ async def test_alembic_upgrades_empty_database(postgres_engine: AsyncEngine) -> 
         )
     assert {
         "ix_mcp_server_versions_search_vector",
+        "ix_mcp_server_versions_search_name_trgm",
+        "ix_mcp_server_versions_search_title_trgm",
         "ix_mcp_server_versions_catalog_source",
         "ix_mcp_server_versions_org_latest_page",
         "ix_mcp_server_versions_org_page",

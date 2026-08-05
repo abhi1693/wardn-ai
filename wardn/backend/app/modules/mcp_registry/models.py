@@ -92,6 +92,16 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             postgresql_using="gin",
         ),
         Index(
+            "ix_mcp_server_versions_search_name_trgm",
+            text("lower(name) gin_trgm_ops"),
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_mcp_server_versions_search_title_trgm",
+            text("lower(title) gin_trgm_ops"),
+            postgresql_using="gin",
+        ),
+        Index(
             "ix_mcp_server_versions_catalog_source",
             "organization_id",
             "catalog_source_id",
@@ -120,9 +130,11 @@ class MCPServerVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     search_vector: Mapped[Any] = mapped_column(
         TSVECTOR,
         Computed(
-            "to_tsvector('simple'::regconfig, "
-            "coalesce(name, '') || ' ' || coalesce(title, '') || ' ' || "
-            "coalesce(description, ''))",
+            "setweight(to_tsvector('simple'::regconfig, coalesce(name, '')), 'A') || "
+            "setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('english'::regconfig, coalesce(description, '')), 'B') || "
+            "setweight(to_tsvector('english'::regconfig, "
+            "left(coalesce(server_json #>> '{documentation}', ''), 32768)), 'C')",
             persisted=True,
         ),
         nullable=False,

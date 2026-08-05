@@ -501,7 +501,7 @@ export function InstallFormClient({
                     event.preventDefault();
                   }
                 }}
-                placeholder="Search supported connections"
+                placeholder="Search by server, title, or use case"
                 type="search"
                 value={serverQuery}
               />

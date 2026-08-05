@@ -88,6 +88,11 @@ def test_scoped_domain_models_declare_database_invariants() -> None:
 def test_registry_models_declare_database_invariants() -> None:
     assert "ck_mcp_server_versions_status" in constraint_names(MCPServerVersion)
     assert {
+        "ix_mcp_server_versions_search_vector",
+        "ix_mcp_server_versions_search_name_trgm",
+        "ix_mcp_server_versions_search_title_trgm",
+    } <= index_names(MCPServerVersion)
+    assert {
         "ck_mcp_catalog_sources_provider",
         "ck_mcp_catalog_sources_sync_mode",
     } <= constraint_names(MCPCatalogSource)

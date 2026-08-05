@@ -1,3 +1,5 @@
+import math
+import re
 import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -32,6 +34,26 @@ from app.modules.organizations.models import Workspace
 SYNC_QUERY_BATCH_SIZE = 500
 NULL_QUALITY_SCORE_RANK = Decimal("1000000000")
 QUALITY_SCORE_METADATA_KEYS = ("dev.wardnai.hub/catalog", "ai.wardn.hub")
+SERVER_CURSOR_FIELDS = 4
+SEARCH_CURSOR_FIELDS = 6
+REGISTRY_SEARCH_GENERIC_TERMS = frozenset({"mcp", "server", "servers"})
+REGISTRY_SEARCH_GENERIC_PHRASE = re.compile(r"\bmodel\s+context\s+protocol\b")
+
+
+def normalize_registry_search_query(query: str) -> str:
+    normalized_query = query.casefold()
+    tokens = [token.strip("_") for token in re.findall(r"\w+", normalized_query)]
+    tokens = [token for token in tokens if token]
+    catalog_agnostic_query = REGISTRY_SEARCH_GENERIC_PHRASE.sub(" ", normalized_query)
+    catalog_agnostic_tokens = [
+        token.strip("_") for token in re.findall(r"\w+", catalog_agnostic_query)
+    ]
+    meaningful_tokens = [
+        token
+        for token in catalog_agnostic_tokens
+        if token and token not in REGISTRY_SEARCH_GENERIC_TERMS
+    ]
+    return " ".join(meaningful_tokens or tokens) or normalized_query.strip()
 
 
 def _visible_query(include_deleted: bool) -> Select[tuple[MCPServerVersion]]:
@@ -65,6 +87,53 @@ def _decimal_cursor_value(value: Decimal) -> str:
     return format(value, "f")
 
 
+def _decimal_cursor_decimal(value: str) -> Decimal:
+    try:
+        decimal_value = Decimal(value)
+    except InvalidOperation as exc:
+        raise InvalidCursorError("invalid cursor") from exc
+    if not decimal_value.is_finite():
+        raise InvalidCursorError("invalid cursor")
+    return decimal_value
+
+
+def _uuid_cursor_value(value: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise InvalidCursorError("invalid cursor") from exc
+
+
+def _search_text_rank_cursor_value(value: Any) -> str:
+    try:
+        text_rank = float(value or 0.0)
+    except (TypeError, ValueError) as exc:
+        raise InvalidCursorError("invalid cursor") from exc
+    if not math.isfinite(text_rank):
+        raise InvalidCursorError("invalid cursor")
+    return text_rank.hex()
+
+
+def _search_text_rank_cursor_float(value: str) -> float:
+    try:
+        text_rank = float.fromhex(value)
+    except ValueError as exc:
+        raise InvalidCursorError("invalid cursor") from exc
+    if not math.isfinite(text_rank):
+        raise InvalidCursorError("invalid cursor")
+    return text_rank
+
+
+def _search_match_tier_cursor_value(value: str) -> int:
+    try:
+        match_tier = int(value)
+    except ValueError as exc:
+        raise InvalidCursorError("invalid cursor") from exc
+    if match_tier < 0 or match_tier > 3:
+        raise InvalidCursorError("invalid cursor")
+    return match_tier
+
+
 def _quality_score_value(server_json: dict[str, Any]) -> Decimal | None:
     def numeric(value: Any) -> Decimal | None:
         if isinstance(value, bool) or not isinstance(value, int | float):
@@ -96,6 +165,55 @@ def _quality_score_rank_value(server_json: dict[str, Any]) -> str:
     if score is None:
         return _decimal_cursor_value(NULL_QUALITY_SCORE_RANK)
     return _decimal_cursor_value(-score)
+
+
+def _escaped_like_search(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _search_cursor_after_condition(
+    *,
+    match_tier: Any,
+    text_rank: Any,
+    quality_score_rank: Any,
+    after_match_tier: int,
+    after_text_rank: float,
+    after_quality_score_rank: Decimal,
+    after_name: str,
+    after_version: str,
+    after_id: uuid.UUID,
+):
+    same_match_tier = match_tier == after_match_tier
+    same_text_rank = text_rank == after_text_rank
+    same_quality_score_rank = quality_score_rank == after_quality_score_rank
+    same_name = MCPServerVersion.name == after_name
+    same_version = MCPServerVersion.version == after_version
+    return or_(
+        match_tier > after_match_tier,
+        and_(same_match_tier, text_rank < after_text_rank),
+        and_(same_match_tier, same_text_rank, quality_score_rank > after_quality_score_rank),
+        and_(
+            same_match_tier,
+            same_text_rank,
+            same_quality_score_rank,
+            MCPServerVersion.name > after_name,
+        ),
+        and_(
+            same_match_tier,
+            same_text_rank,
+            same_quality_score_rank,
+            same_name,
+            MCPServerVersion.version > after_version,
+        ),
+        and_(
+            same_match_tier,
+            same_text_rank,
+            same_quality_score_rank,
+            same_name,
+            same_version,
+            MCPServerVersion.id > after_id,
+        ),
+    )
 
 
 async def get_server_version(
@@ -149,15 +267,62 @@ async def list_servers(
     statement = _visible_query(include_deleted or updated_since is not None)
     if organization_id is not None:
         statement = statement.where(MCPServerVersion.organization_id == organization_id)
-    normalized_search = search.strip() if search else ""
+    normalized_search = normalize_registry_search_query(search) if search else ""
+    quality_score_rank = _quality_score_rank_expression()
     if normalized_search:
-        statement = statement.where(
-            MCPServerVersion.search_vector.op("@@")(
-                func.websearch_to_tsquery(
-                    literal_column("'simple'::regconfig"),
-                    normalized_search,
-                )
+        escaped_search = _escaped_like_search(normalized_search)
+        english_query = func.websearch_to_tsquery(
+            literal_column("'english'::regconfig"),
+            normalized_search,
+        )
+        simple_query = func.websearch_to_tsquery(
+            literal_column("'simple'::regconfig"),
+            normalized_search,
+        )
+        english_match = MCPServerVersion.search_vector.op("@@")(english_query)
+        simple_match = MCPServerVersion.search_vector.op("@@")(simple_query)
+        text_match = or_(english_match, simple_match)
+        normalized_name = func.lower(MCPServerVersion.name)
+        normalized_title = func.lower(MCPServerVersion.title)
+        exact_match = or_(
+            normalized_name == normalized_search,
+            normalized_title == normalized_search,
+        )
+        prefix_pattern = f"{escaped_search}%"
+        prefix_match = or_(
+            normalized_name.ilike(prefix_pattern, escape="\\"),
+            normalized_title.ilike(prefix_pattern, escape="\\"),
+        )
+        contains_pattern = f"%{escaped_search}%"
+        contains_match = or_(
+            normalized_name.ilike(contains_pattern, escape="\\"),
+            normalized_title.ilike(contains_pattern, escape="\\"),
+        )
+        match_tier = case(
+            (exact_match, 0),
+            (prefix_match, 1),
+            (contains_match, 2),
+            else_=3,
+        ).label("match_tier")
+        text_rank = (
+            func.ts_rank_cd(
+                MCPServerVersion.search_vector,
+                english_query,
+                32,
             )
+            + func.ts_rank_cd(
+                MCPServerVersion.search_vector,
+                simple_query,
+                32,
+            )
+        ).label("text_rank")
+        search_quality_score_rank = quality_score_rank.label("quality_score_rank")
+        statement = statement.where(
+            or_(exact_match, prefix_match, contains_match, text_match)
+        ).add_columns(
+            match_tier,
+            text_rank,
+            search_quality_score_rank,
         )
     if updated_since:
         statement = statement.where(MCPServerVersion.updated_at >= updated_since)
@@ -166,26 +331,69 @@ async def list_servers(
     else:
         statement = statement.where(MCPServerVersion.version == version)
 
-    quality_score_rank = _quality_score_rank_expression()
+    if normalized_search:
+        statement = statement.order_by(
+            match_tier.asc(),
+            text_rank.desc(),
+            quality_score_rank.asc(),
+            MCPServerVersion.name.asc(),
+            MCPServerVersion.version.asc(),
+            MCPServerVersion.id.asc(),
+        )
+        cursor_values = decode_cursor(cursor, fields=SEARCH_CURSOR_FIELDS)
+        if cursor_values is not None:
+            (
+                after_match_tier_value,
+                after_text_rank_value,
+                after_quality_score_rank_value,
+                after_name,
+                after_version,
+                after_id_value,
+            ) = cursor_values
+            statement = statement.where(
+                _search_cursor_after_condition(
+                    match_tier=match_tier,
+                    text_rank=text_rank,
+                    quality_score_rank=quality_score_rank,
+                    after_match_tier=_search_match_tier_cursor_value(after_match_tier_value),
+                    after_text_rank=_search_text_rank_cursor_float(after_text_rank_value),
+                    after_quality_score_rank=_decimal_cursor_decimal(
+                        after_quality_score_rank_value
+                    ),
+                    after_name=after_name,
+                    after_version=after_version,
+                    after_id=_uuid_cursor_value(after_id_value),
+                )
+            )
+        result = await session.execute(statement.limit(limit + 1))
+        search_rows = list(result.all())
+        rows = [row[0] for row in search_rows]
+        page = rows[:limit]
+        next_cursor = ""
+        if len(rows) > limit and page:
+            last_row = search_rows[limit - 1]
+            last = last_row[0]
+            next_cursor = encode_cursor(
+                str(int(last_row[1])),
+                _search_text_rank_cursor_value(last_row[2]),
+                _decimal_cursor_value(Decimal(str(last_row[3]))),
+                last.name,
+                last.version,
+                str(last.id),
+            )
+        return page, next_cursor
+
     statement = statement.order_by(
         quality_score_rank.asc(),
         MCPServerVersion.name.asc(),
         MCPServerVersion.version.asc(),
         MCPServerVersion.id.asc(),
     )
-    cursor_values = decode_cursor(cursor, fields=4)
+    cursor_values = decode_cursor(cursor, fields=SERVER_CURSOR_FIELDS)
     if cursor_values is not None:
         after_quality_score_rank_value, after_name, after_version, after_id_value = cursor_values
-        try:
-            after_quality_score_rank = Decimal(after_quality_score_rank_value)
-        except InvalidOperation as exc:
-            raise InvalidCursorError("invalid cursor") from exc
-        if not after_quality_score_rank.is_finite():
-            raise InvalidCursorError("invalid cursor")
-        try:
-            after_id = uuid.UUID(after_id_value)
-        except ValueError as exc:
-            raise InvalidCursorError("invalid cursor") from exc
+        after_quality_score_rank = _decimal_cursor_decimal(after_quality_score_rank_value)
+        after_id = _uuid_cursor_value(after_id_value)
         statement = statement.where(
             tuple_(
                 quality_score_rank,
