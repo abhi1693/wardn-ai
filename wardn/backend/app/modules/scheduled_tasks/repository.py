@@ -577,6 +577,88 @@ async def complete_run(
     return True
 
 
+async def pause_run_for_approval(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    *,
+    worker_id: str,
+    agent_run_id: uuid.UUID | None,
+    conversation_id: uuid.UUID | None,
+    delivery_summary: dict,
+) -> bool:
+    run = await get_owned_running_run(session, run_id, worker_id=worker_id)
+    if run is None:
+        return False
+    run.status = "waiting_confirmation"
+    run.error = ""
+    run.finished_at = None
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.agent_run_id = agent_run_id
+    run.conversation_id = conversation_id
+    run.delivery_summary = delivery_summary
+    task = await session.get(WorkspaceScheduledTask, run.task_id)
+    if task is not None:
+        task.last_status = "waiting_confirmation"
+        task.last_error = ""
+        task.last_task_run_id = run.id
+        task.last_agent_run_id = agent_run_id
+        if conversation_id is not None and task.conversation_policy == "reuse":
+            task.conversation_id = conversation_id
+    await session.flush()
+    return True
+
+
+async def complete_waiting_run(
+    session: AsyncSession,
+    run: WorkspaceScheduledTaskRun,
+    *,
+    now: datetime,
+    status: str,
+    error: str,
+    delivery_summary: dict,
+) -> bool:
+    if run.status != "waiting_confirmation":
+        return False
+    run.status = status
+    run.error = error
+    run.finished_at = now
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.delivery_summary = delivery_summary
+    task = await session.get(WorkspaceScheduledTask, run.task_id)
+    if task is not None:
+        task.last_status = status
+        task.last_error = error
+        task.last_task_run_id = run.id
+        task.last_agent_run_id = run.agent_run_id
+        if run.conversation_id is not None and task.conversation_policy == "reuse":
+            task.conversation_id = run.conversation_id
+    await session.flush()
+    return True
+
+
+async def cancel_run(
+    session: AsyncSession,
+    run: WorkspaceScheduledTaskRun,
+    *,
+    now: datetime,
+    error: str,
+) -> None:
+    run.status = "canceled"
+    run.error = error
+    run.finished_at = now
+    run.worker_id = ""
+    run.lease_expires_at = None
+    task = await session.get(WorkspaceScheduledTask, run.task_id)
+    if task is not None:
+        task.last_status = "canceled"
+        task.last_error = error
+        task.last_task_run_id = run.id
+        task.last_agent_run_id = run.agent_run_id
+    await session.flush()
+
+
 async def retry_or_fail_run(
     session: AsyncSession,
     run_id: uuid.UUID,

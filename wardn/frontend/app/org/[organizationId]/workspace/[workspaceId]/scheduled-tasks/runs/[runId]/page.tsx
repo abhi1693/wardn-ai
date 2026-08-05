@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/app/components/app-shell";
+import { CancelScheduledTaskRunButton } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/runs/[runId]/cancel-scheduled-task-run-button";
 import { DateTimeText } from "@/components/date-time-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,6 +158,13 @@ export default async function ScheduledTaskRunPage({ params }: ScheduledTaskRunP
       active="workspace-scheduled-tasks"
       actions={
         <div className="flex flex-wrap gap-2">
+          <CancelScheduledTaskRunButton
+            canCancel={Boolean(run.canCancel)}
+            organizationId={organizationId}
+            runId={run.id}
+            taskId={run.taskId}
+            workspaceId={workspaceId}
+          />
           <Button asChild size="sm" variant="outline">
             <Link href={scheduledTasksHref(organizationId, workspaceId)}>
               <ArrowLeft className="size-4" />

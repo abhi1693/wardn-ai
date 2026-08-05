@@ -269,6 +269,7 @@ class WorkspaceScheduledTaskRunRead(APIModel):
     attempt_count: int
     max_attempts: int
     error: str
+    can_cancel: bool = Field(default=False, title="Can cancel")
     delivery_summary: dict[str, Any] = Field(default_factory=dict)
     deliveries: list[WorkspaceScheduledTaskDeliveryRead] = Field(default_factory=list)
     notifications: list[WorkspaceScheduledTaskNotificationRead] = Field(default_factory=list)

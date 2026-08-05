@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -67,6 +66,9 @@ DEFAULT_NOTIFICATION_RULES = WorkspaceScheduledTaskNotificationRules()
 DEFAULT_MONITORING_CONFIG = WorkspaceScheduledTaskMonitoringConfig()
 DELIVERY_TEXT_PAYLOAD_KEY = "scheduledTaskDeliveryText"
 RETRYABLE_DELIVERY_RUN_STATUSES = {"succeeded", "partially_delivered", "delivery_failed"}
+WAITING_AGENT_RUN_STATUSES = {"running", "waiting_confirmation"}
+CANCELABLE_RUN_STATUSES = {"queued", "running", "waiting_confirmation"}
+CANCELED_RUN_ERROR = "Canceled by user."
 NOTIFICATION_EVENT_TO_RULE_KEY = {
     "failure": "on_failure",
     "waiting_approval": "on_waiting_approval",
@@ -1297,6 +1299,7 @@ def run_response(
         attemptCount=run.attempt_count,
         maxAttempts=run.max_attempts,
         error=run.error,
+        canCancel=run.status in CANCELABLE_RUN_STATUSES,
         deliverySummary=run.delivery_summary,
         deliveries=[delivery_response(delivery) for delivery in (deliveries or [])],
         notifications=[
@@ -1708,6 +1711,76 @@ async def get_workspace_scheduled_task_run(
     )
 
 
+async def cancel_workspace_scheduled_task_run(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> WorkspaceScheduledTaskRunRead:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    task = await repository.get_task(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+    )
+    if task is None:
+        raise ScheduledTaskNotFoundError("scheduled task not found")
+    run = await repository.get_task_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        run_id=run_id,
+        for_update=True,
+    )
+    if run is None:
+        raise ScheduledTaskNotFoundError("scheduled task run not found")
+    if run.status not in CANCELABLE_RUN_STATUSES:
+        raise InvalidScheduledTaskError("only queued, running, or waiting runs can be canceled")
+    now = utc_now()
+    if run.agent_run_id is not None:
+        agent_run = await agent_repository.get_agent_run(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_run_id=run.agent_run_id,
+        )
+        if agent_run is not None and agent_run.status in WAITING_AGENT_RUN_STATUSES:
+            await agent_repository.finish_agent_run(
+                session,
+                agent_run,
+                status="canceled",
+                error=CANCELED_RUN_ERROR,
+                now=now,
+            )
+        approvals = await agent_repository.list_active_tool_approvals_for_agent_run(
+            session,
+            agent_run_id=run.agent_run_id,
+        )
+        for approval in approvals:
+            approval.status = "denied" if approval.status == "pending" else "failed"
+            approval.error = CANCELED_RUN_ERROR
+            approval.decided_by_id = user.id
+            if approval.conversation_id is not None:
+                await agent_repository.update_conversation_tool_activity(
+                    session,
+                    conversation_id=approval.conversation_id,
+                    approval_id=approval.id,
+                    data_update={"status": approval.status, "error": approval.error},
+                )
+    await repository.cancel_run(session, run, now=now, error=CANCELED_RUN_ERROR)
+    deliveries_by_run = await repository.list_run_deliveries(session, run_ids=[run.id])
+    notifications_by_run = await repository.list_run_notifications(session, run_ids=[run.id])
+    return run_response(
+        run,
+        deliveries=deliveries_by_run.get(run.id, []),
+        notifications=notifications_by_run.get(run.id, []),
+    )
+
+
 async def test_workspace_scheduled_task_route(
     session: AsyncSession,
     user: User,
@@ -2080,64 +2153,6 @@ async def reply_for_task_run(
             approval_id=approval.id,
         )
     return TaskRunReply(text=PROVIDER_EMPTY_REPLY, kind="empty")
-
-
-def scheduled_task_approval_wait_poll_seconds() -> float:
-    return min(
-        max(float(get_settings().scheduled_task_worker_heartbeat_seconds), 5.0),
-        60.0,
-    )
-
-
-async def wait_for_task_run_approval(
-    session: AsyncSession,
-    *,
-    task: WorkspaceScheduledTask,
-    agent_run_id: uuid.UUID | None,
-    approval_id: uuid.UUID | None,
-    sleep=asyncio.sleep,
-) -> tuple[str, str]:
-    if approval_id is None:
-        return "waiting_confirmation", ""
-    while True:
-        approval = await agent_repository.get_tool_approval(
-            session,
-            organization_id=task.organization_id,
-            workspace_id=task.workspace_id,
-            agent_id=task.agent_id,
-            approval_id=approval_id,
-        )
-        if approval is None:
-            return "failed", "Pending tool approval was not found."
-
-        now = utc_now()
-        if approval.status == "pending" and agent_approvals.agent_tool_approval_is_expired(
-            approval,
-            now=now,
-        ):
-            await agent_approvals.expire_agent_tool_approval(session, approval)
-            await session.commit()
-            return "failed", approval.error
-
-        agent_run = await session.get(AgentRun, agent_run_id) if agent_run_id else None
-        if agent_run is not None:
-            await session.refresh(agent_run)
-            if agent_run.status not in {"running", "waiting_confirmation"}:
-                return agent_run.status, agent_run.error
-
-        if approval.status in {"denied", "failed", "expired"}:
-            return "failed", approval.error
-        if approval.status == "completed" and agent_run is None:
-            return "succeeded", ""
-
-        delay = scheduled_task_approval_wait_poll_seconds()
-        if approval.status == "pending":
-            expires_at = agent_approvals.agent_tool_approval_expires_at(approval, now=now)
-            delay = min(delay, max((expires_at - now).total_seconds(), 0.0))
-        await session.commit()
-        if delay <= 0:
-            continue
-        await sleep(delay)
 
 
 async def provider_route_connection(
@@ -2643,6 +2658,115 @@ async def deliver_task_run_output(
     }
 
 
+async def expire_pending_scheduled_approvals(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int = 100,
+) -> int:
+    fallback_created_before = now - timedelta(
+        seconds=get_settings().agent_tool_approval_expiry_seconds
+    )
+    approvals = await agent_repository.list_expired_pending_tool_approvals(
+        session,
+        now=now,
+        fallback_created_before=fallback_created_before,
+        trigger_type=SCHEDULED_AGENT_TRIGGER,
+        limit=limit,
+    )
+    for approval in approvals:
+        await agent_approvals.expire_agent_tool_approval(session, approval)
+    return len(approvals)
+
+
+async def list_resolved_waiting_task_runs(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[WorkspaceScheduledTaskRun]:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskRun)
+        .join(AgentRun, AgentRun.id == WorkspaceScheduledTaskRun.agent_run_id)
+        .where(
+            WorkspaceScheduledTaskRun.status == "waiting_confirmation",
+            ~AgentRun.status.in_(WAITING_AGENT_RUN_STATUSES),
+        )
+        .order_by(
+            WorkspaceScheduledTaskRun.updated_at.asc(),
+            WorkspaceScheduledTaskRun.scheduled_for.asc(),
+            WorkspaceScheduledTaskRun.id.asc(),
+        )
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(result.scalars().all())
+
+
+async def finalize_waiting_task_run(
+    session: AsyncSession,
+    *,
+    run: WorkspaceScheduledTaskRun,
+    now: datetime,
+) -> bool:
+    task = await session.get(WorkspaceScheduledTask, run.task_id)
+    if task is None:
+        return False
+    agent_run = await session.get(AgentRun, run.agent_run_id) if run.agent_run_id else None
+    agent_status = agent_run.status if agent_run is not None else "failed"
+    error = (
+        agent_run.error
+        if agent_run is not None
+        else "Scheduled task did not create an agent run."
+    )
+    delivery_summary = dict(run.delivery_summary or {})
+    if agent_status == "succeeded":
+        if run.conversation_id is None:
+            agent_status = "failed"
+            error = "Scheduled task did not create a conversation."
+        else:
+            delivery_summary = await deliver_task_run_output(
+                session,
+                task=task,
+                run=run,
+                conversation_id=run.conversation_id,
+            )
+    status = scheduled_task_run_status(agent_status, delivery_summary)
+    completed = await repository.complete_waiting_run(
+        session,
+        run,
+        now=now,
+        status=status,
+        error=error,
+        delivery_summary=delivery_summary,
+    )
+    if not completed:
+        return False
+    await dispatch_task_run_notifications(
+        session,
+        task=task,
+        run=run,
+        status=status,
+        error=error,
+        delivery_summary=delivery_summary,
+    )
+    return True
+
+
+async def finalize_resolved_waiting_task_runs(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int = 100,
+) -> int:
+    await expire_pending_scheduled_approvals(session, now=now, limit=limit)
+    runs = await list_resolved_waiting_task_runs(session, limit=limit)
+    finalized = 0
+    for run in runs:
+        if await finalize_waiting_task_run(session, run=run, now=now):
+            finalized += 1
+    return finalized
+
+
 async def execute_claimed_task_run(
     session: AsyncSession,
     *,
@@ -2691,7 +2815,6 @@ async def execute_claimed_task_run(
     else:
         status = "failed"
         error = "Scheduled task did not create an agent run."
-    waiting_notification_dispatched = False
     if status == "waiting_confirmation":
         approval_reply = await reply_for_task_run(
             session,
@@ -2712,23 +2835,17 @@ async def execute_claimed_task_run(
             error=error,
             delivery_summary=waiting_delivery_summary,
         )
-        waiting_notification_dispatched = True
-        await session.commit()
-        status, error = await wait_for_task_run_approval(
+        paused = await repository.pause_run_for_approval(
             session,
-            task=task,
+            run.id,
+            worker_id=worker_id,
             agent_run_id=agent_run_id,
-            approval_id=approval_reply.approval_id,
+            conversation_id=conversation_id,
+            delivery_summary=waiting_delivery_summary,
         )
-        if status == "succeeded":
-            delivery_summary = await deliver_task_run_output(
-                session,
-                task=task,
-                run=run,
-                conversation_id=conversation_id,
-            )
-        else:
-            delivery_summary = waiting_delivery_summary
+        if not paused:
+            raise InvalidScheduledTaskError("scheduled task run lease was lost")
+        return
     else:
         delivery_summary = await deliver_task_run_output(
             session,
@@ -2750,15 +2867,14 @@ async def execute_claimed_task_run(
     )
     if not completed:
         raise InvalidScheduledTaskError("scheduled task run lease was lost")
-    if not (waiting_notification_dispatched and status == "waiting_confirmation"):
-        await dispatch_task_run_notifications(
-            session,
-            task=task,
-            run=run,
-            status=status,
-            error=error,
-            delivery_summary=delivery_summary,
-        )
+    await dispatch_task_run_notifications(
+        session,
+        task=task,
+        run=run,
+        status=status,
+        error=error,
+        delivery_summary=delivery_summary,
+    )
 
 
 async def enqueue_due_task_runs(

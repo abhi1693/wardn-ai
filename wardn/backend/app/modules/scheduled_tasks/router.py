@@ -19,6 +19,7 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskUpdate,
 )
 from app.modules.scheduled_tasks.service import (
+    cancel_workspace_scheduled_task_run,
     create_workspace_scheduled_task,
     delete_workspace_scheduled_task,
     enqueue_workspace_scheduled_task_run,
@@ -297,6 +298,34 @@ async def run_workspace_scheduled_task_now_route(
         organization_id,
         workspace_id,
         task_id,
+    )
+
+
+@workspace_router.post(
+    "/{task_id}/runs/{run_id}/cancel",
+    response_model=WorkspaceScheduledTaskRunRead,
+    operation_id="workspace_scheduled_tasks_cancel_run",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def cancel_workspace_scheduled_task_run_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    task_id: UUID,
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceScheduledTaskRunRead:
+    return await cancel_workspace_scheduled_task_run(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        task_id,
+        run_id,
     )
 
 

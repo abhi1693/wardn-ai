@@ -78,6 +78,10 @@ async def test_worker_once_claims_and_executes_scheduled_run(monkeypatch) -> Non
         seen["recover"] = session
         return 0
 
+    async def finalize(session, *, now):
+        seen["finalize"] = session
+        return 0
+
     async def enqueue(session, *, now):
         seen["enqueue"] = session
         return 1
@@ -90,6 +94,7 @@ async def test_worker_once_claims_and_executes_scheduled_run(monkeypatch) -> Non
         seen["execute"] = (claimed_run, kwargs)
 
     session_factory = FakeSessionFactory()
+    monkeypatch.setattr(worker.service, "finalize_resolved_waiting_task_runs", finalize)
     monkeypatch.setattr(worker.repository, "recover_expired_leases", recover)
     monkeypatch.setattr(worker.service, "enqueue_due_task_runs", enqueue)
     monkeypatch.setattr(worker.repository, "claim_next_run", claim)
@@ -105,10 +110,52 @@ async def test_worker_once_claims_and_executes_scheduled_run(monkeypatch) -> Non
     )
 
     assert worked is True
+    assert seen["finalize"] is session_factory.sessions[0]
     assert seen["recover"] is session_factory.sessions[0]
     assert seen["enqueue"] is session_factory.sessions[0]
     assert seen["claim"][0] is session_factory.sessions[0]
     assert seen["execute"][0] is run
+    assert session_factory.sessions[0].committed is True
+
+
+@pytest.mark.asyncio
+async def test_worker_once_counts_finalized_approval_wait_as_work(monkeypatch) -> None:
+    seen = {}
+
+    async def finalize(session, *, now):
+        seen["finalize"] = session
+        return 1
+
+    async def recover(session, *, now):
+        seen["recover"] = session
+        return 0
+
+    async def enqueue(session, *, now):
+        seen["enqueue"] = session
+        return 0
+
+    async def claim(session, **kwargs):
+        seen["claim"] = (session, kwargs)
+        return None
+
+    session_factory = FakeSessionFactory()
+    monkeypatch.setattr(worker.service, "finalize_resolved_waiting_task_runs", finalize)
+    monkeypatch.setattr(worker.repository, "recover_expired_leases", recover)
+    monkeypatch.setattr(worker.service, "enqueue_due_task_runs", enqueue)
+    monkeypatch.setattr(worker.repository, "claim_next_run", claim)
+
+    worked = await worker.run_scheduled_task_worker_once(
+        worker_id="worker-1",
+        session_factory=session_factory,
+        lease_seconds=300,
+        heartbeat_seconds=30,
+        retry_base_seconds=30,
+        retry_max_seconds=300,
+    )
+
+    assert worked is True
+    assert seen["finalize"] is session_factory.sessions[0]
+    assert seen["claim"][0] is session_factory.sessions[0]
     assert session_factory.sessions[0].committed is True
 
 

@@ -56,6 +56,7 @@ import type {
   WorkspaceScheduledTaskUpdate,
 } from "@/lib/api/generated/model";
 import {
+  workspaceScheduledTasksCancelRun,
   workspaceScheduledTasksCreate,
   workspaceScheduledTasksDelete,
   workspaceScheduledTasksPreview,
@@ -735,6 +736,10 @@ function statusLabel(status: string) {
     return "delivery failed";
   }
   return status.replaceAll("_", " ");
+}
+
+function canCancelRun(run: WorkspaceScheduledTaskRunRead) {
+  return Boolean(run.canCancel);
 }
 
 function taskOutputLabels(
@@ -2647,6 +2652,7 @@ export function ScheduledTasksClient({
   const [runRows, setRunRows] = useState(runs);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [busyDeliveryId, setBusyDeliveryId] = useState<string | null>(null);
+  const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
@@ -2739,7 +2745,15 @@ export function ScheduledTasksClient({
       );
       setTaskRows((current) =>
         current.map((row) =>
-          row.lastTaskRunId === updatedRun.id ? { ...row, lastStatus: updatedRun.status } : row
+          row.id === updatedRun.taskId
+            ? {
+                ...row,
+                lastError: updatedRun.error,
+                lastRunAt: updatedRun.scheduledFor,
+                lastStatus: updatedRun.status,
+                lastTaskRunId: updatedRun.id,
+              }
+            : row
         )
       );
       setFeedback({ variant: "success", text: "Delivery retried." });
@@ -2751,6 +2765,40 @@ export function ScheduledTasksClient({
       });
     } finally {
       setBusyDeliveryId(null);
+    }
+  }
+
+  async function cancelRun(run: WorkspaceScheduledTaskRunRead) {
+    const task = taskRows.find((row) => row.id === run.taskId);
+    if (!window.confirm(`Cancel ${task?.name ?? "this scheduled run"}?`)) {
+      return;
+    }
+    setBusyRunId(run.id);
+    setFeedback(null);
+    try {
+      const updatedRun = await workspaceScheduledTasksCancelRun(
+        organizationId,
+        workspaceId,
+        run.taskId,
+        run.id
+      );
+      setRunRows((current) =>
+        current.map((row) => (row.id === updatedRun.id ? updatedRun : row))
+      );
+      setTaskRows((current) =>
+        current.map((row) =>
+          row.lastTaskRunId === updatedRun.id ? { ...row, lastStatus: updatedRun.status } : row
+        )
+      );
+      setFeedback({ variant: "success", text: "Scheduled run canceled." });
+      router.refresh();
+    } catch (error) {
+      setFeedback({
+        variant: "error",
+        text: error instanceof Error ? error.message : "Could not cancel scheduled run.",
+      });
+    } finally {
+      setBusyRunId(null);
     }
   }
 
@@ -3082,6 +3130,24 @@ export function ScheduledTasksClient({
                   >
                     {rowContent}
                   </Link>
+                  {canCancelRun(run) ? (
+                    <div className="flex justify-end">
+                      <Button
+                        disabled={busyRunId === run.id}
+                        onClick={() => cancelRun(run)}
+                        size="sm"
+                        title="Cancel scheduled run"
+                        variant="outline"
+                      >
+                        {busyRunId === run.id ? (
+                          <RefreshCw className="size-4 animate-spin" />
+                        ) : (
+                          <X className="size-4" />
+                        )}
+                        Cancel run
+                      </Button>
+                    </div>
+                  ) : null}
                   {retryableDeliveries.length > 0 ? (
                     <div className="grid gap-2">
                       {retryableDeliveries.map((delivery) => (

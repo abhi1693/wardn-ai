@@ -254,7 +254,7 @@ class WorkspaceScheduledTaskRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             (
                 "status IN ("
                 "'queued', 'running', 'succeeded', 'partially_delivered', "
-                "'delivery_failed', 'failed', 'waiting_confirmation'"
+                "'delivery_failed', 'failed', 'waiting_confirmation', 'canceled'"
                 ")"
             ),
             name="ck_workspace_scheduled_task_runs_status",

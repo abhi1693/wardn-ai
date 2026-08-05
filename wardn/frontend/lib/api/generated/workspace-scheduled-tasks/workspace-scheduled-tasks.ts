@@ -293,6 +293,35 @@ export const workspaceScheduledTasksRunNow = async (organizationId: string,
 );}
 
 
+export const getWorkspaceScheduledTasksCancelRunUrl = (organizationId: string,
+    workspaceId: string,
+    taskId: string,
+    runId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/scheduled-tasks/${taskId}/runs/${runId}/cancel`
+}
+
+/**
+ * @summary Cancel Workspace Scheduled Task Run Route
+ */
+export const workspaceScheduledTasksCancelRun = async (organizationId: string,
+    workspaceId: string,
+    taskId: string,
+    runId: string, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRunRead> => {
+
+  return apiRequest<WorkspaceScheduledTaskRunRead>(getWorkspaceScheduledTasksCancelRunUrl(organizationId,workspaceId,taskId,runId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
 export const getWorkspaceScheduledTasksRetryDeliveryUrl = (organizationId: string,
     workspaceId: string,
     taskId: string,

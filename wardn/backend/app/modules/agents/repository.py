@@ -603,6 +603,58 @@ async def latest_pending_tool_approval_by_conversation(
     return result.scalar_one_or_none()
 
 
+async def list_expired_pending_tool_approvals(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    fallback_created_before: datetime,
+    trigger_type: str | None = None,
+    limit: int = 100,
+) -> list[AgentToolApproval]:
+    statement = select(AgentToolApproval)
+    if trigger_type is not None:
+        statement = statement.join(AgentRun, AgentRun.id == AgentToolApproval.agent_run_id)
+    statement = statement.where(
+        AgentToolApproval.status == "pending",
+        or_(
+            AgentToolApproval.expires_at <= now,
+            and_(
+                AgentToolApproval.expires_at.is_(None),
+                AgentToolApproval.created_at <= fallback_created_before,
+            ),
+        ),
+    )
+    if trigger_type is not None:
+        statement = statement.where(AgentRun.trigger_type == trigger_type)
+    result = await session.execute(
+        statement.order_by(
+            AgentToolApproval.expires_at.asc().nulls_last(),
+            AgentToolApproval.created_at.asc(),
+            AgentToolApproval.id.asc(),
+        )
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(result.scalars().all())
+
+
+async def list_active_tool_approvals_for_agent_run(
+    session: AsyncSession,
+    *,
+    agent_run_id: uuid.UUID,
+) -> list[AgentToolApproval]:
+    result = await session.execute(
+        select(AgentToolApproval)
+        .where(
+            AgentToolApproval.agent_run_id == agent_run_id,
+            AgentToolApproval.status.in_(("pending", "running")),
+        )
+        .order_by(AgentToolApproval.created_at.asc(), AgentToolApproval.id.asc())
+        .with_for_update()
+    )
+    return list(result.scalars().all())
+
+
 async def finish_agent_run(
     session: AsyncSession,
     agent_run: AgentRun,

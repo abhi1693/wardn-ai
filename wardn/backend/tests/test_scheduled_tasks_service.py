@@ -5,10 +5,13 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.modules.agents.models import AgentRun, WorkspaceConversation
+from app.modules.agents.models import AgentRun, AgentToolApproval, WorkspaceConversation
 from app.modules.chat_providers.models import ChatProviderConnection
 from app.modules.scheduled_tasks import repository, service
-from app.modules.scheduled_tasks.exceptions import ScheduledTaskNotFoundError
+from app.modules.scheduled_tasks.exceptions import (
+    InvalidScheduledTaskError,
+    ScheduledTaskNotFoundError,
+)
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
@@ -57,6 +60,29 @@ class FakeExecutionSession(FakeSession):
 
     async def refresh(self, obj) -> None:
         self.refreshed = True
+
+
+class FakeWaitingSession(FakeSession):
+    def __init__(
+        self,
+        *,
+        task: WorkspaceScheduledTask,
+        run: WorkspaceScheduledTaskRun,
+        agent_run: AgentRun,
+    ) -> None:
+        super().__init__()
+        self.task = task
+        self.run = run
+        self.agent_run = agent_run
+
+    async def get(self, model, item_id):
+        if model is WorkspaceScheduledTask and item_id == self.task.id:
+            return self.task
+        if model is WorkspaceScheduledTaskRun and item_id == self.run.id:
+            return self.run
+        if model is AgentRun and item_id == self.agent_run.id:
+            return self.agent_run
+        return None
 
 
 def make_task() -> WorkspaceScheduledTask:
@@ -355,6 +381,150 @@ async def test_get_task_run_raises_when_missing(monkeypatch) -> None:
             task.organization_id,
             task.workspace_id,
             uuid4(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_workspace_scheduled_task_run_marks_waiting_run_and_approval(
+    monkeypatch,
+) -> None:
+    task = make_task()
+    run = make_run(task)
+    run.status = "waiting_confirmation"
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.conversation_id = uuid4()
+    run.agent_run_id = uuid4()
+    task.last_task_run_id = run.id
+    actor = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    agent_run = AgentRun(
+        id=run.agent_run_id,
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=run.conversation_id,
+        triggered_by_id=actor.id,
+        trigger_type=service.SCHEDULED_AGENT_TRIGGER,
+        status="waiting_confirmation",
+        started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
+        error="",
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=run.conversation_id,
+        agent_run_id=run.agent_run_id,
+        requested_by_id=actor.id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="github_search",
+        arguments={},
+        status="pending",
+        result="",
+        error="",
+    )
+    captured = {}
+
+    async def require_admin(*args, **kwargs):
+        captured["admin_checked"] = True
+
+    async def get_task(*args, **kwargs):
+        return task
+
+    async def get_task_run(*args, **kwargs):
+        captured["run_for_update"] = kwargs["for_update"]
+        return run
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def list_active_tool_approvals_for_agent_run(*args, **kwargs):
+        captured["approval_agent_run_id"] = kwargs["agent_run_id"]
+        return [approval]
+
+    async def update_conversation_tool_activity(*args, **kwargs):
+        captured["activity_update"] = kwargs["data_update"]
+
+    async def list_run_deliveries(*args, **kwargs):
+        return {run.id: []}
+
+    async def list_run_notifications(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(service.repository, "get_task", get_task)
+    monkeypatch.setattr(service.repository, "get_task_run", get_task_run)
+    monkeypatch.setattr(service.agent_repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service.agent_repository,
+        "list_active_tool_approvals_for_agent_run",
+        list_active_tool_approvals_for_agent_run,
+    )
+    monkeypatch.setattr(
+        service.agent_repository,
+        "update_conversation_tool_activity",
+        update_conversation_tool_activity,
+    )
+    monkeypatch.setattr(service.repository, "list_run_deliveries", list_run_deliveries)
+    monkeypatch.setattr(service.repository, "list_run_notifications", list_run_notifications)
+
+    response = await service.cancel_workspace_scheduled_task_run(
+        FakeWaitingSession(task=task, run=run, agent_run=agent_run),
+        actor,
+        task.organization_id,
+        task.workspace_id,
+        task.id,
+        run.id,
+    )
+
+    assert captured["admin_checked"] is True
+    assert captured["run_for_update"] is True
+    assert captured["approval_agent_run_id"] == run.agent_run_id
+    assert captured["activity_update"] == {
+        "status": "denied",
+        "error": service.CANCELED_RUN_ERROR,
+    }
+    assert approval.status == "denied"
+    assert approval.decided_by_id == actor.id
+    assert agent_run.status == "canceled"
+    assert run.status == "canceled"
+    assert run.error == service.CANCELED_RUN_ERROR
+    assert response.status == "canceled"
+    assert response.can_cancel is False
+    assert task.last_status == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_workspace_scheduled_task_run_rejects_terminal_run(monkeypatch) -> None:
+    task = make_task()
+    run = make_run(task)
+    run.status = "succeeded"
+    actor = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+
+    async def require_admin(*args, **kwargs):
+        return None
+
+    async def get_task(*args, **kwargs):
+        return task
+
+    async def get_task_run(*args, **kwargs):
+        return run
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(service.repository, "get_task", get_task)
+    monkeypatch.setattr(service.repository, "get_task_run", get_task_run)
+
+    with pytest.raises(InvalidScheduledTaskError, match="can be canceled"):
+        await service.cancel_workspace_scheduled_task_run(
+            FakeSession(),
+            actor,
+            task.organization_id,
+            task.workspace_id,
+            task.id,
+            run.id,
         )
 
 
@@ -1018,48 +1188,36 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
             approval_id=approval_id,
         )
 
-    async def complete_run(session, run_id, **kwargs):
-        run.status = kwargs["status"]
-        run.agent_run_id = kwargs["agent_run_id"]
-        run.conversation_id = kwargs["conversation_id"]
-        captured["status"] = kwargs["status"]
-        captured["delivery_summary"] = kwargs["delivery_summary"]
-        return True
-
     async def dispatch_task_run_notifications(*args, **kwargs):
         captured["notifications"].append(kwargs["status"])
         if kwargs["status"] == "waiting_confirmation":
             captured["notification_summary"] = kwargs["delivery_summary"]
 
-    async def deliver_task_run_output(*args, **kwargs):
-        captured["delivered_after_approval"] = True
-        return {
-            "total": 1,
-            "sent": 1,
-            "failed": 0,
-            "outputKind": "assistant",
-            "hasOutput": True,
-            "outputHash": "hash",
-            "outputPreview": "Approved result",
+    async def pause_run_for_approval(session, run_id, **kwargs):
+        run.status = "waiting_confirmation"
+        run.worker_id = ""
+        run.lease_expires_at = None
+        run.agent_run_id = kwargs["agent_run_id"]
+        run.conversation_id = kwargs["conversation_id"]
+        run.delivery_summary = kwargs["delivery_summary"]
+        captured["paused"] = {
+            "run_id": run_id,
+            "agent_run_id": kwargs["agent_run_id"],
+            "conversation_id": kwargs["conversation_id"],
+            "delivery_summary": kwargs["delivery_summary"],
         }
-
-    async def wait_for_task_run_approval(*args, **kwargs):
-        captured["waited_for_approval"] = kwargs["approval_id"]
-        agent_run.status = "succeeded"
-        return "succeeded", ""
+        return True
 
     monkeypatch.setattr(service.repository, "get_task", get_task)
     monkeypatch.setattr(service, "resolve_task_actor", resolve_task_actor)
     monkeypatch.setattr(service, "prepare_agent_run_for_task", prepare_agent_run_for_task)
     monkeypatch.setattr(service, "reply_for_task_run", reply_for_task_run)
-    monkeypatch.setattr(service.repository, "complete_run", complete_run)
+    monkeypatch.setattr(service.repository, "pause_run_for_approval", pause_run_for_approval)
     monkeypatch.setattr(
         service,
         "dispatch_task_run_notifications",
         dispatch_task_run_notifications,
     )
-    monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
-    monkeypatch.setattr(service, "wait_for_task_run_approval", wait_for_task_run_approval)
 
     session = FakeExecutionSession(agent_run)
     await service.execute_claimed_task_run(
@@ -1069,10 +1227,10 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         session_factory=object(),
     )
 
-    assert session.commits == 2
-    assert captured["waited_for_approval"] == approval_id
-    assert captured["delivered_after_approval"] is True
-    assert captured["status"] == "succeeded"
+    assert session.commits == 1
+    assert captured["paused"]["run_id"] == run.id
+    assert captured["paused"]["agent_run_id"] == agent_run.id
+    assert captured["paused"]["conversation_id"] == conversation_id
     assert captured["notification_summary"] == {
         "total": 0,
         "sent": 0,
@@ -1083,13 +1241,78 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         "outputPreview": "Open approval: https://ai.home/approval",
         "approvalId": str(approval_id),
     }
-    assert captured["delivery_summary"] == {
-        "total": 1,
-        "sent": 1,
+    assert run.status == "waiting_confirmation"
+    assert run.worker_id == ""
+    assert run.lease_expires_at is None
+    assert captured["notifications"] == ["waiting_confirmation"]
+
+
+@pytest.mark.asyncio
+async def test_finalize_waiting_task_run_delivers_after_approval(monkeypatch) -> None:
+    task = make_task()
+    run = make_run(task)
+    conversation_id = uuid4()
+    run.status = "waiting_confirmation"
+    run.conversation_id = conversation_id
+    run.worker_id = ""
+    run.lease_expires_at = None
+    run.delivery_summary = {
+        "total": 0,
+        "sent": 0,
         "failed": 0,
-        "outputKind": "assistant",
-        "hasOutput": True,
-        "outputHash": "hash",
-        "outputPreview": "Approved result",
+        "outputKind": "approval",
+        "outputPreview": "Open approval: https://ai.home/approval",
     }
-    assert captured["notifications"] == ["waiting_confirmation", "succeeded"]
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=conversation_id,
+        triggered_by_id=task.created_by_id,
+        trigger_type=service.SCHEDULED_AGENT_TRIGGER,
+        status="succeeded",
+        started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
+        error="",
+    )
+    run.agent_run_id = agent_run.id
+    captured = {}
+
+    async def deliver_task_run_output(*args, **kwargs):
+        captured["delivered"] = kwargs["conversation_id"]
+        return {
+            "total": 1,
+            "sent": 1,
+            "failed": 0,
+            "outputKind": "assistant",
+            "hasOutput": True,
+            "outputHash": "hash",
+            "outputPreview": "Approved result",
+        }
+
+    async def dispatch_task_run_notifications(*args, **kwargs):
+        captured["notification_status"] = kwargs["status"]
+        captured["notification_summary"] = kwargs["delivery_summary"]
+
+    monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
+    monkeypatch.setattr(
+        service,
+        "dispatch_task_run_notifications",
+        dispatch_task_run_notifications,
+    )
+
+    finalized = await service.finalize_waiting_task_run(
+        FakeWaitingSession(task=task, run=run, agent_run=agent_run),
+        run=run,
+        now=datetime(2026, 8, 4, 8, 5, tzinfo=UTC),
+    )
+
+    assert finalized is True
+    assert captured["delivered"] == conversation_id
+    assert run.status == "succeeded"
+    assert run.finished_at == datetime(2026, 8, 4, 8, 5, tzinfo=UTC)
+    assert run.delivery_summary["outputPreview"] == "Approved result"
+    assert task.last_status == "succeeded"
+    assert task.last_task_run_id == run.id
+    assert captured["notification_status"] == "succeeded"
+    assert captured["notification_summary"]["sent"] == 1

@@ -73,6 +73,7 @@ class WorkspaceScheduledTaskRunStatus(StrEnum):
     DELIVERY_FAILED = "delivery_failed"
     FAILED = "failed"
     WAITING_CONFIRMATION = "waiting_confirmation"
+    CANCELED = "canceled"
 
 
 class WorkspaceScheduledTaskDeliveryStatus(StrEnum):

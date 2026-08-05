@@ -226,6 +226,9 @@ async def run_scheduled_task_worker_once(
 ) -> bool:
     now = datetime.now(UTC)
     async with session_factory() as session:
+        finalized_waits = await service.finalize_resolved_waiting_task_runs(session, now=now)
+        if finalized_waits:
+            logger.info("Finalized %s resolved scheduled task approval waits.", finalized_waits)
         recovered = await repository.recover_expired_leases(session, now=now)
         if recovered:
             logger.warning("Recovered %s expired scheduled task run leases.", recovered)
@@ -241,7 +244,7 @@ async def run_scheduled_task_worker_once(
         await session.commit()
 
     if run is None:
-        return bool(enqueued or recovered)
+        return bool(enqueued or recovered or finalized_waits)
     await execute_task_run(
         run,
         worker_id=worker_id,

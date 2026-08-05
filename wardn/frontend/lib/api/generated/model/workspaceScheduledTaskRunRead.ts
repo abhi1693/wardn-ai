@@ -13,6 +13,7 @@ export interface WorkspaceScheduledTaskRunRead {
   agentRunId?: string | null;
   attemptCount: number;
   availableAt: string;
+  canCancel?: boolean;
   conversationId?: string | null;
   createdAt: string;
   deliveries?: WorkspaceScheduledTaskDeliveryRead[];
