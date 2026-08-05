@@ -124,6 +124,20 @@ function packageRegistryPolicyDetail(installation: MCPServerInstallationRead) {
   return "";
 }
 
+function installationHasRemoteMcpDestinations(installation: MCPServerInstallationRead) {
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  const rawPolicy = runtimeConfig.networkPolicy;
+  if (isRecord(rawPolicy) && Array.isArray(rawPolicy.remoteDestinations)) {
+    return rawPolicy.remoteDestinations.length > 0;
+  }
+  return Boolean(
+    installation.server.remotes?.some((remote) =>
+      typeof (remote as Record<string, unknown>).url === "string" &&
+      Boolean(((remote as Record<string, unknown>).url as string).trim())
+    )
+  );
+}
+
 function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   if (installation.runtimeProvider !== "kubernetes") {
     return [];
@@ -134,7 +148,7 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
   if (!isRecord(rawPolicy)) {
     return [
       "Default-deny egress",
-      "Remote MCP endpoint egress",
+      ...(installationHasRemoteMcpDestinations(installation) ? ["Remote MCP endpoint egress"] : []),
       ...(packageRegistryDetail ? [packageRegistryDetail] : []),
     ];
   }
@@ -143,11 +157,13 @@ function runtimePolicyDetails(installation: MCPServerInstallationRead) {
     return ["Allow all egress"];
   }
   const details = ["Default-deny egress"];
-  if (rawPolicy.allowRemoteMcpEgress !== false) {
+  if (rawPolicy.allowRemoteMcpEgress !== false && installationHasRemoteMcpDestinations(installation)) {
     details.push("Remote MCP endpoint egress");
-    if (packageRegistryDetail) {
-      details.push(packageRegistryDetail);
-    }
+  }
+  const allowRuntimeDependencyEgress =
+    rawPolicy.allowRuntimeDependencyEgress ?? rawPolicy.allowRemoteMcpEgress;
+  if (allowRuntimeDependencyEgress !== false && packageRegistryDetail) {
+    details.push(packageRegistryDetail);
   }
   if (rawPolicy.allowKubernetesApi === true || rawPolicy.inClusterKubernetesApi === true) {
     details.push("Kubernetes API");

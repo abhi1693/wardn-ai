@@ -235,6 +235,7 @@ function initialState(overrides = {}) {
     catalogStatus: overrides.catalogStatus ?? 200,
     jobs: new Map(),
     organizationsStatus: overrides.organizationsStatus ?? 200,
+    packageRuntimeProvider: overrides.packageRuntimeProvider ?? "local",
     requests: [],
     installations: overrides.installations ?? [],
     skillLibrary: overrides.skillLibrary ?? [],
@@ -699,7 +700,7 @@ async function handle(request) {
     return json({
       installations: state.installations,
       metadata: { count: state.installations.length, nextCursor: "" },
-      packageRuntimeProvider: "local",
+      packageRuntimeProvider: state.packageRuntimeProvider,
     });
   }
 

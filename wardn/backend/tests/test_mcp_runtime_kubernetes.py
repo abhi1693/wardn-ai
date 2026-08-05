@@ -51,6 +51,7 @@ from app.modules.mcp_runtime.providers.kubernetes import (
     safe_kubernetes_name,
 )
 from app.modules.mcp_runtime.providers.kubernetes_manifest_builder import (
+    network_policy_config,
     package_transport_remote_destinations,
     service_selector,
 )
@@ -3111,6 +3112,56 @@ def test_kubernetes_runtime_manifest_honors_registry_egress_opt_out(
         for policy in manifest.network_policies
     )
     assert resolved_hosts == []
+
+
+def test_kubernetes_runtime_network_policy_splits_remote_and_dependency_egress(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    python_path = tmp_path / "venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.modules.mcp_runtime.provider.shutil.which",
+        lambda command: str(python_path) if command == str(python_path) else None,
+    )
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.sirkirby/unifi-access-mcp",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="pypi",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "pypi",
+            "command": str(python_path),
+            "args": ["-m", "unifi_access_mcp"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "unifi-access-mcp", "version": "0.5.2"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": False,
+                "allowRuntimeDependencyEgress": True,
+                "denyOtherEgress": True,
+                "remoteDestinations": [
+                    {"label": "remote-api", "host": "api.example.com", "port": 443}
+                ],
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+
+    policy_config = network_policy_config(installation, settings=FakeSettings())
+
+    assert policy_config["allowRemoteMcpEgress"] is False
+    assert policy_config["allowRuntimeDependencyEgress"] is True
+    assert {destination["host"] for destination in policy_config["remoteDestinations"]} == {
+        "pypi.org",
+        "files.pythonhosted.org",
+    }
 
 
 def test_kubernetes_runtime_manifest_deduplicates_installed_pypi_transport_args(

@@ -103,6 +103,7 @@ class MCPRuntimeNetworkPolicyCustomEgress(APIModel):
 class MCPRuntimeNetworkPolicyConfig(APIModel):
     allow_kubernetes_api: bool = False
     allow_remote_mcp_egress: bool = True
+    allow_runtime_dependency_egress: bool = True
     deny_other_egress: bool = True
     isolation_enabled: bool = True
     public_egress: bool = False

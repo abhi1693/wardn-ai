@@ -73,6 +73,7 @@ DEFAULT_RUNTIME_NETWORK_POLICY_CONFIG = {
     "mode": "intent",
     "allowKubernetesApi": False,
     "allowRemoteMcpEgress": True,
+    "allowRuntimeDependencyEgress": True,
     "denyOtherEgress": True,
     "isolationEnabled": True,
     "publicEgress": False,
@@ -126,11 +127,13 @@ def merged_install_network_policy_config(
         explicit_intent_fields = {
             "allow_kubernetes_api",
             "allow_remote_mcp_egress",
+            "allow_runtime_dependency_egress",
             "deny_other_egress",
         }
         if requested.model_fields_set.isdisjoint(explicit_intent_fields):
             payload.pop("allowKubernetesApi", None)
             payload.pop("allowRemoteMcpEgress", None)
+            payload.pop("allowRuntimeDependencyEgress", None)
             payload.pop("denyOtherEgress", None)
             payload["mode"] = "legacy"
         else:
@@ -146,7 +149,12 @@ def effective_runtime_network_policy_config(config: dict | None) -> dict:
     mode = str(config.get("mode") or "").strip().casefold()
     has_intent_fields = any(
         key in config
-        for key in ("allowKubernetesApi", "allowRemoteMcpEgress", "denyOtherEgress")
+        for key in (
+            "allowKubernetesApi",
+            "allowRemoteMcpEgress",
+            "allowRuntimeDependencyEgress",
+            "denyOtherEgress",
+        )
     )
     uses_intents = mode == "intent" or (mode != "legacy" and (not config or has_intent_fields))
     allow_kubernetes_api = bool(

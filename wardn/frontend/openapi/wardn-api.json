@@ -5159,6 +5159,11 @@
             "title": "Allowremotemcpegress",
             "type": "boolean"
           },
+          "allowRuntimeDependencyEgress": {
+            "default": true,
+            "title": "Allowruntimedependencyegress",
+            "type": "boolean"
+          },
           "customEgress": {
             "items": {
               "$ref": "#/components/schemas/MCPRuntimeNetworkPolicyCustomEgress"

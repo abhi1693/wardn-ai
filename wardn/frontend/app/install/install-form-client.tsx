@@ -56,6 +56,7 @@ import {
   networkPolicyPayloadValue,
   selectedInstallTargetOption,
   serverResponseFromInstallation,
+  serverHasRemoteMcpEndpoints,
   SERVER_PICKER_PAGE_SIZE,
   type CustomHeader,
   type InstallFormClientProps,
@@ -220,6 +221,8 @@ export function InstallFormClient({
   const showNetworkPolicyControls =
     selectedInstallTargetDetails?.kind === "package" &&
     packageRuntimeProvider.trim().toLowerCase() === "kubernetes";
+  const showRemoteMcpEgressControl =
+    showNetworkPolicyControls && serverHasRemoteMcpEndpoints(selectedServer);
   const needsSecretBackend =
     selectedFields.some((field) => field.secret || field.format === "file") ||
     customHeaders.some((header) => header.name.trim() || header.value.trim());
@@ -415,7 +418,9 @@ export function InstallFormClient({
     let networkPolicyPayload = null;
     if (showNetworkPolicyControls) {
       try {
-        networkPolicyPayload = networkPolicyPayloadValue(networkPolicy);
+        networkPolicyPayload = networkPolicyPayloadValue(networkPolicy, {
+          includeRemoteMcpEgress: showRemoteMcpEgressControl,
+        });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Runtime policy settings are invalid.");
         return;
@@ -767,6 +772,14 @@ export function InstallFormClient({
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-3">
                   <RuntimePolicyToggle
+                    checked={networkPolicy.allowRuntimeDependencyEgress}
+                    description="Allow package runtimes to reach their required package registries and runtime dependency endpoints."
+                    disabled={!networkPolicy.denyOtherEgress}
+                    icon={<Package className="size-4" />}
+                    onChange={(checked) => updateNetworkPolicy({ allowRuntimeDependencyEgress: checked })}
+                    title="Runtime dependencies"
+                  />
+                  <RuntimePolicyToggle
                     checked={networkPolicy.allowKubernetesApi}
                     description="Allow this runtime to reach the in-cluster Kubernetes API. Wardn discovers the service address, ports, and CNI policy type."
                     disabled={!networkPolicy.denyOtherEgress}
@@ -774,14 +787,16 @@ export function InstallFormClient({
                     onChange={(checked) => updateNetworkPolicy({ allowKubernetesApi: checked })}
                     title="Kubernetes API"
                   />
-                  <RuntimePolicyToggle
-                    checked={networkPolicy.allowRemoteMcpEgress}
-                    description="Allow egress only to remote MCP endpoints declared by the installed connection. Wardn derives host, port, and policy rules."
-                    disabled={!networkPolicy.denyOtherEgress}
-                    icon={<Network className="size-4" />}
-                    onChange={(checked) => updateNetworkPolicy({ allowRemoteMcpEgress: checked })}
-                    title="Remote MCP egress"
-                  />
+                  {showRemoteMcpEgressControl ? (
+                    <RuntimePolicyToggle
+                      checked={networkPolicy.allowRemoteMcpEgress}
+                      description="Allow this package runtime to reach remote MCP endpoints declared by the selected server."
+                      disabled={!networkPolicy.denyOtherEgress}
+                      icon={<Network className="size-4" />}
+                      onChange={(checked) => updateNetworkPolicy({ allowRemoteMcpEgress: checked })}
+                      title="Remote MCP endpoints"
+                    />
+                  ) : null}
                   <RuntimePolicyToggle
                     checked={networkPolicy.denyOtherEgress}
                     description="Apply default-deny egress except for Wardn-managed DNS and the selected access intents."

@@ -59,6 +59,7 @@ export type NetworkPolicyCustomEgressFormState = {
 export type NetworkPolicyFormState = {
   allowKubernetesApi: boolean;
   allowRemoteMcpEgress: boolean;
+  allowRuntimeDependencyEgress: boolean;
   denyOtherEgress: boolean;
   customEgress: NetworkPolicyCustomEgressFormState[];
 };
@@ -258,9 +259,16 @@ export function defaultNetworkPolicyState(): NetworkPolicyFormState {
   return {
     allowKubernetesApi: false,
     allowRemoteMcpEgress: true,
+    allowRuntimeDependencyEgress: true,
     denyOtherEgress: true,
     customEgress: [],
   };
+}
+
+export function serverHasRemoteMcpEndpoints(entry: MCPRegistryServerResponse | null) {
+  return Boolean(
+    entry?.server.remotes?.some((remote) => stringValue((remote as Record<string, unknown>).url).trim())
+  );
 }
 
 function customEgressRows(value: unknown): NetworkPolicyCustomEgressFormState[] {
@@ -308,6 +316,10 @@ export function networkPolicyFromInstallation(
       networkPolicy.allowRemoteMcpEgress,
       defaults.allowRemoteMcpEgress,
     ),
+    allowRuntimeDependencyEgress: booleanValue(
+      networkPolicy.allowRuntimeDependencyEgress,
+      booleanValue(networkPolicy.allowRemoteMcpEgress, defaults.allowRuntimeDependencyEgress),
+    ),
     denyOtherEgress: booleanValue(
       networkPolicy.denyOtherEgress,
       booleanValue(networkPolicy.isolationEnabled, defaults.denyOtherEgress),
@@ -333,6 +345,7 @@ function parsePortList(value: string) {
 
 export function networkPolicyPayloadValue(
   value: NetworkPolicyFormState,
+  options: { includeRemoteMcpEgress?: boolean } = {},
 ): MCPRuntimeNetworkPolicyConfig {
   const customEgress = value.customEgress
     .map((rule) => ({
@@ -351,7 +364,10 @@ export function networkPolicyPayloadValue(
   }
   return {
     allowKubernetesApi: value.allowKubernetesApi,
-    allowRemoteMcpEgress: value.allowRemoteMcpEgress,
+    allowRemoteMcpEgress: options.includeRemoteMcpEgress === false
+      ? false
+      : value.allowRemoteMcpEgress,
+    allowRuntimeDependencyEgress: value.allowRuntimeDependencyEgress,
     denyOtherEgress: value.denyOtherEgress,
     customEgress,
   };

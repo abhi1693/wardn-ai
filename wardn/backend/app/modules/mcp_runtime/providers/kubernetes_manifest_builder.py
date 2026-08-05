@@ -277,7 +277,12 @@ def runtime_network_policy_has_intents(raw_config: dict[str, Any]) -> bool:
         return True
     return any(
         key in raw_config
-        for key in ("allowKubernetesApi", "allowRemoteMcpEgress", "denyOtherEgress")
+        for key in (
+            "allowKubernetesApi",
+            "allowRemoteMcpEgress",
+            "allowRuntimeDependencyEgress",
+            "denyOtherEgress",
+        )
     )
 
 
@@ -419,6 +424,11 @@ def network_policy_config(
         "allowRemoteMcpEgress",
         fallback=True if uses_intents else False,
     )
+    allow_runtime_dependency_egress = bool_config(
+        raw_config,
+        "allowRuntimeDependencyEgress",
+        fallback=allow_remote_mcp_egress,
+    )
     if uses_intents:
         public_egress = False
         private_egress = False
@@ -440,14 +450,26 @@ def network_policy_config(
         isolation_enabled = bool(raw_config.get("isolationEnabled", True))
 
     remote_destinations = []
-    if allow_remote_mcp_egress:
+    if allow_remote_mcp_egress or allow_runtime_dependency_egress:
         remote_destinations = merge_remote_destinations(
-            normalize_remote_mcp_destinations(raw_config.get("remoteDestinations")),
-            normalize_remote_mcp_destinations(
-                package_transport_remote_destinations(runtime_config)
+            *(
+                [
+                    normalize_remote_mcp_destinations(raw_config.get("remoteDestinations")),
+                    normalize_remote_mcp_destinations(
+                        package_transport_remote_destinations(runtime_config)
+                    ),
+                ]
+                if allow_remote_mcp_egress
+                else []
             ),
-            normalize_remote_mcp_destinations(
-                package_registry_remote_destinations(installation, runtime_config)
+            *(
+                [
+                    normalize_remote_mcp_destinations(
+                        package_registry_remote_destinations(installation, runtime_config)
+                    )
+                ]
+                if allow_runtime_dependency_egress
+                else []
             ),
         )
 
@@ -456,6 +478,7 @@ def network_policy_config(
         "denyOtherEgress": deny_other_egress,
         "allowKubernetesApi": allow_kubernetes_api,
         "allowRemoteMcpEgress": allow_remote_mcp_egress,
+        "allowRuntimeDependencyEgress": allow_runtime_dependency_egress,
         "publicEgress": public_egress,
         "privateEgress": private_egress,
         "privateEgressPorts": private_egress_ports,

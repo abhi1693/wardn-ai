@@ -1241,6 +1241,7 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
         "mode": "intent",
         "allowKubernetesApi": True,
         "allowRemoteMcpEgress": True,
+        "allowRuntimeDependencyEgress": True,
         "denyOtherEgress": True,
         "isolationEnabled": True,
         "publicEgress": False,
@@ -1264,6 +1265,47 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
             },
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_install_server_version_keeps_runtime_dependency_egress_without_remote_endpoints(
+    monkeypatch,
+) -> None:
+    seen = {}
+
+    async def get_server_version(*args, **kwargs):
+        return server_version("1.0.0", is_latest=True)
+
+    async def get_installation(*args, **kwargs):
+        return None
+
+    def install_runtime(server, **kwargs):
+        seen["network_policy"] = kwargs["network_policy"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
+
+    await service.install_server_version(
+        FakeSession(),
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            version="latest",
+            installTarget="package",
+            networkPolicy={
+                "allowRemoteMcpEgress": False,
+                "allowRuntimeDependencyEgress": True,
+                "denyOtherEgress": True,
+            },
+        ),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["network_policy"]["allowRemoteMcpEgress"] is False
+    assert seen["network_policy"]["allowRuntimeDependencyEgress"] is True
+    assert seen["network_policy"]["remoteDestinations"] == []
 
 
 @pytest.mark.asyncio

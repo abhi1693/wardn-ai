@@ -16,8 +16,8 @@ async function authenticate(context: BrowserContext, baseURL: string) {
   ]);
 }
 
-async function resetBackend(request: APIRequestContext) {
-  await request.post(`${mockBackendUrl}/__test/reset`, { data: {} });
+async function resetBackend(request: APIRequestContext, overrides: Record<string, unknown> = {}) {
+  await request.post(`${mockBackendUrl}/__test/reset`, { data: overrides });
 }
 
 async function backendRequests(request: APIRequestContext) {
@@ -111,6 +111,40 @@ test.describe("MCP install runtime selection", () => {
       version: "1.0.0",
       configName: "default",
       installTarget: "package:1",
+    });
+  });
+
+  test("hides remote MCP egress when the package server has no remote endpoint", async ({
+    baseURL,
+    page,
+    request,
+  }) => {
+    await resetBackend(request, { packageRuntimeProvider: "kubernetes" });
+    await authenticate(page.context(), baseURL ?? "");
+    await page.goto(
+      `/org/${organizationId}/workspace/${workspaceId}/install/new?serverName=${encodeURIComponent(
+        serverName
+      )}&version=1.0.0`
+    );
+
+    await expect(page.getByRole("heading", { name: "Add Connection" })).toBeVisible();
+    await expect(page.getByText("Runtime dependencies", { exact: true })).toBeVisible();
+    await expect(page.getByText("Kubernetes API", { exact: true })).toBeVisible();
+    await expect(page.getByText("Deny other egress", { exact: true })).toBeVisible();
+    await expect(page.getByText("Remote MCP endpoints", { exact: true })).toBeHidden();
+
+    await page.getByRole("button", { exact: true, name: "Add" }).click();
+
+    const installRequest = (await backendRequests(request)).find(
+      (entry) =>
+        entry.method === "PUT" &&
+        entry.path ===
+          `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/mcp/registry/installed-servers/${serverName}`
+    );
+    expect(installRequest?.body?.networkPolicy).toMatchObject({
+      allowRemoteMcpEgress: false,
+      allowRuntimeDependencyEgress: true,
+      denyOtherEgress: true,
     });
   });
 });
