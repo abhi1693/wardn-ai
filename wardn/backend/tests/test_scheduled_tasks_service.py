@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -1316,3 +1316,79 @@ async def test_finalize_waiting_task_run_delivers_after_approval(monkeypatch) ->
     assert task.last_task_run_id == run.id
     assert captured["notification_status"] == "succeeded"
     assert captured["notification_summary"]["sent"] == 1
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_scheduled_approvals_handles_pending_and_running(
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
+    pending = AgentToolApproval(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        agent_id=uuid4(),
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        requested_by_id=uuid4(),
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-pending",
+        tool_name="jira_get_issue",
+        arguments={},
+        status="pending",
+        result="",
+        error="",
+        expires_at=now - timedelta(minutes=1),
+    )
+    running = AgentToolApproval(
+        id=uuid4(),
+        organization_id=pending.organization_id,
+        workspace_id=pending.workspace_id,
+        agent_id=pending.agent_id,
+        conversation_id=pending.conversation_id,
+        agent_run_id=uuid4(),
+        requested_by_id=pending.requested_by_id,
+        installation_id=pending.installation_id,
+        tool_schema_id=pending.tool_schema_id,
+        tool_call_id="call-running",
+        tool_name="jira_get_issue",
+        arguments={},
+        status="running",
+        result="",
+        error="",
+        expires_at=now - timedelta(minutes=1),
+    )
+    captured = {"expired": []}
+
+    async def list_expired_active_tool_approvals(*args, **kwargs):
+        captured["query"] = kwargs
+        return [pending, running]
+
+    async def expire_agent_tool_approval(session, approval, *, error):
+        captured["expired"].append((approval.status, error))
+
+    monkeypatch.setattr(
+        service.agent_repository,
+        "list_expired_active_tool_approvals",
+        list_expired_active_tool_approvals,
+    )
+    monkeypatch.setattr(
+        service.agent_approvals,
+        "expire_agent_tool_approval",
+        expire_agent_tool_approval,
+    )
+
+    count = await service.expire_stale_scheduled_approvals(
+        FakeSession(),
+        now=now,
+        limit=2,
+    )
+
+    assert count == 2
+    assert captured["query"]["trigger_type"] == service.SCHEDULED_AGENT_TRIGGER
+    assert captured["query"]["limit"] == 2
+    assert captured["expired"] == [
+        ("pending", service.agent_approvals.APPROVAL_EXPIRED_ERROR),
+        ("running", service.STALE_APPROVED_TOOL_ERROR),
+    ]

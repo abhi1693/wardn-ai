@@ -69,6 +69,7 @@ RETRYABLE_DELIVERY_RUN_STATUSES = {"succeeded", "partially_delivered", "delivery
 WAITING_AGENT_RUN_STATUSES = {"running", "waiting_confirmation"}
 CANCELABLE_RUN_STATUSES = {"queued", "running", "waiting_confirmation"}
 CANCELED_RUN_ERROR = "Canceled by user."
+STALE_APPROVED_TOOL_ERROR = "Approved tool call did not finish before approval expiry."
 NOTIFICATION_EVENT_TO_RULE_KEY = {
     "failure": "on_failure",
     "waiting_approval": "on_waiting_approval",
@@ -2679,6 +2680,32 @@ async def expire_pending_scheduled_approvals(
     return len(approvals)
 
 
+async def expire_stale_scheduled_approvals(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int = 100,
+) -> int:
+    fallback_created_before = now - timedelta(
+        seconds=get_settings().agent_tool_approval_expiry_seconds
+    )
+    approvals = await agent_repository.list_expired_active_tool_approvals(
+        session,
+        now=now,
+        fallback_created_before=fallback_created_before,
+        trigger_type=SCHEDULED_AGENT_TRIGGER,
+        limit=limit,
+    )
+    for approval in approvals:
+        error = (
+            STALE_APPROVED_TOOL_ERROR
+            if approval.status == "running"
+            else agent_approvals.APPROVAL_EXPIRED_ERROR
+        )
+        await agent_approvals.expire_agent_tool_approval(session, approval, error=error)
+    return len(approvals)
+
+
 async def list_resolved_waiting_task_runs(
     session: AsyncSession,
     *,
@@ -2758,7 +2785,7 @@ async def finalize_resolved_waiting_task_runs(
     now: datetime,
     limit: int = 100,
 ) -> int:
-    await expire_pending_scheduled_approvals(session, now=now, limit=limit)
+    await expire_stale_scheduled_approvals(session, now=now, limit=limit)
     runs = await list_resolved_waiting_task_runs(session, limit=limit)
     finalized = 0
     for run in runs:
