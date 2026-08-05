@@ -69,6 +69,8 @@ class WorkspaceScheduledTaskRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
+    PARTIALLY_DELIVERED = "partially_delivered"
+    DELIVERY_FAILED = "delivery_failed"
     FAILED = "failed"
     WAITING_CONFIRMATION = "waiting_confirmation"
 

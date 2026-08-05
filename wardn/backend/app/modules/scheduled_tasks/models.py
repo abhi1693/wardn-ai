@@ -208,7 +208,12 @@ class WorkspaceScheduledTaskRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "available_at",
         ),
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed', 'waiting_confirmation')",
+            (
+                "status IN ("
+                "'queued', 'running', 'succeeded', 'partially_delivered', "
+                "'delivery_failed', 'failed', 'waiting_confirmation'"
+                ")"
+            ),
             name="ck_workspace_scheduled_task_runs_status",
         ),
         CheckConstraint(

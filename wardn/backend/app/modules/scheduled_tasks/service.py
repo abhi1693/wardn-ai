@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
@@ -61,6 +61,34 @@ MAX_LOOKAHEAD_DAYS = 366 * 5
 TIMEZONE_ALIASES = {
     "Asia/Calcutta": "Asia/Kolkata",
 }
+
+
+def delivery_summary_count(delivery_summary: Mapping[str, Any], key: str) -> int:
+    value = delivery_summary.get(key)
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str):
+        try:
+            return max(0, int(value))
+        except ValueError:
+            return 0
+    return 0
+
+
+def scheduled_task_run_status(agent_status: str, delivery_summary: Mapping[str, Any]) -> str:
+    if agent_status == "waiting_confirmation":
+        return "waiting_confirmation"
+    if agent_status != "succeeded":
+        return "failed"
+    failed = delivery_summary_count(delivery_summary, "failed")
+    if failed <= 0:
+        return "succeeded"
+    sent = delivery_summary_count(delivery_summary, "sent")
+    if sent > 0:
+        return "partially_delivered"
+    return "delivery_failed"
 
 
 @dataclass(frozen=True)
@@ -1554,8 +1582,7 @@ async def execute_claimed_task_run(
         run=run,
         conversation_id=conversation_id,
     )
-    if status not in {"succeeded", "waiting_confirmation"}:
-        status = "failed"
+    status = scheduled_task_run_status(status, delivery_summary)
     completed = await repository.complete_run(
         session,
         run.id,

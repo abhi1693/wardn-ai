@@ -549,8 +549,11 @@ function statusVariant(status: string) {
   if (status === "succeeded" || status === "sent") {
     return "success" as const;
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "delivery_failed") {
     return "destructive" as const;
+  }
+  if (status === "partially_delivered") {
+    return "outline" as const;
   }
   if (status === "waiting_confirmation" || status === "running" || status === "queued") {
     return "secondary" as const;
@@ -561,6 +564,15 @@ function statusVariant(status: string) {
 function statusLabel(status: string) {
   if (!status) {
     return "Never run";
+  }
+  if (status === "waiting_confirmation") {
+    return "waiting approval";
+  }
+  if (status === "partially_delivered") {
+    return "partially delivered";
+  }
+  if (status === "delivery_failed") {
+    return "delivery failed";
   }
   return status.replaceAll("_", " ");
 }
@@ -1171,7 +1183,9 @@ export function ScheduledTasksClient({
         const next = new Date(task.nextRunAt).getTime();
         return Number.isFinite(next) && next - nowMs <= day && next >= nowMs - 60_000;
       }).length,
-      failed: taskRows.filter((task) => task.lastStatus === "failed").length,
+      failed: taskRows.filter((task) =>
+        ["failed", "delivery_failed"].includes(task.lastStatus)
+      ).length,
       waiting: runRows.filter((run) => run.status === "waiting_confirmation").length,
     };
   }, [nowMs, runRows, taskRows]);

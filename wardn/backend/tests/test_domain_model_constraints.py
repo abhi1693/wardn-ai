@@ -1,4 +1,9 @@
-from app.db.domain_types import AgentScope, MCPOperationJobStatus, MembershipRole
+from app.db.domain_types import (
+    AgentScope,
+    MCPOperationJobStatus,
+    MembershipRole,
+    WorkspaceScheduledTaskRunStatus,
+)
 from app.modules.agents.models import Agent, ConversationMessage
 from app.modules.chat_providers.models import (
     ChatProviderConnection,
@@ -118,3 +123,4 @@ def test_domain_enums_remain_wire_compatible_strings() -> None:
     assert AgentScope.WORKSPACE == "workspace"
     assert MembershipRole.OWNER == "owner"
     assert MCPOperationJobStatus.SUCCEEDED == "succeeded"
+    assert WorkspaceScheduledTaskRunStatus.PARTIALLY_DELIVERED == "partially_delivered"

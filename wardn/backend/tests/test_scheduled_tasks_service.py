@@ -28,6 +28,21 @@ class FakeSession:
         self.commits += 1
 
 
+class FakeExecutionSession(FakeSession):
+    def __init__(self, agent_run: AgentRun) -> None:
+        super().__init__()
+        self.agent_run = agent_run
+        self.refreshed = False
+
+    async def get(self, model, item_id):
+        if model is AgentRun and item_id == self.agent_run.id:
+            return self.agent_run
+        return None
+
+    async def refresh(self, obj) -> None:
+        self.refreshed = True
+
+
 def make_task() -> WorkspaceScheduledTask:
     now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
     return WorkspaceScheduledTask(
@@ -221,6 +236,35 @@ def test_timezone_aliases_are_normalized_for_browser_values() -> None:
     ) == datetime(2026, 8, 4, 3, 30, tzinfo=UTC)
 
 
+def test_scheduled_task_run_status_splits_delivery_outcomes() -> None:
+    assert (
+        service.scheduled_task_run_status(
+            "succeeded",
+            {"total": 2, "sent": 2, "failed": 0},
+        )
+        == "succeeded"
+    )
+    assert (
+        service.scheduled_task_run_status(
+            "succeeded",
+            {"total": 2, "sent": 1, "failed": 1},
+        )
+        == "partially_delivered"
+    )
+    assert (
+        service.scheduled_task_run_status(
+            "succeeded",
+            {"total": 1, "sent": 0, "failed": 1},
+        )
+        == "delivery_failed"
+    )
+    assert service.scheduled_task_run_status("failed", {"sent": 1, "failed": 0}) == "failed"
+    assert (
+        service.scheduled_task_run_status("waiting_confirmation", {"sent": 0, "failed": 1})
+        == "waiting_confirmation"
+    )
+
+
 def test_due_and_claim_statements_use_skip_locked() -> None:
     now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
 
@@ -336,3 +380,65 @@ async def test_prepare_agent_run_uses_scheduled_trigger(monkeypatch) -> None:
     assert "Scheduled task: Daily digest" in captured.payload.messages[0].parts[0]["text"]
     async for _chunk in stream:
         pass
+
+
+@pytest.mark.asyncio
+async def test_execute_claimed_task_run_records_partial_delivery(monkeypatch) -> None:
+    task = make_task()
+    run = make_run(task)
+    actor = User(id=task.created_by_id, email="owner@example.com", is_active=True)
+    conversation_id = uuid4()
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=conversation_id,
+        triggered_by_id=actor.id,
+        trigger_type=service.SCHEDULED_AGENT_TRIGGER,
+        status="succeeded",
+        started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
+        error="",
+    )
+    captured = {}
+
+    async def get_task(*args, **kwargs):
+        return task
+
+    async def resolve_task_actor(*args, **kwargs):
+        return actor
+
+    async def prepare_agent_run_for_task(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        return conversation_id, agent_run.id, stream()
+
+    async def deliver_task_run_output(*args, **kwargs):
+        return {"total": 2, "sent": 1, "failed": 1}
+
+    async def complete_run(session, run_id, **kwargs):
+        captured["run_id"] = run_id
+        captured["status"] = kwargs["status"]
+        captured["delivery_summary"] = kwargs["delivery_summary"]
+        return True
+
+    monkeypatch.setattr(service.repository, "get_task", get_task)
+    monkeypatch.setattr(service, "resolve_task_actor", resolve_task_actor)
+    monkeypatch.setattr(service, "prepare_agent_run_for_task", prepare_agent_run_for_task)
+    monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
+    monkeypatch.setattr(service.repository, "complete_run", complete_run)
+
+    session = FakeExecutionSession(agent_run)
+    await service.execute_claimed_task_run(
+        session,
+        run=run,
+        worker_id="worker-1",
+        session_factory=object(),
+    )
+
+    assert session.commits == 1
+    assert session.refreshed is True
+    assert captured["run_id"] == run.id
+    assert captured["status"] == "partially_delivered"
+    assert captured["delivery_summary"] == {"total": 2, "sent": 1, "failed": 1}
