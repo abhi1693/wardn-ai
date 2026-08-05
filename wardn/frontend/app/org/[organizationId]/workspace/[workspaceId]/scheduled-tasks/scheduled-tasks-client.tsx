@@ -637,16 +637,6 @@ function TaskDialog({
                   value={form.maxAttempts}
                 />
               </div>
-              <div className="rounded-md border border-border bg-muted/45 p-3 text-xs leading-5 text-muted-foreground">
-                <div className="flex items-center gap-2 font-medium text-foreground">
-                  <ShieldCheck className="size-4" />
-                  Guardrails
-                </div>
-                <div className="mt-1">
-                  Tool approvals use the workspace guardrail policy already configured for the
-                  assistant.
-                </div>
-              </div>
             </div>
           </div>
 
