@@ -1,12 +1,13 @@
+import asyncio
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from app.core.schemas import ErrorResponse
-from app.db.session import get_db_session
+from app.db.session import defer_session_work, get_db_session
 from app.modules.agents.schemas import (
     AgentAvailableToolListResponse,
     AgentChatRequest,
@@ -518,19 +519,22 @@ async def decide_workspace_agent_tool_approval_route(
     agent_id: UUID,
     approval_id: UUID,
     payload: AgentToolApprovalDecisionRequest,
-    background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentToolApprovalDecisionResponse:
     def schedule_completion(scheduled_approval_id: UUID) -> None:
-        background_tasks.add_task(
-            complete_agent_tool_approval_background,
-            organization_id,
-            workspace_id,
-            agent_id,
-            scheduled_approval_id,
-            current_user.id,
-        )
+        async def enqueue_completion(_session: AsyncSession) -> None:
+            asyncio.create_task(
+                complete_agent_tool_approval_background(
+                    organization_id,
+                    workspace_id,
+                    agent_id,
+                    scheduled_approval_id,
+                    current_user.id,
+                )
+            )
+
+        defer_session_work(session, enqueue_completion)
 
     return await decide_agent_tool_approval(
         session,
