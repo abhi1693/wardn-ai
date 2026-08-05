@@ -62,6 +62,7 @@ import {
   workspaceAgentsDecideToolApproval,
   workspaceAgentsUpdateWorkspaceAssistantModel,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
+import { formatUserShortDate } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 import type { LlmCredentialRead } from "../../llm-credentials/types";
@@ -188,18 +189,7 @@ function chatCommandName(value: string) {
 }
 
 function displayDate(value?: string | null) {
-  if (!value) {
-    return "No activity";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "No activity";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return formatUserShortDate(value, "No activity");
 }
 
 function ChatStat({

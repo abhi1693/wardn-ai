@@ -10,6 +10,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
+import { DateTimeText } from "@/components/date-time-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -189,16 +190,6 @@ function formatBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
 function formatDuration(value?: number | null) {
   if (value === null || value === undefined) {
     return "";
@@ -363,7 +354,11 @@ export async function WorkspaceObservabilityView({
                       return (
                         <TableRow key={call.id}>
                           <TableCell className="min-w-40 align-top">
-                            <div className="text-sm">{formatDate(call.startedAt)}</div>
+                            <DateTimeText
+                              className="text-sm"
+                              fallback=""
+                              value={call.startedAt}
+                            />
                           </TableCell>
                           <TableCell className="min-w-44 align-top">
                             <div className="font-medium">{actorLabel(call)}</div>

@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
 import { runtimeDisplayName, serverIconUrlFromIcons } from "@/app/mcp/mcp-list-ui";
+import { DateTimeText } from "@/components/date-time-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -289,16 +290,6 @@ function healthSummary(
     label: "Healthy",
     variant: "success" as const,
   };
-}
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
 
 type ConnectionDetailViewProps = {
@@ -658,13 +649,17 @@ export async function ConnectionDetailView({
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Installed
             </div>
-            <div className="mt-1">{formatDate(installation.installedAt)}</div>
+            <div className="mt-1">
+              <DateTimeText fallback="" value={installation.installedAt} />
+            </div>
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Last Updated
             </div>
-            <div className="mt-1">{formatDate(installation.updatedAt)}</div>
+            <div className="mt-1">
+              <DateTimeText fallback="" value={installation.updatedAt} />
+            </div>
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

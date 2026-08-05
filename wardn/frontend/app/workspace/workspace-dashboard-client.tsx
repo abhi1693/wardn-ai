@@ -48,6 +48,7 @@ import type {
   UsageSummaryResponse,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { formatUserDateBucket } from "@/lib/date-time";
 
 type WorkspaceDashboardPaths = {
   agents: string;
@@ -133,11 +134,7 @@ function formatRatioPercent(value: number | null | undefined) {
 }
 
 function chartDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+  return formatUserDateBucket(value);
 }
 
 function shortLabel(value: string, maxLength = 24) {

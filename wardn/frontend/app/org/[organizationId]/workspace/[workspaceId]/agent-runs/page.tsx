@@ -9,6 +9,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/app/components/app-shell";
+import { DateTimeText } from "@/components/date-time-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,16 +39,6 @@ async function getAgentRuns(
     )}/workspaces/${encodeURIComponent(workspaceId)}/agent-runs`
   );
   return payload.runs;
-}
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not finished";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
 
 function statusVariant(status: string) {
@@ -187,7 +178,11 @@ export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
                   <TableRow key={run.id}>
                     <TableCell>
                       <div className="space-y-1">
-                        <div className="font-medium">{formatDate(run.startedAt)}</div>
+                        <DateTimeText
+                          className="font-medium"
+                          fallback="Not finished"
+                          value={run.startedAt}
+                        />
                         <div className="max-w-56 truncate font-mono text-xs text-muted-foreground">
                           {run.id}
                         </div>

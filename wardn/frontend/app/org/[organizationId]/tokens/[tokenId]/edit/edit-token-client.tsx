@@ -21,6 +21,7 @@ import type {
   WorkspaceRead,
 } from "@/lib/api/generated/model";
 import { authUpdateApiToken } from "@/lib/api/generated/auth/auth";
+import { formatUserDateTimeInputValue, parseUserDateTimeInputValue } from "@/lib/date-time";
 
 import { type ScopeMode, TokenFields } from "../../token-form";
 
@@ -30,13 +31,6 @@ type EditTokenClientProps = {
   workspaces: WorkspaceRead[];
 };
 
-function datetimeLocalValue(value: string | null) {
-  if (!value) {
-    return "";
-  }
-  return new Date(value).toISOString().slice(0, 16);
-}
-
 function scopeModeForToken(token: UserAPITokenRead): ScopeMode {
   return token.workspaceIds.length > 0 ? "workspaces" : "organization";
 }
@@ -45,7 +39,7 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
   const router = useRouter();
   const [name, setName] = useState(token.name);
   const [description, setDescription] = useState(token.description);
-  const [expiresAt, setExpiresAt] = useState(datetimeLocalValue(token.expiresAt));
+  const [expiresAt, setExpiresAt] = useState(formatUserDateTimeInputValue(token.expiresAt));
   const [scopeMode, setScopeMode] = useState<ScopeMode>(scopeModeForToken(token));
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<Set<string>>(
     () => new Set(token.workspaceIds)
@@ -88,7 +82,7 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
     const payload: UserAPITokenUpdate = {
       name: name.trim(),
       description: description.trim(),
-      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+      expiresAt: parseUserDateTimeInputValue(expiresAt),
       isActive,
       organizationIds: scopeMode === "organization" ? [organization.id] : [],
       workspaceIds: scopeMode === "workspaces" ? Array.from(selectedWorkspaceIds).sort() : [],

@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
+import { formatUserDate } from "@/lib/date-time";
 import { setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
@@ -58,16 +59,7 @@ function workspaceSettingsPath(organizationId: string, workspaceId: string) {
 }
 
 function displayDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(date);
+  return formatUserDate(value);
 }
 
 function workspaceMatchesFilter(workspace: WorkspaceRead, filter: WorkspaceFilter) {

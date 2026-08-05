@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/app/components/app-shell";
+import { DateTimeText } from "@/components/date-time-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -92,15 +93,10 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ");
 }
 
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Not set";
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  }).format(new Date(value));
-}
+const runDateTimeOptions: Intl.DateTimeFormatOptions = {
+  dateStyle: "medium",
+  timeStyle: "medium",
+};
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -205,9 +201,20 @@ export default async function ScheduledTaskRunPage({ params }: ScheduledTaskRunP
             <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-4">
-            <InfoItem label="Scheduled" value={formatDate(run.scheduledFor)} />
-            <InfoItem label="Started" value={formatDate(run.startedAt)} />
-            <InfoItem label="Finished" value={formatDate(run.finishedAt)} />
+            <InfoItem
+              label="Scheduled"
+              value={
+                <DateTimeText options={runDateTimeOptions} value={run.scheduledFor} />
+              }
+            />
+            <InfoItem
+              label="Started"
+              value={<DateTimeText options={runDateTimeOptions} value={run.startedAt} />}
+            />
+            <InfoItem
+              label="Finished"
+              value={<DateTimeText options={runDateTimeOptions} value={run.finishedAt} />}
+            />
             <InfoItem label="Output" value={outputLabel(run)} />
             <InfoItem label="Attempt" value={`${run.attemptCount} / ${run.maxAttempts}`} />
             <InfoItem label="Trigger" value={statusLabel(run.triggerSource)} />
@@ -319,9 +326,18 @@ export default async function ScheduledTaskRunPage({ params }: ScheduledTaskRunP
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-4">
-            <InfoItem label="Available" value={formatDate(run.availableAt)} />
-            <InfoItem label="Created" value={formatDate(run.createdAt)} />
-            <InfoItem label="Updated" value={formatDate(run.updatedAt)} />
+            <InfoItem
+              label="Available"
+              value={<DateTimeText options={runDateTimeOptions} value={run.availableAt} />}
+            />
+            <InfoItem
+              label="Created"
+              value={<DateTimeText options={runDateTimeOptions} value={run.createdAt} />}
+            />
+            <InfoItem
+              label="Updated"
+              value={<DateTimeText options={runDateTimeOptions} value={run.updatedAt} />}
+            />
             <InfoItem label="Task run ID" value={<span className="font-mono">{run.id}</span>} />
           </CardContent>
         </Card>

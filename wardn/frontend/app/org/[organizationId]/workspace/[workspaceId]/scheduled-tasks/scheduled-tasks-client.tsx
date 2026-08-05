@@ -64,6 +64,7 @@ import {
   workspaceScheduledTasksTestRoute,
   workspaceScheduledTasksUpdate,
 } from "@/lib/api/generated/workspace-scheduled-tasks/workspace-scheduled-tasks";
+import { formatUserDateTimeInputValue, parseUserDateTimeInputValue } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
 type ScheduleType =
@@ -267,24 +268,11 @@ function configTimes(config: unknown, fallback = ["09:00"]) {
 }
 
 function datetimeLocalValue(value?: string | null) {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+  return formatUserDateTimeInputValue(value);
 }
 
 function datetimeLocalToIso(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const date = new Date(trimmed);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  return parseUserDateTimeInputValue(value);
 }
 
 function scheduleKey() {

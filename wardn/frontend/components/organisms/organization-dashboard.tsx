@@ -57,6 +57,7 @@ import type {
   OrganizationRead,
   UsageSummaryBreakdownRow,
 } from "@/lib/api/generated/model";
+import { formatUserDateBucket, formatUserShortDate } from "@/lib/date-time";
 
 type OrganizationDashboardProps = {
   dashboard: OrganizationDashboardResponse;
@@ -117,18 +118,7 @@ function formatDuration(value: number | null | undefined) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return "No activity";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return formatUserShortDate(value, "No activity");
 }
 
 function shortLabel(value: string, maxLength = 22) {
@@ -166,11 +156,7 @@ function badgeVariant(tone: "danger" | "info" | "success" | "warning") {
 }
 
 function chartDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+  return formatUserDateBucket(value);
 }
 
 function ChartTooltip({ active, payload, label }: ChartTooltipProps) {

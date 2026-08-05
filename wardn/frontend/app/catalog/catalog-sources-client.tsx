@@ -28,6 +28,7 @@ import {
   organizationMcpCatalogGetOperationJob,
   organizationMcpCatalogSyncSource,
 } from "@/lib/api/generated/organization-mcp-catalog/organization-mcp-catalog";
+import { formatUserShortDateTime } from "@/lib/date-time";
 import {
   isOperationJobPollingCancelled,
   useOperationJobPoller,
@@ -68,20 +69,7 @@ function syncModeLabel(syncMode: string) {
 }
 
 function displayDate(value?: string | null) {
-  if (!value) {
-    return "Never synced";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Never synced";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return formatUserShortDateTime(value, "Never synced");
 }
 
 function displayHost(value: string) {
