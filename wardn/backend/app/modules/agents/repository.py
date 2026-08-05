@@ -8,12 +8,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.modules.agents.models import (
     Agent,
+    AgentApprovedSkillAssignment,
     AgentMCPServerAssignment,
     AgentMCPToolAssignment,
     AgentRun,
     AgentRunStep,
     AgentToolApproval,
     ConversationMessage,
+    WorkspaceApprovedSkill,
     WorkspaceConversation,
 )
 from app.modules.chat_providers.models import ChatProviderConnection, ChatProviderThread
@@ -653,6 +655,147 @@ async def list_recent_workspace_agent_run_steps(
         .limit(limit)
     )
     return list(result.all())
+
+
+async def list_workspace_approved_skills(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    include_inactive: bool = False,
+) -> list[WorkspaceApprovedSkill]:
+    statement = select(WorkspaceApprovedSkill).where(
+        WorkspaceApprovedSkill.organization_id == organization_id,
+        WorkspaceApprovedSkill.workspace_id == workspace_id,
+    )
+    if not include_inactive:
+        statement = statement.where(WorkspaceApprovedSkill.status == "active")
+    result = await session.execute(
+        statement.order_by(
+            WorkspaceApprovedSkill.name.asc(),
+            WorkspaceApprovedSkill.skill_id.asc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_workspace_approved_skill(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    workspace_skill_id: uuid.UUID,
+) -> WorkspaceApprovedSkill | None:
+    result = await session.execute(
+        select(WorkspaceApprovedSkill).where(
+            WorkspaceApprovedSkill.id == workspace_skill_id,
+            WorkspaceApprovedSkill.organization_id == organization_id,
+            WorkspaceApprovedSkill.workspace_id == workspace_id,
+            WorkspaceApprovedSkill.status == "active",
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_workspace_approved_skill_by_skill_id(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    skill_id: str,
+) -> WorkspaceApprovedSkill | None:
+    result = await session.execute(
+        select(WorkspaceApprovedSkill).where(
+            WorkspaceApprovedSkill.organization_id == organization_id,
+            WorkspaceApprovedSkill.workspace_id == workspace_id,
+            WorkspaceApprovedSkill.skill_id == skill_id,
+            WorkspaceApprovedSkill.status == "active",
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_workspace_approved_skill_assignments(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> list[tuple[WorkspaceApprovedSkill, AgentApprovedSkillAssignment, Agent]]:
+    result = await session.execute(
+        select(WorkspaceApprovedSkill, AgentApprovedSkillAssignment, Agent)
+        .join(
+            AgentApprovedSkillAssignment,
+            AgentApprovedSkillAssignment.workspace_skill_id == WorkspaceApprovedSkill.id,
+        )
+        .join(Agent, Agent.id == AgentApprovedSkillAssignment.agent_id)
+        .where(
+            WorkspaceApprovedSkill.organization_id == organization_id,
+            WorkspaceApprovedSkill.workspace_id == workspace_id,
+            WorkspaceApprovedSkill.status == "active",
+            Agent.workspace_id == workspace_id,
+            Agent.is_active.is_(True),
+        )
+        .order_by(WorkspaceApprovedSkill.skill_id.asc(), Agent.name.asc(), Agent.id.asc())
+    )
+    return list(result.all())
+
+
+async def list_agent_approved_skills(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+) -> list[WorkspaceApprovedSkill]:
+    result = await session.execute(
+        select(WorkspaceApprovedSkill)
+        .join(
+            AgentApprovedSkillAssignment,
+            AgentApprovedSkillAssignment.workspace_skill_id == WorkspaceApprovedSkill.id,
+        )
+        .join(Agent, Agent.id == AgentApprovedSkillAssignment.agent_id)
+        .where(
+            WorkspaceApprovedSkill.organization_id == organization_id,
+            WorkspaceApprovedSkill.workspace_id == workspace_id,
+            WorkspaceApprovedSkill.status == "active",
+            Agent.id == agent_id,
+            Agent.workspace_id == workspace_id,
+            Agent.is_active.is_(True),
+        )
+        .order_by(WorkspaceApprovedSkill.name.asc(), WorkspaceApprovedSkill.skill_id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def replace_workspace_approved_skill_assignments(
+    session: AsyncSession,
+    *,
+    workspace_skill_id: uuid.UUID,
+    agents: list[Agent],
+) -> None:
+    await session.execute(
+        delete(AgentApprovedSkillAssignment).where(
+            AgentApprovedSkillAssignment.workspace_skill_id == workspace_skill_id
+        )
+    )
+    await session.flush()
+    for agent in agents:
+        session.add(
+            AgentApprovedSkillAssignment(
+                agent_id=agent.id,
+                workspace_skill_id=workspace_skill_id,
+            )
+        )
+    await session.flush()
+
+
+async def delete_workspace_approved_skill(
+    session: AsyncSession,
+    *,
+    workspace_skill: WorkspaceApprovedSkill,
+) -> None:
+    await session.delete(workspace_skill)
+    await session.flush()
 
 
 async def list_chat_provider_triggers_by_conversation(

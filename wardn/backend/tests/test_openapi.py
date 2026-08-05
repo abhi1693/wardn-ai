@@ -203,6 +203,18 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/skills/library"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/skills/library/{workspace_skill_id}"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/skills/library/{workspace_skill_id}/agents"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/skills/search"
             ),
             (

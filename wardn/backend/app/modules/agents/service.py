@@ -102,6 +102,7 @@ from app.modules.agents.mappers import (
 from app.modules.agents.models import (
     Agent,
     ConversationMessage,
+    WorkspaceApprovedSkill,
     WorkspaceConversation,
 )
 from app.modules.agents.provider_clients import (
@@ -174,6 +175,9 @@ from app.modules.agents.schemas import (
     AgentSkillUsageSummaryRead,
     AgentSkillWorkflowRead,
     WorkspaceAgentModelUpdate,
+    WorkspaceApprovedSkillRead,
+    WorkspaceSkillAgentAssignmentRequest,
+    WorkspaceSkillApproveRequest,
 )
 from app.modules.agents.skills import (
     WARDN_FIND_SKILLS_DESCRIPTION,
@@ -186,7 +190,9 @@ from app.modules.agents.skills import (
     WARDN_SEARCH_SKILLS_TOOL_NAME,
     fetch_wardn_hub_skill_audit,
     find_skills_permission_summaries,
+    get_wardn_hub_skill,
     normalize_agent_skill_ids,
+    normalize_hub_skill_id,
     rejecting_audit_summary,
     search_wardn_hub_skills,
     skill_audit_summary,
@@ -776,6 +782,9 @@ def agent_skill_activity_read(
         or string_value(result.get("auditStatus"))
         or string_value(result.get("audit_status"))
     )
+    approved_result_count = int_or_none(result.get("approvedResultCount")) or 0
+    approved = bool(result.get("approved")) or approved_result_count > 0
+    temporary = bool(result.get("temporary", not approved))
     source = string_value(result.get("source")) or string_value(skill.get("source"))
     status = string_value(payload.get("status")) or step.status
     result_count = int_or_none(result.get("count"))
@@ -809,6 +818,8 @@ def agent_skill_activity_read(
         fetched_skill_id=fetched_skill_id,
         audit_status=audit_status,
         source=source,
+        approved=approved,
+        temporary=temporary,
         summary=summary,
         created_at=step.created_at,
     )
@@ -868,10 +879,104 @@ def agent_skill_usage_by_agent(
     return usage
 
 
+def agent_skill_usage_by_skill(
+    activities: list[AgentSkillActivityRead],
+    *,
+    now: datetime | None = None,
+) -> dict[str, dict[str, Any]]:
+    week_start = (now or datetime.now(UTC)) - timedelta(days=7)
+    usage: dict[str, dict[str, Any]] = {}
+    for activity in sorted(activities, key=lambda item: aware_utc(item.created_at), reverse=True):
+        skill_ids = [activity.fetched_skill_id or activity.skill_id]
+        for skill_id in [value for value in skill_ids if value]:
+            row = usage.setdefault(
+                skill_id,
+                {
+                    "usage_count_last_7d": 0,
+                    "last_used_at": None,
+                },
+            )
+            if row["last_used_at"] is None:
+                row["last_used_at"] = activity.created_at
+            if aware_utc(activity.created_at) < week_start:
+                continue
+            if activity.event_type in {"fetch", "selected"}:
+                row["usage_count_last_7d"] += 1
+    return usage
+
+
+def workspace_skill_assignment_indexes(
+    assignments: list[tuple[WorkspaceApprovedSkill, Any, Agent]],
+) -> tuple[dict[uuid.UUID, list[Agent]], dict[uuid.UUID, list[WorkspaceApprovedSkill]]]:
+    agents_by_skill: dict[uuid.UUID, list[Agent]] = {}
+    skills_by_agent: dict[uuid.UUID, list[WorkspaceApprovedSkill]] = {}
+    for skill, _assignment, agent in assignments:
+        agents_by_skill.setdefault(skill.id, []).append(agent)
+        skills_by_agent.setdefault(agent.id, []).append(skill)
+    return agents_by_skill, skills_by_agent
+
+
+def workspace_skill_context(skill: WorkspaceApprovedSkill) -> dict[str, Any]:
+    metadata = skill.metadata_json if isinstance(skill.metadata_json, dict) else {}
+    return {
+        "workspaceSkillId": str(skill.id),
+        "skillId": skill.skill_id,
+        "name": skill.name,
+        "description": skill.description,
+        "url": skill.url,
+        "source": skill.source,
+        "sourceUrl": skill.source_url,
+        "sourceOwner": skill.source_owner,
+        "sourceName": skill.source_name,
+        "auditStatus": skill.audit_status,
+        "auditScore": skill.audit_score,
+        "auditRank": skill.audit_rank,
+        "contentHash": skill.content_hash,
+        "isOfficial": bool(metadata.get("isOfficial")),
+        "installs": int(metadata.get("installs") or 0),
+    }
+
+
+def workspace_approved_skill_read(
+    skill: WorkspaceApprovedSkill,
+    *,
+    assigned_agents: list[Agent] | None = None,
+    usage: dict[str, Any] | None = None,
+) -> WorkspaceApprovedSkillRead:
+    assigned_agents = assigned_agents or []
+    usage = usage or {}
+    return WorkspaceApprovedSkillRead(
+        id=skill.id,
+        skill_id=skill.skill_id,
+        name=skill.name,
+        description=skill.description,
+        url=skill.url,
+        source=skill.source,
+        source_url=skill.source_url,
+        source_owner=skill.source_owner,
+        source_name=skill.source_name,
+        audit_status=skill.audit_status,
+        audit_score=skill.audit_score,
+        audit_rank=skill.audit_rank,
+        audit_summary=skill.audit_summary,
+        content_hash=skill.content_hash,
+        status=skill.status,
+        assigned_agent_ids=[agent.id for agent in assigned_agents],
+        assigned_agent_names=[agent.name for agent in assigned_agents],
+        last_used_at=usage.get("last_used_at"),
+        usage_count_last_7d=int(usage.get("usage_count_last_7d") or 0),
+        approved_by_id=skill.approved_by_id,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
 def agent_skill_usage_summary(
     *,
     agents: list[Agent],
     active_skills: int,
+    approved_skills: list[WorkspaceApprovedSkill] | None = None,
+    assignments: list[tuple[WorkspaceApprovedSkill, Any, Agent]] | None = None,
     activities: list[AgentSkillActivityRead],
     now: datetime | None = None,
 ) -> AgentSkillUsageSummaryRead:
@@ -886,6 +991,8 @@ def agent_skill_usage_summary(
     )
     return AgentSkillUsageSummaryRead(
         active_skills=active_skills,
+        approved_skills=len(approved_skills or []),
+        assigned_approved_skills=len(assignments or []),
         total_agents=len(agents),
         enabled_agents=sum(
             1
@@ -906,14 +1013,18 @@ def agent_skill_usage_summary(
 def agent_skill_agent_read(
     agent: Agent,
     usage: dict[str, Any] | None = None,
+    assigned_skills: list[WorkspaceApprovedSkill] | None = None,
 ) -> AgentSkillAgentRead:
     usage = usage or {}
+    assigned_skills = assigned_skills or []
     enabled_skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
     return AgentSkillAgentRead(
         id=agent.id,
         name=agent.name,
         enabled_skill_ids=enabled_skill_ids,
-        available_skill_count=len(enabled_skill_ids),
+        assigned_approved_skill_ids=[skill.skill_id for skill in assigned_skills],
+        assigned_workspace_skill_ids=[skill.id for skill in assigned_skills],
+        available_skill_count=len(enabled_skill_ids) + len(assigned_skills),
         observed_skill_ids=sorted(usage.get("observed_skill_ids") or []),
         calls_last_7d=int(usage.get("calls_last_7d") or 0),
         searches_last_7d=int(usage.get("searches_last_7d") or 0),
@@ -1080,12 +1191,36 @@ async def list_workspace_skills(
     )
     recent_activity = agent_skill_activity_reads(skill_step_rows)
     usage_by_agent = agent_skill_usage_by_agent(recent_activity)
+    usage_by_skill = agent_skill_usage_by_skill(recent_activity)
+    approved_skills = await repository.list_workspace_approved_skills(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    assignments = await repository.list_workspace_approved_skill_assignments(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    agents_by_skill, skills_by_agent = workspace_skill_assignment_indexes(assignments)
     audit_metadata = await find_skills_audit_metadata()
     skills = [find_skills_read(agents=agents, audit_metadata=audit_metadata)]
     return AgentSkillCatalogResponse(
         skills=skills,
+        library=[
+            workspace_approved_skill_read(
+                skill,
+                assigned_agents=agents_by_skill.get(skill.id, []),
+                usage=usage_by_skill.get(skill.skill_id),
+            )
+            for skill in approved_skills
+        ],
         agents=[
-            agent_skill_agent_read(agent, usage=usage_by_agent.get(agent.id))
+            agent_skill_agent_read(
+                agent,
+                usage=usage_by_agent.get(agent.id),
+                assigned_skills=skills_by_agent.get(agent.id),
+            )
             for agent in agents
         ],
         recommendations=workspace_skill_recommendations(installations),
@@ -1093,10 +1228,157 @@ async def list_workspace_skills(
         usage_summary=agent_skill_usage_summary(
             agents=agents,
             active_skills=sum(1 for skill in skills if skill.installed),
+            approved_skills=approved_skills,
+            assignments=assignments,
             activities=recent_activity,
         ),
         recent_activity=recent_activity[:50],
     )
+
+
+def approved_skill_model_fields(
+    *,
+    payload: dict[str, Any],
+    skill_id: str,
+    user_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    audit = skill_audit_summary(payload.get("audit")) or {}
+    parts = skill_id.split("/")
+    source_owner = string_value(payload.get("sourceOwner")) or (parts[0] if len(parts) > 0 else "")
+    source_name = string_value(payload.get("sourceName")) or (parts[1] if len(parts) > 1 else "")
+    source = string_value(payload.get("source")) or (
+        f"{source_owner}/{source_name}" if source_owner and source_name else ""
+    )
+    return {
+        "approved_by_id": user_id,
+        "skill_id": skill_id,
+        "name": string_value(payload.get("name")) or skill_id.rsplit("/", 1)[-1],
+        "description": string_value(payload.get("description")),
+        "url": string_value(payload.get("url")) or f"https://hub.wardnai.dev/skills/{skill_id}",
+        "source": source,
+        "source_url": string_value(payload.get("sourceUrl")),
+        "source_owner": source_owner,
+        "source_name": source_name,
+        "audit_status": string_value(audit.get("status")) or "unknown",
+        "audit_score": audit.get("score") if isinstance(audit.get("score"), int) else None,
+        "audit_rank": string_value(audit.get("rank")),
+        "audit_summary": string_value(audit.get("summary")),
+        "content_hash": string_value(payload.get("hash")),
+        "status": "active",
+        "metadata_json": {
+            "bundleFormatVersion": payload.get("bundleFormatVersion"),
+            "files": payload.get("files") or [],
+            "isOfficial": bool(payload.get("isOfficial")),
+            "resolutionIssues": payload.get("resolutionIssues") or [],
+            "resolutionStatus": payload.get("resolutionStatus"),
+            "sourceEntrypoint": payload.get("sourceEntrypoint"),
+        },
+    }
+
+
+async def approve_workspace_skill(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: WorkspaceSkillApproveRequest,
+) -> WorkspaceApprovedSkillRead:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    try:
+        skill_id = normalize_hub_skill_id(payload.skill_id)
+        hub_payload = await get_wardn_hub_skill({"skillId": skill_id})
+    except ValueError as exc:
+        raise InvalidAgentScopeError(str(exc)) from exc
+    audit = skill_audit_summary(hub_payload.get("audit"))
+    if hub_payload.get("rejected") or rejecting_audit_summary(audit):
+        raise InvalidAgentScopeError(
+            "Skill bundle was not approved because its audit status is unsafe."
+        )
+    existing = await repository.get_workspace_approved_skill_by_skill_id(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        skill_id=skill_id,
+    )
+    fields = approved_skill_model_fields(
+        payload=hub_payload,
+        skill_id=skill_id,
+        user_id=user.id,
+    )
+    if existing is None:
+        existing = WorkspaceApprovedSkill(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            **fields,
+        )
+        session.add(existing)
+    else:
+        for key, value in fields.items():
+            setattr(existing, key, value)
+    await session.flush()
+    await session.refresh(existing)
+    return workspace_approved_skill_read(existing)
+
+
+async def assign_workspace_skill_agents(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    workspace_skill_id: uuid.UUID,
+    payload: WorkspaceSkillAgentAssignmentRequest,
+) -> WorkspaceApprovedSkillRead:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    workspace_skill = await repository.get_workspace_approved_skill(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        workspace_skill_id=workspace_skill_id,
+    )
+    if workspace_skill is None:
+        raise AgentNotFoundError("workspace skill not found")
+    agent_ids = list(dict.fromkeys(payload.agent_ids))
+    agents: list[Agent] = []
+    for agent_id in agent_ids:
+        agent = await repository.get_agent(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        if agent is None:
+            raise AgentNotFoundError("agent not found")
+        skill_ids = normalize_agent_skill_ids(agent.skill_ids or [])
+        if WARDN_FIND_SKILLS_ID not in skill_ids:
+            agent.skill_ids = [*skill_ids, WARDN_FIND_SKILLS_ID]
+        agents.append(agent)
+    await session.flush()
+    await repository.replace_workspace_approved_skill_assignments(
+        session,
+        workspace_skill_id=workspace_skill.id,
+        agents=agents,
+    )
+    await session.refresh(workspace_skill)
+    return workspace_approved_skill_read(workspace_skill, assigned_agents=agents)
+
+
+async def remove_workspace_skill(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    workspace_skill_id: uuid.UUID,
+) -> None:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    workspace_skill = await repository.get_workspace_approved_skill(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        workspace_skill_id=workspace_skill_id,
+    )
+    if workspace_skill is None:
+        raise AgentNotFoundError("workspace skill not found")
+    await repository.delete_workspace_approved_skill(session, workspace_skill=workspace_skill)
 
 
 async def update_agent_skills(
@@ -1126,9 +1408,17 @@ async def update_agent_skills(
     return agent_skill_agent_read(agent)
 
 
-def skill_search_result_read(item: dict[str, Any]) -> AgentSkillSearchResultRead:
+def skill_search_result_read(
+    item: dict[str, Any],
+    *,
+    approved_by_skill_id: dict[str, WorkspaceApprovedSkill] | None = None,
+) -> AgentSkillSearchResultRead:
+    approved_by_skill_id = approved_by_skill_id or {}
+    skill_id = str(item.get("id") or "")
+    approved_skill = approved_by_skill_id.get(skill_id)
+    approved = approved_skill is not None or bool(item.get("approved"))
     return AgentSkillSearchResultRead(
-        id=str(item.get("id") or ""),
+        id=skill_id,
         name=str(item.get("name") or ""),
         description=str(item.get("description") or ""),
         url=str(item.get("url") or ""),
@@ -1140,8 +1430,10 @@ def skill_search_result_read(item: dict[str, Any]) -> AgentSkillSearchResultRead
         audit_status=item.get("auditStatus"),
         audit_score=item.get("auditScore"),
         audit_rank=item.get("auditRank"),
-        installed=item.get("id") == WARDN_FIND_SKILLS_ID,
-        temporary=item.get("id") != WARDN_FIND_SKILLS_ID,
+        approved=approved,
+        workspace_skill_id=approved_skill.id if approved_skill else None,
+        installed=approved or item.get("id") == WARDN_FIND_SKILLS_ID,
+        temporary=not approved and item.get("id") != WARDN_FIND_SKILLS_ID,
         permissions=skill_permission_reads(),
     )
 
@@ -1156,6 +1448,12 @@ async def search_workspace_skills(
     limit: int,
 ) -> AgentSkillSearchResponse:
     await require_workspace_member(session, user, organization_id, workspace_id)
+    approved_skills = await repository.list_workspace_approved_skills(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+    approved_by_skill_id = {skill.skill_id: skill for skill in approved_skills}
     try:
         payload = await search_wardn_hub_skills({"query": query, "limit": limit})
     except ValueError as exc:
@@ -1164,7 +1462,7 @@ async def search_workspace_skills(
         query=str(payload.get("query") or query),
         count=int(payload.get("count") or 0),
         results=[
-            skill_search_result_read(item)
+            skill_search_result_read(item, approved_by_skill_id=approved_by_skill_id)
             for item in payload.get("results", [])
             if isinstance(item, dict)
         ],

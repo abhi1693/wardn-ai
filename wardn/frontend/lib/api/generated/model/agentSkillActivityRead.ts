@@ -10,6 +10,7 @@ export interface AgentSkillActivityRead {
   agentId: string;
   agentName: string;
   agentRunId: string;
+  approved?: boolean;
   auditStatus?: string;
   createdAt: string;
   eventType?: AgentSkillActivityReadEventType;
@@ -22,5 +23,6 @@ export interface AgentSkillActivityRead {
   source?: string;
   status?: string;
   summary?: string;
+  temporary?: boolean;
   toolName?: string;
 }

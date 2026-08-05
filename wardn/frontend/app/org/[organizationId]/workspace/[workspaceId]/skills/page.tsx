@@ -36,7 +36,7 @@ export default async function WorkspaceSkillsPage({ params }: WorkspaceSkillsPag
     <AppShell
       active="workspace-skills"
       eyebrow="Workspace"
-      title="Skills"
+      title="Skill Marketplace"
       workspaceContext={workspaceContext}
     >
       <SkillsClient

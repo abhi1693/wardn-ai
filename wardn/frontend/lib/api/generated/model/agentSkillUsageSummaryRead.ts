@@ -7,6 +7,8 @@
 
 export interface AgentSkillUsageSummaryRead {
   activeSkills?: number;
+  approvedSkills?: number;
+  assignedApprovedSkills?: number;
   enabledAgents?: number;
   failuresLast7d?: number;
   fetchesLast7d?: number;

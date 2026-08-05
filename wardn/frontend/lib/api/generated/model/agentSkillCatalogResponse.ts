@@ -10,10 +10,12 @@ import type { AgentSkillRead } from './agentSkillRead';
 import type { AgentSkillRecommendationRead } from './agentSkillRecommendationRead';
 import type { AgentSkillUsageSummaryRead } from './agentSkillUsageSummaryRead';
 import type { AgentSkillWorkflowRead } from './agentSkillWorkflowRead';
+import type { WorkspaceApprovedSkillRead } from './workspaceApprovedSkillRead';
 
 export interface AgentSkillCatalogResponse {
   agents?: AgentSkillAgentRead[];
   guidedWorkflows?: AgentSkillWorkflowRead[];
+  library?: WorkspaceApprovedSkillRead[];
   recentActivity?: AgentSkillActivityRead[];
   recommendations?: AgentSkillRecommendationRead[];
   skills?: AgentSkillRead[];

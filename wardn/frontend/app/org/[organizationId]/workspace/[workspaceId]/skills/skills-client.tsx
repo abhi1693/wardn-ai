@@ -3,6 +3,7 @@
 import {
   Activity,
   ArrowRight,
+  BookOpenCheck,
   CheckCircle2,
   Clock,
   ExternalLink,
@@ -11,13 +12,11 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UserRound,
-  Wrench,
-  XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,12 +42,16 @@ import type {
   AgentSkillAgentRead,
   AgentSkillCatalogResponse,
   AgentSkillSearchResultRead,
+  WorkspaceApprovedSkillRead,
 } from "@/lib/api/generated/model";
-import { workspaceAgentsUpdateSkills } from "@/lib/api/generated/workspace-agents/workspace-agents";
-import { workspaceSkillsSearch } from "@/lib/api/generated/workspace-skills/workspace-skills";
+import {
+  workspaceSkillsApprove,
+  workspaceSkillsAssignAgents,
+  workspaceSkillsList,
+  workspaceSkillsRemove,
+  workspaceSkillsSearch,
+} from "@/lib/api/generated/workspace-skills/workspace-skills";
 import { cn } from "@/lib/utils";
-
-const FIND_SKILLS_SKILL_ID = "abhi1693/wardn-hub/find-skills";
 
 type SkillsClientProps = {
   initialCatalog: AgentSkillCatalogResponse;
@@ -56,12 +59,12 @@ type SkillsClientProps = {
   workspaceId: string;
 };
 
-type SkillTab = "overview" | "agents" | "evidence";
+type SkillTab = "discover" | "library" | "usage";
 
 const tabs: { id: SkillTab; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "agents", label: "Agents" },
-  { id: "evidence", label: "Run Evidence" },
+  { id: "discover", label: "Discover" },
+  { id: "library", label: "Workspace Library" },
+  { id: "usage", label: "Usage" },
 ];
 
 function statusVariant(status?: string | null) {
@@ -77,10 +80,6 @@ function statusVariant(status?: string | null) {
 
 function formatCount(value?: number | null) {
   return new Intl.NumberFormat("en").format(value ?? 0);
-}
-
-function formatUnitCount(value: number, singular: string, plural = `${singular}s`) {
-  return `${formatCount(value)} ${value === 1 ? singular : plural}`;
 }
 
 function formatDate(value?: string | null) {
@@ -99,92 +98,59 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
   )}/agent-runs/${encodeURIComponent(runId)}`;
 }
 
-function skillEnabled(agent: AgentSkillAgentRead) {
-  return (agent.enabledSkillIds ?? []).includes(FIND_SKILLS_SKILL_ID);
-}
-
-function normalizeResults(results?: AgentSkillSearchResultRead[]) {
-  return results ?? [];
-}
-
-function MetricCard({
-  description,
-  icon: Icon,
-  label,
-  value,
+function EmptyState({
+  action,
+  children,
+  title,
 }: {
-  description: string;
-  icon: LucideIcon;
-  label: string;
-  value: string;
+  action?: ReactNode;
+  children: ReactNode;
+  title: string;
 }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-muted-foreground">{label}</div>
-          <Icon className="size-4 text-muted-foreground" />
-        </div>
-        <div className="mt-2 text-2xl font-semibold tracking-normal">{value}</div>
-        <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptyState({ children }: { children: string }) {
-  return (
-    <div
-      className={cn(
-        "rounded-md border border-dashed border-border px-4 py-8 text-center",
-        "text-sm text-muted-foreground"
-      )}
-    >
-      {children}
+    <div className="rounded-md border border-dashed border-border bg-muted/20 px-4 py-10 text-center">
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+        {children}
+      </div>
+      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
 }
 
+function SkillBadge({
+  approved,
+  temporary,
+}: {
+  approved?: boolean | null;
+  temporary?: boolean | null;
+}) {
+  if (approved) {
+    return <Badge variant="success">Approved</Badge>;
+  }
+  if (temporary) {
+    return <Badge variant="outline">Hub fallback</Badge>;
+  }
+  return <Badge variant="secondary">Hub result</Badge>;
+}
+
 function ActivityBadge({ activity }: { activity: AgentSkillActivityRead }) {
-  const eventType = activity.eventType ?? "activity";
-  if (eventType === "search") {
+  if (activity.eventType === "search") {
     return <Badge variant="secondary">Search</Badge>;
   }
-  if (eventType === "fetch") {
-    return <Badge variant="success">Fetched</Badge>;
+  if (activity.eventType === "fetch") {
+    return <Badge variant="secondary">Fetch</Badge>;
   }
-  if (eventType === "selected") {
+  if (activity.eventType === "selected") {
     return <Badge variant="outline">Selected</Badge>;
   }
   return <Badge variant="outline">Activity</Badge>;
 }
 
-function ActionCard({
-  action,
-  children,
-  icon: Icon,
-  title,
-}: {
-  action?: ReactNode;
-  children: ReactNode;
-  icon: LucideIcon;
-  title: string;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <Icon className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold">{title}</div>
-            <div className="mt-1 text-sm leading-6 text-muted-foreground">{children}</div>
-          </div>
-        </div>
-        {action}
-      </div>
-    </div>
+function useApprovedSkillIds(catalog: AgentSkillCatalogResponse) {
+  return useMemo(
+    () => new Set((catalog.library ?? []).map((skill) => skill.skillId)),
+    [catalog.library]
   );
 }
 
@@ -194,48 +160,50 @@ export function SkillsClient({
   workspaceId,
 }: SkillsClientProps) {
   const [catalog, setCatalog] = useState(initialCatalog);
-  const [activeTab, setActiveTab] = useState<SkillTab>("overview");
+  const [activeTab, setActiveTab] = useState<SkillTab>("discover");
   const [query, setQuery] = useState("kubernetes ops");
   const [results, setResults] = useState<AgentSkillSearchResultRead[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [resultCount, setResultCount] = useState<number | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [updatingAgentId, setUpdatingAgentId] = useState("");
+  const [mutatingId, setMutatingId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const skills = catalog.skills ?? [];
   const agents = catalog.agents ?? [];
+  const library = catalog.library ?? [];
   const recommendations = catalog.recommendations ?? [];
   const workflows = catalog.guidedWorkflows ?? [];
   const recentActivity = catalog.recentActivity ?? [];
   const usage = catalog.usageSummary ?? {};
-  const findSkills = skills.find((skill) => skill.id === FIND_SKILLS_SKILL_ID);
-  const enabledAgents = agents.filter(skillEnabled);
-  const disabledAgents = agents.filter((agent) => !skillEnabled(agent));
-  const unusedEnabledAgents = enabledAgents.filter((agent) => (agent.callsLast7d ?? 0) === 0);
-  const lastUsed = usage.lastUsedAt ?? recentActivity[0]?.createdAt ?? null;
+  const approvedSkillIds = useApprovedSkillIds(catalog);
+  const assignedAgentCount = agents.filter(
+    (agent) => (agent.assignedApprovedSkillIds ?? []).length > 0
+  ).length;
 
   const previewShortcuts =
     recommendations.length > 0
       ? recommendations.map((recommendation) => ({
-          description: recommendation.description,
           id: recommendation.id,
           query: recommendation.query,
           title: recommendation.title,
         }))
       : workflows.map((workflow) => ({
-          description: workflow.description,
           id: workflow.id,
           query: workflow.query,
           title: workflow.title,
         }));
 
   const tabCounts = {
-    overview: usage.skillRunsLast7d ?? 0,
-    agents: enabledAgents.length,
-    evidence: recentActivity.length,
+    discover: resultCount ?? 0,
+    library: library.length,
+    usage: recentActivity.length,
   };
+
+  async function refreshCatalog() {
+    const nextCatalog = await workspaceSkillsList(organizationId, workspaceId);
+    setCatalog(nextCatalog);
+  }
 
   async function runSearch(nextQuery: string) {
     const normalizedQuery = nextQuery.trim();
@@ -252,7 +220,7 @@ export function SkillsClient({
         query: normalizedQuery,
         limit: 8,
       });
-      setResults(normalizeResults(payload.results));
+      setResults(payload.results ?? []);
       setResultCount(payload.count ?? 0);
     } catch (caught) {
       setResults([]);
@@ -268,58 +236,55 @@ export function SkillsClient({
     await runSearch(query);
   }
 
-  async function toggleAgentSkill(agent: AgentSkillAgentRead, enabled: boolean) {
-    const currentSkillIds = agent.enabledSkillIds ?? [];
-    const nextSkillIds = enabled
-      ? Array.from(new Set([...currentSkillIds, FIND_SKILLS_SKILL_ID]))
-      : currentSkillIds.filter((skillId) => skillId !== FIND_SKILLS_SKILL_ID);
-
-    setUpdatingAgentId(agent.id);
+  async function approveSkill(result: AgentSkillSearchResultRead) {
+    setMutatingId(result.id);
     setError("");
     setNotice("");
     try {
-      const updatedAgent = await workspaceAgentsUpdateSkills(
-        organizationId,
-        workspaceId,
-        agent.id,
-        { skillIds: nextSkillIds }
-      );
-      setCatalog((current) => {
-        const updatedAgents = (current.agents ?? []).map((candidate) =>
-          candidate.id === updatedAgent.id ? { ...candidate, ...updatedAgent } : candidate
-        );
-        const enabledAgentRows = updatedAgents.filter(skillEnabled);
-        const updatedSkills = (current.skills ?? []).map((skill) =>
-          skill.id === FIND_SKILLS_SKILL_ID
-            ? {
-                ...skill,
-                installed: enabledAgentRows.length > 0,
-                enabledAgentIds: enabledAgentRows.map((row) => row.id),
-                enabledAgentNames: enabledAgentRows.map((row) => row.name),
-              }
-            : skill
-        );
-        return {
-          ...current,
-          agents: updatedAgents,
-          skills: updatedSkills,
-          usageSummary: {
-            ...current.usageSummary,
-            activeSkills: updatedSkills.filter((skill) => skill.installed).length,
-            enabledAgents: enabledAgentRows.length,
-            totalAgents: updatedAgents.length,
-          },
-        };
-      });
-      setNotice(
-        enabled
-          ? `${updatedAgent.name} can now search Wardn Hub guidance during runs.`
-          : `${updatedAgent.name} will not search Wardn Hub guidance during runs.`
-      );
+      await workspaceSkillsApprove(organizationId, workspaceId, { skillId: result.id });
+      await refreshCatalog();
+      setNotice(`${result.name || result.id} is now approved for this workspace.`);
+      setActiveTab("library");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update agent skills.");
+      setError(caught instanceof Error ? caught.message : "Could not approve skill.");
     } finally {
-      setUpdatingAgentId("");
+      setMutatingId("");
+    }
+  }
+
+  async function removeSkill(skill: WorkspaceApprovedSkillRead) {
+    setMutatingId(skill.id);
+    setError("");
+    setNotice("");
+    try {
+      await workspaceSkillsRemove(organizationId, workspaceId, skill.id);
+      await refreshCatalog();
+      setNotice(`${skill.name || skill.skillId} was removed from the workspace library.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not remove skill.");
+    } finally {
+      setMutatingId("");
+    }
+  }
+
+  async function toggleAgent(skill: WorkspaceApprovedSkillRead, agent: AgentSkillAgentRead) {
+    const currentIds = skill.assignedAgentIds ?? [];
+    const assigned = currentIds.includes(agent.id);
+    const nextIds = assigned
+      ? currentIds.filter((agentId) => agentId !== agent.id)
+      : [...currentIds, agent.id];
+    setMutatingId(`${skill.id}:${agent.id}`);
+    setError("");
+    setNotice("");
+    try {
+      await workspaceSkillsAssignAgents(organizationId, workspaceId, skill.id, {
+        agentIds: nextIds,
+      });
+      await refreshCatalog();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update assignments.");
+    } finally {
+      setMutatingId("");
     }
   }
 
@@ -333,12 +298,7 @@ export function SkillsClient({
             </div>
           ) : null}
           {notice ? (
-            <div
-              className={cn(
-                "rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2",
-                "text-sm text-emerald-700"
-              )}
-            >
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
               {notice}
             </div>
           ) : null}
@@ -346,29 +306,36 @@ export function SkillsClient({
       )}
 
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-4 py-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Sparkles className="size-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold tracking-normal">Agent Skill Guidance</h2>
-              <Badge variant={enabledAgents.length > 0 ? "success" : "secondary"}>
-                {formatCount(enabledAgents.length)} of {formatCount(agents.length)} agents enabled
+              <h2 className="text-base font-semibold tracking-normal">Skill Marketplace</h2>
+              <Badge variant={library.length > 0 ? "success" : "secondary"}>
+                {formatCount(library.length)} approved
               </Badge>
             </div>
-            <div className="mt-1 max-w-4xl text-sm leading-5 text-muted-foreground">
-              Wardn currently has one runtime skill capability: Find Skills. It lets enabled agents
-              search Wardn Hub for vetted guidance during a run, then records whether that actually
-              happened.
+            <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+              Search Wardn Hub, approve trusted guidance into this workspace, assign it to agents,
+              and verify usage from run evidence.
+            </p>
+          </div>
+          <div className="grid min-w-72 grid-cols-3 gap-2 text-sm">
+            <div className="rounded-md border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Library</div>
+              <div className="font-semibold">{formatCount(library.length)}</div>
+            </div>
+            <div className="rounded-md border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Agents</div>
+              <div className="font-semibold">
+                {formatCount(assignedAgentCount)}/{formatCount(agents.length)}
+              </div>
+            </div>
+            <div className="rounded-md border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Runs</div>
+              <div className="font-semibold">{formatCount(usage.skillRunsLast7d)}</div>
             </div>
           </div>
-          {findSkills?.url ? (
-            <Button asChild size="sm" variant="outline">
-              <a href={findSkills.url} rel="noreferrer" target="_blank">
-                Open Hub record
-                <ExternalLink className="size-4" />
-              </a>
-            </Button>
-          ) : null}
         </div>
         <div className="flex flex-wrap gap-1 border-b border-border/80 bg-muted/30 px-3 py-2">
           {tabs.map((tab) => {
@@ -403,407 +370,316 @@ export function SkillsClient({
         </div>
       </section>
 
-      {activeTab === "overview" ? (
-        <div className="space-y-4">
-          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              description="Coverage decides which agents are allowed to retrieve Hub guidance."
-              icon={UserRound}
-              label="Skill coverage"
-              value={`${formatCount(enabledAgents.length)}/${formatCount(agents.length)}`}
-            />
-            <MetricCard
-              description="If this is zero, enabled agents have not needed or chosen skill guidance."
-              icon={Activity}
-              label="Runs using guidance"
-              value={formatCount(usage.skillRunsLast7d)}
-            />
-            <MetricCard
-              description="Searches find candidates; fetches load selected guidance into the run."
-              icon={Search}
-              label="Search and fetch"
-              value={`${formatCount(usage.searchesLast7d)} / ${formatCount(usage.fetchesLast7d)}`}
-            />
-            <MetricCard
-              description={`Last observed use: ${formatDate(lastUsed)}.`}
-              icon={ShieldCheck}
-              label="Skill issues"
-              value={formatCount(usage.failuresLast7d)}
-            />
-          </section>
-
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <Card>
-              <CardHeader>
-                <CardTitle>What Needs Attention</CardTitle>
-                <CardDescription>
-                  Actions are based on current coverage and observed run evidence.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {disabledAgents.length > 0 ? (
-                  <ActionCard
-                    action={
-                      <Button onClick={() => setActiveTab("agents")} size="sm" type="button">
-                        Review agents
-                        <ArrowRight className="size-4" />
-                      </Button>
-                    }
-                    icon={UserRound}
-                    title={`${formatUnitCount(disabledAgents.length, "agent")} cannot use Hub guidance`}
-                  >
-                    Enable Find Skills only for agents that handle specialist work such as
-                    Kubernetes, SEO, observability, marketing, or troubleshooting.
-                  </ActionCard>
-                ) : (
-                  <ActionCard icon={CheckCircle2} title="All agents can use Hub guidance">
-                    Coverage is complete. Use run evidence to confirm whether agents are actually
-                    searching when specialized work appears.
-                  </ActionCard>
-                )}
-
-                {enabledAgents.length > 0 && unusedEnabledAgents.length > 0 ? (
-                  <ActionCard
-                    action={
-                      <Button onClick={() => setActiveTab("agents")} size="sm" type="button" variant="outline">
-                        View agents
-                      </Button>
-                    }
-                    icon={History}
-                    title={`${formatUnitCount(
-                      unusedEnabledAgents.length,
-                      "enabled agent",
-                      "enabled agents"
-                    )} ${unusedEnabledAgents.length === 1 ? "has" : "have"} no recent usage`}
-                  >
-                    This is fine for general agents. For specialist agents, tune their instructions
-                    to search Wardn Hub before starting unfamiliar domain work.
-                  </ActionCard>
-                ) : null}
-
-                {(usage.failuresLast7d ?? 0) > 0 ? (
-                  <ActionCard
-                    action={
-                      <Button onClick={() => setActiveTab("evidence")} size="sm" type="button" variant="outline">
-                        Open evidence
-                      </Button>
-                    }
-                    icon={XCircle}
-                    title={`${formatUnitCount(
-                      usage.failuresLast7d ?? 0,
-                      "skill failure",
-                      "skill failures"
-                    )} in the last 7 days`}
-                  >
-                    Open the affected runs to see whether discovery failed, a bundle could not be
-                    fetched, or the agent selected guidance that was not usable.
-                  </ActionCard>
-                ) : (
-                  <ActionCard icon={ShieldCheck} title="No recent skill failures">
-                    The skill gateway is not showing errors in recent persisted run traces.
-                  </ActionCard>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>How It Works</CardTitle>
-                <CardDescription>Find Skills is a gateway, not a separate app catalog.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-md border border-border p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <UserRound className="size-4 text-muted-foreground" />
-                    Enable on the right agents
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Disabled agents will never call Find Skills, even if the prompt asks for it.
-                  </div>
+      {activeTab === "discover" ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Discover Hub Skills</CardTitle>
+              <CardDescription>
+                Search with broad catalog terms. Approving a skill adds it to this workspace
+                library; agents only prefer approved skills after assignment.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form className="flex gap-2" onSubmit={submitSearch}>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <Label className="sr-only" htmlFor="skill-search">
+                    Search Wardn Hub skills
+                  </Label>
+                  <Input
+                    id="skill-search"
+                    maxLength={120}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="kubernetes ops"
+                    value={query}
+                  />
                 </div>
-                <div className="rounded-md border border-border p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Search className="size-4 text-muted-foreground" />
-                    Search and fetch during runs
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                    A search means the agent looked for guidance; a fetch means it loaded a specific
-                    skill bundle into context.
-                  </div>
-                </div>
-                <div className="rounded-md border border-border p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Wrench className="size-4 text-muted-foreground" />
-                    Tool policy still applies
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Skills guide behavior. MCP tool execution still goes through Wardn access rules.
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+                <Button
+                  disabled={isSearching || query.trim().length < 3}
+                  onClick={() => void runSearch(query)}
+                  type="button"
+                >
+                  {isSearching ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Search className="size-4" />
+                  )}
+                  Search
+                </Button>
+              </form>
 
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <Card>
-              <CardHeader>
-                <CardTitle>Preview Hub Guidance</CardTitle>
-                <CardDescription>
-                  Check whether useful guidance exists before editing an agent or scheduled task.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <form className="flex gap-2" onSubmit={submitSearch}>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Label className="sr-only" htmlFor="skill-search">
-                      Search Wardn Hub guidance
-                    </Label>
-                    <Input
-                      id="skill-search"
-                      maxLength={120}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="kubernetes ops"
-                      value={query}
-                    />
-                  </div>
-                  <Button disabled={isSearching || query.trim().length < 3} type="submit">
-                    {isSearching ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Search className="size-4" />
-                    )}
-                    Preview
+              <div className="flex flex-wrap gap-2">
+                {previewShortcuts.slice(0, 6).map((shortcut) => (
+                  <Button
+                    key={shortcut.id}
+                    onClick={() => void runSearch(shortcut.query)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {shortcut.title}
                   </Button>
-                </form>
+                ))}
+              </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {previewShortcuts.slice(0, 6).map((shortcut) => (
-                    <Button
-                      key={shortcut.id}
-                      onClick={() => void runSearch(shortcut.query)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {shortcut.title}
-                    </Button>
-                  ))}
-                </div>
-
-                {hasSearched && resultCount !== null ? (
-                  <div className="text-xs text-muted-foreground">
-                    {formatUnitCount(resultCount, "Hub result")} for &quot;{query}&quot;.
-                  </div>
-                ) : null}
-
-                {!hasSearched ? (
-                  <EmptyState>
-                    Search results will show whether an enabled agent has useful guidance to fetch.
-                  </EmptyState>
-                ) : results.length === 0 ? (
-                  <EmptyState>No matching Hub guidance was found for this query.</EmptyState>
-                ) : (
-                  <div className="space-y-3">
-                    {results.map((result) => (
-                      <div className="rounded-md border border-border p-3" key={result.id}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-medium">{result.name || result.id}</div>
-                            <div className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
-                              {result.description}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-2">
+              {!hasSearched ? (
+                <EmptyState title="Start with a domain or workflow">
+                  Use terms like Kubernetes ops, GitHub review, SEO, or incident response. The
+                  results are Hub records that can become workspace-approved guidance.
+                </EmptyState>
+              ) : results.length === 0 ? (
+                <EmptyState title="No matching skills">
+                  Try broader terms. Hub search works best with one to three generic catalog words.
+                </EmptyState>
+              ) : (
+                <div className="grid gap-3">
+                  {results.map((result) => {
+                    const approved = approvedSkillIds.has(result.id) || result.approved;
+                    return (
+                      <div className="rounded-md border border-border bg-card p-4" key={result.id}>
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-semibold">{result.name || result.id}</div>
+                              <SkillBadge approved={approved} temporary={!approved} />
                               <Badge variant={statusVariant(result.auditStatus)}>
                                 Audit {result.auditStatus ?? "unknown"}
                               </Badge>
-                              {result.isOfficial ? <Badge variant="success">Official</Badge> : null}
-                              <Badge variant="secondary">{result.sourceName || result.source}</Badge>
+                            </div>
+                            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                              {result.description || "No description is available for this skill."}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                              <span>{result.id}</span>
+                              {result.sourceName || result.source ? (
+                                <span>{result.sourceName || result.source}</span>
+                              ) : null}
                             </div>
                           </div>
-                          {result.url ? (
-                            <Button asChild size="icon" title="Open Hub result" variant="outline">
-                              <a href={result.url} rel="noreferrer" target="_blank">
-                                <ExternalLink className="size-4" />
-                              </a>
+                          <div className="flex shrink-0 gap-2">
+                            {result.url ? (
+                              <Button asChild size="icon" title="Open Hub result" variant="outline">
+                                <a href={result.url} rel="noreferrer" target="_blank">
+                                  <ExternalLink className="size-4" />
+                                </a>
+                              </Button>
+                            ) : null}
+                            <Button
+                              disabled={approved || mutatingId === result.id}
+                              onClick={() => void approveSkill(result)}
+                              type="button"
+                            >
+                              {mutatingId === result.id ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                <BookOpenCheck className="size-4" />
+                              )}
+                              {approved ? "Approved" : "Approve"}
                             </Button>
-                          ) : null}
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Evidence</CardTitle>
-                <CardDescription>Latest runs where Find Skills left a trace.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {recentActivity.length === 0 ? (
-                  <EmptyState>No skill activity has been recorded yet.</EmptyState>
-                ) : (
-                  recentActivity.slice(0, 5).map((activity) => (
-                    <div className="rounded-md border border-border p-3" key={activity.id}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">
-                            {activity.query || activity.fetchedSkillId || activity.toolName}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {activity.agentName} / {formatDate(activity.createdAt)}
-                          </div>
-                        </div>
-                        <ActivityBadge activity={activity} />
-                      </div>
-                      <div className="mt-2 flex justify-end">
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={runHref(organizationId, workspaceId, activity.agentRunId)}>
-                            Open run
-                            <ArrowRight className="size-4" />
-                          </Link>
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </section>
+          <Card>
+            <CardHeader>
+              <CardTitle>Approval Model</CardTitle>
+              <CardDescription>What changes when a skill is approved.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="rounded-md border border-border p-3">
+                <div className="flex items-center gap-2 font-medium">
+                  <ShieldCheck className="size-4 text-muted-foreground" />
+                  Workspace trust
+                </div>
+                <p className="mt-1 leading-6 text-muted-foreground">
+                  Approved skills are the preferred library for this workspace. They keep audit,
+                  hash, source, and assignment metadata.
+                </p>
+              </div>
+              <div className="rounded-md border border-border p-3">
+                <div className="flex items-center gap-2 font-medium">
+                  <UserRound className="size-4 text-muted-foreground" />
+                  Agent assignment
+                </div>
+                <p className="mt-1 leading-6 text-muted-foreground">
+                  Assign a skill to the agents that should prefer it. Assignment automatically
+                  enables the internal skill-search gateway for those agents.
+                </p>
+              </div>
+              <div className="rounded-md border border-border p-3">
+                <div className="flex items-center gap-2 font-medium">
+                  <History className="size-4 text-muted-foreground" />
+                  Run evidence
+                </div>
+                <p className="mt-1 leading-6 text-muted-foreground">
+                  Usage shows whether a run searched approved guidance or fell back to temporary Hub
+                  results.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       ) : null}
 
-      {activeTab === "agents" ? (
+      {activeTab === "library" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Agent Controls</CardTitle>
+            <CardTitle>Workspace Library</CardTitle>
             <CardDescription>
-              Choose which agents are allowed to search Wardn Hub guidance during runs.
+              Approved skills are workspace-level. Assign them to agents that should prefer this
+              guidance during runs.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Hub guidance</TableHead>
-                  <TableHead>Last 7 days</TableHead>
-                  <TableHead>Last evidence</TableHead>
-                  <TableHead className="w-40 text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {agents.length > 0 ? (
-                  agents.map((agent) => {
-                    const enabled = skillEnabled(agent);
-                    return (
-                      <TableRow key={agent.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="font-medium">{agent.name}</div>
-                            <div className="max-w-96 truncate text-xs text-muted-foreground">
-                              {(agent.observedSkillIds ?? []).length > 0
-                                ? `Observed: ${(agent.observedSkillIds ?? []).join(", ")}`
-                                : "No observed skill usage"}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={enabled ? "success" : "secondary"}>
-                            {enabled ? "Allowed" : "Blocked"}
+            {library.length === 0 ? (
+              <EmptyState
+                action={
+                  <Button onClick={() => setActiveTab("discover")} type="button">
+                    Search Hub skills
+                    <ArrowRight className="size-4" />
+                  </Button>
+                }
+                title="No approved skills yet"
+              >
+                Use Discover to search Wardn Hub and approve the first skill into this workspace.
+              </EmptyState>
+            ) : (
+              <div className="grid gap-4">
+                {library.map((skill) => (
+                  <div className="rounded-md border border-border bg-card" key={skill.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 p-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-semibold">{skill.name || skill.skillId}</div>
+                          <Badge variant={statusVariant(skill.auditStatus)}>
+                            Audit {skill.auditStatus}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            {formatCount(agent.callsLast7d)} calls
-                            <span className="text-muted-foreground">
-                              {" "}
-                              / {formatCount(agent.searchesLast7d)} searches /{" "}
-                              {formatCount(agent.fetchesLast7d)} fetches
-                            </span>
-                          </div>
-                          {(agent.failuresLast7d ?? 0) > 0 ? (
-                            <div className="mt-1 text-xs text-red-600">
-                              {formatCount(agent.failuresLast7d)} failures
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span>{formatDate(agent.lastUsedAt)}</span>
-                            {agent.recentRunId ? (
-                              <Button asChild size="icon" title="Open latest skill run" variant="outline">
-                                <Link
-                                  aria-label="Open latest skill run"
-                                  href={runHref(organizationId, workspaceId, agent.recentRunId)}
-                                >
-                                  <ArrowRight className="size-4" />
-                                </Link>
-                              </Button>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            disabled={updatingAgentId === agent.id}
-                            onClick={() => void toggleAgentSkill(agent, !enabled)}
-                            size="sm"
-                            type="button"
-                            variant={enabled ? "outline" : "default"}
-                          >
-                            {updatingAgentId === agent.id ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : enabled ? (
-                              <XCircle className="size-4" />
-                            ) : (
-                              <CheckCircle2 className="size-4" />
-                            )}
-                            {enabled ? "Disable" : "Enable"}
+                          <Badge variant="secondary">
+                            {formatCount(skill.assignedAgentIds?.length ?? 0)} agents
+                          </Badge>
+                        </div>
+                        <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
+                          {skill.description || "No description is available for this skill."}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          <span>{skill.skillId}</span>
+                          {skill.contentHash ? <span>Hash {skill.contentHash}</span> : null}
+                          <span>Last used {formatDate(skill.lastUsedAt)}</span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        {skill.url ? (
+                          <Button asChild size="icon" title="Open Hub record" variant="outline">
+                            <a href={skill.url} rel="noreferrer" target="_blank">
+                              <ExternalLink className="size-4" />
+                            </a>
                           </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell className="h-32 text-center text-muted-foreground" colSpan={5}>
-                      No workspace agents are available.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                        ) : null}
+                        <Button
+                          disabled={mutatingId === skill.id}
+                          onClick={() => void removeSkill(skill)}
+                          type="button"
+                          variant="outline"
+                        >
+                          {mutatingId === skill.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+                      {agents.length > 0 ? (
+                        agents.map((agent) => {
+                          const assigned = (skill.assignedAgentIds ?? []).includes(agent.id);
+                          const pending = mutatingId === `${skill.id}:${agent.id}`;
+                          return (
+                            <label
+                              className={cn(
+                                "flex cursor-pointer items-start gap-3 rounded-md border p-3",
+                                assigned
+                                  ? "border-emerald-200 bg-emerald-50"
+                                  : "border-border bg-card"
+                              )}
+                              key={agent.id}
+                            >
+                              <input
+                                checked={assigned}
+                                className="mt-1 size-4 accent-emerald-700"
+                                disabled={pending}
+                                onChange={() => void toggleAgent(skill, agent)}
+                                type="checkbox"
+                              />
+                              <span className="min-w-0">
+                                <span className="flex items-center gap-2 text-sm font-medium">
+                                  {agent.name}
+                                  {pending ? <Loader2 className="size-3 animate-spin" /> : null}
+                                </span>
+                                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                                  {(agent.assignedApprovedSkillIds ?? []).length} assigned skills,
+                                  last guidance use {formatDate(agent.lastUsedAt)}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })
+                      ) : (
+                        <div className="text-sm text-muted-foreground">
+                          No workspace agents are available.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : null}
 
-      {activeTab === "evidence" ? (
+      {activeTab === "usage" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Run Evidence</CardTitle>
+            <CardTitle>Usage Evidence</CardTitle>
             <CardDescription>
-              Actual search, fetch, and selection events persisted from agent run traces.
+              Persisted search, fetch, and selection events from agent runs.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border p-3">
-                <div className="text-sm font-medium">Search</div>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Activity className="size-4 text-muted-foreground" />
+                  {formatCount(usage.skillEventsLast7d)} events
+                </div>
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  The agent looked for relevant Wardn Hub guidance.
+                  Search, fetch, and selected events in the last 7 days.
                 </div>
               </div>
               <div className="rounded-md border border-border p-3">
-                <div className="text-sm font-medium">Fetched</div>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <BookOpenCheck className="size-4 text-muted-foreground" />
+                  {formatCount(usage.assignedApprovedSkills)} assignments
+                </div>
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  The agent loaded a specific skill bundle into context.
+                  Agent-to-approved-skill assignments currently configured.
                 </div>
               </div>
               <div className="rounded-md border border-border p-3">
-                <div className="text-sm font-medium">Selected</div>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <CheckCircle2 className="size-4 text-muted-foreground" />
+                  {formatCount(usage.failuresLast7d)} failures
+                </div>
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  The agent considered a candidate before continuing the run.
+                  Failed or blocked skill events in the last 7 days.
                 </div>
               </div>
             </div>
@@ -814,7 +690,8 @@ export function SkillsClient({
                   <TableHead>When</TableHead>
                   <TableHead>Event</TableHead>
                   <TableHead>Agent</TableHead>
-                  <TableHead>Query or Skill</TableHead>
+                  <TableHead>Skill or Query</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-24 text-right">Run</TableHead>
                 </TableRow>
@@ -847,6 +724,9 @@ export function SkillsClient({
                         </div>
                       </TableCell>
                       <TableCell>
+                        <SkillBadge approved={activity.approved} temporary={activity.temporary} />
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={statusVariant(activity.status)}>
                           {activity.status || "recorded"}
                         </Badge>
@@ -865,8 +745,8 @@ export function SkillsClient({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="h-32 text-center text-muted-foreground" colSpan={6}>
-                      No skill events have been recorded in recent runs.
+                    <TableCell className="h-32 text-center text-muted-foreground" colSpan={7}>
+                      No skill activity has been recorded in recent runs.
                     </TableCell>
                   </TableRow>
                 )}

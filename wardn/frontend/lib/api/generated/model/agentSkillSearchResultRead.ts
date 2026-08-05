@@ -7,6 +7,7 @@
 import type { AgentSkillPermissionRead } from './agentSkillPermissionRead';
 
 export interface AgentSkillSearchResultRead {
+  approved?: boolean;
   auditRank?: string | null;
   auditScore?: number | null;
   auditStatus?: string | null;
@@ -22,4 +23,5 @@ export interface AgentSkillSearchResultRead {
   sourceOwner?: string;
   temporary?: boolean;
   url: string;
+  workspaceSkillId?: string | null;
 }

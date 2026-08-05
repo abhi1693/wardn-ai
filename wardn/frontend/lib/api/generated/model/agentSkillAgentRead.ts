@@ -6,6 +6,8 @@
  */
 
 export interface AgentSkillAgentRead {
+  assignedApprovedSkillIds?: string[];
+  assignedWorkspaceSkillIds?: string[];
   availableSkillCount?: number;
   callsLast7d?: number;
   enabledSkillIds?: string[];

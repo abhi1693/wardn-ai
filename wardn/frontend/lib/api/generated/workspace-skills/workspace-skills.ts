@@ -7,6 +7,9 @@
 import type {
   AgentSkillCatalogResponse,
   AgentSkillSearchResponse,
+  WorkspaceApprovedSkillRead,
+  WorkspaceSkillAgentAssignmentRequest,
+  WorkspaceSkillApproveRequest,
   WorkspaceSkillsSearchParams
 } from '../model';
 
@@ -33,6 +36,87 @@ export const workspaceSkillsList = async (organizationId: string,
     method: 'GET'
 
 
+  }
+);}
+
+
+export const getWorkspaceSkillsApproveUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/skills/library`
+}
+
+/**
+ * @summary Approve Workspace Skill Route
+ */
+export const workspaceSkillsApprove = async (organizationId: string,
+    workspaceId: string,
+    workspaceSkillApproveRequest: WorkspaceSkillApproveRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceApprovedSkillRead> => {
+
+  return apiRequest<WorkspaceApprovedSkillRead>(getWorkspaceSkillsApproveUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceSkillApproveRequest)
+  }
+);}
+
+
+export const getWorkspaceSkillsRemoveUrl = (organizationId: string,
+    workspaceId: string,
+    workspaceSkillId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/skills/library/${workspaceSkillId}`
+}
+
+/**
+ * @summary Remove Workspace Skill Route
+ */
+export const workspaceSkillsRemove = async (organizationId: string,
+    workspaceId: string,
+    workspaceSkillId: string, options?: Parameters<typeof apiRequest>[1]): Promise<void> => {
+
+  return apiRequest<void>(getWorkspaceSkillsRemoveUrl(organizationId,workspaceId,workspaceSkillId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+export const getWorkspaceSkillsAssignAgentsUrl = (organizationId: string,
+    workspaceId: string,
+    workspaceSkillId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/skills/library/${workspaceSkillId}/agents`
+}
+
+/**
+ * @summary Assign Workspace Skill Agents Route
+ */
+export const workspaceSkillsAssignAgents = async (organizationId: string,
+    workspaceId: string,
+    workspaceSkillId: string,
+    workspaceSkillAgentAssignmentRequest: WorkspaceSkillAgentAssignmentRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceApprovedSkillRead> => {
+
+  return apiRequest<WorkspaceApprovedSkillRead>(getWorkspaceSkillsAssignAgentsUrl(organizationId,workspaceId,workspaceSkillId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceSkillAgentAssignmentRequest)
   }
 );}
 

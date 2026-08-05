@@ -605,6 +605,11 @@
             "title": "Agentrunid",
             "type": "string"
           },
+          "approved": {
+            "default": false,
+            "title": "Approved",
+            "type": "boolean"
+          },
           "auditStatus": {
             "default": "",
             "title": "Auditstatus",
@@ -677,6 +682,11 @@
             "title": "Summary",
             "type": "string"
           },
+          "temporary": {
+            "default": true,
+            "title": "Temporary",
+            "type": "boolean"
+          },
           "toolName": {
             "default": "",
             "title": "Toolname",
@@ -695,6 +705,21 @@
       },
       "AgentSkillAgentRead": {
         "properties": {
+          "assignedApprovedSkillIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assignedapprovedskillids",
+            "type": "array"
+          },
+          "assignedWorkspaceSkillIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Assignedworkspaceskillids",
+            "type": "array"
+          },
           "availableSkillCount": {
             "default": 0,
             "title": "Availableskillcount",
@@ -789,6 +814,13 @@
               "$ref": "#/components/schemas/AgentSkillWorkflowRead"
             },
             "title": "Guidedworkflows",
+            "type": "array"
+          },
+          "library": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceApprovedSkillRead"
+            },
+            "title": "Library",
             "type": "array"
           },
           "recentActivity": {
@@ -1052,6 +1084,11 @@
       },
       "AgentSkillSearchResultRead": {
         "properties": {
+          "approved": {
+            "default": false,
+            "title": "Approved",
+            "type": "boolean"
+          },
           "auditRank": {
             "anyOf": [
               {
@@ -1141,6 +1178,18 @@
           "url": {
             "title": "Url",
             "type": "string"
+          },
+          "workspaceSkillId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaceskillid"
           }
         },
         "required": [
@@ -1171,6 +1220,16 @@
           "activeSkills": {
             "default": 0,
             "title": "Activeskills",
+            "type": "integer"
+          },
+          "approvedSkills": {
+            "default": 0,
+            "title": "Approvedskills",
+            "type": "integer"
+          },
+          "assignedApprovedSkills": {
+            "default": 0,
+            "title": "Assignedapprovedskills",
             "type": "integer"
           },
           "enabledAgents": {
@@ -8608,6 +8667,156 @@
         "title": "WorkspaceAgentModelUpdate",
         "type": "object"
       },
+      "WorkspaceApprovedSkillRead": {
+        "properties": {
+          "approvedById": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvedbyid"
+          },
+          "assignedAgentIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Assignedagentids",
+            "type": "array"
+          },
+          "assignedAgentNames": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assignedagentnames",
+            "type": "array"
+          },
+          "auditRank": {
+            "default": "",
+            "title": "Auditrank",
+            "type": "string"
+          },
+          "auditScore": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auditscore"
+          },
+          "auditStatus": {
+            "default": "unknown",
+            "title": "Auditstatus",
+            "type": "string"
+          },
+          "auditSummary": {
+            "default": "",
+            "title": "Auditsummary",
+            "type": "string"
+          },
+          "contentHash": {
+            "default": "",
+            "title": "Contenthash",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastusedat"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skillId": {
+            "title": "Skillid",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "sourceName": {
+            "default": "",
+            "title": "Sourcename",
+            "type": "string"
+          },
+          "sourceOwner": {
+            "default": "",
+            "title": "Sourceowner",
+            "type": "string"
+          },
+          "sourceUrl": {
+            "default": "",
+            "title": "Sourceurl",
+            "type": "string"
+          },
+          "status": {
+            "default": "active",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "usageCountLast7d": {
+            "default": 0,
+            "title": "Usagecountlast7D",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "skillId",
+          "name",
+          "description",
+          "url",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "WorkspaceApprovedSkillRead",
+        "type": "object"
+      },
       "WorkspaceConversationRead": {
         "properties": {
           "agentId": {
@@ -10239,6 +10448,35 @@
           }
         },
         "title": "WorkspaceScheduledTaskUpdate",
+        "type": "object"
+      },
+      "WorkspaceSkillAgentAssignmentRequest": {
+        "properties": {
+          "agentIds": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Agentids",
+            "type": "array"
+          }
+        },
+        "title": "WorkspaceSkillAgentAssignmentRequest",
+        "type": "object"
+      },
+      "WorkspaceSkillApproveRequest": {
+        "properties": {
+          "skillId": {
+            "maxLength": 512,
+            "minLength": 3,
+            "title": "Skillid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skillId"
+        ],
+        "title": "WorkspaceSkillApproveRequest",
         "type": "object"
       },
       "WorkspaceUpdate": {
@@ -22906,6 +23144,326 @@
           }
         },
         "summary": "List Workspace Skills Route",
+        "tags": [
+          "workspace-skills"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/skills/library": {
+      "post": {
+        "operationId": "workspace_skills_approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSkillApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceApprovedSkillRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Workspace Skill Route",
+        "tags": [
+          "workspace-skills"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/skills/library/{workspace_skill_id}": {
+      "delete": {
+        "operationId": "workspace_skills_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_skill_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Workspace Skill Route",
+        "tags": [
+          "workspace-skills"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/skills/library/{workspace_skill_id}/agents": {
+      "patch": {
+        "operationId": "workspace_skills_assign_agents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_skill_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSkillAgentAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceApprovedSkillRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assign Workspace Skill Agents Route",
         "tags": [
           "workspace-skills"
         ]

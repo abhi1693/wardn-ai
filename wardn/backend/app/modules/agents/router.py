@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -23,8 +23,13 @@ from app.modules.agents.schemas import (
     AgentToolApprovalDecisionResponse,
     AgentToolApprovalRead,
     WorkspaceAgentModelUpdate,
+    WorkspaceApprovedSkillRead,
+    WorkspaceSkillAgentAssignmentRequest,
+    WorkspaceSkillApproveRequest,
 )
 from app.modules.agents.service import (
+    approve_workspace_skill,
+    assign_workspace_skill_agents,
     decide_agent_tool_approval,
     get_agent,
     get_agent_tool_approval,
@@ -35,6 +40,7 @@ from app.modules.agents.service import (
     list_workspace_agent_runs,
     list_workspace_skills,
     quick_start_workspace_agent,
+    remove_workspace_skill,
     search_workspace_skills,
     stream_agent_chat,
     update_agent_skills,
@@ -242,6 +248,87 @@ async def search_workspace_skills_route(
         query=query,
         limit=limit,
     )
+
+
+@workspace_skills_router.post(
+    "/library",
+    response_model=WorkspaceApprovedSkillRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="workspace_skills_approve",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def approve_workspace_skill_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: WorkspaceSkillApproveRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceApprovedSkillRead:
+    return await approve_workspace_skill(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
+
+
+@workspace_skills_router.patch(
+    "/library/{workspace_skill_id}/agents",
+    response_model=WorkspaceApprovedSkillRead,
+    operation_id="workspace_skills_assign_agents",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def assign_workspace_skill_agents_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    workspace_skill_id: UUID,
+    payload: WorkspaceSkillAgentAssignmentRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceApprovedSkillRead:
+    return await assign_workspace_skill_agents(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        workspace_skill_id,
+        payload,
+    )
+
+
+@workspace_skills_router.delete(
+    "/library/{workspace_skill_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="workspace_skills_remove",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def remove_workspace_skill_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    workspace_skill_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    await remove_workspace_skill(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        workspace_skill_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @workspace_router.get(

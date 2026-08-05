@@ -59,9 +59,10 @@ from app.modules.agents.provider_clients import (
 )
 from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
 from app.modules.agents.skills import (
+    AgentSkillContext,
     agent_skill_function_tools,
     agent_skill_tool_display_name,
-    execute_agent_skill_tool_call,
+    execute_agent_skill_tool_call_with_context,
     is_agent_skill_tool_enabled,
     skill_tool_capability_metadata,
 )
@@ -629,9 +630,18 @@ async def stream_openai_responses_response_text(
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
     guardrail_filter = agent_guardrail_filter_from_tools(tools)
     input_items = provider_messages(messages)
+    approved_skill_context = await agent_approved_skill_context(
+        session_factory=session_factory,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
     function_tools = agent_dynamic_function_tools(
         guardrail_filter,
-        skill_tools=agent_skill_function_tools(agent.skill_ids or []),
+        skill_tools=agent_skill_function_tools(
+            agent.skill_ids or [],
+            approved_skills=approved_skill_context,
+        ),
     )
     latest_user = latest_user_message(messages)
     latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
@@ -798,6 +808,49 @@ async def agent_chat_max_tool_rounds(
         )
 
 
+async def agent_approved_skill_context(
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent: Agent | None = None,
+) -> list[AgentSkillContext]:
+    if organization_id is None or workspace_id is None or agent is None:
+        return []
+    if not agent_skill_function_tools(agent.skill_ids or []):
+        return []
+    async with agent_stream_unit_of_work(session_factory) as session:
+        approved_skills = await repository.list_agent_approved_skills(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+        )
+    contexts: list[AgentSkillContext] = []
+    for skill in approved_skills:
+        metadata = skill.metadata_json if isinstance(skill.metadata_json, dict) else {}
+        contexts.append(
+            {
+                "workspaceSkillId": str(skill.id),
+                "skillId": skill.skill_id,
+                "name": skill.name,
+                "description": skill.description,
+                "url": skill.url,
+                "source": skill.source,
+                "sourceUrl": skill.source_url,
+                "sourceOwner": skill.source_owner,
+                "sourceName": skill.source_name,
+                "auditStatus": skill.audit_status,
+                "auditScore": skill.audit_score,
+                "auditRank": skill.audit_rank,
+                "contentHash": skill.content_hash,
+                "isOfficial": bool(metadata.get("isOfficial")),
+                "installs": int(metadata.get("installs") or 0),
+            }
+        )
+    return contexts
+
+
 async def stream_chatgpt_codex_response_text(
     agent: Agent,
     credential: LLMProviderCredential,
@@ -825,9 +878,18 @@ async def stream_chatgpt_codex_response_text(
         ) as websocket:
             previous_response_id = None
             input_items = chatgpt_codex_messages(messages)
+            approved_skill_context = await agent_approved_skill_context(
+                session_factory=session_factory,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent=agent,
+            )
             function_tools = agent_dynamic_function_tools(
                 guardrail_filter,
-                skill_tools=agent_skill_function_tools(agent.skill_ids or []),
+                skill_tools=agent_skill_function_tools(
+                    agent.skill_ids or [],
+                    approved_skills=approved_skill_context,
+                ),
             )
             latest_user = latest_user_message(messages)
             latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
@@ -1021,6 +1083,8 @@ async def receive_chatgpt_codex_websocket_message(
 
 async def execute_agent_skill_tool_call_stream(
     tool_call: AgentToolCall,
+    *,
+    approved_skills: list[AgentSkillContext] | None = None,
 ) -> AsyncGenerator[AgentChatToolActivityEvent | AgentToolExecutionResult, None]:
     tool_name = agent_skill_tool_display_name(tool_call.name)
     activity_id = f"tool-{tool_call.call_id}"
@@ -1032,7 +1096,11 @@ async def execute_agent_skill_tool_call_stream(
         details={"skill": skill_tool_capability_metadata(tool_call.name)},
     )
     try:
-        output = await execute_agent_skill_tool_call(tool_call.name, tool_call.arguments)
+        output = await execute_agent_skill_tool_call_with_context(
+            tool_call.name,
+            tool_call.arguments,
+            approved_skills=approved_skills,
+        )
         execution = tool_execution_result(tool_name, output)
     except Exception as exc:
         execution = tool_execution_result(tool_name, f"Tool {tool_name} failed: {exc}")
@@ -1144,7 +1212,16 @@ async def execute_agent_dynamic_tool_call_stream(
     guardrail_filter = agent_guardrail_filter_from_tools(tools)
     allowed_tools = guardrail_filter.allowed_tools
     activity_id = f"tool-{tool_call.call_id}"
-    skill_tools = agent_skill_function_tools(skill_ids or [])
+    approved_skill_context = await agent_approved_skill_context(
+        session_factory=session_factory,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
+    skill_tools = agent_skill_function_tools(
+        skill_ids or [],
+        approved_skills=approved_skill_context,
+    )
     if tool_call.name == AGENT_SEARCH_TOOLS_TOOL_NAME:
         yield AgentChatToolActivityEvent(
             id=activity_id,
@@ -1217,7 +1294,8 @@ async def execute_agent_dynamic_tool_call_stream(
                 name=target_name,
                 call_id=tool_call.call_id,
                 arguments=raw_tool_args,
-            )
+            ),
+            approved_skills=approved_skill_context,
         ):
             yield event
         return

@@ -20,6 +20,14 @@ class AgentSkillUpdateRequest(APIModel):
     skill_ids: list[str] = Field(default_factory=list)
 
 
+class WorkspaceSkillApproveRequest(APIModel):
+    skill_id: str = Field(min_length=3, max_length=512)
+
+
+class WorkspaceSkillAgentAssignmentRequest(APIModel):
+    agent_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
 class AgentRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -197,6 +205,8 @@ class AgentSkillAgentRead(APIModel):
     id: uuid.UUID
     name: str
     enabled_skill_ids: list[str] = Field(default_factory=list)
+    assigned_approved_skill_ids: list[str] = Field(default_factory=list)
+    assigned_workspace_skill_ids: list[uuid.UUID] = Field(default_factory=list)
     available_skill_count: int = 0
     observed_skill_ids: list[str] = Field(default_factory=list)
     calls_last_7d: int = 0
@@ -248,6 +258,8 @@ class AgentSkillSearchResultRead(APIModel):
     audit_status: str | None = None
     audit_score: int | None = None
     audit_rank: str | None = None
+    approved: bool = False
+    workspace_skill_id: uuid.UUID | None = None
     installed: bool = False
     temporary: bool = True
     permissions: list[AgentSkillPermissionRead] = Field(default_factory=list)
@@ -279,6 +291,8 @@ class AgentSkillWorkflowRead(APIModel):
 
 class AgentSkillUsageSummaryRead(APIModel):
     active_skills: int = 0
+    approved_skills: int = 0
+    assigned_approved_skills: int = 0
     total_agents: int = 0
     enabled_agents: int = 0
     skill_events_last_7d: int = 0
@@ -304,12 +318,40 @@ class AgentSkillActivityRead(APIModel):
     fetched_skill_id: str = ""
     audit_status: str = ""
     source: str = ""
+    approved: bool = False
+    temporary: bool = True
     summary: str = ""
     created_at: datetime
 
 
+class WorkspaceApprovedSkillRead(APIModel):
+    id: uuid.UUID
+    skill_id: str
+    name: str
+    description: str
+    url: str
+    source: str = ""
+    source_url: str = ""
+    source_owner: str = ""
+    source_name: str = ""
+    audit_status: str = "unknown"
+    audit_score: int | None = None
+    audit_rank: str = ""
+    audit_summary: str = ""
+    content_hash: str = ""
+    status: Literal["active", "disabled"] = "active"
+    assigned_agent_ids: list[uuid.UUID] = Field(default_factory=list)
+    assigned_agent_names: list[str] = Field(default_factory=list)
+    last_used_at: datetime | None = None
+    usage_count_last_7d: int = 0
+    approved_by_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentSkillCatalogResponse(APIModel):
     skills: list[AgentSkillRead] = Field(default_factory=list)
+    library: list[WorkspaceApprovedSkillRead] = Field(default_factory=list)
     agents: list[AgentSkillAgentRead] = Field(default_factory=list)
     recommendations: list[AgentSkillRecommendationRead] = Field(default_factory=list)
     guided_workflows: list[AgentSkillWorkflowRead] = Field(default_factory=list)

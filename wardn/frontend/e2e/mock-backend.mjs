@@ -36,6 +36,42 @@ const workspace = {
   updatedAt: now,
 };
 
+const workspaceAgent = {
+  id: "agent-1",
+  name: "Workspace Assistant",
+  enabledSkillIds: [],
+  assignedApprovedSkillIds: [],
+  assignedWorkspaceSkillIds: [],
+  availableSkillCount: 0,
+  observedSkillIds: [],
+  callsLast7d: 0,
+  searchesLast7d: 0,
+  fetchesLast7d: 0,
+  failuresLast7d: 0,
+  recentRunId: null,
+  lastUsedAt: null,
+};
+
+const hubSkillResult = {
+  id: "owner/repo/kubernetes-ops",
+  name: "Kubernetes ops",
+  description: "Operate Kubernetes clusters with safe inspection and rollout checks.",
+  url: "https://hub.wardnai.dev/skills/owner/repo/kubernetes-ops",
+  source: "owner/repo",
+  sourceOwner: "owner",
+  sourceName: "repo",
+  isOfficial: false,
+  installs: 12,
+  auditStatus: "pass",
+  auditScore: 99,
+  auditRank: "A",
+  approved: false,
+  workspaceSkillId: null,
+  installed: false,
+  temporary: true,
+  permissions: [],
+};
+
 const secretStore = {
   id: "store-1",
   organizationId: organization.id,
@@ -201,6 +237,7 @@ function initialState(overrides = {}) {
     organizationsStatus: overrides.organizationsStatus ?? 200,
     requests: [],
     installations: overrides.installations ?? [],
+    skillLibrary: overrides.skillLibrary ?? [],
     sources: overrides.sources ?? [{ ...defaultSource }],
     tokens: [],
   };
@@ -349,6 +386,133 @@ function installedServerFromPayload(body) {
     updatedAt: now,
     server: googleSearchConsoleServer,
     latestServer: googleSearchConsoleServer,
+  };
+}
+
+function skillCatalogResponse() {
+  const library = state.skillLibrary;
+  const assignedSkillIds = library
+    .filter((skill) => skill.assignedAgentIds.includes(workspaceAgent.id))
+    .map((skill) => skill.skillId);
+  const assignedWorkspaceSkillIds = library
+    .filter((skill) => skill.assignedAgentIds.includes(workspaceAgent.id))
+    .map((skill) => skill.id);
+  const hasAssignments = assignedSkillIds.length > 0;
+  const recentActivity = hasAssignments
+    ? [
+        {
+          id: "step-1",
+          agentRunId: "run-1",
+          agentId: workspaceAgent.id,
+          agentName: workspaceAgent.name,
+          skillId: "abhi1693/wardn-hub/find-skills",
+          skillName: "find-skills",
+          toolName: "Wardn Hub skill fetch",
+          eventType: "fetch",
+          status: "completed",
+          query: "",
+          resultCount: null,
+          fetchedSkillId: assignedSkillIds[0],
+          auditStatus: "pass",
+          source: "owner/repo",
+          approved: true,
+          temporary: false,
+          summary: `Fetched ${assignedSkillIds[0]} with audit pass.`,
+          createdAt: now,
+        },
+      ]
+    : [];
+  return {
+    skills: [
+      {
+        id: "abhi1693/wardn-hub/find-skills",
+        name: "find-skills",
+        description: "Search Wardn Hub for audited workflow guidance.",
+        url: "https://hub.wardnai.dev/skills/abhi1693/wardn-hub/find-skills",
+        source: "abhi1693/wardn-hub",
+        sourceUrl: "https://github.com/abhi1693/wardn-hub",
+        sourceOwner: "abhi1693",
+        sourceName: "wardn-hub",
+        auditStatus: "pass",
+        auditScore: 100,
+        auditRank: "S",
+        auditSummary: "No known threat patterns.",
+        permissions: [],
+        installed: hasAssignments,
+        temporary: false,
+        enabledAgentIds: hasAssignments ? [workspaceAgent.id] : [],
+        enabledAgentNames: hasAssignments ? [workspaceAgent.name] : [],
+        healthStatus: "healthy",
+        healthDetail: "",
+      },
+    ],
+    library,
+    agents: [
+      {
+        ...workspaceAgent,
+        enabledSkillIds: hasAssignments ? ["abhi1693/wardn-hub/find-skills"] : [],
+        assignedApprovedSkillIds: assignedSkillIds,
+        assignedWorkspaceSkillIds,
+        availableSkillCount: assignedSkillIds.length + (hasAssignments ? 1 : 0),
+        callsLast7d: recentActivity.length,
+        fetchesLast7d: recentActivity.length,
+        recentRunId: hasAssignments ? "run-1" : null,
+        lastUsedAt: hasAssignments ? now : null,
+      },
+    ],
+    recommendations: [
+      {
+        id: "kubernetes-ops",
+        title: "Kubernetes ops",
+        description: "Recommended because this workspace has Kubernetes-style connections.",
+        query: "kubernetes ops",
+        connectionIds: [],
+        connectionNames: [],
+        workflowIds: ["kubernetes-ops"],
+      },
+    ],
+    guidedWorkflows: [],
+    usageSummary: {
+      activeSkills: hasAssignments ? 1 : 0,
+      approvedSkills: library.length,
+      assignedApprovedSkills: assignedSkillIds.length,
+      totalAgents: 1,
+      enabledAgents: hasAssignments ? 1 : 0,
+      skillEventsLast7d: recentActivity.length,
+      skillRunsLast7d: recentActivity.length,
+      searchesLast7d: 0,
+      fetchesLast7d: recentActivity.length,
+      failuresLast7d: 0,
+      lastUsedAt: hasAssignments ? now : null,
+    },
+    recentActivity,
+  };
+}
+
+function approvedSkillFromBody(body) {
+  return {
+    id: "library-1",
+    skillId: body.skillId,
+    name: "Kubernetes ops",
+    description: "Operate Kubernetes clusters with safe inspection and rollout checks.",
+    url: "https://hub.wardnai.dev/skills/owner/repo/kubernetes-ops",
+    source: "owner/repo",
+    sourceUrl: "https://github.com/owner/repo",
+    sourceOwner: "owner",
+    sourceName: "repo",
+    auditStatus: "pass",
+    auditScore: 99,
+    auditRank: "A",
+    auditSummary: "No known threat patterns.",
+    contentHash: "hash-123",
+    status: "active",
+    assignedAgentIds: [],
+    assignedAgentNames: [],
+    lastUsedAt: null,
+    usageCountLast7d: 0,
+    approvedById: "user-1",
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -557,6 +721,64 @@ async function handle(request) {
         installation,
       })
     );
+  }
+
+  const workspaceSkillsPath = `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/skills`;
+  if (request.method === "GET" && url.pathname === workspaceSkillsPath) {
+    return json(skillCatalogResponse());
+  }
+  if (request.method === "GET" && url.pathname === `${workspaceSkillsPath}/search`) {
+    const approved = state.skillLibrary.find((skill) => skill.skillId === hubSkillResult.id);
+    return json({
+      query: url.searchParams.get("query") ?? "",
+      count: 1,
+      results: [
+        {
+          ...hubSkillResult,
+          approved: Boolean(approved),
+          workspaceSkillId: approved?.id ?? null,
+          installed: Boolean(approved),
+          temporary: !approved,
+        },
+      ],
+    });
+  }
+  if (request.method === "POST" && url.pathname === `${workspaceSkillsPath}/library`) {
+    const approved = approvedSkillFromBody(body ?? {});
+    state.skillLibrary = [
+      ...state.skillLibrary.filter((skill) => skill.skillId !== approved.skillId),
+      approved,
+    ];
+    return json(approved, 201);
+  }
+  const skillLibraryMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/org-1\/workspaces\/workspace-1\/skills\/library\/([^/]+)(?:\/agents)?$/
+  );
+  if (skillLibraryMatch?.[1]) {
+    const skillId = skillLibraryMatch[1];
+    const libraryIndex = state.skillLibrary.findIndex((skill) => skill.id === skillId);
+    if (libraryIndex < 0) {
+      return json({ detail: "workspace skill not found" }, 404);
+    }
+    if (request.method === "DELETE" && url.pathname.endsWith(`/library/${skillId}`)) {
+      state.skillLibrary = state.skillLibrary.filter((skill) => skill.id !== skillId);
+      return empty();
+    }
+    if (request.method === "PATCH" && url.pathname.endsWith(`/library/${skillId}/agents`)) {
+      const assignedAgentIds = body.agentIds ?? [];
+      const updated = {
+        ...state.skillLibrary[libraryIndex],
+        assignedAgentIds,
+        assignedAgentNames: assignedAgentIds.includes(workspaceAgent.id)
+          ? [workspaceAgent.name]
+          : [],
+        lastUsedAt: assignedAgentIds.includes(workspaceAgent.id) ? now : null,
+        usageCountLast7d: assignedAgentIds.includes(workspaceAgent.id) ? 1 : 0,
+        updatedAt: now,
+      };
+      state.skillLibrary[libraryIndex] = updated;
+      return json(updated);
+    }
   }
 
   const catalogJobMatch = url.pathname.match(

@@ -223,6 +223,75 @@ class AgentRunStep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class WorkspaceApprovedSkill(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "workspace_approved_skills"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "skill_id",
+            name="uq_workspace_approved_skills_workspace_skill",
+        ),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    approved_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    skill_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    source_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    audit_status: Mapped[str] = mapped_column(String(64), default="unknown", nullable=False)
+    audit_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audit_rank: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    audit_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class AgentApprovedSkillAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_approved_skill_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "workspace_skill_id",
+            name="uq_agent_approved_skill_assignments_agent_skill",
+        ),
+    )
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_skill_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspace_approved_skills.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+
 class AgentToolApproval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "agent_tool_approvals"
     __table_args__ = (
