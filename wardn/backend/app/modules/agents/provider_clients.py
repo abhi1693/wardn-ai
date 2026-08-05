@@ -313,7 +313,6 @@ def chatgpt_codex_request_body(
         "tool_choice": "auto",
         "parallel_tool_calls": bool(tools),
         "reasoning": reasoning_request_for_model(agent.model_name),
-        "store": False,
         "stream": True,
         "include": [],
     }

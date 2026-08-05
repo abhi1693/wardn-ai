@@ -2459,7 +2459,6 @@ def test_chatgpt_codex_request_body_uses_websocket_response_create_shape() -> No
         "tool_choice": "auto",
         "parallel_tool_calls": False,
         "reasoning": {"summary": "auto"},
-        "store": False,
         "stream": True,
         "include": [],
     }
@@ -3313,7 +3312,12 @@ async def test_stream_chatgpt_codex_retries_round_websocket_drop_after_tool_resu
     text_events = [event.text for event in events if isinstance(event, service.AgentChatTextEvent)]
     assert text_events == ["done"]
     assert len(sent_bodies) == 3
+    assert "store" not in sent_bodies[0]
+    assert sent_bodies[1]["previous_response_id"] == "resp_1"
+    assert "store" not in sent_bodies[1]
     assert sent_bodies[1]["input"] == sent_bodies[2]["input"]
+    assert sent_bodies[2]["previous_response_id"] == "resp_1"
+    assert "store" not in sent_bodies[2]
     assert sent_bodies[1]["input"] == [
         {
             "type": "function_call_output",

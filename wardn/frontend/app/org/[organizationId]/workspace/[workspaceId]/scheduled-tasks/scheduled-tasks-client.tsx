@@ -3085,32 +3085,37 @@ export function ScheduledTasksClient({
               const retryableDeliveries = failedRetryableDeliveries(run);
               const runDetailHref = scheduledTaskRunHref(organizationId, workspaceId, run.id);
               const runRowClassName = cn(
-                "grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[1fr_150px_150px_130px_120px]",
+                "relative grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[minmax(0,1fr)_150px_150px_130px_230px]",
                 "transition-colors hover:border-teal-300 hover:bg-teal-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               );
               const rowContent = (
                 <>
-                  <div className="min-w-0">
+                  <Link
+                    aria-label={`Open scheduled task run ${run.id}`}
+                    className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    href={runDetailHref}
+                  />
+                  <div className="pointer-events-none relative z-10 min-w-0">
                     <div className="truncate font-medium">{task?.name ?? "Scheduled task"}</div>
                     <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                       {run.id}
                     </div>
                   </div>
-                  <div>
+                  <div className="pointer-events-none relative z-10">
                     <div className="text-xs text-muted-foreground">Scheduled</div>
                     <div className="mt-0.5">{formatDate(run.scheduledFor)}</div>
                   </div>
-                  <div>
+                  <div className="pointer-events-none relative z-10">
                     <div className="text-xs text-muted-foreground">Output</div>
                     <div className="mt-0.5">{runOutputLabel(run)}</div>
                   </div>
-                  <div>
+                  <div className="pointer-events-none relative z-10">
                     <div className="text-xs text-muted-foreground">Notifications</div>
                     <div className="mt-0.5">
                       {String(run.notifications?.length ?? 0)} routed
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2 md:justify-end">
+                  <div className="pointer-events-none relative z-10 flex flex-wrap items-center justify-start gap-2 md:justify-end">
                     <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
                     <span
                       aria-hidden="true"
@@ -3118,21 +3123,9 @@ export function ScheduledTasksClient({
                     >
                       <Clock3 className="size-4" />
                     </span>
-                  </div>
-                </>
-              );
-              return (
-                <div className="space-y-2" key={run.id}>
-                  <Link
-                    aria-label={`Open scheduled task run ${run.id}`}
-                    className={runRowClassName}
-                    href={runDetailHref}
-                  >
-                    {rowContent}
-                  </Link>
-                  {canCancelRun(run) ? (
-                    <div className="flex justify-end">
+                    {canCancelRun(run) ? (
                       <Button
+                        className="pointer-events-auto"
                         disabled={busyRunId === run.id}
                         onClick={() => cancelRun(run)}
                         size="sm"
@@ -3146,8 +3139,15 @@ export function ScheduledTasksClient({
                         )}
                         Cancel run
                       </Button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
+                </>
+              );
+              return (
+                <div className="space-y-2" key={run.id}>
+                  <div className={runRowClassName}>
+                    {rowContent}
+                  </div>
                   {retryableDeliveries.length > 0 ? (
                     <div className="grid gap-2">
                       {retryableDeliveries.map((delivery) => (
