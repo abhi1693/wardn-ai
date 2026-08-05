@@ -1489,6 +1489,9 @@ async def create_workspace_scheduled_task(
             max_attempts=payload.max_attempts,
         )
         schedules = await sync_task_schedules(session, task, schedule_entries, now=now)
+        await session.flush()
+        await session.refresh(task)
+        schedules = await repository.list_task_schedules(session, task_id=task.id)
     except IntegrityError as exc:
         if is_constraint_violation(exc, TASK_UNIQUE_CONSTRAINTS):
             raise DuplicateScheduledTaskError("scheduled task name already exists") from exc

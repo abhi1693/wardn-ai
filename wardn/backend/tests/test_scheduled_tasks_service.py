@@ -15,8 +15,10 @@ from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTaskSchedule,
 )
 from app.modules.scheduled_tasks.schemas import (
+    WorkspaceScheduledTaskCreate,
     WorkspaceScheduledTaskOutputRoute,
     WorkspaceScheduledTaskRouteTestRequest,
+    WorkspaceScheduledTaskScheduleCreate,
 )
 from app.modules.users.models import User
 
@@ -26,6 +28,7 @@ class FakeSession:
         self.flushed = False
         self.commits = 0
         self.added: list[object] = []
+        self.refreshes: list[object] = []
 
     def add(self, value: object) -> None:
         self.added.append(value)
@@ -35,6 +38,9 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def refresh(self, obj) -> None:
+        self.refreshes.append(obj)
 
 
 class FakeExecutionSession(FakeSession):
@@ -284,6 +290,95 @@ def test_task_response_includes_schedule_rows_and_preview() -> None:
     assert response.schedules[0].id == schedule.id
     assert response.schedules[0].schedule_config == {"times": ["09:00", "17:00"]}
     assert len(response.next_run_preview) == 5
+
+
+@pytest.mark.asyncio
+async def test_create_task_refreshes_and_reloads_schedules_before_response(
+    monkeypatch,
+) -> None:
+    task = make_task()
+    now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
+
+    def schedule_row(name: str) -> WorkspaceScheduledTaskSchedule:
+        return WorkspaceScheduledTaskSchedule(
+            id=uuid4(),
+            organization_id=task.organization_id,
+            workspace_id=task.workspace_id,
+            task_id=task.id,
+            name=name,
+            schedule_type="daily",
+            schedule_config={"times": ["09:00"]},
+            timezone=task.timezone,
+            is_active=True,
+            sort_order=0,
+            next_run_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+            created_at=now,
+            updated_at=now,
+        )
+
+    stale_schedule = schedule_row("Stale in-memory schedule")
+    reloaded_schedule = schedule_row("Reloaded schedule")
+    call_order: list[str] = []
+    session = FakeSession()
+
+    async def refresh(obj) -> None:
+        call_order.append("refresh")
+        session.refreshes.append(obj)
+
+    session.refresh = refresh
+
+    async def require_admin(*args, **kwargs) -> None:
+        call_order.append("admin")
+
+    async def ensure_agent(*args, **kwargs):
+        return SimpleNamespace(id=task.agent_id)
+
+    async def validate_routes(*args, **kwargs) -> None:
+        return None
+
+    async def create_task(*args, **kwargs) -> WorkspaceScheduledTask:
+        call_order.append("create")
+        return task
+
+    async def sync_schedules(*args, **kwargs) -> list[WorkspaceScheduledTaskSchedule]:
+        call_order.append("sync")
+        return [stale_schedule]
+
+    async def list_schedules(*args, **kwargs) -> list[WorkspaceScheduledTaskSchedule]:
+        call_order.append("list")
+        return [reloaded_schedule]
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(service.agent_service, "ensure_workspace_assistant_agent", ensure_agent)
+    monkeypatch.setattr(service, "validate_output_routes", validate_routes)
+    monkeypatch.setattr(service.repository, "create_task", create_task)
+    monkeypatch.setattr(service, "sync_task_schedules", sync_schedules)
+    monkeypatch.setattr(service.repository, "list_task_schedules", list_schedules)
+
+    response = await service.create_workspace_scheduled_task(
+        session,
+        User(id=task.created_by_id, email="owner@example.com", is_active=True),
+        task.organization_id,
+        task.workspace_id,
+        WorkspaceScheduledTaskCreate(
+            name=task.name,
+            instructions=task.instructions,
+            timezone=task.timezone,
+            schedules=[
+                WorkspaceScheduledTaskScheduleCreate(
+                    name="Daily",
+                    schedule_type="daily",
+                    schedule_config={"times": ["09:00"]},
+                    timezone=task.timezone,
+                ),
+            ],
+            output_routes=[WorkspaceScheduledTaskOutputRoute(route_type="chat")],
+        ),
+    )
+
+    assert session.refreshes == [task]
+    assert call_order.index("refresh") < call_order.index("list")
+    assert response.schedules[0].name == "Reloaded schedule"
 
 
 def test_timezone_aliases_are_normalized_for_browser_values() -> None:
