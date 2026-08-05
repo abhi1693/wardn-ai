@@ -36,6 +36,23 @@ class WorkspaceScheduledTaskNotificationRules(APIModel):
     on_meaningful_update: bool = False
 
 
+class WorkspaceScheduledTaskMonitoringStopConditions(APIModel):
+    after_first_change: bool = False
+    after_change_count: int | None = Field(default=None, ge=1, le=1000)
+    after_run_count: int | None = Field(default=None, ge=1, le=10000)
+    after_unchanged_count: int | None = Field(default=None, ge=1, le=10000)
+
+
+class WorkspaceScheduledTaskMonitoringConfig(APIModel):
+    enabled: bool = False
+    notify_on_change: bool = True
+    deliver_on_change_only: bool = True
+    baseline_on_first_run: bool = True
+    stop_conditions: WorkspaceScheduledTaskMonitoringStopConditions = Field(
+        default_factory=WorkspaceScheduledTaskMonitoringStopConditions,
+    )
+
+
 class WorkspaceScheduledTaskOutputRoute(APIModel):
     route_type: RouteType
     connection_id: uuid.UUID | None = None
@@ -133,6 +150,9 @@ class WorkspaceScheduledTaskCreate(APIModel):
         default=None,
         max_length=12,
     )
+    monitoring_config: WorkspaceScheduledTaskMonitoringConfig = Field(
+        default_factory=WorkspaceScheduledTaskMonitoringConfig,
+    )
     conversation_policy: ConversationPolicy = "reuse"
     is_active: bool = True
     max_attempts: int = Field(default=3, ge=1, le=10)
@@ -168,6 +188,8 @@ class WorkspaceScheduledTaskUpdate(APIModel):
         default=None,
         max_length=12,
     )
+    monitoring_config: WorkspaceScheduledTaskMonitoringConfig | None = None
+    reset_monitoring_state: bool = False
     conversation_policy: ConversationPolicy | None = None
     is_active: bool | None = None
     max_attempts: int | None = Field(default=None, ge=1, le=10)
@@ -276,6 +298,11 @@ class WorkspaceScheduledTaskRead(APIModel):
     )
     notification_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
     approval_routes: list[WorkspaceScheduledTaskOutputRoute] = Field(default_factory=list)
+    monitoring_config: WorkspaceScheduledTaskMonitoringConfig = Field(
+        default_factory=WorkspaceScheduledTaskMonitoringConfig,
+    )
+    monitoring_status: str = "off"
+    monitoring_state: dict[str, Any] = Field(default_factory=dict)
     conversation_policy: str
     is_active: bool
     next_run_at: datetime | None = None

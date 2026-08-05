@@ -37,6 +37,7 @@ from app.modules.scheduled_tasks.schemas import (
     WorkspaceScheduledTaskCreate,
     WorkspaceScheduledTaskDeliveryRead,
     WorkspaceScheduledTaskListResponse,
+    WorkspaceScheduledTaskMonitoringConfig,
     WorkspaceScheduledTaskNotificationRead,
     WorkspaceScheduledTaskNotificationRules,
     WorkspaceScheduledTaskOutputRoute,
@@ -58,6 +59,7 @@ DEFAULT_OUTPUT_ROUTES = [WorkspaceScheduledTaskOutputRoute(route_type="chat")]
 SCHEDULED_AGENT_TRIGGER = "scheduled"
 PROVIDER_EMPTY_REPLY = "The scheduled task completed, but the assistant did not return text."
 DEFAULT_NOTIFICATION_RULES = WorkspaceScheduledTaskNotificationRules()
+DEFAULT_MONITORING_CONFIG = WorkspaceScheduledTaskMonitoringConfig()
 NOTIFICATION_EVENT_TO_RULE_KEY = {
     "failure": "on_failure",
     "waiting_approval": "on_waiting_approval",
@@ -118,6 +120,12 @@ class TaskRunReply:
     text: str
     kind: str
     approval_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class MonitoringEvaluation:
+    deliver_output: bool
+    summary: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -659,6 +667,26 @@ def normalize_notification_rules(
     )
 
 
+def normalize_monitoring_config(
+    config: WorkspaceScheduledTaskMonitoringConfig | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if config is None:
+        return DEFAULT_MONITORING_CONFIG.model_dump(by_alias=False)
+    if isinstance(config, WorkspaceScheduledTaskMonitoringConfig):
+        return config.model_dump(by_alias=False)
+    return WorkspaceScheduledTaskMonitoringConfig.model_validate(config).model_dump(
+        by_alias=False
+    )
+
+
+def monitoring_config_enabled(config: Mapping[str, Any] | None) -> bool:
+    return bool(normalize_monitoring_config(config).get("enabled"))
+
+
+def monitoring_status_for_config(config: Mapping[str, Any] | None) -> str:
+    return "watching" if monitoring_config_enabled(config) else "off"
+
+
 def notification_rule_enabled(
     rules: Mapping[str, Any] | None,
     event_type: str,
@@ -695,6 +723,191 @@ def reply_summary(reply: TaskRunReply) -> dict[str, Any]:
         else "",
         "approvalId": str(reply.approval_id) if reply.approval_id else "",
     }
+
+
+def monitoring_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str):
+        try:
+            return max(0, int(value))
+        except ValueError:
+            return 0
+    return 0
+
+
+def monitoring_state_value(task: WorkspaceScheduledTask) -> dict[str, Any]:
+    state = task.notification_state or {}
+    value = state.get("monitoring") if isinstance(state, Mapping) else None
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def set_monitoring_state(task: WorkspaceScheduledTask, value: Mapping[str, Any]) -> None:
+    state = dict(task.notification_state or {})
+    state["monitoring"] = dict(value)
+    task.notification_state = state
+
+
+def monitoring_stop_reason(
+    stop_conditions: Mapping[str, Any],
+    *,
+    changed: bool,
+    change_count: int,
+    run_count: int,
+    consecutive_unchanged_count: int,
+) -> str:
+    if changed and bool(stop_conditions.get("after_first_change")):
+        return "after_first_change"
+    after_change_count = stop_conditions.get("after_change_count")
+    if after_change_count is not None and change_count >= monitoring_int(after_change_count):
+        return "after_change_count"
+    after_run_count = stop_conditions.get("after_run_count")
+    if after_run_count is not None and run_count >= monitoring_int(after_run_count):
+        return "after_run_count"
+    after_unchanged_count = stop_conditions.get("after_unchanged_count")
+    if after_unchanged_count is not None and consecutive_unchanged_count >= monitoring_int(
+        after_unchanged_count
+    ):
+        return "after_unchanged_count"
+    return ""
+
+
+def evaluate_monitoring_result(
+    *,
+    task: WorkspaceScheduledTask,
+    run: WorkspaceScheduledTaskRun,
+    reply: TaskRunReply,
+) -> MonitoringEvaluation:
+    config = normalize_monitoring_config(task.monitoring_config)
+    if not config["enabled"]:
+        task.monitoring_status = "off"
+        return MonitoringEvaluation(deliver_output=True, summary={})
+
+    now = utc_now()
+    state = monitoring_state_value(task)
+    reply_data = reply_summary(reply)
+    run_count = monitoring_int(state.get("runCount")) + 1
+    current_preview = str(reply_data.get("outputPreview") or "")
+    previous_hash = str(state.get("lastOutputHash") or "")
+    previous_preview = str(state.get("lastOutputPreview") or "")
+    change_count = monitoring_int(state.get("changeCount"))
+    consecutive_unchanged_count = 0
+    consecutive_changed_count = 0
+
+    if not reply_data.get("hasOutput"):
+        consecutive_unchanged_count = monitoring_int(state.get("consecutiveUnchangedCount"))
+        consecutive_changed_count = 0
+        status = "no_output"
+        updated_state = {
+            **state,
+            "runCount": run_count,
+            "lastRunId": str(run.id),
+            "lastCheckedAt": now.isoformat(),
+            "lastStatus": status,
+            "consecutiveChangedCount": consecutive_changed_count,
+            "consecutiveUnchangedCount": consecutive_unchanged_count,
+        }
+        set_monitoring_state(task, updated_state)
+        task.monitoring_status = status
+        return MonitoringEvaluation(
+            deliver_output=not bool(config["deliver_on_change_only"]),
+            summary={
+                "monitoring": {
+                    "enabled": True,
+                    "status": status,
+                    "changed": False,
+                    "baseline": False,
+                    "runCount": run_count,
+                    "changeCount": change_count,
+                    "consecutiveChangedCount": consecutive_changed_count,
+                    "consecutiveUnchangedCount": consecutive_unchanged_count,
+                    "currentOutputPreview": current_preview,
+                    "previousOutputPreview": previous_preview,
+                    "stopReason": "",
+                }
+            },
+        )
+
+    current_hash = str(reply_data.get("outputHash") or "")
+    baseline = not previous_hash and bool(config["baseline_on_first_run"])
+    changed = (not previous_hash and not baseline) or (
+        bool(previous_hash) and previous_hash != current_hash
+    )
+    if changed:
+        change_count += 1
+        consecutive_changed_count = monitoring_int(state.get("consecutiveChangedCount")) + 1
+        consecutive_unchanged_count = 0
+    elif baseline:
+        consecutive_changed_count = 0
+        consecutive_unchanged_count = 0
+    else:
+        consecutive_changed_count = 0
+        consecutive_unchanged_count = monitoring_int(state.get("consecutiveUnchangedCount")) + 1
+
+    status = "baseline" if baseline else "changed" if changed else "unchanged"
+    stop_conditions = config.get("stop_conditions") or {}
+    stop_reason = (
+        monitoring_stop_reason(
+            stop_conditions,
+            changed=changed,
+            change_count=change_count,
+            run_count=run_count,
+            consecutive_unchanged_count=consecutive_unchanged_count,
+        )
+        if isinstance(stop_conditions, Mapping)
+        else ""
+    )
+    if stop_reason:
+        task.is_active = False
+        task.next_run_at = None
+        status = "stopped"
+
+    updated_state = {
+        **state,
+        "runCount": run_count,
+        "changeCount": change_count,
+        "consecutiveChangedCount": consecutive_changed_count,
+        "consecutiveUnchangedCount": consecutive_unchanged_count,
+        "lastRunId": str(run.id),
+        "lastCheckedAt": now.isoformat(),
+        "lastStatus": status,
+        "lastOutputHash": current_hash,
+        "lastOutputPreview": current_preview,
+        "previousOutputHash": previous_hash,
+        "previousOutputPreview": previous_preview,
+    }
+    if baseline:
+        updated_state["baselineRunId"] = str(run.id)
+        updated_state["baselineAt"] = now.isoformat()
+    if changed:
+        updated_state["lastChangedRunId"] = str(run.id)
+        updated_state["lastChangedAt"] = now.isoformat()
+    if stop_reason:
+        updated_state["stoppedAt"] = now.isoformat()
+        updated_state["stopReason"] = stop_reason
+    set_monitoring_state(task, updated_state)
+    task.monitoring_status = status
+
+    return MonitoringEvaluation(
+        deliver_output=not bool(config["deliver_on_change_only"]) or changed,
+        summary={
+            "monitoring": {
+                "enabled": True,
+                "status": status,
+                "changed": changed,
+                "baseline": baseline,
+                "runCount": run_count,
+                "changeCount": change_count,
+                "consecutiveChangedCount": consecutive_changed_count,
+                "consecutiveUnchangedCount": consecutive_unchanged_count,
+                "currentOutputPreview": current_preview,
+                "previousOutputPreview": previous_preview,
+                "stopReason": stop_reason,
+            }
+        },
+    )
 
 
 def schedule_response(
@@ -1080,6 +1293,11 @@ def task_response(
         ),
         notificationRoutes=route_reads(task.notification_routes),
         approvalRoutes=route_reads(task.approval_routes),
+        monitoringConfig=WorkspaceScheduledTaskMonitoringConfig.model_validate(
+            normalize_monitoring_config(task.monitoring_config)
+        ),
+        monitoringStatus=task.monitoring_status,
+        monitoringState=monitoring_state_value(task),
         conversationPolicy=task.conversation_policy,
         isActive=task.is_active,
         nextRunAt=task.next_run_at,
@@ -1179,6 +1397,7 @@ async def create_workspace_scheduled_task(
         fallback=notification_routes,
     )
     notification_rules = normalize_notification_rules(payload.notification_rules)
+    monitoring_config = normalize_monitoring_config(payload.monitoring_config)
     await validate_output_routes(
         session,
         organization_id=organization_id,
@@ -1214,6 +1433,8 @@ async def create_workspace_scheduled_task(
             notification_rules=notification_rules,
             notification_routes=notification_routes,
             approval_routes=approval_routes,
+            monitoring_config=monitoring_config,
+            monitoring_status=monitoring_status_for_config(monitoring_config),
             conversation_policy=payload.conversation_policy,
             is_active=payload.is_active,
             next_run_at=None,
@@ -1283,6 +1504,14 @@ async def update_workspace_scheduled_task(
             routes=approval_routes,
         )
         task.approval_routes = approval_routes
+    if payload.monitoring_config is not None:
+        task.monitoring_config = normalize_monitoring_config(payload.monitoring_config)
+        task.monitoring_status = monitoring_status_for_config(task.monitoring_config)
+    if payload.reset_monitoring_state:
+        state = dict(task.notification_state or {})
+        state.pop("monitoring", None)
+        task.notification_state = state
+        task.monitoring_status = monitoring_status_for_config(task.monitoring_config)
     if payload.conversation_policy is not None:
         task.conversation_policy = payload.conversation_policy
         if payload.conversation_policy == "new_each_run":
@@ -1452,7 +1681,7 @@ async def ensure_task_conversation(
 
 def scheduled_task_prompt(task: WorkspaceScheduledTask, run: WorkspaceScheduledTaskRun) -> str:
     local_time = run.scheduled_for.astimezone(zoneinfo_for(task.timezone))
-    return (
+    prompt = (
         f"Scheduled task: {task.name}\n"
         f"Scheduled for: {local_time.isoformat()}\n"
         f"Workspace ID: {task.workspace_id}\n\n"
@@ -1461,6 +1690,17 @@ def scheduled_task_prompt(task: WorkspaceScheduledTask, run: WorkspaceScheduledT
         "Produce the final answer as a clear message that can be delivered to the selected "
         "workspace chat output channels."
     )
+    if monitoring_config_enabled(task.monitoring_config):
+        previous_preview = str(monitoring_state_value(task).get("lastOutputPreview") or "").strip()
+        monitoring_context = (
+            "\n\nMonitoring mode:\n"
+            "Return the current observed state in stable wording. Avoid mentioning the current "
+            "time, run id, or other incidental details unless they are part of the watched state."
+        )
+        if previous_preview:
+            monitoring_context += f"\nPrevious observed state:\n{previous_preview}"
+        prompt += monitoring_context
+    return prompt
 
 
 async def resolve_task_actor(
@@ -1883,6 +2123,20 @@ def notification_message(
         failed = delivery_summary_count(delivery_summary, "failed")
         return f"{task.name} had output delivery failures. Sent: {sent}. Failed: {failed}."
     if event_type == "meaningful_update":
+        monitoring = delivery_summary.get("monitoring")
+        if isinstance(monitoring, Mapping):
+            previous = str(monitoring.get("previousOutputPreview") or "").strip()
+            current = str(monitoring.get("currentOutputPreview") or "").strip()
+            stop_reason = str(monitoring.get("stopReason") or "").strip()
+            message = f"{task.name} changed."
+            if previous or current:
+                message += (
+                    f"\n\nPrevious:\n{previous or '(empty)'}"
+                    f"\n\nCurrent:\n{current or '(empty)'}"
+                )
+            if stop_reason:
+                message += f"\n\nMonitoring stopped: {stop_reason.replace('_', ' ')}."
+            return message
         preview = str(delivery_summary.get("outputPreview") or "").strip()
         if preview:
             return f"{task.name} found a meaningful update.\n\n{preview}"
@@ -1914,6 +2168,15 @@ def notification_events_for_run(
         "delivery_failure",
     ):
         events.append("delivery_failure")
+    monitoring = delivery_summary.get("monitoring")
+    if isinstance(monitoring, Mapping) and monitoring.get("enabled"):
+        config = normalize_monitoring_config(task.monitoring_config)
+        if monitoring.get("changed") and (
+            bool(config.get("notify_on_change"))
+            or notification_rule_enabled(task.notification_rules, "meaningful_update")
+        ):
+            events.append("meaningful_update")
+        return events
     if notification_rule_enabled(task.notification_rules, "meaningful_update"):
         output_hash = str(delivery_summary.get("outputHash") or "").strip()
         if output_hash:
@@ -1974,23 +2237,25 @@ async def deliver_task_run_output(
     conversation_id: uuid.UUID,
 ) -> dict[str, Any]:
     reply = await reply_for_task_run(session, task=task, conversation_id=conversation_id)
+    monitoring = evaluate_monitoring_result(task=task, run=run, reply=reply)
     routes = task.output_routes or [DEFAULT_OUTPUT_ROUTES[0].model_dump(by_alias=False)]
-    for route in routes:
-        if route.get("route_type") == "chat_provider":
-            await send_provider_delivery(
-                session,
-                task=task,
-                run=run,
-                route=route,
-                text=reply.text,
-            )
-        else:
-            await record_chat_delivery(
-                session,
-                task=task,
-                run=run,
-                conversation_id=conversation_id,
-            )
+    if monitoring.deliver_output:
+        for route in routes:
+            if route.get("route_type") == "chat_provider":
+                await send_provider_delivery(
+                    session,
+                    task=task,
+                    run=run,
+                    route=route,
+                    text=reply.text,
+                )
+            else:
+                await record_chat_delivery(
+                    session,
+                    task=task,
+                    run=run,
+                    conversation_id=conversation_id,
+                )
     deliveries = await repository.list_run_deliveries(session, run_ids=[run.id])
     run_deliveries = deliveries.get(run.id, [])
     return {
@@ -1998,6 +2263,7 @@ async def deliver_task_run_output(
         "sent": sum(1 for delivery in run_deliveries if delivery.status == "sent"),
         "failed": sum(1 for delivery in run_deliveries if delivery.status == "failed"),
         **reply_summary(reply),
+        **monitoring.summary,
     }
 
 

@@ -2,6 +2,7 @@ from app.db.domain_types import (
     AgentScope,
     MCPOperationJobStatus,
     MembershipRole,
+    WorkspaceScheduledTaskMonitoringStatus,
     WorkspaceScheduledTaskNotificationEvent,
     WorkspaceScheduledTaskRunStatus,
 )
@@ -26,7 +27,10 @@ from app.modules.organizations.models import (
     Workspace,
     WorkspaceMembership,
 )
-from app.modules.scheduled_tasks.models import WorkspaceScheduledTaskNotification
+from app.modules.scheduled_tasks.models import (
+    WorkspaceScheduledTask,
+    WorkspaceScheduledTaskNotification,
+)
 
 
 def constraint_names(model: type) -> set[str]:
@@ -127,6 +131,7 @@ def test_domain_enums_remain_wire_compatible_strings() -> None:
     assert MCPOperationJobStatus.SUCCEEDED == "succeeded"
     assert WorkspaceScheduledTaskRunStatus.PARTIALLY_DELIVERED == "partially_delivered"
     assert WorkspaceScheduledTaskNotificationEvent.MEANINGFUL_UPDATE == "meaningful_update"
+    assert WorkspaceScheduledTaskMonitoringStatus.UNCHANGED == "unchanged"
 
 
 def test_scheduled_task_notifications_declare_database_invariants() -> None:
@@ -137,4 +142,13 @@ def test_scheduled_task_notifications_declare_database_invariants() -> None:
     } <= constraint_names(WorkspaceScheduledTaskNotification)
     assert "ix_workspace_scheduled_task_notifications_run_event" in index_names(
         WorkspaceScheduledTaskNotification
+    )
+
+
+def test_scheduled_tasks_declare_monitoring_invariants() -> None:
+    assert "ck_workspace_scheduled_tasks_monitoring_status" in constraint_names(
+        WorkspaceScheduledTask
+    )
+    assert "ix_workspace_scheduled_tasks_monitoring_status" in index_names(
+        WorkspaceScheduledTask
     )

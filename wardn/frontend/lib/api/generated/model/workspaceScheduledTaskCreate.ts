@@ -7,6 +7,7 @@
 import type { WorkspaceScheduledTaskCreateConversationPolicy } from './workspaceScheduledTaskCreateConversationPolicy';
 import type { WorkspaceScheduledTaskCreateScheduleConfig } from './workspaceScheduledTaskCreateScheduleConfig';
 import type { WorkspaceScheduledTaskCreateScheduleType } from './workspaceScheduledTaskCreateScheduleType';
+import type { WorkspaceScheduledTaskMonitoringConfig } from './workspaceScheduledTaskMonitoringConfig';
 import type { WorkspaceScheduledTaskNotificationRules } from './workspaceScheduledTaskNotificationRules';
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
 import type { WorkspaceScheduledTaskScheduleCreate } from './workspaceScheduledTaskScheduleCreate';
@@ -25,6 +26,7 @@ export interface WorkspaceScheduledTaskCreate {
      * @maximum 10
      */
   maxAttempts?: number;
+  monitoringConfig?: WorkspaceScheduledTaskMonitoringConfig;
   /**
      * @minLength 1
      * @maxLength 120

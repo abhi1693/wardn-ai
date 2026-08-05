@@ -722,6 +722,9 @@ def test_workspace_scheduled_tasks_openapi_contract() -> None:
     task_read = schema["components"]["schemas"]["WorkspaceScheduledTaskRead"]["properties"]
     assert "schedules" in task_read
     assert "nextRunPreview" in task_read
+    assert "monitoringConfig" in task_read
+    assert "monitoringState" in task_read
+    assert "monitoringStatus" in task_read
 
 
 def test_mcp_registry_openapi_contract() -> None:

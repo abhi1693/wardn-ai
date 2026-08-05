@@ -4,6 +4,7 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { WorkspaceScheduledTaskMonitoringConfig } from './workspaceScheduledTaskMonitoringConfig';
 import type { WorkspaceScheduledTaskNotificationRules } from './workspaceScheduledTaskNotificationRules';
 import type { WorkspaceScheduledTaskOutputRoute } from './workspaceScheduledTaskOutputRoute';
 import type { WorkspaceScheduledTaskScheduleUpdate } from './workspaceScheduledTaskScheduleUpdate';
@@ -17,10 +18,12 @@ export interface WorkspaceScheduledTaskUpdate {
   instructions?: string | null;
   isActive?: boolean | null;
   maxAttempts?: number | null;
+  monitoringConfig?: WorkspaceScheduledTaskMonitoringConfig | null;
   name?: string | null;
   notificationRoutes?: WorkspaceScheduledTaskOutputRoute[] | null;
   notificationRules?: WorkspaceScheduledTaskNotificationRules | null;
   outputRoutes?: WorkspaceScheduledTaskOutputRoute[] | null;
+  resetMonitoringState?: boolean;
   scheduleConfig?: WorkspaceScheduledTaskUpdateScheduleConfig;
   scheduleType?: WorkspaceScheduledTaskUpdateScheduleType;
   schedules?: WorkspaceScheduledTaskScheduleUpdate[] | null;

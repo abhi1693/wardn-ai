@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.db.domain_types import (
     WorkspaceScheduledTaskConversationPolicy,
     WorkspaceScheduledTaskDeliveryStatus,
+    WorkspaceScheduledTaskMonitoringStatus,
     WorkspaceScheduledTaskNotificationEvent,
     WorkspaceScheduledTaskNotificationStatus,
     WorkspaceScheduledTaskRunStatus,
@@ -44,6 +45,15 @@ class WorkspaceScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "conversation_policy IN ('reuse', 'new_each_run')",
             name="ck_workspace_scheduled_tasks_conversation_policy",
+        ),
+        CheckConstraint(
+            (
+                "monitoring_status IN ("
+                "'off', 'watching', 'baseline', 'changed', 'unchanged', "
+                "'no_output', 'stopped'"
+                ")"
+            ),
+            name="ck_workspace_scheduled_tasks_monitoring_status",
         ),
         CheckConstraint("btrim(name) <> ''", name="ck_workspace_scheduled_tasks_name"),
         CheckConstraint(
@@ -125,6 +135,17 @@ class WorkspaceScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         JSONB,
         default=list,
         nullable=False,
+    )
+    monitoring_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+    monitoring_status: Mapped[WorkspaceScheduledTaskMonitoringStatus] = mapped_column(
+        String(32),
+        default=WorkspaceScheduledTaskMonitoringStatus.OFF,
+        nullable=False,
+        index=True,
     )
     notification_state: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

@@ -8,6 +8,7 @@ import {
   CalendarRange,
   CheckCircle2,
   Clock3,
+  Eye,
   MessageSquare,
   MoreHorizontal,
   Pause,
@@ -43,6 +44,7 @@ import {
 import type {
   ChatProviderConnectionRead,
   WorkspaceScheduledTaskCreate,
+  WorkspaceScheduledTaskMonitoringConfig,
   WorkspaceScheduledTaskOutputRoute,
   WorkspaceScheduledTaskRead,
   WorkspaceScheduledTaskRunRead,
@@ -102,6 +104,17 @@ type FormState = {
     onNoOutput: boolean;
     onWaitingApproval: boolean;
   };
+  monitoringConfig: {
+    baselineOnFirstRun: boolean;
+    deliverOnChangeOnly: boolean;
+    enabled: boolean;
+    notifyOnChange: boolean;
+    stopAfterChangeCount: string;
+    stopAfterFirstChange: boolean;
+    stopAfterRunCount: string;
+    stopAfterUnchangedCount: string;
+  };
+  resetMonitoringState: boolean;
   conversationPolicy: ConversationPolicy;
   isActive: boolean;
   maxAttempts: string;
@@ -372,6 +385,79 @@ function defaultNotificationRules() {
   };
 }
 
+function defaultMonitoringConfig() {
+  return {
+    baselineOnFirstRun: true,
+    deliverOnChangeOnly: true,
+    enabled: false,
+    notifyOnChange: true,
+    stopAfterChangeCount: "",
+    stopAfterFirstChange: false,
+    stopAfterRunCount: "",
+    stopAfterUnchangedCount: "",
+  };
+}
+
+function monitoringFormConfig(task: WorkspaceScheduledTaskRead | null) {
+  const defaults = defaultMonitoringConfig();
+  const config = record(task?.monitoringConfig);
+  const stopConditions = record(config.stopConditions);
+  return {
+    ...defaults,
+    baselineOnFirstRun:
+      typeof config.baselineOnFirstRun === "boolean"
+        ? config.baselineOnFirstRun
+        : defaults.baselineOnFirstRun,
+    deliverOnChangeOnly:
+      typeof config.deliverOnChangeOnly === "boolean"
+        ? config.deliverOnChangeOnly
+        : defaults.deliverOnChangeOnly,
+    enabled: typeof config.enabled === "boolean" ? config.enabled : defaults.enabled,
+    notifyOnChange:
+      typeof config.notifyOnChange === "boolean"
+        ? config.notifyOnChange
+        : defaults.notifyOnChange,
+    stopAfterChangeCount:
+      stopConditions.afterChangeCount === null || stopConditions.afterChangeCount === undefined
+        ? ""
+        : String(stopConditions.afterChangeCount),
+    stopAfterFirstChange:
+      typeof stopConditions.afterFirstChange === "boolean"
+        ? stopConditions.afterFirstChange
+        : defaults.stopAfterFirstChange,
+    stopAfterRunCount:
+      stopConditions.afterRunCount === null || stopConditions.afterRunCount === undefined
+        ? ""
+        : String(stopConditions.afterRunCount),
+    stopAfterUnchangedCount:
+      stopConditions.afterUnchangedCount === null || stopConditions.afterUnchangedCount === undefined
+        ? ""
+        : String(stopConditions.afterUnchangedCount),
+  };
+}
+
+function optionalPositiveInteger(value: string) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function monitoringPayload(form: FormState): WorkspaceScheduledTaskMonitoringConfig {
+  return {
+    baselineOnFirstRun: form.monitoringConfig.baselineOnFirstRun,
+    deliverOnChangeOnly: form.monitoringConfig.deliverOnChangeOnly,
+    enabled: form.monitoringConfig.enabled,
+    notifyOnChange: form.monitoringConfig.notifyOnChange,
+    stopConditions: {
+      afterChangeCount: optionalPositiveInteger(form.monitoringConfig.stopAfterChangeCount),
+      afterFirstChange: form.monitoringConfig.stopAfterFirstChange,
+      afterRunCount: optionalPositiveInteger(form.monitoringConfig.stopAfterRunCount),
+      afterUnchangedCount: optionalPositiveInteger(
+        form.monitoringConfig.stopAfterUnchangedCount
+      ),
+    },
+  };
+}
+
 function taskFormState(
   task: WorkspaceScheduledTaskRead | null,
   timezone: string
@@ -386,6 +472,8 @@ function taskFormState(
       notificationRoutes: ["chat"],
       approvalRoutes: ["chat"],
       notificationRules,
+      monitoringConfig: defaultMonitoringConfig(),
+      resetMonitoringState: false,
       conversationPolicy: "reuse",
       isActive: true,
       maxAttempts: "3",
@@ -405,6 +493,8 @@ function taskFormState(
       ...notificationRules,
       ...(task.notificationRules ?? {}),
     },
+    monitoringConfig: monitoringFormConfig(task),
+    resetMonitoringState: false,
     conversationPolicy: task.conversationPolicy as ConversationPolicy,
     isActive: task.isActive,
     maxAttempts: String(task.maxAttempts || 3),
@@ -654,6 +744,47 @@ function enabledNotificationRuleCount(task: WorkspaceScheduledTaskRead) {
   return Object.values(rules).filter((enabled) => enabled).length;
 }
 
+function taskMonitoringEnabled(task: WorkspaceScheduledTaskRead) {
+  return Boolean(record(task.monitoringConfig).enabled);
+}
+
+function monitoringState(task: WorkspaceScheduledTaskRead) {
+  return record(task.monitoringState);
+}
+
+function taskMonitoringLabel(task: WorkspaceScheduledTaskRead) {
+  if (!taskMonitoringEnabled(task)) {
+    return "Standard";
+  }
+  const status = task.monitoringStatus || String(monitoringState(task).lastStatus ?? "watching");
+  return status.replaceAll("_", " ");
+}
+
+function monitoringChangeCount(task: WorkspaceScheduledTaskRead) {
+  const value = monitoringState(task).changeCount;
+  return typeof value === "number" ? value : Number(value || 0);
+}
+
+function runMonitoringSummary(run: WorkspaceScheduledTaskRunRead) {
+  const summary = record(run.deliverySummary);
+  const monitoring = record(summary.monitoring);
+  return monitoring.enabled ? monitoring : null;
+}
+
+function runOutputLabel(run: WorkspaceScheduledTaskRunRead) {
+  const monitoring = runMonitoringSummary(run);
+  if (monitoring) {
+    const status = String(monitoring.status ?? "watching").replaceAll("_", " ");
+    const stopReason = String(monitoring.stopReason ?? "").replaceAll("_", " ");
+    return stopReason ? `${status} · ${stopReason}` : status;
+  }
+  return `${String(record(run.deliverySummary).sent ?? 0)} sent${
+    Number(record(run.deliverySummary).failed ?? 0) > 0
+      ? `, ${String(record(run.deliverySummary).failed)} failed`
+      : ""
+  }`;
+}
+
 function taskHref(organizationId: string, workspaceId: string, conversationId: string) {
   return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
@@ -730,6 +861,16 @@ export function ScheduledTaskFormClient({
       notificationRules: {
         ...form.notificationRules,
         [key]: !form.notificationRules[key],
+      },
+    });
+  }
+
+  function updateMonitoringConfig(patch: Partial<FormState["monitoringConfig"]>) {
+    setForm({
+      ...form,
+      monitoringConfig: {
+        ...form.monitoringConfig,
+        ...patch,
       },
     });
   }
@@ -820,6 +961,7 @@ export function ScheduledTaskFormClient({
       isActive: form.isActive,
       maxAttempts: Number(form.maxAttempts || 3),
       name: form.name.trim(),
+      monitoringConfig: monitoringPayload(form),
       notificationRoutes: buildOutputRoutes(form.notificationRoutes, providerOptions),
       notificationRules: form.notificationRules,
       outputRoutes: buildOutputRoutes(form.selectedRoutes, providerOptions),
@@ -832,6 +974,7 @@ export function ScheduledTaskFormClient({
       if (editingTask) {
         const updatePayload: WorkspaceScheduledTaskUpdate = {
           ...basePayload,
+          resetMonitoringState: form.resetMonitoringState,
           schedules: schedulePayloads(form, { includeIds: true }) as WorkspaceScheduledTaskScheduleUpdate[],
         };
         await workspaceScheduledTasksUpdate(
@@ -1288,6 +1431,196 @@ export function ScheduledTaskFormClient({
           <div className="grid gap-4 rounded-md border border-border p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm font-medium">
+                <Eye className="size-4 text-muted-foreground" />
+                Monitoring
+              </div>
+              <Badge variant={form.monitoringConfig.enabled ? "success" : "secondary"}>
+                {form.monitoringConfig.enabled ? "On" : "Off"}
+              </Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <button
+                className={cn(
+                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                  form.monitoringConfig.enabled
+                    ? "border-ring bg-sidebar-accent text-foreground"
+                    : "border-border bg-card text-muted-foreground"
+                )}
+                onClick={() =>
+                  updateMonitoringConfig({ enabled: !form.monitoringConfig.enabled })
+                }
+                type="button"
+              >
+                <span>Watch mode</span>
+                <CheckCircle2
+                  className={cn(
+                    "size-4",
+                    form.monitoringConfig.enabled ? "opacity-100" : "opacity-0"
+                  )}
+                />
+              </button>
+              <button
+                className={cn(
+                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                  form.monitoringConfig.notifyOnChange
+                    ? "border-ring bg-sidebar-accent text-foreground"
+                    : "border-border bg-card text-muted-foreground"
+                )}
+                disabled={!form.monitoringConfig.enabled}
+                onClick={() =>
+                  updateMonitoringConfig({
+                    notifyOnChange: !form.monitoringConfig.notifyOnChange,
+                  })
+                }
+                type="button"
+              >
+                <span>Notify on change</span>
+                <BellRing className="size-4" />
+              </button>
+              <button
+                className={cn(
+                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                  form.monitoringConfig.deliverOnChangeOnly
+                    ? "border-ring bg-sidebar-accent text-foreground"
+                    : "border-border bg-card text-muted-foreground"
+                )}
+                disabled={!form.monitoringConfig.enabled}
+                onClick={() =>
+                  updateMonitoringConfig({
+                    deliverOnChangeOnly: !form.monitoringConfig.deliverOnChangeOnly,
+                  })
+                }
+                type="button"
+              >
+                <span>Deliver on change</span>
+                <Route className="size-4" />
+              </button>
+              <button
+                className={cn(
+                  "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                  form.monitoringConfig.baselineOnFirstRun
+                    ? "border-ring bg-sidebar-accent text-foreground"
+                    : "border-border bg-card text-muted-foreground"
+                )}
+                disabled={!form.monitoringConfig.enabled}
+                onClick={() =>
+                  updateMonitoringConfig({
+                    baselineOnFirstRun: !form.monitoringConfig.baselineOnFirstRun,
+                  })
+                }
+                type="button"
+              >
+                <span>Baseline first run</span>
+                <CheckCircle2 className="size-4" />
+              </button>
+            </div>
+
+            {form.monitoringConfig.enabled ? (
+              <div className="grid gap-4 lg:grid-cols-[1fr_240px]">
+                <div className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-4">
+                  <button
+                    className={cn(
+                      "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
+                      form.monitoringConfig.stopAfterFirstChange
+                        ? "border-ring bg-sidebar-accent text-foreground"
+                        : "border-border bg-card text-muted-foreground"
+                    )}
+                    onClick={() =>
+                      updateMonitoringConfig({
+                        stopAfterFirstChange: !form.monitoringConfig.stopAfterFirstChange,
+                      })
+                    }
+                    type="button"
+                  >
+                    <span>Stop on change</span>
+                    <Pause className="size-4" />
+                  </button>
+                  <div className="space-y-2">
+                    <Label htmlFor="monitoring-stop-change-count">Change count</Label>
+                    <Input
+                      id="monitoring-stop-change-count"
+                      min={1}
+                      onChange={(event) =>
+                        updateMonitoringConfig({
+                          stopAfterChangeCount: event.target.value,
+                        })
+                      }
+                      placeholder="No limit"
+                      type="number"
+                      value={form.monitoringConfig.stopAfterChangeCount}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="monitoring-stop-run-count">Run count</Label>
+                    <Input
+                      id="monitoring-stop-run-count"
+                      min={1}
+                      onChange={(event) =>
+                        updateMonitoringConfig({ stopAfterRunCount: event.target.value })
+                      }
+                      placeholder="No limit"
+                      type="number"
+                      value={form.monitoringConfig.stopAfterRunCount}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="monitoring-stop-unchanged-count">Unchanged count</Label>
+                    <Input
+                      id="monitoring-stop-unchanged-count"
+                      min={1}
+                      onChange={(event) =>
+                        updateMonitoringConfig({
+                          stopAfterUnchangedCount: event.target.value,
+                        })
+                      }
+                      placeholder="No limit"
+                      type="number"
+                      value={form.monitoringConfig.stopAfterUnchangedCount}
+                    />
+                  </div>
+                </div>
+
+                {editingTask ? (
+                  <div className="grid gap-3 rounded-md border border-border p-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-xs text-muted-foreground">State</div>
+                        <div className="mt-1 font-medium">
+                          {taskMonitoringLabel(editingTask)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Changes</div>
+                        <div className="mt-1 font-medium">
+                          {metricValue(monitoringChangeCount(editingTask))}
+                        </div>
+                      </div>
+                    </div>
+                    <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
+                      <input
+                        checked={form.resetMonitoringState}
+                        className="size-4"
+                        onChange={() =>
+                          setForm({
+                            ...form,
+                            resetMonitoringState: !form.resetMonitoringState,
+                          })
+                        }
+                        type="checkbox"
+                      />
+                      <RefreshCw className="size-4 text-muted-foreground" />
+                      <span>Reset baseline</span>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid gap-4 rounded-md border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
                 <BellRing className="size-4 text-muted-foreground" />
                 Notifications
               </div>
@@ -1457,6 +1790,7 @@ export function ScheduledTasksClient({
     const day = 24 * 60 * 60 * 1000;
     return {
       active: taskRows.filter((task) => task.isActive).length,
+      monitoring: taskRows.filter(taskMonitoringEnabled).length,
       dueSoon: taskRows.filter((task) => {
         if (!task.nextRunAt || !task.isActive) {
           return false;
@@ -1539,7 +1873,7 @@ export function ScheduledTasksClient({
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-5">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -1547,6 +1881,15 @@ export function ScheduledTasksClient({
               <CalendarClock className="size-4 text-muted-foreground" />
             </div>
             <div className="mt-3 text-2xl font-semibold">{metricValue(stats.active)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-muted-foreground">Monitoring</div>
+              <Eye className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.monitoring)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1617,6 +1960,18 @@ export function ScheduledTasksClient({
                         <Badge variant="secondary">
                           {notificationCount} notifications
                         </Badge>
+                        {taskMonitoringEnabled(task) ? (
+                          <Badge
+                            variant={
+                              task.monitoringStatus === "changed" ||
+                              task.monitoringStatus === "stopped"
+                                ? "outline"
+                                : "secondary"
+                            }
+                          >
+                            {taskMonitoringLabel(task)}
+                          </Badge>
+                        ) : null}
                         <Badge variant={statusVariant(task.lastStatus)}>
                           {statusLabel(task.lastStatus)}
                         </Badge>
@@ -1676,6 +2031,17 @@ export function ScheduledTasksClient({
 	                      <div className="mt-1 text-sm font-medium">{task.maxAttempts}</div>
 	                    </div>
 	                  </div>
+                  {taskMonitoringEnabled(task) ? (
+                    <div className="grid gap-2">
+                      <div className="text-xs text-muted-foreground">Monitoring</div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline">
+                          {metricValue(monitoringChangeCount(task))} changes
+                        </Badge>
+                        <Badge variant="secondary">{taskMonitoringLabel(task)}</Badge>
+                      </div>
+                    </div>
+                  ) : null}
 	                  {task.schedules && task.schedules.length > 0 ? (
 	                    <div className="grid gap-2">
 	                      <div className="text-xs text-muted-foreground">Attached schedules</div>
@@ -1782,12 +2148,7 @@ export function ScheduledTasksClient({
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Output</div>
-                    <div className="mt-0.5">
-                      {String(record(run.deliverySummary).sent ?? 0)} sent
-                      {Number(record(run.deliverySummary).failed ?? 0) > 0
-                        ? `, ${String(record(run.deliverySummary).failed)} failed`
-                        : ""}
-                    </div>
+                    <div className="mt-0.5">{runOutputLabel(run)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Notifications</div>

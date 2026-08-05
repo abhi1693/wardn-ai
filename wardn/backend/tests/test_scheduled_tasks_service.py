@@ -60,6 +60,8 @@ def make_task() -> WorkspaceScheduledTask:
         notification_rules=service.normalize_notification_rules(None),
         notification_routes=[{"route_type": "chat"}],
         approval_routes=[{"route_type": "chat"}],
+        monitoring_config=service.normalize_monitoring_config(None),
+        monitoring_status="off",
         notification_state={},
         conversation_policy="reuse",
         is_active=True,
@@ -318,6 +320,89 @@ def test_notification_rules_default_to_failure_approval_and_delivery_failure() -
         "on_delivery_failure": True,
         "on_meaningful_update": False,
     }
+
+
+def test_monitoring_config_defaults_to_off_with_change_delivery() -> None:
+    assert service.normalize_monitoring_config(None) == {
+        "enabled": False,
+        "notify_on_change": True,
+        "deliver_on_change_only": True,
+        "baseline_on_first_run": True,
+        "stop_conditions": {
+            "after_first_change": False,
+            "after_change_count": None,
+            "after_run_count": None,
+            "after_unchanged_count": None,
+        },
+    }
+
+
+def test_monitoring_records_baseline_and_suppresses_unchanged_delivery() -> None:
+    task = make_task()
+    task.monitoring_config = service.normalize_monitoring_config({"enabled": True})
+    run = make_run(task)
+
+    baseline = service.evaluate_monitoring_result(
+        task=task,
+        run=run,
+        reply=service.TaskRunReply(text="Open issues: 3", kind="assistant"),
+    )
+
+    assert baseline.deliver_output is False
+    assert baseline.summary["monitoring"]["status"] == "baseline"
+    assert task.monitoring_status == "baseline"
+    assert service.monitoring_state_value(task)["lastOutputHash"] == service.output_text_hash(
+        "Open issues: 3"
+    )
+
+    unchanged = service.evaluate_monitoring_result(
+        task=task,
+        run=make_run(task),
+        reply=service.TaskRunReply(text="open   issues: 3", kind="assistant"),
+    )
+
+    assert unchanged.deliver_output is False
+    assert unchanged.summary["monitoring"]["status"] == "unchanged"
+    assert unchanged.summary["monitoring"]["changed"] is False
+    assert unchanged.summary["monitoring"]["consecutiveUnchangedCount"] == 1
+
+
+def test_monitoring_detects_change_and_stop_condition_pauses_task() -> None:
+    task = make_task()
+    task.monitoring_config = service.normalize_monitoring_config(
+        {"enabled": True, "stopConditions": {"afterFirstChange": True}}
+    )
+    service.evaluate_monitoring_result(
+        task=task,
+        run=make_run(task),
+        reply=service.TaskRunReply(text="Version: 1.0.0", kind="assistant"),
+    )
+
+    changed = service.evaluate_monitoring_result(
+        task=task,
+        run=make_run(task),
+        reply=service.TaskRunReply(text="Version: 1.0.1", kind="assistant"),
+    )
+
+    assert changed.deliver_output is True
+    assert changed.summary["monitoring"]["changed"] is True
+    assert changed.summary["monitoring"]["status"] == "stopped"
+    assert changed.summary["monitoring"]["stopReason"] == "after_first_change"
+    assert task.is_active is False
+    assert task.next_run_at is None
+    assert task.monitoring_status == "stopped"
+    assert service.notification_events_for_run(
+        task=task,
+        status="succeeded",
+        delivery_summary={"failed": 0, **changed.summary},
+    ) == ["meaningful_update"]
+    assert "Previous:" in service.notification_message(
+        event_type="meaningful_update",
+        task=task,
+        run=make_run(task),
+        error="",
+        delivery_summary=changed.summary,
+    )
 
 
 def test_notification_events_include_enabled_run_conditions() -> None:

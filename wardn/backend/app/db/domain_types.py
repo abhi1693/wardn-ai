@@ -96,6 +96,16 @@ class WorkspaceScheduledTaskNotificationStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class WorkspaceScheduledTaskMonitoringStatus(StrEnum):
+    OFF = "off"
+    WATCHING = "watching"
+    BASELINE = "baseline"
+    CHANGED = "changed"
+    UNCHANGED = "unchanged"
+    NO_OUTPUT = "no_output"
+    STOPPED = "stopped"
+
+
 class LLMProviderVisibility(StrEnum):
     ORGANIZATION = "organization"
     WORKSPACE = "workspace"

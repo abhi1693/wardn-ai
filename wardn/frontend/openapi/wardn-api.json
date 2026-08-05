@@ -8572,6 +8572,9 @@
             "title": "Maxattempts",
             "type": "integer"
           },
+          "monitoringConfig": {
+            "$ref": "#/components/schemas/WorkspaceScheduledTaskMonitoringConfig"
+          },
           "name": {
             "maxLength": 120,
             "minLength": 1,
@@ -8764,6 +8767,85 @@
           "tasks"
         ],
         "title": "WorkspaceScheduledTaskListResponse",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskMonitoringConfig": {
+        "properties": {
+          "baselineOnFirstRun": {
+            "default": true,
+            "title": "Baselineonfirstrun",
+            "type": "boolean"
+          },
+          "deliverOnChangeOnly": {
+            "default": true,
+            "title": "Deliveronchangeonly",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "notifyOnChange": {
+            "default": true,
+            "title": "Notifyonchange",
+            "type": "boolean"
+          },
+          "stopConditions": {
+            "$ref": "#/components/schemas/WorkspaceScheduledTaskMonitoringStopConditions"
+          }
+        },
+        "title": "WorkspaceScheduledTaskMonitoringConfig",
+        "type": "object"
+      },
+      "WorkspaceScheduledTaskMonitoringStopConditions": {
+        "properties": {
+          "afterChangeCount": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Afterchangecount"
+          },
+          "afterFirstChange": {
+            "default": false,
+            "title": "Afterfirstchange",
+            "type": "boolean"
+          },
+          "afterRunCount": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Afterruncount"
+          },
+          "afterUnchangedCount": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Afterunchangedcount"
+          }
+        },
+        "title": "WorkspaceScheduledTaskMonitoringStopConditions",
         "type": "object"
       },
       "WorkspaceScheduledTaskNotificationRead": {
@@ -9057,6 +9139,19 @@
           "maxAttempts": {
             "title": "Maxattempts",
             "type": "integer"
+          },
+          "monitoringConfig": {
+            "$ref": "#/components/schemas/WorkspaceScheduledTaskMonitoringConfig"
+          },
+          "monitoringState": {
+            "additionalProperties": true,
+            "title": "Monitoringstate",
+            "type": "object"
+          },
+          "monitoringStatus": {
+            "default": "off",
+            "title": "Monitoringstatus",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -9693,6 +9788,16 @@
             ],
             "title": "Maxattempts"
           },
+          "monitoringConfig": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceScheduledTaskMonitoringConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "anyOf": [
               {
@@ -9744,6 +9849,11 @@
               }
             ],
             "title": "Outputroutes"
+          },
+          "resetMonitoringState": {
+            "default": false,
+            "title": "Resetmonitoringstate",
+            "type": "boolean"
           },
           "scheduleConfig": {
             "anyOf": [
