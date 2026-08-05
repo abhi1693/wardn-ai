@@ -1298,10 +1298,17 @@ export function ScheduledTaskFormClient({
   const activeScheduleIndex = activeSchedule
     ? form.schedules.findIndex((schedule) => schedule.key === activeSchedule.key)
     : -1;
+  const showSummaryRail = activeSection === "schedule" || activeSection === "review";
+  const showRunPreview = showSummaryRail;
+  const focusedMainWidth = cn(
+    activeSection === "instructions" || activeSection === "notifications"
+      ? "max-w-6xl"
+      : "max-w-5xl"
+  );
 
   return (
     <form
-      className="min-h-screen bg-slate-50 text-slate-950"
+      className="text-slate-950"
       id="scheduled-task-form"
       onSubmit={submitTask}
     >
@@ -1319,41 +1326,25 @@ export function ScheduledTaskFormClient({
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 truncate text-[11px] text-slate-500">
-                <span>Wardn Operations</span>
-                <span>/</span>
-                <span>Task editor</span>
-                <span>/</span>
-                <span>{editingTask ? "Edit" : "Draft"}</span>
-              </div>
-              <div className="mt-0.5 flex items-center gap-2">
-                <h1 className="truncate text-sm font-semibold leading-5 text-slate-950">
-                  {editingTask ? "Edit scheduled task" : "New scheduled task"}
-                </h1>
-                <span
-                  className={
-                    form.isActive
-                      ? "size-2 rounded-full bg-emerald-500"
-                      : "size-2 rounded-full bg-slate-300"
-                  }
-                />
-                {validationIssues.length ? (
-                  <Badge
-                    className="hidden border-amber-200 bg-amber-50 text-amber-800 sm:inline-flex"
-                    variant="outline"
-                  >
-                    {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
-                  </Badge>
-                ) : (
-                  <Badge
-                    className="hidden border-teal-200 bg-teal-50 text-teal-800 sm:inline-flex"
-                    variant="outline"
-                  >
-                    Ready
-                  </Badge>
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-600">
+              <span
+                className={cn(
+                  "size-2 rounded-full",
+                  form.isActive ? "bg-emerald-500" : "bg-slate-300"
                 )}
-              </div>
+              />
+              {validationIssues.length ? (
+                <Badge className="border-amber-200 bg-amber-50 text-amber-800" variant="outline">
+                  {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
+                </Badge>
+              ) : (
+                <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline">
+                  Ready
+                </Badge>
+              )}
+              <span className="hidden truncate md:inline">
+                {sectionSummaries.schedule} · {sectionSummaries.outputs}
+              </span>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1422,8 +1413,13 @@ export function ScheduledTaskFormClient({
         <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
       ) : null}
 
-      <div className="grid gap-4 pt-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <main className="min-w-0 space-y-4">
+      <div
+        className={cn(
+          "grid gap-4 pt-4",
+          showSummaryRail ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "xl:grid-cols-1"
+        )}
+      >
+        <main className={cn("min-w-0 space-y-4", !showSummaryRail && focusedMainWidth)}>
           <section
             className={sectionPanelClass(activeSection === "basics" ? undefined : "hidden")}
             id="task-basics"
@@ -1699,7 +1695,7 @@ export function ScheduledTaskFormClient({
 
                     {activeSchedule.scheduleType !== "interval" &&
                     activeSchedule.scheduleType !== "cron" ? (
-                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                      <div className="grid gap-2">
                         <Label>Run times</Label>
                         <div className="flex flex-wrap items-center gap-2">
                           {activeSchedule.times.map((timeValue) => (
@@ -1735,7 +1731,7 @@ export function ScheduledTaskFormClient({
                     ) : null}
 
                     {activeSchedule.scheduleType === "weekly" ? (
-                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                      <div className="grid gap-2">
                         <Label>Weekdays</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {weekdays.map((weekday) => (
@@ -1757,7 +1753,7 @@ export function ScheduledTaskFormClient({
                     ) : null}
 
                     {activeSchedule.scheduleType === "weekdays" ? (
-                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                      <div className="grid gap-2">
                         <Label>Weekdays</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {["Mon", "Tue", "Wed", "Thu", "Fri"].map((weekday) => (
@@ -1773,7 +1769,7 @@ export function ScheduledTaskFormClient({
                     ) : null}
 
                     {activeSchedule.scheduleType === "monthly" ? (
-                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                      <div className="grid gap-2">
                         <Label>Month days</Label>
                         <div className="grid grid-cols-7 gap-1 sm:grid-cols-10">
                           {Array.from({ length: 31 }, (_, day) => String(day + 1)).map((day) => (
@@ -2163,10 +2159,12 @@ export function ScheduledTaskFormClient({
                   return (
                     <button
                       className={cn(
-                        "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                        item.active
-                          ? "border-teal-200 bg-teal-50 text-teal-900"
-                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors disabled:cursor-not-allowed",
+                        item.disabled
+                          ? "border-slate-200 bg-slate-50 text-slate-400"
+                          : item.active
+                            ? "border-teal-200 bg-teal-50 text-teal-900"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                       )}
                       disabled={item.disabled}
                       key={item.label}
@@ -2363,137 +2361,179 @@ export function ScheduledTaskFormClient({
           </section>
         </main>
 
-        <aside className="xl:sticky xl:top-24 xl:self-start" id="task-review">
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Live Summary
-                </h2>
-                <div className="mt-1 text-sm font-medium text-slate-950">
-                  {sectionSummaries.review}
-                </div>
-              </div>
-              <Button
-                className="h-8 bg-white"
-                disabled={isPreviewing || !canPreview}
-                onClick={previewSchedules}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {isPreviewing ? (
-                  <RefreshCw className="size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3.5" />
-                )}
-                Preview
-              </Button>
-            </div>
-            <div className="mt-4 grid gap-5">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div>
-                  <div className="text-xs text-slate-500">Schedules</div>
-                  <div className="mt-1 font-medium text-slate-900">{sectionSummaries.schedule}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Attempts</div>
-                  <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Chat history</div>
-                  <div className="mt-1 font-medium text-slate-900">
-                    {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+        {showSummaryRail ? (
+          <aside className="xl:sticky xl:top-24 xl:self-start" id="task-review">
+            <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Live Summary
+                  </h2>
+                  <div className="mt-1 text-sm font-medium text-slate-950">
+                    {sectionSummaries.review}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-slate-500">Monitoring</div>
-                  <div className="mt-1 font-medium text-slate-900">
-                    {form.monitoringConfig.enabled ? "On" : "Off"}
+                <Button
+                  className="h-8 bg-white"
+                  disabled={isPreviewing || !canPreview}
+                  onClick={previewSchedules}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {isPreviewing ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  Preview
+                </Button>
+              </div>
+              <div className="mt-4 grid gap-5">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <div className="text-xs text-slate-500">Schedules</div>
+                    <div className="mt-1 font-medium text-slate-900">
+                      {sectionSummaries.schedule}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Attempts</div>
+                    <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Chat history</div>
+                    <div className="mt-1 font-medium text-slate-900">
+                      {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Monitoring</div>
+                    <div className="mt-1 font-medium text-slate-900">
+                      {form.monitoringConfig.enabled ? "On" : "Off"}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="grid gap-2 border-t border-slate-200 pt-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
-                  {validationIssues.length > 0 ? (
-                    <Badge className="border-amber-200 bg-amber-50 text-amber-800" variant="outline">
-                      {validationIssues.length} warning{validationIssues.length === 1 ? "" : "s"}
-                    </Badge>
-                  ) : null}
-                </div>
-                {validationIssues.length > 0 ? (
-                  <div className="grid gap-1.5">
-                    {validationIssues.map((issue) => (
-                      <div
-                        className="rounded-md border border-amber-200 bg-white px-2.5 py-2 text-xs text-amber-900"
-                        key={issue}
+                <div className="grid gap-2 border-t border-slate-200 pt-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
+                    {validationIssues.length > 0 ? (
+                      <Badge
+                        className="border-amber-200 bg-amber-50 text-amber-800"
+                        variant="outline"
                       >
-                        {issue}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-teal-200 bg-white px-2.5 py-2 text-xs text-teal-900">
-                    Ready to save.
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-2 border-t border-slate-200 pt-4">
-                <div className="text-xs font-semibold uppercase text-slate-500">Next 5 runs</div>
-                {previewRuns.length > 0 ? (
-                  <div className="grid gap-1 text-sm">
-                    {previewRuns.map((run) => (
-                      <div
-                        className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-2 py-1.5"
-                        key={run}
-                      >
-                        <span className="truncate text-slate-700">{formatDate(run)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
-                    No upcoming runs.
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-2 border-t border-slate-200 pt-4">
-                <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
-                {selectedOutputLabels.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedOutputLabels.map((label) => (
-                      <Badge className="max-w-full truncate" key={label} variant="secondary">
-                        {label}
+                        {validationIssues.length} warning
+                        {validationIssues.length === 1 ? "" : "s"}
                       </Badge>
-                    ))}
+                    ) : null}
                   </div>
-                ) : (
-                  <div className="text-sm text-slate-500">None selected</div>
-                )}
-              </div>
+                  {validationIssues.length > 0 ? (
+                    <div className="grid gap-1.5">
+                      {validationIssues.map((issue) => (
+                        <div
+                          className="rounded-md border border-amber-200 bg-white px-2.5 py-2 text-xs text-amber-900"
+                          key={issue}
+                        >
+                          {issue}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-teal-200 bg-white px-2.5 py-2 text-xs text-teal-900">
+                      Ready to save.
+                    </div>
+                  )}
+                </div>
 
-              <div className="grid gap-2 border-t border-slate-200 pt-4">
-                <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
-                <div className="grid gap-1 text-xs text-slate-600">
-                  <div>
-                    Notifications:{" "}
-                    {selectedNotificationLabels.length
-                      ? selectedNotificationLabels.join(", ")
-                      : "None"}
+                {showRunPreview ? (
+                  <div className="grid gap-2 border-t border-slate-200 pt-4">
+                    <div className="text-xs font-semibold uppercase text-slate-500">
+                      Next 5 runs
+                    </div>
+                    {previewRuns.length > 0 ? (
+                      <div className="grid gap-1 text-sm">
+                        {previewRuns.map((run) => (
+                          <div
+                            className="rounded-md bg-slate-50 px-2 py-1.5 text-slate-700"
+                            key={run}
+                          >
+                            {formatDate(run)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                        No upcoming runs.
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    Approvals:{" "}
-                    {selectedApprovalLabels.length ? selectedApprovalLabels.join(", ") : "None"}
+                ) : null}
+
+                <div className="grid gap-2 border-t border-slate-200 pt-4">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
+                  {selectedOutputLabels.length > 0 ? (
+                    <div className="grid gap-1.5">
+                      {selectedOutputLabels.map((label) => (
+                        <div
+                          className="min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                          key={label}
+                          title={label}
+                        >
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">None selected</div>
+                  )}
+                </div>
+
+                <div className="grid gap-2 border-t border-slate-200 pt-4">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
+                  <div className="grid gap-2 text-xs text-slate-600">
+                    <div>
+                      <div className="mb-1 text-slate-500">Notifications</div>
+                      <div className="grid gap-1">
+                        {selectedNotificationLabels.length ? (
+                          selectedNotificationLabels.map((label) => (
+                            <div
+                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1"
+                              key={label}
+                              title={label}
+                            >
+                              {label}
+                            </div>
+                          ))
+                        ) : (
+                          <span>None</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-1 text-slate-500">Approvals</div>
+                      <div className="grid gap-1">
+                        {selectedApprovalLabels.length ? (
+                          selectedApprovalLabels.map((label) => (
+                            <div
+                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1"
+                              key={label}
+                              title={label}
+                            >
+                              {label}
+                            </div>
+                          ))
+                        ) : (
+                          <span>None</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </aside>
+          </aside>
+        ) : null}
       </div>
     </form>
   );

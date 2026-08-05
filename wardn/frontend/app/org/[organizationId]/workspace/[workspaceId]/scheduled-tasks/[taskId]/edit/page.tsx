@@ -53,6 +53,8 @@ export default async function EditScheduledTaskPage({ params }: EditScheduledTas
   return (
     <AppShell
       active="workspace-scheduled-tasks"
+      contentClassName="max-w-none px-8 max-md:px-4"
+      contentInnerClassName="space-y-0"
       eyebrow="Workspace"
       title="Edit Scheduled Task"
       workspaceContext={workspaceContext}
