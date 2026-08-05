@@ -9,7 +9,7 @@ import {
   ShieldOff,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Badge } from "@/components/ui/badge";
@@ -215,6 +215,7 @@ export function ApprovalDecisionClient({
   const [result, setResult] = useState(initialApproval.result ?? "");
   const [error, setError] = useState(initialApproval.error ?? "");
   const [expiresAt, setExpiresAt] = useState(initialApproval.expiresAt ?? "");
+  const [updatedAt, setUpdatedAt] = useState(initialApproval.updatedAt);
   const [inFlightDecision, setInFlightDecision] = useState<Decision | "">("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [decisionResponse, setDecisionResponse] =
@@ -234,6 +235,42 @@ export function ApprovalDecisionClient({
         ? "Approval completed"
         : "Approval closed";
 
+  const applyApprovalState = useCallback((approval: AgentToolApprovalRead) => {
+    setStatus(approval.status);
+    setResult(approval.result ?? "");
+    setError(approval.error ?? "");
+    setExpiresAt(approval.expiresAt ?? "");
+    setUpdatedAt(approval.updatedAt);
+    if (approval.status === "running") {
+      setFeedback({
+        message: "Approved. The tool call is still running...",
+        variant: "progress",
+      });
+    } else if (approval.status === "completed") {
+      setFeedback({
+        message: "Tool call approved and completed.",
+        variant: "success",
+      });
+    } else if (approval.status === "failed") {
+      setFeedback({
+        message: approval.error || "The approved tool call failed.",
+        variant: "error",
+      });
+    }
+  }, []);
+
+  const fetchApproval = useCallback(
+    () =>
+      workspaceAgentsGetToolApproval(
+        organizationId,
+        workspaceId,
+        agentId,
+        approvalId,
+        { timeoutMs: 10_000 }
+      ),
+    [agentId, approvalId, organizationId, workspaceId]
+  );
+
   useEffect(() => {
     if (!isRunning) {
       return;
@@ -241,36 +278,11 @@ export function ApprovalDecisionClient({
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const approval = await workspaceAgentsGetToolApproval(
-          organizationId,
-          workspaceId,
-          agentId,
-          approvalId,
-          { timeoutMs: 10_000 }
-        );
+        const approval = await fetchApproval();
         if (cancelled) {
           return;
         }
-        setStatus(approval.status);
-        setResult(approval.result ?? "");
-        setError(approval.error ?? "");
-        setExpiresAt(approval.expiresAt ?? "");
-        if (approval.status === "running") {
-          setFeedback({
-            message: "Approved. The tool call is still running...",
-            variant: "progress",
-          });
-        } else if (approval.status === "completed") {
-          setFeedback({
-            message: "Tool call approved and completed.",
-            variant: "success",
-          });
-        } else if (approval.status === "failed") {
-          setFeedback({
-            message: approval.error || "The approved tool call failed.",
-            variant: "error",
-          });
-        }
+        applyApprovalState(approval);
       } catch (caught) {
         if (!cancelled) {
           setFeedback({ message: errorMessage(caught), variant: "error" });
@@ -281,7 +293,7 @@ export function ApprovalDecisionClient({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [agentId, approvalId, isRunning, organizationId, workspaceId]);
+  }, [applyApprovalState, fetchApproval, isRunning]);
 
   async function decide(decision: Decision) {
     setInFlightDecision(decision);
@@ -314,7 +326,17 @@ export function ApprovalDecisionClient({
         variant: response.status === "failed" ? "error" : "success",
       });
     } catch (caught) {
-      setFeedback({ message: errorMessage(caught), variant: "error" });
+      const message = errorMessage(caught);
+      try {
+        const approval = await fetchApproval();
+        applyApprovalState(approval);
+        if (approval.status !== "pending") {
+          return;
+        }
+      } catch {
+        // Keep the original decision error visible when the follow-up read also fails.
+      }
+      setFeedback({ message, variant: "error" });
     } finally {
       setInFlightDecision("");
     }
@@ -367,7 +389,7 @@ export function ApprovalDecisionClient({
             </div>
             <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
               <div className="text-xs text-muted-foreground">Last updated</div>
-              <div className="mt-1 text-sm">{formatDate(initialApproval.updatedAt)}</div>
+              <div className="mt-1 text-sm">{formatDate(updatedAt)}</div>
             </div>
             <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
               <div className="text-xs text-muted-foreground">Expires</div>
