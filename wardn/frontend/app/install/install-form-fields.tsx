@@ -1,4 +1,4 @@
-import { FileUp } from "lucide-react";
+import { ExternalLink, FileUp } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,7 @@ import type { MCPRegistryServerResponse } from "@/lib/api/generated/model";
 import {
   installValueFilename,
   installValueInputText,
+  hubServerHref,
   qualityScore,
   qualityScorePercent,
   qualityScoreTone,
@@ -28,63 +29,80 @@ export function ServerPickerCard({
   const iconUrl = serverIconUrl(entry);
   const description = entry.server.description?.trim();
   const category = serverCategory(entry);
+  const hubHref = hubServerHref(entry);
 
   return (
-    <button
-      className="flex min-h-48 w-full flex-col rounded-md border bg-white p-4 text-left transition-colors hover:border-primary/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onSelect}
-      type="button"
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
-          {iconUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              alt=""
-              className="size-full object-contain"
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              src={iconUrl}
+    <div className="flex min-h-48 w-full flex-col overflow-hidden rounded-md border bg-white text-left transition-colors hover:border-primary/50 hover:shadow-sm focus-within:ring-2 focus-within:ring-ring">
+      <button
+        className="flex flex-1 flex-col p-4 text-left focus-visible:outline-none"
+        onClick={onSelect}
+        type="button"
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+            {iconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                alt=""
+                className="size-full object-contain"
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                src={iconUrl}
+              />
+            ) : (
+              (entry.server.title || entry.server.name).slice(0, 1).toUpperCase()
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="break-words text-sm font-semibold leading-5 text-foreground">
+              {entry.server.title || entry.server.name}
+            </div>
+            <div className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
+              {category || entry.server.name}
+            </div>
+          </div>
+        </div>
+
+        {description ? (
+          <p className="mt-4 line-clamp-4 text-sm leading-6 text-foreground">
+            {description}
+          </p>
+        ) : (
+          <div className="mt-4 text-sm leading-6 text-muted-foreground">
+            No description provided.
+          </div>
+        )}
+
+        <div className="mt-auto pt-4">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">Quality score</span>
+            <span className="font-semibold text-foreground">
+              {score === null ? "Pending" : `${score}/100`}
+            </span>
+          </div>
+          <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full rounded-full ${qualityScoreTone(score)}`}
+              style={{ width: `${qualityScorePercent(score)}%` }}
             />
-          ) : (
-            (entry.server.title || entry.server.name).slice(0, 1).toUpperCase()
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="break-words text-sm font-semibold leading-5 text-foreground">
-            {entry.server.title || entry.server.name}
-          </div>
-          <div className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
-            {category || entry.server.name}
           </div>
         </div>
-      </div>
+      </button>
 
-      {description ? (
-        <p className="mt-4 line-clamp-4 text-sm leading-6 text-foreground">
-          {description}
-        </p>
-      ) : (
-        <div className="mt-4 text-sm leading-6 text-muted-foreground">
-          No description provided.
+      {hubHref ? (
+        <div className="border-t bg-muted/20 px-4 py-2.5">
+          <a
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href={hubHref}
+            rel="noreferrer"
+            target="_blank"
+          >
+            View in Hub
+            <ExternalLink className="size-3.5" />
+          </a>
         </div>
-      )}
-
-      <div className="mt-auto pt-4">
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-muted-foreground">Quality score</span>
-          <span className="font-semibold text-foreground">
-            {score === null ? "Pending" : `${score}/100`}
-          </span>
-        </div>
-        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full ${qualityScoreTone(score)}`}
-            style={{ width: `${qualityScorePercent(score)}%` }}
-          />
-        </div>
-      </div>
-    </button>
+      ) : null}
+    </div>
   );
 }
 

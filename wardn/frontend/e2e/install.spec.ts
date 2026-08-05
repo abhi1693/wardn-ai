@@ -44,10 +44,16 @@ test.describe("MCP install runtime selection", () => {
     await authenticate(page.context(), baseURL ?? "");
     await page.goto(`/org/${organizationId}/workspace/${workspaceId}/install/new`);
 
-    await expect(page.getByRole("heading", { name: "Add MCP server" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Add Connection" })).toBeVisible();
     const badgeIcon = page.locator('img[src="https://skills.sh/badge/google-search-console.svg"]');
     await expect(badgeIcon).toBeVisible();
     await expect(badgeIcon).toHaveClass(/object-contain/);
+    const hubLink = page.getByRole("link", { name: "View in Hub" });
+    await expect(hubLink).toHaveAttribute(
+      "href",
+      "https://hub.wardnai.dev/servers/io.github.acamolese/google-search-console-mcp"
+    );
+    await expect(hubLink).toHaveAttribute("target", "_blank");
 
     const serverListRequest = (await backendRequests(request)).find(
       (entry) =>
@@ -72,7 +78,7 @@ test.describe("MCP install runtime selection", () => {
       )}&version=1.0.0`
     );
 
-    await expect(page.getByRole("heading", { name: "Add MCP server" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Add Connection" })).toBeVisible();
     await expect(page.getByRole("link", { name: serverName })).toHaveAttribute(
       "href",
       "https://hub.wardnai.dev/servers/io.github.acamolese/google-search-console-mcp"

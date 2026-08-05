@@ -699,6 +699,7 @@ async function handle(request) {
     return json({
       installations: state.installations,
       metadata: { count: state.installations.length, nextCursor: "" },
+      packageRuntimeProvider: "local",
     });
   }
 
