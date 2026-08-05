@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -30,6 +30,7 @@ from app.modules.agents.schemas import (
 from app.modules.agents.service import (
     approve_workspace_skill,
     assign_workspace_skill_agents,
+    complete_agent_tool_approval_background,
     decide_agent_tool_approval,
     get_agent,
     get_agent_tool_approval,
@@ -517,9 +518,20 @@ async def decide_workspace_agent_tool_approval_route(
     agent_id: UUID,
     approval_id: UUID,
     payload: AgentToolApprovalDecisionRequest,
+    background_tasks: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentToolApprovalDecisionResponse:
+    def schedule_completion(scheduled_approval_id: UUID) -> None:
+        background_tasks.add_task(
+            complete_agent_tool_approval_background,
+            organization_id,
+            workspace_id,
+            agent_id,
+            scheduled_approval_id,
+            current_user.id,
+        )
+
     return await decide_agent_tool_approval(
         session,
         current_user,
@@ -528,4 +540,5 @@ async def decide_workspace_agent_tool_approval_route(
         agent_id,
         approval_id,
         payload,
+        schedule_completion=schedule_completion,
     )

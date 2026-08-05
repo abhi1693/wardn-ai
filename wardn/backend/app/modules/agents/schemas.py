@@ -148,6 +148,7 @@ class AgentToolApprovalDecisionResponse(APIModel):
     result: str = ""
     error: str = ""
     assistant_message: ConversationMessageRead | None = None
+    expires_at: datetime | None = None
 
 
 class AgentToolApprovalRead(APIModel):
@@ -167,6 +168,7 @@ class AgentToolApprovalRead(APIModel):
     status: str
     result: str = ""
     error: str = ""
+    expires_at: datetime | None = None
     approval_url: str
     action_review: dict[str, Any] | None = None
     created_at: datetime

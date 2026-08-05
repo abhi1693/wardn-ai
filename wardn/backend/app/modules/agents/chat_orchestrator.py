@@ -107,6 +107,7 @@ from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 DENIED_MCP_TOOL_MATCH_LIMIT = 5
+CHATGPT_CODEX_WEBSOCKET_REQUEST_ATTEMPTS = 2
 MCP_REQUEST_ACTION_WORDS = {
     "call",
     "check",
@@ -937,125 +938,127 @@ async def stream_chatgpt_codex_response_text(
 ) -> AsyncGenerator[AgentChatStreamEvent, None]:
     guardrail_filter = agent_guardrail_filter_from_tools(tools)
     try:
-        async with websocket_connect(
-            CHATGPT_CODEX_RESPONSES_WS_URL,
-            additional_headers=headers,
-            user_agent_header=CODEX_COMPAT_USER_AGENT,
-            open_timeout=30.0,
-            ping_interval=20.0,
-            ping_timeout=20.0,
-            max_size=None,
-        ) as websocket:
-            previous_response_id = None
-            input_items = chatgpt_codex_messages(messages)
-            approved_skill_context = await agent_approved_skill_context(
-                session_factory=session_factory,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                agent=agent,
-            )
-            skill_tools = agent_skill_function_tools(
-                agent.skill_ids or [],
-                approved_skills=approved_skill_context,
-            )
-            function_tools = agent_dynamic_function_tools(
-                guardrail_filter,
-                skill_tools=skill_tools,
-            )
-            runtime_instructions = agent_runtime_instructions(
+        previous_response_id = None
+        input_items = chatgpt_codex_messages(messages)
+        approved_skill_context = await agent_approved_skill_context(
+            session_factory=session_factory,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent=agent,
+        )
+        skill_tools = agent_skill_function_tools(
+            agent.skill_ids or [],
+            approved_skills=approved_skill_context,
+        )
+        function_tools = agent_dynamic_function_tools(
+            guardrail_filter,
+            skill_tools=skill_tools,
+        )
+        runtime_instructions = agent_runtime_instructions(
+            agent,
+            skill_tools=skill_tools,
+            approved_skill_context=approved_skill_context,
+            agent_run=agent_run,
+        )
+        latest_user = latest_user_message(messages)
+        latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
+        max_tool_rounds = await agent_chat_max_tool_rounds(
+            session_factory=session_factory,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+        response_timeout_seconds = agent_chat_websocket_response_timeout_seconds()
+
+        for _round_index in range(max_tool_rounds):
+            body = chatgpt_codex_request_body(
                 agent,
-                skill_tools=skill_tools,
-                approved_skill_context=approved_skill_context,
-                agent_run=agent_run,
+                input_items=input_items,
+                tools=function_tools,
+                previous_response_id=previous_response_id,
+                instructions=runtime_instructions,
             )
-            latest_user = latest_user_message(messages)
-            latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
-            max_tool_rounds = await agent_chat_max_tool_rounds(
-                session_factory=session_factory,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-            )
-            response_timeout_seconds = agent_chat_websocket_response_timeout_seconds()
-
-            for _round_index in range(max_tool_rounds):
-                body = chatgpt_codex_request_body(
-                    agent,
-                    input_items=input_items,
-                    tools=function_tools,
-                    previous_response_id=previous_response_id,
-                    instructions=runtime_instructions,
+            call_started_at = datetime.now(UTC)
+            call_usage: observability_service.LLMTokenUsage | None = None
+            tool_calls: list[AgentToolCall] = []
+            reasoning_summaries: set[str] = set()
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await require_agent_llm_budget_available(
+                    session,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
                 )
-                call_started_at = datetime.now(UTC)
-                call_usage: observability_service.LLMTokenUsage | None = None
-                tool_calls: list[AgentToolCall] = []
-                reasoning_summaries: set[str] = set()
-                async with agent_stream_unit_of_work(session_factory) as session:
-                    await require_agent_llm_budget_available(
-                        session,
-                        agent=agent,
-                        user=user,
-                        organization_id=organization_id,
-                        workspace_id=workspace_id,
-                    )
 
-                try:
-                    await websocket.send(json.dumps(body, separators=(",", ":")))
-                    while True:
-                        raw_message = await receive_chatgpt_codex_websocket_message(
-                            websocket,
+            try:
+                for attempt in range(CHATGPT_CODEX_WEBSOCKET_REQUEST_ATTEMPTS):
+                    round_had_output = False
+                    try:
+                        async for payload in stream_chatgpt_codex_response_payloads(
+                            headers=headers,
+                            body=body,
                             timeout_seconds=response_timeout_seconds,
-                        )
-                        if isinstance(raw_message, bytes):
-                            raw_message = raw_message.decode("utf-8", errors="replace")
-                        try:
-                            payload = json.loads(raw_message)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(payload, dict):
-                            continue
-                        error_message = websocket_error_message(payload)
-                        if error_message:
-                            status = payload.get("status") or payload.get("status_code")
-                            status_code = status if isinstance(status, int) else 502
-                            raise AgentChatProviderError(
-                                f"LLM provider returned HTTP {status_code}: {error_message}",
-                                status_code=status_code,
+                        ):
+                            error_message = websocket_error_message(payload)
+                            if error_message:
+                                status = payload.get("status") or payload.get("status_code")
+                                status_code = status if isinstance(status, int) else 502
+                                raise AgentChatProviderError(
+                                    (
+                                        f"LLM provider returned HTTP {status_code}: "
+                                        f"{error_message}"
+                                    ),
+                                    status_code=status_code,
+                                )
+                            usage = llm_usage_from_completed_event(payload)
+                            if usage is not None:
+                                call_usage = usage
+                            for summary in reasoning_summaries_from_openai_event(payload):
+                                if summary in reasoning_summaries:
+                                    continue
+                                round_had_output = True
+                                reasoning_summaries.add(summary)
+                                yield AgentChatReasoningSummaryEvent(summary=summary)
+                            text = text_delta_from_openai_event(payload)
+                            if text:
+                                round_had_output = True
+                                yield AgentChatTextEvent(text=text)
+                            new_tool_calls = tool_calls_from_event(payload)
+                            if new_tool_calls:
+                                round_had_output = True
+                                tool_calls.extend(new_tool_calls)
+                            response_id = response_id_from_event(payload)
+                            if response_id:
+                                previous_response_id = response_id
+                        break
+                    except WebSocketException:
+                        if (
+                            attempt + 1 < CHATGPT_CODEX_WEBSOCKET_REQUEST_ATTEMPTS
+                            and not round_had_output
+                        ):
+                            logger.warning(
+                                "Retrying ChatGPT Codex websocket after clean round drop.",
+                                extra={
+                                    "organization_id": str(organization_id)
+                                    if organization_id
+                                    else None,
+                                    "workspace_id": str(workspace_id)
+                                    if workspace_id
+                                    else None,
+                                    "agent_id": str(agent.id),
+                                    "agent_run_id": str(agent_run.id) if agent_run else None,
+                                    "user_id": str(user.id) if user else None,
+                                    "agent_scope": agent.scope,
+                                    "attempt": attempt + 1,
+                                    "max_attempts": CHATGPT_CODEX_WEBSOCKET_REQUEST_ATTEMPTS,
+                                },
                             )
-                        usage = llm_usage_from_completed_event(payload)
-                        if usage is not None:
-                            call_usage = usage
-                        for summary in reasoning_summaries_from_openai_event(payload):
-                            if summary in reasoning_summaries:
-                                continue
-                            reasoning_summaries.add(summary)
-                            yield AgentChatReasoningSummaryEvent(summary=summary)
-                        text = text_delta_from_openai_event(payload)
-                        if text:
-                            yield AgentChatTextEvent(text=text)
-                        tool_calls.extend(tool_calls_from_event(payload))
-                        response_id = response_id_from_event(payload)
-                        if response_id:
-                            previous_response_id = response_id
-                        if payload.get("type") == "response.completed":
-                            break
-                except Exception as exc:
-                    async with agent_stream_unit_of_work(session_factory) as session:
-                        await record_agent_llm_usage(
-                            session,
-                            credential=credential,
-                            agent=agent,
-                            user=user,
-                            organization_id=organization_id,
-                            workspace_id=workspace_id,
-                            agent_run=agent_run,
-                            usage=call_usage,
-                            started_at=call_started_at,
-                            finished_at=datetime.now(UTC),
-                            status="failed",
-                            error=str(exc),
-                        )
-                    raise
-
+                            call_usage = None
+                            tool_calls = []
+                            reasoning_summaries = set()
+                            continue
+                        raise
+            except Exception as exc:
                 async with agent_stream_unit_of_work(session_factory) as session:
                     await record_agent_llm_usage(
                         session,
@@ -1068,52 +1071,69 @@ async def stream_chatgpt_codex_response_text(
                         usage=call_usage,
                         started_at=call_started_at,
                         finished_at=datetime.now(UTC),
-                        status="succeeded",
+                        status="failed",
+                        error=str(exc),
                     )
+                raise
 
-                if not tool_calls:
-                    return
-
-                input_items = []
-                for tool_call in tool_calls:
-                    execution: AgentToolExecutionResult | None = None
-                    async for event in execute_agent_model_tool_call_stream(
-                        guardrail_filter,
-                        tool_call,
-                        agent=agent,
-                        session_factory=session_factory,
-                        user=user,
-                        organization_id=organization_id,
-                        workspace_id=workspace_id,
-                        conversation=conversation,
-                        agent_run=agent_run,
-                        request_meta={"userMessage": latest_user_text},
-                    ):
-                        if isinstance(event, AgentToolExecutionResult):
-                            execution = event
-                        else:
-                            yield event
-                    if execution is None:
-                        execution = tool_execution_result(
-                            tool_call.name,
-                            f"Tool {tool_call.name} failed: no tool result was returned",
-                        )
-                    if execution.status == "requires_confirmation":
-                        return
-                    input_items.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": tool_call.call_id,
-                            "output": execution.output,
-                        }
-                    )
-
-            yield AgentChatTextEvent(
-                text=(
-                    "\n\nStopped after reaching the configured tool call limit "
-                    f"({max_tool_rounds})."
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await record_agent_llm_usage(
+                    session,
+                    credential=credential,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run=agent_run,
+                    usage=call_usage,
+                    started_at=call_started_at,
+                    finished_at=datetime.now(UTC),
+                    status="succeeded",
                 )
+
+            if not tool_calls:
+                return
+
+            input_items = []
+            for tool_call in tool_calls:
+                execution: AgentToolExecutionResult | None = None
+                async for event in execute_agent_model_tool_call_stream(
+                    guardrail_filter,
+                    tool_call,
+                    agent=agent,
+                    session_factory=session_factory,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    conversation=conversation,
+                    agent_run=agent_run,
+                    request_meta={"userMessage": latest_user_text},
+                ):
+                    if isinstance(event, AgentToolExecutionResult):
+                        execution = event
+                    else:
+                        yield event
+                if execution is None:
+                    execution = tool_execution_result(
+                        tool_call.name,
+                        f"Tool {tool_call.name} failed: no tool result was returned",
+                    )
+                if execution.status == "requires_confirmation":
+                    return
+                input_items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": tool_call.call_id,
+                        "output": execution.output,
+                    }
+                )
+
+        yield AgentChatTextEvent(
+            text=(
+                "\n\nStopped after reaching the configured tool call limit "
+                f"({max_tool_rounds})."
             )
+        )
     except AgentChatProviderError:
         raise
     except InvalidStatus as exc:
@@ -1128,6 +1148,47 @@ async def stream_chatgpt_codex_response_text(
         raise AgentChatProviderError(f"LLM provider websocket failed: {exc}") from exc
     except TimeoutError as exc:
         raise AgentChatProviderError("LLM provider websocket timed out") from exc
+
+
+async def stream_chatgpt_codex_response_payloads(
+    *,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    timeout_seconds: float,
+) -> AsyncGenerator[dict[str, Any], None]:
+    completed = False
+    try:
+        async with websocket_connect(
+            CHATGPT_CODEX_RESPONSES_WS_URL,
+            additional_headers=headers,
+            user_agent_header=CODEX_COMPAT_USER_AGENT,
+            open_timeout=30.0,
+            ping_interval=20.0,
+            ping_timeout=20.0,
+            max_size=None,
+        ) as websocket:
+            await websocket.send(json.dumps(body, separators=(",", ":")))
+            while True:
+                raw_message = await receive_chatgpt_codex_websocket_message(
+                    websocket,
+                    timeout_seconds=timeout_seconds,
+                )
+                if isinstance(raw_message, bytes):
+                    raw_message = raw_message.decode("utf-8", errors="replace")
+                try:
+                    payload = json.loads(raw_message)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                yield payload
+                if payload.get("type") == "response.completed":
+                    completed = True
+                    break
+    except WebSocketException:
+        if completed:
+            return
+        raise
 
 
 def agent_chat_websocket_response_timeout_seconds() -> float:

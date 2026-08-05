@@ -997,7 +997,7 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
         error="",
     )
-    captured = {}
+    captured = {"notifications": []}
 
     async def get_task(*args, **kwargs):
         return task
@@ -1027,11 +1027,26 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         return True
 
     async def dispatch_task_run_notifications(*args, **kwargs):
-        captured["notification_status"] = kwargs["status"]
-        captured["notification_summary"] = kwargs["delivery_summary"]
+        captured["notifications"].append(kwargs["status"])
+        if kwargs["status"] == "waiting_confirmation":
+            captured["notification_summary"] = kwargs["delivery_summary"]
 
     async def deliver_task_run_output(*args, **kwargs):
-        raise AssertionError("waiting approvals should not use output delivery")
+        captured["delivered_after_approval"] = True
+        return {
+            "total": 1,
+            "sent": 1,
+            "failed": 0,
+            "outputKind": "assistant",
+            "hasOutput": True,
+            "outputHash": "hash",
+            "outputPreview": "Approved result",
+        }
+
+    async def wait_for_task_run_approval(*args, **kwargs):
+        captured["waited_for_approval"] = kwargs["approval_id"]
+        agent_run.status = "succeeded"
+        return "succeeded", ""
 
     monkeypatch.setattr(service.repository, "get_task", get_task)
     monkeypatch.setattr(service, "resolve_task_actor", resolve_task_actor)
@@ -1044,6 +1059,7 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         dispatch_task_run_notifications,
     )
     monkeypatch.setattr(service, "deliver_task_run_output", deliver_task_run_output)
+    monkeypatch.setattr(service, "wait_for_task_run_approval", wait_for_task_run_approval)
 
     session = FakeExecutionSession(agent_run)
     await service.execute_claimed_task_run(
@@ -1053,8 +1069,11 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         session_factory=object(),
     )
 
-    assert captured["status"] == "waiting_confirmation"
-    assert captured["delivery_summary"] == {
+    assert session.commits == 2
+    assert captured["waited_for_approval"] == approval_id
+    assert captured["delivered_after_approval"] is True
+    assert captured["status"] == "succeeded"
+    assert captured["notification_summary"] == {
         "total": 0,
         "sent": 0,
         "failed": 0,
@@ -1064,4 +1083,13 @@ async def test_execute_claimed_task_run_routes_waiting_approval_notifications(
         "outputPreview": "Open approval: https://ai.home/approval",
         "approvalId": str(approval_id),
     }
-    assert captured["notification_status"] == "waiting_confirmation"
+    assert captured["delivery_summary"] == {
+        "total": 1,
+        "sent": 1,
+        "failed": 0,
+        "outputKind": "assistant",
+        "hasOutput": True,
+        "outputHash": "hash",
+        "outputPreview": "Approved result",
+    }
+    assert captured["notifications"] == ["waiting_confirmation", "succeeded"]

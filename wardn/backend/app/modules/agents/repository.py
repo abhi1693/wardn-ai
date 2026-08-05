@@ -476,6 +476,18 @@ async def create_agent_run(
     return agent_run
 
 
+async def mark_agent_run_running(
+    session: AsyncSession,
+    agent_run: AgentRun,
+) -> AgentRun:
+    agent_run.status = "running"
+    agent_run.error = ""
+    agent_run.finished_at = None
+    await session.flush()
+    await session.refresh(agent_run)
+    return agent_run
+
+
 async def append_agent_run_step(
     session: AsyncSession,
     *,
@@ -525,6 +537,7 @@ async def create_tool_approval(
     tool_call_id: str,
     tool_name: str,
     arguments: dict,
+    expires_at: datetime | None = None,
 ) -> AgentToolApproval:
     approval = AgentToolApproval(
         organization_id=organization_id,
@@ -542,6 +555,7 @@ async def create_tool_approval(
         status="pending",
         result="",
         error="",
+        expires_at=expires_at,
     )
     session.add(approval)
     await session.flush()

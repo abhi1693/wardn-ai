@@ -1357,6 +1357,18 @@
             "title": "Error",
             "type": "string"
           },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
           "result": {
             "default": "",
             "title": "Result",
@@ -1452,6 +1464,18 @@
             "default": "",
             "title": "Error",
             "type": "string"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
           },
           "id": {
             "format": "uuid",

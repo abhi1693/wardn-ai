@@ -1275,6 +1275,184 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        requested_by_id=user.id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="search_repositories",
+        arguments={"query": "wardn"},
+        status="pending",
+        result="",
+        error="",
+    )
+    agent_run = AgentRun(
+        id=approval.agent_run_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=approval.conversation_id,
+        triggered_by_id=user.id,
+        trigger_type="chat",
+        status="waiting_confirmation",
+        started_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+    captured: dict[str, object] = {}
+    scheduled: list[object] = []
+
+    async def require_workspace_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise AssertionError("scheduled approval should not execute inline")
+
+    async def append_agent_run_step(*args, **kwargs):
+        captured["step_status"] = kwargs["status"]
+
+    async def update_conversation_tool_activity(*args, **kwargs):
+        captured["activity_update"] = kwargs["data_update"]
+        return True
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    def schedule_completion(approval_id):
+        scheduled.append(approval_id)
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_approvals,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+    monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        agent_service.repository,
+        "update_conversation_tool_activity",
+        update_conversation_tool_activity,
+    )
+    monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
+
+    response = await agent_approvals.decide_agent_tool_approval(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        approval.id,
+        AgentToolApprovalDecisionRequest(decision="approve"),
+        schedule_completion=schedule_completion,
+    )
+
+    assert scheduled == [approval.id]
+    assert captured["step_status"] == "running"
+    assert captured["activity_update"] == {"status": "running"}
+    assert agent_run.status == "running"
+    assert agent_run.finished_at is None
+    assert approval.status == "running"
+    assert response.status == "running"
+    assert response.result == ""
+
+
+@pytest.mark.asyncio
+async def test_approve_agent_tool_approval_expires_late_decision(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        agent_run_id=None,
+        requested_by_id=user.id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="search_repositories",
+        arguments={"query": "wardn"},
+        status="pending",
+        result="",
+        error="",
+        expires_at=datetime(2026, 7, 5, 7, 59, tzinfo=UTC),
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        raise AssertionError("expired approval should not execute")
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_approvals,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+
+    response = await agent_approvals.decide_agent_tool_approval(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        approval.id,
+        AgentToolApprovalDecisionRequest(decision="approve"),
+    )
+
+    assert approval.status == "expired"
+    assert response.status == "expired"
+    assert response.error == agent_approvals.APPROVAL_EXPIRED_ERROR
+
+
+@pytest.mark.asyncio
 async def test_persisted_chat_stream_leaves_confirmation_run_waiting(monkeypatch) -> None:
     organization_id = uuid4()
     workspace_id = uuid4()

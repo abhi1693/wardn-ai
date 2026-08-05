@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     scheduled_task_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
     scheduled_task_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     scheduled_task_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
+    agent_tool_approval_expiry_seconds: int = Field(default=24 * 60 * 60, ge=60, le=2_592_000)
     agent_chat_websocket_response_timeout_seconds: float = Field(
         default=120.0,
         gt=0,

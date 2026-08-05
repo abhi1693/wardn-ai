@@ -362,6 +362,11 @@ class AgentToolApproval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
     result: Mapped[str] = mapped_column(Text, default="", nullable=False)
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
 
 
 class AgentMCPServerAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

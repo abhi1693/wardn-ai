@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agents import repository
+from app.modules.agents.approval_expiry import new_agent_tool_approval_expires_at
 from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.conversations import AgentSessionFactory, agent_stream_unit_of_work
 from app.modules.agents.mappers import sanitize_run_payload
@@ -143,6 +144,7 @@ async def _execute_agent_tool_call(
                 tool_call_id=tool_call.call_id,
                 tool_name=tool.tool_schema.tool_name,
                 arguments=tool_call.arguments,
+                expires_at=new_agent_tool_approval_expires_at(),
             )
             return tool_execution_result(
                 tool.tool_schema.tool_name,
@@ -275,6 +277,7 @@ def tool_approval_payload(approval: AgentToolApproval, tool: AgentRuntimeTool) -
         "installationId": str(tool.installation.id),
         "toolSchemaId": str(tool.tool_schema.id),
         "toolName": tool.tool_schema.tool_name,
+        "expiresAt": approval.expires_at.isoformat() if approval.expires_at else "",
         "approvalUrl": agent_tool_approval_url(
             organization_id=approval.organization_id,
             workspace_id=approval.workspace_id,

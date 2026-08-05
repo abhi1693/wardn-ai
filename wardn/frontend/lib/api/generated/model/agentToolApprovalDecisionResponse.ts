@@ -10,6 +10,7 @@ export interface AgentToolApprovalDecisionResponse {
   approvalId: string;
   assistantMessage?: ConversationMessageRead | null;
   error?: string;
+  expiresAt?: string | null;
   result?: string;
   status: string;
   toolName: string;

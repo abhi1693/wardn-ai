@@ -3159,6 +3159,174 @@ async def test_stream_chatgpt_codex_exposes_dynamic_tools_instead_of_concrete_mc
 
 
 @pytest.mark.asyncio
+async def test_stream_chatgpt_codex_retries_round_websocket_drop_after_tool_result(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="ChatGPT",
+        provider=service.OPENAI_CHATGPT_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="oauth",
+        oauth_provider="chatgpt",
+        oauth_metadata={"accountId": "account-1"},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+    usage_statuses: list[str] = []
+    runtime_calls: list[dict] = []
+    websocket_attempts = 0
+
+    class FakeWebSocket:
+        def __init__(self, messages: list[dict] | None = None, *, fail_before_output: bool = False):
+            self.messages = [json.dumps(message) for message in (messages or [])]
+            self.fail_before_output = fail_before_output
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            sent_bodies.append(json.loads(message))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.fail_before_output:
+                raise chat_orchestrator.WebSocketException(
+                    "no close frame received or sent"
+                )
+            if not self.messages:
+                raise StopAsyncIteration
+            return self.messages.pop(0)
+
+    def websocket_connect(*args, **kwargs):
+        nonlocal websocket_attempts
+        websocket_attempts += 1
+        if websocket_attempts == 1:
+            return FakeWebSocket(
+                [
+                    {
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "function_call",
+                            "name": service.AGENT_RUN_TOOL_TOOL_NAME,
+                            "call_id": "call_1",
+                            "arguments": json.dumps(
+                                {
+                                    "tool_name": "namespace_list",
+                                    "configured_target": "rancher-qa-omsllc",
+                                    "tool_args": {},
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp_1",
+                            "usage": {"input_tokens": 1, "output_tokens": 1},
+                        },
+                    },
+                ]
+            )
+        if websocket_attempts == 2:
+            return FakeWebSocket(fail_before_output=True)
+        return FakeWebSocket(
+            [
+                {"type": "response.output_text.delta", "delta": "done"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_2",
+                        "usage": {"input_tokens": 1, "output_tokens": 1},
+                    },
+                },
+            ]
+        )
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        usage_statuses.append(kwargs["status"])
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        runtime_calls.append(kwargs)
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(chat_orchestrator, "websocket_connect", websocket_connect)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in service.stream_chatgpt_codex_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"Authorization": "Bearer token"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "list namespaces in rancher-qa"}],
+                )
+            ],
+            tools={runtime_tool.wire_name: runtime_tool},
+        )
+    ]
+
+    text_events = [event.text for event in events if isinstance(event, service.AgentChatTextEvent)]
+    assert text_events == ["done"]
+    assert len(sent_bodies) == 3
+    assert sent_bodies[1]["input"] == sent_bodies[2]["input"]
+    assert sent_bodies[1]["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "namespace data",
+        }
+    ]
+    assert len(runtime_calls) == 1
+    assert runtime_calls[0]["tool_name"] == "namespace_list"
+    assert usage_statuses == ["succeeded", "succeeded"]
+
+
+@pytest.mark.asyncio
 async def test_stream_chatgpt_codex_times_out_when_provider_stalls(
     monkeypatch,
 ) -> None:

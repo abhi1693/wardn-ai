@@ -15,6 +15,9 @@ from app.modules.agents.approvals import (
     approval_continuation_prompt as approval_continuation_prompt,
 )
 from app.modules.agents.approvals import (
+    complete_agent_tool_approval_background as complete_agent_tool_approval_background,
+)
+from app.modules.agents.approvals import (
     conversation_message_to_chat_message as conversation_message_to_chat_message,
 )
 from app.modules.agents.approvals import (

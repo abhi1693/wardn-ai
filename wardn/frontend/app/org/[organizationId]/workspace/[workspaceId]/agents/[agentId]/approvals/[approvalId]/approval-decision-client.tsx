@@ -9,7 +9,7 @@ import {
   ShieldOff,
   Wrench,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,10 @@ import type {
   AgentToolApprovalDecisionResponse,
   AgentToolApprovalRead,
 } from "@/lib/api/generated/model";
-import { workspaceAgentsDecideToolApproval } from "@/lib/api/generated/workspace-agents/workspace-agents";
+import {
+  workspaceAgentsDecideToolApproval,
+  workspaceAgentsGetToolApproval,
+} from "@/lib/api/generated/workspace-agents/workspace-agents";
 import { apiErrorMessage } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -75,7 +78,7 @@ function statusVariant(status: string) {
   if (status === "completed") {
     return "success" as const;
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "expired") {
     return "destructive" as const;
   }
   if (status === "pending" || status === "running") {
@@ -88,8 +91,17 @@ function statusLabel(status: string) {
   if (status === "pending") {
     return "Needs approval";
   }
+  if (status === "running") {
+    return "Running";
+  }
   if (status === "completed") {
     return "Approved";
+  }
+  if (status === "denied") {
+    return "Denied";
+  }
+  if (status === "expired") {
+    return "Expired";
   }
   return status.replace(/_/g, " ");
 }
@@ -202,6 +214,7 @@ export function ApprovalDecisionClient({
   const [status, setStatus] = useState(initialApproval.status);
   const [result, setResult] = useState(initialApproval.result ?? "");
   const [error, setError] = useState(initialApproval.error ?? "");
+  const [expiresAt, setExpiresAt] = useState(initialApproval.expiresAt ?? "");
   const [inFlightDecision, setInFlightDecision] = useState<Decision | "">("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [decisionResponse, setDecisionResponse] =
@@ -211,12 +224,64 @@ export function ApprovalDecisionClient({
     [initialApproval.arguments]
   );
   const isPending = status === "pending";
+  const isRunning = status === "running";
   const actionTitle =
     status === "pending"
       ? "Review the requested tool call"
+      : status === "running"
+        ? "Approved tool call is running"
       : status === "completed"
         ? "Approval completed"
         : "Approval closed";
+
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const approval = await workspaceAgentsGetToolApproval(
+          organizationId,
+          workspaceId,
+          agentId,
+          approvalId,
+          { timeoutMs: 10_000 }
+        );
+        if (cancelled) {
+          return;
+        }
+        setStatus(approval.status);
+        setResult(approval.result ?? "");
+        setError(approval.error ?? "");
+        setExpiresAt(approval.expiresAt ?? "");
+        if (approval.status === "running") {
+          setFeedback({
+            message: "Approved. The tool call is still running...",
+            variant: "progress",
+          });
+        } else if (approval.status === "completed") {
+          setFeedback({
+            message: "Tool call approved and completed.",
+            variant: "success",
+          });
+        } else if (approval.status === "failed") {
+          setFeedback({
+            message: approval.error || "The approved tool call failed.",
+            variant: "error",
+          });
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setFeedback({ message: errorMessage(caught), variant: "error" });
+        }
+      }
+    }, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [agentId, approvalId, isRunning, organizationId, workspaceId]);
 
   async function decide(decision: Decision) {
     setInFlightDecision(decision);
@@ -236,10 +301,13 @@ export function ApprovalDecisionClient({
       setStatus(response.status);
       setResult(response.result ?? "");
       setError(response.error ?? "");
+      setExpiresAt(response.expiresAt ?? "");
       setFeedback({
         message:
           response.status === "completed"
             ? "Tool call approved and completed."
+            : response.status === "running"
+              ? "Approved. The tool call is running..."
             : response.status === "denied"
               ? "Tool call denied."
               : `Approval is now ${statusLabel(response.status)}.`,
@@ -285,7 +353,7 @@ export function ApprovalDecisionClient({
         </div>
 
         <div className="grid gap-5 px-5 py-5">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
               <div className="text-xs text-muted-foreground">Tool</div>
               <div className="mt-1 truncate font-mono text-sm">{initialApproval.toolName}</div>
@@ -300,6 +368,10 @@ export function ApprovalDecisionClient({
             <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
               <div className="text-xs text-muted-foreground">Last updated</div>
               <div className="mt-1 text-sm">{formatDate(initialApproval.updatedAt)}</div>
+            </div>
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+              <div className="text-xs text-muted-foreground">Expires</div>
+              <div className="mt-1 text-sm">{formatDate(expiresAt)}</div>
             </div>
           </div>
 
@@ -334,6 +406,11 @@ export function ApprovalDecisionClient({
                 )}
                 Deny
               </Button>
+            </div>
+          ) : isRunning ? (
+            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              The approval was accepted. Wardn is running the stored tool call and this page
+              will update automatically.
             </div>
           ) : (
             <div

@@ -17,6 +17,7 @@ export interface AgentToolApprovalRead {
   createdAt: string;
   decidedById?: string | null;
   error?: string;
+  expiresAt?: string | null;
   id: string;
   installationId: string;
   organizationId: string;
