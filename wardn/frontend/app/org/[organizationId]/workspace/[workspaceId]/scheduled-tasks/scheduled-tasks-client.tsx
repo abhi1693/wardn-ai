@@ -171,8 +171,22 @@ const schedulePresets: { label: string; type: ScheduleEntryType; icon: typeof Cl
   { label: "Cron", type: "cron", icon: Clock3 },
 ];
 
+const timezoneOptions = [
+  "Asia/Kolkata",
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Berlin",
+  "Asia/Dubai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
 const editorSections = [
-  { id: "basics", icon: Pencil, label: "Basics" },
   { id: "instructions", icon: MessageSquare, label: "Instructions" },
   { id: "schedule", icon: CalendarClock, label: "Schedule" },
   { id: "outputs", icon: Route, label: "Outputs" },
@@ -970,7 +984,7 @@ export function ScheduledTaskFormClient({
     null
   );
   const [routeTests, setRouteTests] = useState<Record<string, RouteTestState>>({});
-  const [activeSection, setActiveSection] = useState<EditorSectionId>("schedule");
+  const [activeSection, setActiveSection] = useState<EditorSectionId>("instructions");
   const [activeScheduleKey, setActiveScheduleKey] = useState<string | null>(
     () => form.schedules[0]?.key ?? null
   );
@@ -1267,24 +1281,28 @@ export function ScheduledTaskFormClient({
       : null,
   ].filter((issue): issue is string => Boolean(issue));
   const sectionSummaries = {
-    basics: form.name.trim() || "Name required",
     instructions: form.instructions.trim()
-      ? `${metricValue(form.instructions.trim().length)} chars`
-      : "Required",
+      ? `${form.name.trim() || "Unnamed"} · ${metricValue(form.instructions.trim().length)} chars`
+      : `${form.name.trim() || "Unnamed"} · instructions required`,
     monitoring: form.monitoringConfig.enabled ? "Watch mode on" : "Standard run",
     notifications: `${activeNotificationCount} rules`,
     outputs: selectedOutputLabels.length
       ? `${selectedOutputLabels.length} destination${selectedOutputLabels.length === 1 ? "" : "s"}`
       : "No destination",
-    review: validationIssues.length ? `${validationIssues.length} issue${validationIssues.length === 1 ? "" : "s"}` : "Ready",
+    review: validationIssues.length
+      ? `${validationIssues.length} issue${validationIssues.length === 1 ? "" : "s"}`
+      : "Ready",
     schedule:
       form.schedules.length > 0
         ? `${form.schedules.length} execution${form.schedules.length === 1 ? "" : "s"}`
         : "Manual",
   };
   const sectionComplete = {
-    basics: Boolean(form.name.trim()) && Number.isInteger(maxAttemptsValue) && maxAttemptsValue > 0,
-    instructions: Boolean(form.instructions.trim()),
+    instructions:
+      Boolean(form.name.trim()) &&
+      Boolean(form.instructions.trim()) &&
+      Number.isInteger(maxAttemptsValue) &&
+      maxAttemptsValue > 0,
     monitoring: true,
     notifications: activeNotificationCount > 0,
     outputs: form.selectedRoutes.length > 0 && failedRouteTests.length === 0,
@@ -1298,12 +1316,10 @@ export function ScheduledTaskFormClient({
   const activeScheduleIndex = activeSchedule
     ? form.schedules.findIndex((schedule) => schedule.key === activeSchedule.key)
     : -1;
-  const showSummaryRail = activeSection === "schedule" || activeSection === "review";
-  const showRunPreview = showSummaryRail;
   const focusedMainWidth = cn(
-    activeSection === "instructions" || activeSection === "notifications"
-      ? "max-w-6xl"
-      : "max-w-5xl"
+    activeSection === "schedule"
+      ? "max-w-7xl"
+      : "max-w-6xl"
   );
 
   return (
@@ -1413,22 +1429,17 @@ export function ScheduledTaskFormClient({
         <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
       ) : null}
 
-      <div
-        className={cn(
-          "grid gap-4 pt-4",
-          showSummaryRail ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "xl:grid-cols-1"
-        )}
-      >
-        <main className={cn("min-w-0 space-y-4", !showSummaryRail && focusedMainWidth)}>
+      <div className="pt-4">
+        <main className={cn("min-w-0 space-y-4", focusedMainWidth)}>
           <section
-            className={sectionPanelClass(activeSection === "basics" ? undefined : "hidden")}
-            id="task-basics"
+            className={sectionPanelClass(activeSection === "instructions" ? undefined : "hidden")}
+            id="task-instructions"
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Basics</h2>
+                <h2 className="text-sm font-semibold text-slate-950">Instructions</h2>
                 <div className="mt-0.5 text-xs text-slate-500">
-                  Name, state, attempts, and chat history.
+                  Task identity, run behavior, and assistant prompt.
                 </div>
               </div>
               <button
@@ -1446,72 +1457,64 @@ export function ScheduledTaskFormClient({
                 {form.isActive ? "Active" : "Paused"}
               </button>
             </div>
-            <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_260px]">
-              <div className="space-y-2">
-                <Label htmlFor="scheduled-task-name">Task name</Label>
-                <Input
-                  className="bg-white"
-                  id="scheduled-task-name"
-                  maxLength={120}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                  placeholder="Daily SEO report"
-                  required
-                  value={form.name}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-5 p-4">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-max-attempts">Attempts</Label>
+                  <Label htmlFor="scheduled-task-name">Task name</Label>
                   <Input
                     className="bg-white"
-                    id="scheduled-task-max-attempts"
-                    max={10}
-                    min={1}
-                    onChange={(event) => setForm({ ...form, maxAttempts: event.target.value })}
-                    type="number"
-                    value={form.maxAttempts}
+                    id="scheduled-task-name"
+                    maxLength={120}
+                    onChange={(event) => setForm({ ...form, name: event.target.value })}
+                    placeholder="Daily SEO report"
+                    required
+                    value={form.name}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-task-conversation-policy">Chat history</Label>
-                  <Select
-                    onValueChange={(value) =>
-                      setForm({ ...form, conversationPolicy: value as ConversationPolicy })
-                    }
-                    value={form.conversationPolicy}
-                  >
-                    <SelectTrigger className="bg-white" id="scheduled-task-conversation-policy">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="reuse">Reuse</SelectItem>
-                      <SelectItem value="new_each_run">New each run</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="scheduled-task-max-attempts">Attempts</Label>
+                    <Input
+                      className="bg-white"
+                      id="scheduled-task-max-attempts"
+                      max={10}
+                      min={1}
+                      onChange={(event) => setForm({ ...form, maxAttempts: event.target.value })}
+                      type="number"
+                      value={form.maxAttempts}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="scheduled-task-conversation-policy">Chat history</Label>
+                    <Select
+                      onValueChange={(value) =>
+                        setForm({ ...form, conversationPolicy: value as ConversationPolicy })
+                      }
+                      value={form.conversationPolicy}
+                    >
+                      <SelectTrigger className="bg-white" id="scheduled-task-conversation-policy">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="reuse">Reuse</SelectItem>
+                        <SelectItem value="new_each_run">New each run</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
 
-          <section
-            className={sectionPanelClass(activeSection === "instructions" ? undefined : "hidden")}
-            id="task-instructions"
-          >
-            <div className={sectionHeaderClass()}>
-              <h2 className="text-sm font-semibold text-slate-950">Instructions</h2>
-              <div className="mt-0.5 text-xs text-slate-500">
-                The assistant prompt for each scheduled run.
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-task-instructions">Prompt</Label>
+                <textarea
+                  className={fieldTextAreaClass("min-h-[360px] font-sans leading-6")}
+                  id="scheduled-task-instructions"
+                  maxLength={20000}
+                  onChange={(event) => setForm({ ...form, instructions: event.target.value })}
+                  required
+                  value={form.instructions}
+                />
               </div>
-            </div>
-            <div className="p-4">
-              <textarea
-                className={fieldTextAreaClass("min-h-44 font-sans leading-6")}
-                id="scheduled-task-instructions"
-                maxLength={20000}
-                onChange={(event) => setForm({ ...form, instructions: event.target.value })}
-                required
-                value={form.instructions}
-              />
             </div>
           </section>
 
@@ -1528,7 +1531,8 @@ export function ScheduledTaskFormClient({
                 {form.schedules.length === 0 ? "Manual" : `${form.schedules.length} active`}
               </Badge>
             </div>
-            <div className="grid gap-4 p-4">
+            <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="grid min-w-0 gap-4">
               {form.schedules.length > 1 ? (
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {form.schedules.map((schedule, index) => {
@@ -1789,14 +1793,31 @@ export function ScheduledTaskFormClient({
                     <div className="grid gap-4 md:grid-cols-[minmax(220px,280px)_1fr]">
                       <div className="space-y-2">
                         <Label htmlFor={`schedule-timezone-${activeSchedule.key}`}>Timezone</Label>
-                        <Input
-                          className="bg-white"
-                          id={`schedule-timezone-${activeSchedule.key}`}
-                          onChange={(event) =>
-                            updateSchedule(activeSchedule.key, { timezone: event.target.value })
+                        <Select
+                          onValueChange={(value) =>
+                            updateSchedule(activeSchedule.key, { timezone: value })
                           }
                           value={activeSchedule.timezone}
-                        />
+                        >
+                          <SelectTrigger
+                            className="bg-white"
+                            id={`schedule-timezone-${activeSchedule.key}`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {timezoneOptions.includes(activeSchedule.timezone) ? null : (
+                              <SelectItem value={activeSchedule.timezone}>
+                                {activeSchedule.timezone}
+                              </SelectItem>
+                            )}
+                            {timezoneOptions.map((timezone) => (
+                              <SelectItem key={timezone} value={timezone}>
+                                {timezone}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-2">
@@ -1869,6 +1890,83 @@ export function ScheduledTaskFormClient({
                   })}
                 </div>
               </details>
+              </div>
+              <div className="grid gap-4 self-start">
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-semibold uppercase text-slate-500">
+                      Next 5 runs
+                    </div>
+                    <Button
+                      className="h-8 bg-white"
+                      disabled={isPreviewing || !canPreview}
+                      onClick={previewSchedules}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isPreviewing ? (
+                        <RefreshCw className="size-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-3.5" />
+                      )}
+                      Preview
+                    </Button>
+                  </div>
+                  {previewRuns.length > 0 ? (
+                    <div className="mt-3 grid gap-1 text-sm">
+                      {previewRuns.map((run) => (
+                        <div
+                          className="rounded-md bg-white px-2 py-1.5 text-slate-700"
+                          key={run}
+                        >
+                          {formatDate(run)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                      No upcoming runs.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Delivery</div>
+                  <div className="mt-3 grid gap-3 text-sm">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs text-slate-500">Attempts</div>
+                        <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Chat history</div>
+                        <div className="mt-1 font-medium text-slate-900">
+                          {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Outputs</div>
+                      {selectedOutputLabels.length > 0 ? (
+                        <div className="mt-1 grid gap-1">
+                          {selectedOutputLabels.map((label) => (
+                            <div
+                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                              key={label}
+                              title={label}
+                            >
+                              {label}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm text-slate-500">None selected</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -2283,215 +2381,80 @@ export function ScheduledTaskFormClient({
           </section>
           <section
             className={sectionPanelClass(activeSection === "review" ? undefined : "hidden")}
-            id="task-review-main"
+            id="task-review"
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Review and Save</h2>
+                <h2 className="text-sm font-semibold text-slate-950">Review</h2>
                 <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.review}</div>
               </div>
               <Button
-                className="bg-teal-700 text-white hover:bg-teal-800"
-                disabled={!canSave || isSaving}
-                type="submit"
+                className="h-8 bg-white"
+                disabled={isPreviewing || !canPreview}
+                onClick={previewSchedules}
+                size="sm"
+                type="button"
+                variant="outline"
               >
-                {isSaving ? (
-                  <RefreshCw className="size-4 animate-spin" />
+                {isPreviewing ? (
+                  <RefreshCw className="size-3.5 animate-spin" />
                 ) : (
-                  <Save className="size-4" />
+                  <RefreshCw className="size-3.5" />
                 )}
-                {editingTask ? "Save task" : "Create task"}
+                Preview runs
               </Button>
             </div>
-            <div className="grid gap-4 p-4 lg:grid-cols-2">
-              <div className="rounded-md border border-slate-200 bg-white p-3">
-                <div className="text-xs font-semibold uppercase text-slate-500">Configuration</div>
-                <div className="mt-3 grid gap-3 text-sm">
-                  {editorSections
-                    .filter((section) => section.id !== "review")
-                    .map((section) => {
-                      const Icon = section.icon;
-                      return (
-                        <button
-                          className="grid grid-cols-[24px_1fr_auto] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition-colors hover:bg-slate-50"
-                          key={section.id}
-                          onClick={() => setActiveSection(section.id)}
-                          type="button"
-                        >
-                          <Icon className="size-4 text-slate-500" />
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium text-slate-900">
-                              {section.label}
-                            </span>
-                            <span className="block truncate text-xs text-slate-500">
-                              {sectionSummaries[section.id]}
-                            </span>
-                          </span>
-                          <span
-                            className={cn(
-                              "size-2 rounded-full",
-                              sectionComplete[section.id] ? "bg-teal-600" : "bg-amber-500"
-                            )}
-                          />
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-              <div className="rounded-md border border-slate-200 bg-white p-3">
-                <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
-                <div className="mt-3 grid gap-2">
-                  {validationIssues.length > 0 ? (
-                    validationIssues.map((issue) => (
-                      <div
-                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                        key={issue}
-                      >
-                        {issue}
+            <div className="grid gap-4 p-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="grid gap-4">
+                <div className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Summary</div>
+                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-500">Schedules</div>
+                      <div className="mt-1 font-medium text-slate-900">
+                        {sectionSummaries.schedule}
                       </div>
-                    ))
-                  ) : (
-                    <div className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
-                      Ready to save.
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-        </main>
-
-        {showSummaryRail ? (
-          <aside className="xl:sticky xl:top-24 xl:self-start" id="task-review">
-            <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Live Summary
-                  </h2>
-                  <div className="mt-1 text-sm font-medium text-slate-950">
-                    {sectionSummaries.review}
-                  </div>
-                </div>
-                <Button
-                  className="h-8 bg-white"
-                  disabled={isPreviewing || !canPreview}
-                  onClick={previewSchedules}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {isPreviewing ? (
-                    <RefreshCw className="size-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-3.5" />
-                  )}
-                  Preview
-                </Button>
-              </div>
-              <div className="mt-4 grid gap-5">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                  <div>
-                    <div className="text-xs text-slate-500">Schedules</div>
-                    <div className="mt-1 font-medium text-slate-900">
-                      {sectionSummaries.schedule}
+                    <div>
+                      <div className="text-xs text-slate-500">Attempts</div>
+                      <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Attempts</div>
-                    <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Chat history</div>
-                    <div className="mt-1 font-medium text-slate-900">
-                      {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+                    <div>
+                      <div className="text-xs text-slate-500">Chat history</div>
+                      <div className="mt-1 font-medium text-slate-900">
+                        {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Monitoring</div>
-                    <div className="mt-1 font-medium text-slate-900">
-                      {form.monitoringConfig.enabled ? "On" : "Off"}
+                    <div>
+                      <div className="text-xs text-slate-500">Monitoring</div>
+                      <div className="mt-1 font-medium text-slate-900">
+                        {form.monitoringConfig.enabled ? "On" : "Off"}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="grid gap-2 border-t border-slate-200 pt-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
-                    {validationIssues.length > 0 ? (
-                      <Badge
-                        className="border-amber-200 bg-amber-50 text-amber-800"
-                        variant="outline"
-                      >
-                        {validationIssues.length} warning
-                        {validationIssues.length === 1 ? "" : "s"}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  {validationIssues.length > 0 ? (
-                    <div className="grid gap-1.5">
+                {validationIssues.length > 0 ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                    <div className="text-xs font-semibold uppercase text-amber-800">
+                      Validation
+                    </div>
+                    <div className="mt-3 grid gap-2">
                       {validationIssues.map((issue) => (
                         <div
-                          className="rounded-md border border-amber-200 bg-white px-2.5 py-2 text-xs text-amber-900"
+                          className="rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-amber-900"
                           key={issue}
                         >
                           {issue}
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <div className="rounded-md border border-teal-200 bg-white px-2.5 py-2 text-xs text-teal-900">
-                      Ready to save.
-                    </div>
-                  )}
-                </div>
-
-                {showRunPreview ? (
-                  <div className="grid gap-2 border-t border-slate-200 pt-4">
-                    <div className="text-xs font-semibold uppercase text-slate-500">
-                      Next 5 runs
-                    </div>
-                    {previewRuns.length > 0 ? (
-                      <div className="grid gap-1 text-sm">
-                        {previewRuns.map((run) => (
-                          <div
-                            className="rounded-md bg-slate-50 px-2 py-1.5 text-slate-700"
-                            key={run}
-                          >
-                            {formatDate(run)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
-                        No upcoming runs.
-                      </div>
-                    )}
                   </div>
                 ) : null}
 
-                <div className="grid gap-2 border-t border-slate-200 pt-4">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
-                  {selectedOutputLabels.length > 0 ? (
-                    <div className="grid gap-1.5">
-                      {selectedOutputLabels.map((label) => (
-                        <div
-                          className="min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
-                          key={label}
-                          title={label}
-                        >
-                          {label}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">None selected</div>
-                  )}
-                </div>
-
-                <div className="grid gap-2 border-t border-slate-200 pt-4">
+                <div className="rounded-md border border-slate-200 bg-white p-3">
                   <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
-                  <div className="grid gap-2 text-xs text-slate-600">
+                  <div className="mt-3 grid gap-3 text-xs text-slate-600 sm:grid-cols-2">
                     <div>
                       <div className="mb-1 text-slate-500">Notifications</div>
                       <div className="grid gap-1">
@@ -2531,9 +2494,51 @@ export function ScheduledTaskFormClient({
                   </div>
                 </div>
               </div>
+
+              <div className="grid gap-4 self-start">
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Next 5 runs</div>
+                  {previewRuns.length > 0 ? (
+                    <div className="mt-3 grid gap-1 text-sm">
+                      {previewRuns.map((run) => (
+                        <div
+                          className="rounded-md bg-white px-2 py-1.5 text-slate-700"
+                          key={run}
+                        >
+                          {formatDate(run)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                      No upcoming runs.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
+                  {selectedOutputLabels.length > 0 ? (
+                    <div className="mt-3 grid gap-1.5">
+                      {selectedOutputLabels.map((label) => (
+                        <div
+                          className="min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                          key={label}
+                          title={label}
+                        >
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500">None selected</div>
+                  )}
+                </div>
+              </div>
             </div>
-          </aside>
-        ) : null}
+          </section>
+        </main>
+
       </div>
     </form>
   );

@@ -35,7 +35,7 @@ export default async function NewScheduledTaskPage({ params }: NewScheduledTaskP
   return (
     <AppShell
       active="workspace-scheduled-tasks"
-      contentClassName="max-w-none px-8 max-md:px-4"
+      contentClassName="mx-0 max-w-none px-6 max-md:px-4"
       contentInnerClassName="space-y-0"
       eyebrow="Workspace"
       title="New Scheduled Task"
