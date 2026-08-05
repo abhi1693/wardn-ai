@@ -13,7 +13,7 @@ from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTaskSchedule,
 )
 
-ACTIVE_RUN_STATUSES = ("queued", "running")
+ACTIVE_RUN_STATUSES = ("queued", "running", "waiting_confirmation")
 
 
 async def list_tasks(

@@ -224,12 +224,14 @@ def test_timezone_aliases_are_normalized_for_browser_values() -> None:
 def test_due_and_claim_statements_use_skip_locked() -> None:
     now = datetime(2026, 8, 4, 8, 0, tzinfo=UTC)
 
-    due_sql = str(
-        repository.due_task_statement(now).compile(dialect=postgresql.dialect())
-    ).upper()
-    claim_sql = str(
-        repository.claimable_run_statement(now).compile(dialect=postgresql.dialect())
-    ).upper()
+    due_statement = repository.due_task_statement(now).compile(
+        dialect=postgresql.dialect()
+    )
+    due_sql = str(due_statement).upper()
+    claim_statement = repository.claimable_run_statement(now).compile(
+        dialect=postgresql.dialect()
+    )
+    claim_sql = str(claim_statement).upper()
 
     assert "FOR UPDATE SKIP LOCKED" in due_sql
     assert "NEXT_RUN_AT" in due_sql
@@ -237,6 +239,16 @@ def test_due_and_claim_statements_use_skip_locked() -> None:
     assert "FOR UPDATE SKIP LOCKED" in claim_sql
     assert "AVAILABLE_AT" in claim_sql
     assert "NOT (EXISTS" in claim_sql
+    assert due_statement.params["status_1"] == [
+        "queued",
+        "running",
+        "waiting_confirmation",
+    ]
+    assert claim_statement.params["status_2"] == [
+        "queued",
+        "running",
+        "waiting_confirmation",
+    ]
 
 
 def test_output_routes_default_to_builtin_chat() -> None:
