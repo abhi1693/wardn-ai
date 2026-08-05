@@ -50,7 +50,9 @@ test.describe("skill marketplace", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Skill Marketplace" })).toBeVisible();
     await expect(page.getByText("Discover Hub Skills")).toBeVisible();
 
-    await page.getByLabel("Search Wardn Hub skills").fill("kubernetes ops");
+    const searchInput = page.getByLabel("Search Wardn Hub skills");
+    await expect(searchInput).toHaveValue("");
+    await searchInput.fill("kubernetes ops");
     const searchResponse = page.waitForResponse(
       (response) => response.url().includes("/skills/search") && response.status() === 200
     );

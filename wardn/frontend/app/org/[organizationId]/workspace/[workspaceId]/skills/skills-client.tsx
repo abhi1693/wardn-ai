@@ -161,7 +161,7 @@ export function SkillsClient({
 }: SkillsClientProps) {
   const [catalog, setCatalog] = useState(initialCatalog);
   const [activeTab, setActiveTab] = useState<SkillTab>("discover");
-  const [query, setQuery] = useState("kubernetes ops");
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<AgentSkillSearchResultRead[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [resultCount, setResultCount] = useState<number | null>(null);
