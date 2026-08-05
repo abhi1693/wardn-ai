@@ -189,26 +189,26 @@ def _search_cursor_after_condition(
     same_name = MCPServerVersion.name == after_name
     same_version = MCPServerVersion.version == after_version
     return or_(
-        match_tier > after_match_tier,
-        and_(same_match_tier, text_rank < after_text_rank),
-        and_(same_match_tier, same_text_rank, quality_score_rank > after_quality_score_rank),
+        quality_score_rank > after_quality_score_rank,
+        and_(same_quality_score_rank, match_tier > after_match_tier),
+        and_(same_quality_score_rank, same_match_tier, text_rank < after_text_rank),
         and_(
+            same_quality_score_rank,
             same_match_tier,
             same_text_rank,
-            same_quality_score_rank,
             MCPServerVersion.name > after_name,
         ),
         and_(
+            same_quality_score_rank,
             same_match_tier,
             same_text_rank,
-            same_quality_score_rank,
             same_name,
             MCPServerVersion.version > after_version,
         ),
         and_(
+            same_quality_score_rank,
             same_match_tier,
             same_text_rank,
-            same_quality_score_rank,
             same_name,
             same_version,
             MCPServerVersion.id > after_id,
@@ -333,9 +333,9 @@ async def list_servers(
 
     if normalized_search:
         statement = statement.order_by(
+            quality_score_rank.asc(),
             match_tier.asc(),
             text_rank.desc(),
-            quality_score_rank.asc(),
             MCPServerVersion.name.asc(),
             MCPServerVersion.version.asc(),
             MCPServerVersion.id.asc(),

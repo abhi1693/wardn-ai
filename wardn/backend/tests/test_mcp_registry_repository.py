@@ -143,7 +143,14 @@ async def test_list_servers_uses_search_index_and_keyset_cursor() -> None:
     assert "LOWER(MCP_SERVER_VERSIONS.TITLE)" in statement_sql
     assert "MCP_SERVER_VERSIONS.DESCRIPTION ILIKE" not in statement_sql
     assert "CASE WHEN" in statement_sql
-    assert "ORDER BY MATCH_TIER ASC, TEXT_RANK DESC" in statement_sql
+    assert (
+        "ORDER BY COALESCE(-COALESCE("
+        in statement_sql
+        and "MATCH_TIER ASC, TEXT_RANK DESC" in statement_sql
+    )
+    assert statement_sql.index("ORDER BY COALESCE(-COALESCE(") < statement_sql.index(
+        "MATCH_TIER ASC"
+    )
     assert "MCP_SERVER_VERSIONS.NAME ASC" in statement_sql
     assert "MCP_SERVER_VERSIONS.ID ASC" in statement_sql
     assert " OFFSET " not in statement_sql
@@ -183,6 +190,7 @@ async def test_list_servers_search_cursor_uses_ranked_order() -> None:
     statement_sql = sql(session.statements[0], literal_binds=True).upper()
     assert "TS_RANK_CD(MCP_SERVER_VERSIONS.SEARCH_VECTOR" in statement_sql
     assert "CASE WHEN" in statement_sql
+    assert "COALESCE(-COALESCE(" in statement_sql and " > " in statement_sql
     assert "TS_RANK_CD" in statement_sql and " < " in statement_sql
     assert "MCP_SERVER_VERSIONS.NAME > 'EXAMPLE/WEATHER'" in statement_sql
     assert " OFFSET " not in statement_sql
