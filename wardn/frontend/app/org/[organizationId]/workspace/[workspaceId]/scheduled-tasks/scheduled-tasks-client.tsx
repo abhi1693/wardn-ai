@@ -856,8 +856,17 @@ function choiceButtonClass(active: boolean) {
   );
 }
 
+function frequencyButtonClass(active: boolean) {
+  return cn(
+    "inline-flex h-7 items-center justify-center rounded px-2.5 text-xs font-medium transition-colors",
+    active
+      ? "bg-white text-teal-950 shadow-sm ring-1 ring-slate-200"
+      : "text-slate-500 hover:bg-white/70 hover:text-slate-900"
+  );
+}
+
 function sectionPanelClass(extra?: string) {
-  return cn("rounded-md border border-slate-200 bg-white shadow-[var(--shadow-card)]", extra);
+  return cn("rounded-md border border-slate-200 bg-white", extra);
 }
 
 function sectionHeaderClass(extra?: string) {
@@ -962,6 +971,10 @@ export function ScheduledTaskFormClient({
   );
   const [routeTests, setRouteTests] = useState<Record<string, RouteTestState>>({});
   const [activeSection, setActiveSection] = useState<EditorSectionId>("schedule");
+  const [activeScheduleKey, setActiveScheduleKey] = useState<string | null>(
+    () => form.schedules[0]?.key ?? null
+  );
+  const [isAddingSchedule, setIsAddingSchedule] = useState(false);
   const isTestingRoutes = Object.values(routeTests).some((test) => test.status === "testing");
 
   function routeForKey(key: string) {
@@ -1080,7 +1093,10 @@ export function ScheduledTaskFormClient({
 
   function addSchedule(type: ScheduleEntryType) {
     const timezone = form.schedules[0]?.timezone || defaultTimezone;
-    setForm({ ...form, schedules: [...form.schedules, newScheduleDraft(type, timezone)] });
+    const nextSchedule = newScheduleDraft(type, timezone);
+    setForm({ ...form, schedules: [...form.schedules, nextSchedule] });
+    setActiveScheduleKey(nextSchedule.key);
+    setIsAddingSchedule(false);
   }
 
   function updateSchedule(key: string, patch: Partial<ScheduleDraft>) {
@@ -1093,7 +1109,11 @@ export function ScheduledTaskFormClient({
   }
 
   function removeSchedule(key: string) {
-    setForm({ ...form, schedules: form.schedules.filter((schedule) => schedule.key !== key) });
+    const schedules = form.schedules.filter((schedule) => schedule.key !== key);
+    setForm({ ...form, schedules });
+    if (activeScheduleKey === key) {
+      setActiveScheduleKey(schedules[0]?.key ?? null);
+    }
   }
 
   function addRunTime(schedule: ScheduleDraft) {
@@ -1271,59 +1291,79 @@ export function ScheduledTaskFormClient({
     review: validationIssues.length === 0,
     schedule: invalidScheduleCount === 0,
   };
+  const activeSchedule =
+    form.schedules.find((schedule) => schedule.key === activeScheduleKey) ??
+    form.schedules[0] ??
+    null;
+  const activeScheduleIndex = activeSchedule
+    ? form.schedules.findIndex((schedule) => schedule.key === activeSchedule.key)
+    : -1;
 
   return (
     <form
-      className="space-y-4 bg-slate-50/60 pb-2 text-slate-900"
+      className="min-h-screen bg-slate-50 text-slate-950"
       id="scheduled-task-form"
       onSubmit={submitTask}
     >
-      <div className="sticky top-0 z-20 -mx-2 border-b border-slate-200 bg-white/95 px-2 py-3 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Button asChild size="icon" title="Back to scheduled tasks" variant="outline">
+      <div className="sticky top-0 z-20 -mx-2 border-b border-slate-200 bg-white/95 px-2 py-2 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button
+              asChild
+              className="size-8 border-transparent"
+              size="icon"
+              title="Back to scheduled tasks"
+              variant="ghost"
+            >
               <Link href={scheduledTasksHref}>
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-lg font-semibold leading-7 text-slate-950">
+              <div className="flex items-center gap-1.5 truncate text-[11px] text-slate-500">
+                <span>Wardn Operations</span>
+                <span>/</span>
+                <span>Task editor</span>
+                <span>/</span>
+                <span>{editingTask ? "Edit" : "Draft"}</span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2">
+                <h1 className="truncate text-sm font-semibold leading-5 text-slate-950">
                   {editingTask ? "Edit scheduled task" : "New scheduled task"}
                 </h1>
-                <Badge
+                <span
                   className={
                     form.isActive
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-slate-200 bg-slate-100 text-slate-600"
+                      ? "size-2 rounded-full bg-emerald-500"
+                      : "size-2 rounded-full bg-slate-300"
                   }
-                  variant="outline"
-                >
-                  {form.isActive ? "Active" : "Paused"}
-                </Badge>
+                />
                 {validationIssues.length ? (
-                  <Badge className="border-amber-200 bg-amber-50 text-amber-800" variant="outline">
+                  <Badge
+                    className="hidden border-amber-200 bg-amber-50 text-amber-800 sm:inline-flex"
+                    variant="outline"
+                  >
                     {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
                   </Badge>
                 ) : (
-                  <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline">
+                  <Badge
+                    className="hidden border-teal-200 bg-teal-50 text-teal-800 sm:inline-flex"
+                    variant="outline"
+                  >
                     Ready
                   </Badge>
                 )}
               </div>
-              <div className="mt-0.5 truncate text-xs text-slate-500">
-                {form.name.trim() || "Untitled task"} · {sectionSummaries.schedule} ·{" "}
-                {sectionSummaries.outputs}
-              </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button asChild type="button" variant="outline">
+            <Button asChild size="sm" type="button" variant="ghost">
               <Link href={scheduledTasksHref}>Cancel</Link>
             </Button>
             <Button
               disabled={isTestingRoutes || form.selectedRoutes.length === 0}
               onClick={testSelectedRoutes}
+              size="sm"
               type="button"
               variant="outline"
             >
@@ -1332,11 +1372,12 @@ export function ScheduledTaskFormClient({
               ) : (
                 <Send className="size-4" />
               )}
-              Test routes
+              Run test
             </Button>
             <Button
               className="bg-teal-700 text-white hover:bg-teal-800"
               disabled={!canSave || isSaving}
+              size="sm"
               type="submit"
             >
               {isSaving ? (
@@ -1348,24 +1389,22 @@ export function ScheduledTaskFormClient({
             </Button>
           </div>
         </div>
-        <nav className="mt-3 flex gap-1 overflow-x-auto border-t border-slate-200 pt-2">
+        <nav className="mt-2 flex h-8 gap-5 overflow-x-auto border-t border-slate-200 pt-2 text-xs">
           {editorSections.map((section) => {
-            const Icon = section.icon;
             const complete = sectionComplete[section.id];
             const active = activeSection === section.id;
             return (
               <button
                 className={cn(
-                  "flex h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-left text-sm transition-colors",
+                  "flex shrink-0 items-center gap-1.5 border-b-2 px-0.5 pb-1 transition-colors",
                   active
-                    ? "border-teal-600 bg-teal-50 text-teal-950"
-                    : "border-transparent bg-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"
+                    ? "border-teal-600 text-slate-950"
+                    : "border-transparent text-slate-500 hover:text-slate-900"
                 )}
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 type="button"
               >
-                <Icon className="size-4" />
                 <span className="font-medium">{section.label}</span>
                 <span
                   className={cn(
@@ -1383,7 +1422,7 @@ export function ScheduledTaskFormClient({
         <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-4 pt-4 xl:grid-cols-[minmax(0,1fr)_300px]">
         <main className="min-w-0 space-y-4">
           <section
             className={sectionPanelClass(activeSection === "basics" ? undefined : "hidden")}
@@ -1484,195 +1523,190 @@ export function ScheduledTaskFormClient({
             className={sectionPanelClass(activeSection === "schedule" ? undefined : "hidden")}
             id="task-schedule"
           >
-            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-3")}>
+            <div className={sectionHeaderClass("flex items-start justify-between gap-3")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Schedule</h2>
-                <div className="mt-0.5 text-xs text-slate-500">
-                  {sectionSummaries.schedule}
-                </div>
+                <h2 className="text-sm font-semibold text-slate-950">Schedule Configuration</h2>
+                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.schedule}</div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => setForm({ ...form, schedules: [] })}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <Play className="size-4" />
-                  Manual
-                </Button>
-                {schedulePresets.map((preset) => {
-                  const PresetIcon = preset.icon;
-                  return (
-                    <Button
-                      key={preset.type}
-                      onClick={() => addSchedule(preset.type)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <PresetIcon className="size-4" />
-                      {preset.label}
-                    </Button>
-                  );
-                })}
-              </div>
+              <Badge className="border-slate-200 bg-white text-slate-600" variant="outline">
+                {form.schedules.length === 0 ? "Manual" : `${form.schedules.length} active`}
+              </Badge>
             </div>
-            <div className="grid gap-3 p-4">
+            <div className="grid gap-4 p-4">
+              {form.schedules.length > 1 ? (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {form.schedules.map((schedule, index) => {
+                    const active = activeSchedule?.key === schedule.key;
+                    return (
+                      <button
+                        className={cn(
+                          "grid min-w-48 shrink-0 gap-0.5 rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                          active
+                            ? "border-teal-300 bg-teal-50 text-teal-950"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                        )}
+                        key={schedule.key}
+                        onClick={() => setActiveScheduleKey(schedule.key)}
+                        type="button"
+                      >
+                        <span className="truncate font-medium">
+                          {scheduleDisplayName(schedule, index)}
+                        </span>
+                        <span className="truncate text-slate-500">
+                          {scheduleDraftSummary(schedule)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               {form.schedules.length === 0 ? (
-                <div className="flex min-h-16 items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm text-slate-600">
+                <div className="flex min-h-24 items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm text-slate-600">
                   <Play className="size-4" />
                   <span>Manual run only</span>
                 </div>
               ) : null}
 
-              {form.schedules.map((schedule, index) => (
+              {activeSchedule ? (
                 <div
                   className="overflow-hidden rounded-md border border-slate-200 bg-white"
-                  key={schedule.key}
+                  key={activeSchedule.key}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span
-                        className={cn(
-                          "flex size-7 items-center justify-center rounded-md border",
-                          schedule.isActive
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-white text-slate-500"
-                        )}
+                  <div className="flex flex-wrap items-start justify-between gap-3 bg-slate-50 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <Label
+                        className="text-[11px] font-semibold uppercase text-slate-500"
+                        htmlFor={`schedule-name-${activeSchedule.key}`}
                       >
-                        <CalendarClock className="size-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-900">
-                          {scheduleDisplayName(schedule, index)}
-                        </div>
-                        <div className="truncate text-xs text-slate-500">
-                          {scheduleDraftSummary(schedule)}
-                        </div>
-                      </div>
+                        Schedule condition
+                      </Label>
+                      <Input
+                        className="mt-1 h-8 max-w-sm border-slate-200 bg-white text-sm font-medium"
+                        id={`schedule-name-${activeSchedule.key}`}
+                        maxLength={120}
+                        onChange={(event) =>
+                          updateSchedule(activeSchedule.key, { name: event.target.value })
+                        }
+                        placeholder={`Execution ${activeScheduleIndex + 1}`}
+                        value={activeSchedule.name}
+                      />
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         className={cn(
                           "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium",
-                          schedule.isActive
+                          activeSchedule.isActive
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                             : "border-slate-200 bg-white text-slate-500"
                         )}
                         onClick={() =>
-                          updateSchedule(schedule.key, { isActive: !schedule.isActive })
+                          updateSchedule(activeSchedule.key, { isActive: !activeSchedule.isActive })
                         }
                         type="button"
                       >
-                        {schedule.isActive ? "On" : "Off"}
+                        {activeSchedule.isActive ? "On" : "Off"}
                       </button>
                       <Button
-                        className="border-red-200 text-red-700 hover:bg-red-50"
-                        onClick={() => removeSchedule(schedule.key)}
+                        className="border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => removeSchedule(activeSchedule.key)}
                         size="icon"
                         title="Remove schedule"
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                       >
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
                   </div>
 
-                  <div className="grid gap-4 p-3">
-                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,auto)]">
-                      <div className="space-y-2">
-                        <Label htmlFor={`schedule-name-${schedule.key}`}>Label</Label>
-                        <Input
-                          className="bg-white"
-                          id={`schedule-name-${schedule.key}`}
-                          maxLength={120}
-                          onChange={(event) =>
-                            updateSchedule(schedule.key, { name: event.target.value })
-                          }
-                          placeholder={`Execution ${index + 1}`}
-                          value={schedule.name}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {schedulePresets.map((preset) => {
-                            const PresetIcon = preset.icon;
-                            return (
-                              <button
-                                className={choiceButtonClass(
-                                  schedule.scheduleType === preset.type
-                                )}
-                                key={preset.type}
-                                onClick={() => {
-                                  const defaults = newScheduleDraft(preset.type, schedule.timezone);
-                                  updateSchedule(schedule.key, {
-                                    cronExpression: defaults.cronExpression,
-                                    everyMinutes: defaults.everyMinutes,
-                                    monthDays: defaults.monthDays,
-                                    scheduleType: preset.type,
-                                    times: defaults.times,
-                                    weekdays: defaults.weekdays,
-                                  });
-                                }}
-                                type="button"
-                              >
-                                <PresetIcon className="size-3.5" />
-                                {preset.label}
-                              </button>
-                            );
-                          })}
-                        </div>
+                  <div className="grid gap-4 border-t border-slate-200 p-4">
+                    <div className="grid gap-2">
+                      <Label>Frequency</Label>
+                      <div className="inline-flex w-fit max-w-full flex-wrap gap-1 rounded-md bg-slate-100 p-1">
+                        {schedulePresets.map((preset) => (
+                          <button
+                            className={frequencyButtonClass(
+                              activeSchedule.scheduleType === preset.type
+                            )}
+                            key={preset.type}
+                            onClick={() => {
+                              const defaults = newScheduleDraft(
+                                preset.type,
+                                activeSchedule.timezone
+                              );
+                              updateSchedule(activeSchedule.key, {
+                                cronExpression: defaults.cronExpression,
+                                everyMinutes: defaults.everyMinutes,
+                                monthDays: defaults.monthDays,
+                                scheduleType: preset.type,
+                                times: defaults.times,
+                                weekdays: defaults.weekdays,
+                              });
+                            }}
+                            type="button"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-teal-100 bg-teal-50/70 px-3 py-2 text-sm text-teal-900">
-                      {scheduleDraftSummary(schedule)}
+                    <div className="flex items-center gap-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+                      <CalendarClock className="size-4 shrink-0" />
+                      <span className="min-w-0 truncate">{scheduleDraftSummary(activeSchedule)}</span>
                     </div>
 
-                    {schedule.scheduleType === "interval" ? (
+                    {activeSchedule.scheduleType === "interval" ? (
                       <div className="space-y-2">
-                        <Label htmlFor={`schedule-interval-${schedule.key}`}>Every minutes</Label>
+                        <Label htmlFor={`schedule-interval-${activeSchedule.key}`}>
+                          Every minutes
+                        </Label>
                         <Input
                           className="max-w-48 bg-white"
-                          id={`schedule-interval-${schedule.key}`}
+                          id={`schedule-interval-${activeSchedule.key}`}
                           max={10080}
                           min={1}
                           onChange={(event) =>
-                            updateSchedule(schedule.key, { everyMinutes: event.target.value })
+                            updateSchedule(activeSchedule.key, {
+                              everyMinutes: event.target.value,
+                            })
                           }
                           type="number"
-                          value={schedule.everyMinutes}
+                          value={activeSchedule.everyMinutes}
                         />
                       </div>
                     ) : null}
 
-                    {schedule.scheduleType === "cron" ? (
+                    {activeSchedule.scheduleType === "cron" ? (
                       <div className="space-y-2">
-                        <Label htmlFor={`schedule-cron-${schedule.key}`}>Cron expression</Label>
+                        <Label htmlFor={`schedule-cron-${activeSchedule.key}`}>
+                          Cron expression
+                        </Label>
                         <Input
                           className="font-mono bg-white"
-                          id={`schedule-cron-${schedule.key}`}
+                          id={`schedule-cron-${activeSchedule.key}`}
                           onChange={(event) =>
-                            updateSchedule(schedule.key, { cronExpression: event.target.value })
+                            updateSchedule(activeSchedule.key, {
+                              cronExpression: event.target.value,
+                            })
                           }
                           placeholder="0 9 * * 1-5"
-                          value={schedule.cronExpression}
+                          value={activeSchedule.cronExpression}
                         />
                       </div>
                     ) : null}
 
-                    {schedule.scheduleType !== "interval" && schedule.scheduleType !== "cron" ? (
-                      <div className="grid gap-2">
+                    {activeSchedule.scheduleType !== "interval" &&
+                    activeSchedule.scheduleType !== "cron" ? (
+                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
                         <Label>Run times</Label>
                         <div className="flex flex-wrap items-center gap-2">
-                          {schedule.times.map((timeValue) => (
+                          {activeSchedule.times.map((timeValue) => (
                             <button
                               className="inline-flex h-8 items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-2.5 text-xs font-medium text-teal-900"
                               key={timeValue}
-                              onClick={() => removeRunTime(schedule, timeValue)}
+                              onClick={() => removeRunTime(activeSchedule, timeValue)}
                               type="button"
                             >
                               {timeValue}
@@ -1682,13 +1716,13 @@ export function ScheduledTaskFormClient({
                           <Input
                             className="h-8 w-28 bg-white text-xs"
                             onChange={(event) =>
-                              updateSchedule(schedule.key, { timeInput: event.target.value })
+                              updateSchedule(activeSchedule.key, { timeInput: event.target.value })
                             }
                             type="time"
-                            value={schedule.timeInput}
+                            value={activeSchedule.timeInput}
                           />
                           <Button
-                            onClick={() => addRunTime(schedule)}
+                            onClick={() => addRunTime(activeSchedule)}
                             size="sm"
                             type="button"
                             variant="outline"
@@ -1700,17 +1734,19 @@ export function ScheduledTaskFormClient({
                       </div>
                     ) : null}
 
-                    {schedule.scheduleType === "weekly" ? (
-                      <div className="grid gap-2">
+                    {activeSchedule.scheduleType === "weekly" ? (
+                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
                         <Label>Weekdays</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {weekdays.map((weekday) => (
                             <button
                               className={choiceButtonClass(
-                                schedule.weekdays.includes(weekday.value)
+                                activeSchedule.weekdays.includes(weekday.value)
                               )}
                               key={weekday.value}
-                              onClick={() => toggleValue(schedule, "weekdays", weekday.value)}
+                              onClick={() =>
+                                toggleValue(activeSchedule, "weekdays", weekday.value)
+                              }
                               type="button"
                             >
                               {weekday.label.slice(0, 3)}
@@ -1720,28 +1756,31 @@ export function ScheduledTaskFormClient({
                       </div>
                     ) : null}
 
-                    {schedule.scheduleType === "weekdays" ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {["Mon", "Tue", "Wed", "Thu", "Fri"].map((weekday) => (
-                          <span
-                            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-600"
-                            key={weekday}
-                          >
-                            {weekday}
-                          </span>
-                        ))}
+                    {activeSchedule.scheduleType === "weekdays" ? (
+                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                        <Label>Weekdays</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {["Mon", "Tue", "Wed", "Thu", "Fri"].map((weekday) => (
+                            <span
+                              className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-600"
+                              key={weekday}
+                            >
+                              {weekday}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
 
-                    {schedule.scheduleType === "monthly" ? (
-                      <div className="grid gap-2">
+                    {activeSchedule.scheduleType === "monthly" ? (
+                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
                         <Label>Month days</Label>
                         <div className="grid grid-cols-7 gap-1 sm:grid-cols-10">
                           {Array.from({ length: 31 }, (_, day) => String(day + 1)).map((day) => (
                             <button
-                              className={choiceButtonClass(schedule.monthDays.includes(day))}
+                              className={choiceButtonClass(activeSchedule.monthDays.includes(day))}
                               key={day}
-                              onClick={() => toggleValue(schedule, "monthDays", day)}
+                              onClick={() => toggleValue(activeSchedule, "monthDays", day)}
                               type="button"
                             >
                               {day}
@@ -1751,46 +1790,89 @@ export function ScheduledTaskFormClient({
                       </div>
                     ) : null}
 
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-[minmax(220px,280px)_1fr]">
                       <div className="space-y-2">
-                        <Label htmlFor={`schedule-timezone-${schedule.key}`}>Timezone</Label>
+                        <Label htmlFor={`schedule-timezone-${activeSchedule.key}`}>Timezone</Label>
                         <Input
                           className="bg-white"
-                          id={`schedule-timezone-${schedule.key}`}
+                          id={`schedule-timezone-${activeSchedule.key}`}
                           onChange={(event) =>
-                            updateSchedule(schedule.key, { timezone: event.target.value })
+                            updateSchedule(activeSchedule.key, { timezone: event.target.value })
                           }
-                          value={schedule.timezone}
+                          value={activeSchedule.timezone}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`schedule-start-${schedule.key}`}>Start</Label>
-                        <Input
-                          className="bg-white"
-                          id={`schedule-start-${schedule.key}`}
-                          onChange={(event) =>
-                            updateSchedule(schedule.key, { startsAt: event.target.value })
-                          }
-                          type="datetime-local"
-                          value={schedule.startsAt}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`schedule-end-${schedule.key}`}>End</Label>
-                        <Input
-                          className="bg-white"
-                          id={`schedule-end-${schedule.key}`}
-                          onChange={(event) =>
-                            updateSchedule(schedule.key, { endsAt: event.target.value })
-                          }
-                          type="datetime-local"
-                          value={schedule.endsAt}
-                        />
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor={`schedule-start-${activeSchedule.key}`}>Start</Label>
+                          <Input
+                            className="bg-white"
+                            id={`schedule-start-${activeSchedule.key}`}
+                            onChange={(event) =>
+                              updateSchedule(activeSchedule.key, { startsAt: event.target.value })
+                            }
+                            type="datetime-local"
+                            value={activeSchedule.startsAt}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`schedule-end-${activeSchedule.key}`}>End</Label>
+                          <Input
+                            className="bg-white"
+                            id={`schedule-end-${activeSchedule.key}`}
+                            onChange={(event) =>
+                              updateSchedule(activeSchedule.key, { endsAt: event.target.value })
+                            }
+                            type="datetime-local"
+                            value={activeSchedule.endsAt}
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              ))}
+              ) : null}
+
+              <details
+                className="group rounded-md border border-dashed border-slate-300 bg-white"
+                onToggle={(event) => setIsAddingSchedule(event.currentTarget.open)}
+                open={isAddingSchedule}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 group-open:border-b group-open:border-slate-200">
+                  <Plus className="size-4" />
+                  Add schedule condition
+                </summary>
+                <div className="flex flex-wrap justify-center gap-2 p-3">
+                  <Button
+                    onClick={() => {
+                      setForm({ ...form, schedules: [] });
+                      setActiveScheduleKey(null);
+                      setIsAddingSchedule(false);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Play className="size-4" />
+                    Manual
+                  </Button>
+                  {schedulePresets.map((preset) => {
+                    const PresetIcon = preset.icon;
+                    return (
+                      <Button
+                        key={preset.type}
+                        onClick={() => addSchedule(preset.type)}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <PresetIcon className="size-4" />
+                        {preset.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </details>
             </div>
           </section>
 
@@ -2281,14 +2363,19 @@ export function ScheduledTaskFormClient({
           </section>
         </main>
 
-        <aside className="space-y-3 xl:sticky xl:top-32 xl:self-start" id="task-review">
-          <div className={sectionPanelClass()}>
-            <div className={sectionHeaderClass("flex items-center justify-between gap-2")}>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">Review</h2>
-                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.review}</div>
+        <aside className="xl:sticky xl:top-24 xl:self-start" id="task-review">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Live Summary
+                </h2>
+                <div className="mt-1 text-sm font-medium text-slate-950">
+                  {sectionSummaries.review}
+                </div>
               </div>
               <Button
+                className="h-8 bg-white"
                 disabled={isPreviewing || !canPreview}
                 onClick={previewSchedules}
                 size="sm"
@@ -2296,15 +2383,15 @@ export function ScheduledTaskFormClient({
                 variant="outline"
               >
                 {isPreviewing ? (
-                  <RefreshCw className="size-4 animate-spin" />
+                  <RefreshCw className="size-3.5 animate-spin" />
                 ) : (
-                  <RefreshCw className="size-4" />
+                  <RefreshCw className="size-3.5" />
                 )}
                 Preview
               </Button>
             </div>
-            <div className="grid gap-4 p-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="mt-4 grid gap-5">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <div>
                   <div className="text-xs text-slate-500">Schedules</div>
                   <div className="mt-1 font-medium text-slate-900">{sectionSummaries.schedule}</div>
@@ -2327,13 +2414,20 @@ export function ScheduledTaskFormClient({
                 </div>
               </div>
 
-              <div className="grid gap-2">
-                <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
+              <div className="grid gap-2 border-t border-slate-200 pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase text-slate-500">Validation</div>
+                  {validationIssues.length > 0 ? (
+                    <Badge className="border-amber-200 bg-amber-50 text-amber-800" variant="outline">
+                      {validationIssues.length} warning{validationIssues.length === 1 ? "" : "s"}
+                    </Badge>
+                  ) : null}
+                </div>
                 {validationIssues.length > 0 ? (
-                  <div className="grid gap-2">
+                  <div className="grid gap-1.5">
                     {validationIssues.map((issue) => (
                       <div
-                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                        className="rounded-md border border-amber-200 bg-white px-2.5 py-2 text-xs text-amber-900"
                         key={issue}
                       >
                         {issue}
@@ -2341,13 +2435,13 @@ export function ScheduledTaskFormClient({
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                  <div className="rounded-md border border-teal-200 bg-white px-2.5 py-2 text-xs text-teal-900">
                     Ready to save.
                   </div>
                 )}
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid gap-2 border-t border-slate-200 pt-4">
                 <div className="text-xs font-semibold uppercase text-slate-500">Next 5 runs</div>
                 {previewRuns.length > 0 ? (
                   <div className="grid gap-1 text-sm">
@@ -2361,13 +2455,13 @@ export function ScheduledTaskFormClient({
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-500">
+                  <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
                     No upcoming runs.
                   </div>
                 )}
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid gap-2 border-t border-slate-200 pt-4">
                 <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
                 {selectedOutputLabels.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -2382,7 +2476,7 @@ export function ScheduledTaskFormClient({
                 )}
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid gap-2 border-t border-slate-200 pt-4">
                 <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
                 <div className="grid gap-1 text-xs text-slate-600">
                   <div>
