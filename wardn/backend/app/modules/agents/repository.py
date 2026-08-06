@@ -690,6 +690,30 @@ async def list_active_tool_approvals_for_agent_run(
     return list(result.scalars().all())
 
 
+async def has_completed_tool_approval_for_agent_run(
+    session: AsyncSession,
+    *,
+    agent_run_id: uuid.UUID,
+    installation_id: uuid.UUID,
+    tool_schema_id: uuid.UUID,
+    decided_by_id: uuid.UUID | None = None,
+) -> bool:
+    statement = (
+        select(AgentToolApproval.id)
+        .where(
+            AgentToolApproval.agent_run_id == agent_run_id,
+            AgentToolApproval.installation_id == installation_id,
+            AgentToolApproval.tool_schema_id == tool_schema_id,
+            AgentToolApproval.status == "completed",
+        )
+        .limit(1)
+    )
+    if decided_by_id is not None:
+        statement = statement.where(AgentToolApproval.decided_by_id == decided_by_id)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none() is not None
+
+
 async def finish_agent_run(
     session: AsyncSession,
     agent_run: AgentRun,

@@ -1,6 +1,6 @@
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,11 @@ from app.modules.agents.schemas import (
     AgentToolApprovalRead,
 )
 from app.modules.agents.tool_execution import action_review_payload, mcp_result_text
-from app.modules.agents.types import AgentChatTextEvent, AgentInstalledTool
+from app.modules.agents.types import (
+    AgentChatTextEvent,
+    AgentChatToolActivityEvent,
+    AgentInstalledTool,
+)
 from app.modules.chat_providers import repository as chat_provider_repository
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
@@ -49,6 +53,7 @@ from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 AgentToolApprovalScheduler = Callable[[uuid.UUID], None]
+ApprovalCompletionCheckpoint = Callable[[], Awaitable[None]]
 APPROVAL_EXPIRED_ERROR = "Tool approval expired before it was approved."
 
 
@@ -314,6 +319,13 @@ async def generate_approval_continuation_message(
             workspace_id=workspace_id,
             agent_run_id=approval.agent_run_id,
         )
+    conversation = await repository.get_workspace_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=approval.conversation_id,
+        include_inactive=True,
+    )
     stream = run_agent_chat(
         agent,
         credential,
@@ -322,28 +334,90 @@ async def generate_approval_continuation_message(
         user=user,
         organization_id=organization_id,
         workspace_id=workspace_id,
-        conversation=None,
+        conversation=conversation,
         agent_run=agent_run,
     )
     chunks: list[str] = []
+    activity_parts: dict[str, dict[str, Any]] = {}
     try:
         async for event in stream:
             if isinstance(event, AgentChatTextEvent) and event.text:
                 chunks.append(event.text)
+                continue
+            if isinstance(event, AgentChatToolActivityEvent):
+                data: dict[str, Any] = {
+                    "toolName": event.tool_name,
+                    "status": event.status,
+                }
+                if event.arguments is not None:
+                    data["arguments"] = sanitize_run_payload(event.arguments)
+                if event.error:
+                    data["error"] = event.error
+                if event.failure_reason:
+                    data["failureReason"] = event.failure_reason
+                if event.message:
+                    data["message"] = event.message
+                if event.progress is not None:
+                    data["progress"] = event.progress
+                if event.progress_token is not None:
+                    data["progressToken"] = event.progress_token
+                if event.result:
+                    data["result"] = sanitize_run_payload(event.result)
+                if event.details:
+                    previous = activity_parts.get(event.id, {}).get("data", {})
+                    previous_details = (
+                        previous.get("details") if isinstance(previous, dict) else None
+                    )
+                    data["details"] = sanitize_run_payload(
+                        {
+                            **(previous_details if isinstance(previous_details, dict) else {}),
+                            **event.details,
+                        }
+                    )
+                if event.total is not None:
+                    data["total"] = event.total
+                if event.approval:
+                    data["approval"] = sanitize_run_payload(event.approval)
+                activity_parts[event.id] = {
+                    "type": "data-tool-activity",
+                    "id": event.id,
+                    "data": data,
+                }
+                if agent_run is not None:
+                    is_progress_update = event.status == "running" and (
+                        event.progress is not None or event.message is not None
+                    )
+                    await repository.append_agent_run_step(
+                        session,
+                        agent_run_id=agent_run.id,
+                        step_type=(
+                            "tool_progress"
+                            if is_progress_update
+                            else "tool_call"
+                            if event.status == "running"
+                            else "tool_result"
+                        ),
+                        status=event.status,
+                        title=event.tool_name,
+                        payload=sanitize_run_payload(data),
+                    )
     except Exception as exc:
         chunks.append(chat_stream_error_text(exc))
     content = "".join(chunks).strip()
-    if not content:
+    parts = list(activity_parts.values())
+    if content:
+        parts.extend(text_parts(content))
+    if not parts:
         return None
     message = await repository.append_conversation_message(
         session,
         conversation_id=approval.conversation_id,
         role="assistant",
         content=content,
-        parts=text_parts(content),
+        parts=parts,
         agent_run_id=approval.agent_run_id,
     )
-    if approval.agent_run_id is not None:
+    if approval.agent_run_id is not None and content:
         await repository.append_agent_run_step(
             session,
             agent_run_id=approval.agent_run_id,
@@ -457,6 +531,8 @@ async def complete_agent_tool_approval(
     workspace_id: uuid.UUID,
     agent_id: uuid.UUID,
     approval_id: uuid.UUID,
+    *,
+    checkpoint_after_execution: ApprovalCompletionCheckpoint | None = None,
 ) -> AgentToolApprovalDecisionResponse:
     access_context = await require_workspace_member(session, user, organization_id, workspace_id)
     organization_membership, workspace_membership = workspace_membership_context(access_context)
@@ -570,6 +646,8 @@ async def complete_agent_tool_approval(
             approval_id=approval.id,
             data_update=update,
         )
+    if checkpoint_after_execution is not None:
+        await checkpoint_after_execution()
     assistant_message = None
     if approval.status == "completed":
         assistant_message = await generate_approval_continuation_message(
@@ -588,10 +666,18 @@ async def complete_agent_tool_approval(
             agent_run_id=approval.agent_run_id,
         )
         if agent_run is not None:
+            run_status = "succeeded" if approval.status == "completed" else "failed"
+            if approval.status == "completed":
+                active_approvals = await repository.list_active_tool_approvals_for_agent_run(
+                    session,
+                    agent_run_id=agent_run.id,
+                )
+                if active_approvals:
+                    run_status = "waiting_confirmation"
             await repository.finish_agent_run(
                 session,
                 agent_run,
-                status="succeeded" if approval.status == "completed" else "failed",
+                status=run_status,
                 error=approval.error,
             )
     return agent_tool_approval_decision_response(
@@ -629,6 +715,7 @@ async def complete_agent_tool_approval_background(
                 workspace_id,
                 agent_id,
                 approval_id,
+                checkpoint_after_execution=session.commit,
             )
             await session.commit()
         except Exception:

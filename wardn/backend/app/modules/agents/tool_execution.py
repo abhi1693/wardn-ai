@@ -116,6 +116,7 @@ async def _execute_agent_tool_call(
                     decision_details
                 ),
             )
+        auto_approved_confirmation = False
         if decision.mode == GUARDRAIL_MODE_DENY:
             return tool_execution_result(
                 tool.tool_schema.tool_name,
@@ -131,39 +132,71 @@ async def _execute_agent_tool_call(
                     failure_reason=FAILURE_TOOL_ASSIGNED_BLOCKED_POLICY,
                     details={"policy": decision_details},
                 )
-            approval = await repository.create_tool_approval(
+            if agent_run is not None and await repository.has_completed_tool_approval_for_agent_run(
                 session,
-                organization_id=organization_id,
-                workspace_id=workspace_id or tool.installation.workspace_id,
-                agent_id=agent.id,
-                conversation_id=conversation.id if conversation else None,
-                agent_run_id=agent_run.id if agent_run else None,
-                requested_by_id=user.id if user else None,
+                agent_run_id=agent_run.id,
                 installation_id=tool.installation.id,
                 tool_schema_id=tool.tool_schema.id,
-                tool_call_id=tool_call.call_id,
-                tool_name=tool.tool_schema.tool_name,
-                arguments=tool_call.arguments,
-                expires_at=new_agent_tool_approval_expires_at(),
-            )
-            return tool_execution_result(
-                tool.tool_schema.tool_name,
-                f"{AGENT_TOOL_CONFIRMATION_PREFIX} {decision.message}",
-                details={
-                    "policy": decision_details,
-                    "actionReview": action_review_payload(
-                        approval=approval,
-                        tool=tool,
+                decided_by_id=user.id if user else None,
+            ):
+                auto_approval_details = {
+                    **decision_details,
+                    "mode": GUARDRAIL_MODE_ALLOW,
+                    "approvalReuse": {
+                        "scope": "agent_run",
+                        "reason": "same_tool_previously_approved",
+                    },
+                }
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "message": "Confirmation reused from an earlier approval in this run.",
+                            "details": {"policy": auto_approval_details},
+                        }
+                    )
+                await repository.append_agent_run_step(
+                    session,
+                    agent_run_id=agent_run.id,
+                    step_type="guardrail_decision",
+                    status="auto_approved",
+                    title=tool.tool_schema.tool_name,
+                    payload=sanitize_run_payload(auto_approval_details),
+                )
+                auto_approved_confirmation = True
+            else:
+                approval = await repository.create_tool_approval(
+                    session,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id or tool.installation.workspace_id,
+                    agent_id=agent.id,
+                    conversation_id=conversation.id if conversation else None,
+                    agent_run_id=agent_run.id if agent_run else None,
+                    requested_by_id=user.id if user else None,
+                    installation_id=tool.installation.id,
+                    tool_schema_id=tool.tool_schema.id,
+                    tool_call_id=tool_call.call_id,
+                    tool_name=tool.tool_schema.tool_name,
+                    arguments=tool_call.arguments,
+                    expires_at=new_agent_tool_approval_expires_at(),
+                )
+                return tool_execution_result(
+                    tool.tool_schema.tool_name,
+                    f"{AGENT_TOOL_CONFIRMATION_PREFIX} {decision.message}",
+                    details={
+                        "policy": decision_details,
+                        "actionReview": action_review_payload(
+                            approval=approval,
+                            tool=tool,
+                            decision_details=decision_details,
+                        ),
+                    },
+                    approval=tool_approval_payload_with_review(
+                        approval,
+                        tool,
                         decision_details=decision_details,
                     ),
-                },
-                approval=tool_approval_payload_with_review(
-                    approval,
-                    tool,
-                    decision_details=decision_details,
-                ),
-            )
-        if decision.mode != GUARDRAIL_MODE_ALLOW:
+                )
+        if decision.mode != GUARDRAIL_MODE_ALLOW and not auto_approved_confirmation:
             return tool_execution_result(
                 tool.tool_schema.tool_name,
                 f"{AGENT_TOOL_BLOCKED_PREFIX} unsupported guardrail decision",

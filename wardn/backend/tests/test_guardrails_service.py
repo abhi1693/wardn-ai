@@ -1008,6 +1008,143 @@ async def test_agent_tool_call_guardrail_confirmation_creates_approval(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_call_reuses_completed_approval_for_same_run_tool(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    installation_id = uuid4()
+    tool_schema_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        triggered_by_id=user.id,
+        trigger_type="chat",
+        status="running",
+        started_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+    installation = MCPServerInstallation(
+        id=installation_id,
+        workspace_id=workspace_id,
+        server_name="io.github.example/server",
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version="1.0.0",
+        description="Server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=tool_schema_id,
+        workspace_id=workspace_id,
+        installation_id=installation_id,
+        server_name=installation.server_name,
+        server_version="1.0.0",
+        tool_name="scale_statefulset",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    runtime_tool = AgentRuntimeTool(
+        wire_name="scale_statefulset",
+        assignment_id=uuid4(),
+        tool_schema=tool_schema,
+        installation=installation,
+        server=server,
+    )
+    captured: dict[str, object] = {}
+
+    async def evaluate_tool_call_guardrails(*args, **kwargs):
+        return service.GuardrailDecision(
+            mode="require_confirmation",
+            policy_id=uuid4(),
+            policy_name="Confirm scaling",
+            message="Tool call requires confirmation",
+            matched_policy_ids=(uuid4(),),
+        )
+
+    async def has_completed_tool_approval_for_agent_run(*args, **kwargs):
+        captured["approval_reuse_lookup"] = kwargs
+        return True
+
+    async def append_agent_run_step(*args, **kwargs):
+        captured.setdefault("step_statuses", []).append(kwargs["status"])
+        return None
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        captured["runtime_arguments"] = kwargs["arguments"]
+        return {"content": [{"type": "text", "text": "scaled"}]}
+
+    monkeypatch.setattr(
+        agent_tool_execution,
+        "evaluate_tool_call_guardrails",
+        evaluate_tool_call_guardrails,
+    )
+    monkeypatch.setattr(
+        agent_service.repository,
+        "has_completed_tool_approval_for_agent_run",
+        has_completed_tool_approval_for_agent_run,
+    )
+    monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        agent_tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+
+    session = FakeSession()
+    execution = await agent_service.execute_agent_tool_call(
+        {"scale_statefulset": runtime_tool},
+        agent_service.AgentToolCall(
+            name="scale_statefulset",
+            call_id="call-2",
+            arguments={"name": "zeus-mqtt", "replicas": 1},
+        ),
+        session_factory=fake_session_factory(session),
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+        agent_run=agent_run,
+    )
+
+    assert execution.status == "completed"
+    assert execution.result == "scaled"
+    assert execution.approval is None
+    assert captured["runtime_arguments"] == {"name": "zeus-mqtt", "replicas": 1}
+    assert captured["approval_reuse_lookup"]["agent_run_id"] == agent_run.id
+    assert captured["approval_reuse_lookup"]["installation_id"] == installation_id
+    assert captured["approval_reuse_lookup"]["tool_schema_id"] == tool_schema_id
+    assert captured["approval_reuse_lookup"]["decided_by_id"] == user.id
+    assert "auto_approved" in captured["step_statuses"]
+    assert not [entry for entry in session.added if isinstance(entry, AgentToolApproval)]
+
+
+@pytest.mark.asyncio
 async def test_get_agent_tool_approval_returns_review_and_url(monkeypatch) -> None:
     organization_id = uuid4()
     workspace_id = uuid4()
@@ -1609,6 +1746,203 @@ async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) 
     assert approval.status == "running"
     assert response.status == "running"
     assert response.result == ""
+
+
+@pytest.mark.asyncio
+async def test_complete_agent_tool_approval_checkpoints_before_followup_confirmation(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        provider_credential_id=uuid4(),
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        server_name="io.github.AIops-tools/k8s-aiops",
+        server_version="1.0.0",
+        tool_name="scale_statefulset",
+        title="Scale statefulset",
+        description="Scale a statefulset.",
+        input_schema={},
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name=tool_schema.server_name,
+        config_name="rancher-qa-omsllc",
+        installed_version=tool_schema.server_version,
+        install_type="pypi",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=tool_schema.server_name,
+        version=tool_schema.server_version,
+        description="Server",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        requested_by_id=user.id,
+        installation_id=installation.id,
+        tool_schema_id=tool_schema.id,
+        tool_call_id="call-scale-down",
+        tool_name=tool_schema.tool_name,
+        arguments={"name": "zeus-mqtt", "namespace": "zeus-api", "replicas": 0},
+        status="running",
+        result="",
+        error="",
+    )
+    followup_approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=None,
+        agent_run_id=approval.agent_run_id,
+        requested_by_id=user.id,
+        installation_id=installation.id,
+        tool_schema_id=tool_schema.id,
+        tool_call_id="call-scale-up",
+        tool_name=tool_schema.tool_name,
+        arguments={"name": "zeus-mqtt", "namespace": "zeus-api", "replicas": 1},
+        status="pending",
+        result="",
+        error="",
+    )
+    agent_run = AgentRun(
+        id=approval.agent_run_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=approval.conversation_id,
+        triggered_by_id=user.id,
+        trigger_type="whatsapp",
+        status="running",
+        started_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+    captured: dict[str, object] = {}
+
+    async def require_workspace_member(*args, **kwargs):
+        return None
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return [(SimpleNamespace(id=uuid4()), tool_schema, installation, server)]
+
+    async def call_tool_with_tracking(*args, **kwargs):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"name":"zeus-mqtt","replicas":0,"previous_replicas":1}',
+                }
+            ]
+        }
+
+    async def append_agent_run_step(*args, **kwargs):
+        captured.setdefault("step_statuses", []).append(kwargs["status"])
+
+    async def update_conversation_tool_activity(*args, **kwargs):
+        captured["activity_update"] = kwargs["data_update"]
+        return True
+
+    async def checkpoint() -> None:
+        captured["checkpoint_status"] = approval.status
+        captured["checkpoint_result"] = approval.result
+
+    async def generate_approval_continuation_message(*args, **kwargs):
+        assert captured["checkpoint_status"] == "completed"
+        return None
+
+    async def get_agent_run(*args, **kwargs):
+        return agent_run
+
+    async def list_active_tool_approvals_for_agent_run(*args, **kwargs):
+        return [followup_approval]
+
+    async def finish_agent_run(*args, **kwargs):
+        captured["run_status"] = kwargs["status"]
+        return args[1]
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        agent_approvals,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_tracking,
+    )
+    monkeypatch.setattr(agent_service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(
+        agent_service.repository,
+        "update_conversation_tool_activity",
+        update_conversation_tool_activity,
+    )
+    monkeypatch.setattr(
+        agent_approvals,
+        "generate_approval_continuation_message",
+        generate_approval_continuation_message,
+    )
+    monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        agent_service.repository,
+        "list_active_tool_approvals_for_agent_run",
+        list_active_tool_approvals_for_agent_run,
+    )
+    monkeypatch.setattr(agent_service.repository, "finish_agent_run", finish_agent_run)
+
+    response = await agent_approvals.complete_agent_tool_approval(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        approval.id,
+        checkpoint_after_execution=checkpoint,
+    )
+
+    assert approval.status == "completed"
+    assert captured["checkpoint_status"] == "completed"
+    assert captured["checkpoint_result"] == (
+        '{"name":"zeus-mqtt","replicas":0,"previous_replicas":1}'
+    )
+    assert captured["activity_update"]["status"] == "completed"
+    assert captured["run_status"] == "waiting_confirmation"
+    assert response.status == "completed"
 
 
 @pytest.mark.asyncio
