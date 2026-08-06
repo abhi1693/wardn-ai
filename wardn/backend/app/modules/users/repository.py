@@ -26,6 +26,23 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def list_active_superusers(session: AsyncSession) -> list[User]:
+    result = await session.execute(
+        select(User)
+        .where(
+            User.is_active.is_(True),
+            User.is_superuser.is_(True),
+        )
+        .order_by(
+            func.lower(User.first_name).asc(),
+            func.lower(User.last_name).asc(),
+            func.lower(User.email).asc(),
+            User.id.asc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def get_api_token_by_prefix(session: AsyncSession, token_prefix: str) -> UserAPIToken | None:
     result = await session.execute(
         select(UserAPIToken).where(UserAPIToken.token_prefix == token_prefix)

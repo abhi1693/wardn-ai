@@ -25,6 +25,7 @@ from app.modules.chat_providers.models import (
     ChatProviderThread,
 )
 from app.modules.chat_providers.schemas import ChatProviderConnectionCreate
+from app.modules.organizations.models import OrganizationMembership, WorkspaceMembership
 from app.modules.secrets.provider import ResolvedSecret
 from app.modules.users.models import User
 
@@ -171,6 +172,256 @@ def test_provider_config_normalizes_approval_routes() -> None:
             "display_name": "Workspace Owner",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_workspace_member_responses_include_effective_internal_approvers(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    workspace_member = User(
+        id=uuid4(),
+        email="member@example.com",
+        first_name="Workspace",
+        last_name="Member",
+        is_active=True,
+    )
+    organization_owner = User(
+        id=uuid4(),
+        email="owner@example.com",
+        first_name="Organization",
+        last_name="Owner",
+        is_active=True,
+    )
+    superuser = User(
+        id=uuid4(),
+        email="super@example.com",
+        first_name="Wardn",
+        last_name="Admin",
+        is_active=True,
+        is_superuser=True,
+    )
+    workspace_membership = WorkspaceMembership(
+        workspace_id=workspace_id,
+        user_id=workspace_member.id,
+        role="member",
+        is_active=True,
+    )
+    organization_membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=organization_owner.id,
+        role="owner",
+        is_active=True,
+    )
+
+    async def list_workspace_members(*args, **kwargs):
+        return [(workspace_membership, workspace_member)]
+
+    async def list_organization_admin_members(*args, **kwargs):
+        return [(organization_membership, organization_owner)]
+
+    async def list_active_superusers(*args, **kwargs):
+        return [superuser]
+
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "list_workspace_members",
+        list_workspace_members,
+    )
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "list_organization_admin_members",
+        list_organization_admin_members,
+    )
+    monkeypatch.setattr(service, "list_active_superusers", list_active_superusers)
+
+    members = await service.workspace_member_responses(
+        FakeSession(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+
+    assert [(member.email, member.role) for member in members] == [
+        ("owner@example.com", "owner"),
+        ("super@example.com", "owner"),
+        ("member@example.com", "member"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_workspace_member_responses_promote_duplicate_effective_roles(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(
+        id=uuid4(),
+        email="owner@example.com",
+        first_name="Workspace",
+        last_name="Owner",
+        is_active=True,
+    )
+    workspace_membership = WorkspaceMembership(
+        workspace_id=workspace_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+    organization_membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="owner",
+        is_active=True,
+    )
+
+    async def list_workspace_members(*args, **kwargs):
+        return [(workspace_membership, user)]
+
+    async def list_organization_admin_members(*args, **kwargs):
+        return [(organization_membership, user)]
+
+    async def list_active_superusers(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "list_workspace_members",
+        list_workspace_members,
+    )
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "list_organization_admin_members",
+        list_organization_admin_members,
+    )
+    monkeypatch.setattr(service, "list_active_superusers", list_active_superusers)
+
+    members = await service.workspace_member_responses(
+        FakeSession(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+
+    assert [(member.email, member.role) for member in members] == [
+        ("owner@example.com", "owner"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_validate_approval_routes_accepts_superuser_without_membership(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    approver = User(id=uuid4(), email="super@example.com", is_active=True, is_superuser=True)
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+
+    await service.validate_approval_routes(
+        FakeSession(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        routes=[
+            {
+                "route_type": "workspace_member",
+                "user_id": str(approver.id),
+            }
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_approval_routes_accepts_organization_admin_without_workspace_membership(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    approver = User(id=uuid4(), email="admin@example.com", is_active=True)
+    organization_membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=approver.id,
+        role="admin",
+        is_active=True,
+    )
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    async def get_organization_membership(*args, **kwargs):
+        return organization_membership
+
+    async def get_workspace_membership(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_organization_membership",
+        get_organization_membership,
+    )
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_workspace_membership",
+        get_workspace_membership,
+    )
+
+    await service.validate_approval_routes(
+        FakeSession(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        routes=[
+            {
+                "route_type": "workspace_member",
+                "user_id": str(approver.id),
+            }
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_approval_routes_rejects_external_or_inactive_users(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    approver = User(id=uuid4(), email="external@example.com", is_active=True)
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    async def get_organization_membership(*args, **kwargs):
+        return None
+
+    async def get_workspace_membership(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_organization_membership",
+        get_organization_membership,
+    )
+    monkeypatch.setattr(
+        service.organizations_repository,
+        "get_workspace_membership",
+        get_workspace_membership,
+    )
+
+    with pytest.raises(InvalidChatProviderConnectionError):
+        await service.validate_approval_routes(
+            FakeSession(),
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            routes=[
+                {
+                    "route_type": "workspace_member",
+                    "user_id": str(approver.id),
+                }
+            ],
+        )
 
 
 @pytest.mark.asyncio

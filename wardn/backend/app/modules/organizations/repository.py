@@ -90,6 +90,31 @@ async def get_organization_membership(
     return result.scalar_one_or_none()
 
 
+async def list_organization_admin_members(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> list[tuple[OrganizationMembership, User]]:
+    result = await session.execute(
+        select(OrganizationMembership, User)
+        .join(User, User.id == OrganizationMembership.user_id)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.is_active.is_(True),
+            OrganizationMembership.role.in_(("owner", "admin")),
+            User.is_active.is_(True),
+        )
+        .order_by(
+            OrganizationMembership.role.asc(),
+            func.lower(User.first_name).asc(),
+            func.lower(User.last_name).asc(),
+            func.lower(User.email).asc(),
+            OrganizationMembership.id.asc(),
+        )
+    )
+    return list(result.all())
+
+
 async def list_workspaces_for_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,

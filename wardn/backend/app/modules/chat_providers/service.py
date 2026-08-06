@@ -58,7 +58,7 @@ from app.modules.secrets.managed import (
 from app.modules.secrets.schemas import SecretHandleCreate
 from app.modules.secrets.service import create_secret_handle, resolve_secret, write_secret_values
 from app.modules.users.models import User
-from app.modules.users.repository import get_user_by_id
+from app.modules.users.repository import get_user_by_id, list_active_superusers
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,8 @@ WHATSAPP_BRIDGE_RECONNECT_TEXT_MARKERS = (
     "not ready",
     "session",
 )
+
+APPROVAL_ROUTE_ROLE_PRIORITY = {"owner": 0, "admin": 1, "member": 2}
 
 
 @dataclass(frozen=True)
@@ -591,20 +593,87 @@ async def validate_approval_routes(
             raise InvalidChatProviderConnectionError(
                 "chat provider approval route has an invalid workspace member"
             ) from exc
-        membership = await organizations_repository.get_workspace_membership(
-            session,
-            workspace_id,
-            user_id,
-        )
         approver = await get_user_by_id(session, user_id)
-        if (
-            membership is None
-            or approver is None
-            or not approver.is_active
-        ):
+        if approver is None or not approver.is_active:
             raise InvalidChatProviderConnectionError(
-                "chat provider approval route must be an active workspace member"
+                "chat provider approval route must be an active Wardn user"
             )
+        if await user_can_review_chat_provider_approval_route(
+            session,
+            approver,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        ):
+            continue
+        raise InvalidChatProviderConnectionError(
+            "chat provider approval route must be an internal workspace approver"
+        )
+
+
+async def user_can_review_chat_provider_approval_route(
+    session: AsyncSession,
+    user: User,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> bool:
+    if user.is_superuser:
+        return True
+    organization_membership = await organizations_repository.get_organization_membership(
+        session,
+        organization_id,
+        user.id,
+    )
+    if organization_membership is not None and organization_membership.role in {"owner", "admin"}:
+        return True
+    workspace_membership = await organizations_repository.get_workspace_membership(
+        session,
+        workspace_id,
+        user.id,
+    )
+    return workspace_membership is not None
+
+
+def approval_route_response(
+    user: User,
+    *,
+    role: str,
+) -> ChatProviderWorkspaceMemberRead:
+    return ChatProviderWorkspaceMemberRead(
+        user_id=user.id,
+        email=user.email,
+        display_name=workspace_member_display_name(user),
+        role=role,
+    )
+
+
+def add_approval_route_member(
+    members: dict[uuid.UUID, ChatProviderWorkspaceMemberRead],
+    user: User,
+    *,
+    role: str,
+) -> None:
+    current = members.get(user.id)
+    if current is not None:
+        current_priority = APPROVAL_ROUTE_ROLE_PRIORITY.get(current.role, 99)
+        next_priority = APPROVAL_ROUTE_ROLE_PRIORITY.get(role, 99)
+        if current_priority <= next_priority:
+            return
+    members[user.id] = approval_route_response(user, role=role)
+
+
+def approval_member_sort_key(member: ChatProviderWorkspaceMemberRead) -> tuple[int, str, str]:
+    return (
+        APPROVAL_ROUTE_ROLE_PRIORITY.get(member.role, 99),
+        member.display_name.casefold(),
+        member.email.casefold(),
+    )
+
+
+def organization_approval_role(role: str) -> str:
+    if role == "owner":
+        return "owner"
+    return "admin"
 
 
 def normalize_secret_handle_ids(
@@ -730,19 +799,25 @@ async def workspace_member_responses(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
 ) -> list[ChatProviderWorkspaceMemberRead]:
-    return [
-        ChatProviderWorkspaceMemberRead(
-            user_id=membership.user_id,
-            email=user.email,
-            display_name=workspace_member_display_name(user),
-            role=membership.role,
+    members: dict[uuid.UUID, ChatProviderWorkspaceMemberRead] = {}
+    for membership, user in await organizations_repository.list_workspace_members(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    ):
+        add_approval_route_member(members, user, role=membership.role)
+    for membership, user in await organizations_repository.list_organization_admin_members(
+        session,
+        organization_id=organization_id,
+    ):
+        add_approval_route_member(
+            members,
+            user,
+            role=organization_approval_role(membership.role),
         )
-        for membership, user in await organizations_repository.list_workspace_members(
-            session,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-        )
-    ]
+    for user in await list_active_superusers(session):
+        add_approval_route_member(members, user, role="owner")
+    return sorted(members.values(), key=approval_member_sort_key)
 
 
 async def create_secret_handles_for_values(
