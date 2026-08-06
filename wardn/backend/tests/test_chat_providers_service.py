@@ -295,6 +295,27 @@ def test_provider_config_normalizes_approval_routes() -> None:
     ]
 
 
+def test_slack_sender_allowed_accepts_conversation_allow_list() -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+    connection.config = {
+        "allow_all_senders": False,
+        "allowed_chat_ids": ["T123:C123"],
+        "allowed_sender_ids": [],
+    }
+
+    assert service.sender_allowed(
+        connection,
+        service.ProviderTextMessage(
+            event_id="Ev1",
+            external_thread_id="T123:C123:1786026213.981319",
+            external_user_id="U123",
+            external_user_display_name="Asha",
+            text="hi",
+            raw={},
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_workspace_member_responses_include_effective_internal_approvers(
     monkeypatch,
@@ -523,6 +544,47 @@ async def test_validate_approval_routes_requires_linked_provider_thread(monkeypa
             routes=[
                 {
                     "route_type": "workspace_member",
+                    "user_id": str(approver.id),
+                }
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_approval_routes_rejects_slack_channel_thread(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+    connection.external_id = "T123"
+    connection.config = {"allow_all_senders": True, "team_id": "T123"}
+    approver = User(id=uuid4(), email="owner@example.com", is_active=True, is_superuser=True)
+    linked_thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        external_thread_id="T123:C123:1786026213.981319",
+        external_user_id="U123",
+        external_user_display_name="Asha",
+    )
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    async def get_thread(*args, **kwargs):
+        return linked_thread
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+    monkeypatch.setattr(service.repository, "get_thread", get_thread)
+
+    with pytest.raises(InvalidChatProviderConnectionError, match="direct message"):
+        await service.validate_approval_routes(
+            FakeSession(),
+            connection=connection,
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            routes=[
+                {
+                    "route_type": "workspace_member",
+                    "external_thread_id": linked_thread.external_thread_id,
                     "user_id": str(approver.id),
                 }
             ],

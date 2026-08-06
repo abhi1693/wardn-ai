@@ -218,14 +218,53 @@ function slackThreadLabel(value?: string | null) {
   return `Slack ${kind} ${channelId} · ${threadTs}`;
 }
 
+function slackConversationId(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId, threadTs] = trimmed.split(":");
+  if (!teamId || !channelId || !threadTs) {
+    return "";
+  }
+  return `${teamId}:${channelId}`;
+}
+
+function slackConversationLabel(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId] = trimmed.split(":");
+  if (!teamId || !channelId) {
+    return "";
+  }
+  const kind = channelId.startsWith("D")
+    ? "DM"
+    : channelId.startsWith("G")
+      ? "Private channel"
+      : channelId.startsWith("C")
+        ? "Channel"
+        : "Conversation";
+  return `Slack ${kind} ${channelId}`;
+}
+
+function isSlackDmThread(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [, channelId, threadTs] = trimmed.split(":");
+  return Boolean(channelId?.startsWith("D") && threadTs);
+}
+
+function slackUserLabel(
+  identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]
+) {
+  return identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+}
+
 function identityLabel(
   identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number],
   provider = ""
 ) {
   if (provider === "slack") {
     const threadLabel = slackThreadLabel(identity.externalThreadId);
-    const userLabel =
-      identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+    const userLabel = slackUserLabel(identity);
+    if (threadLabel && userLabel && isSlackDmThread(identity.externalThreadId)) {
+      return `${userLabel} · ${threadLabel}`;
+    }
     if (threadLabel && userLabel) {
       return `${threadLabel} · ${userLabel}`;
     }
@@ -239,6 +278,58 @@ function identityLabel(
     friendlyIdentityId(identity.externalThreadId) ||
     "Unknown sender"
   );
+}
+
+function conversationChoices(
+  identities: NonNullable<ChatProviderConnectionRead["knownIdentities"]>,
+  provider = ""
+) {
+  if (provider !== "slack") {
+    return identities.map((identity) => ({
+      externalThreadIds: [identity.externalThreadId],
+      id: identity.externalThreadId,
+      label: identityLabel(identity, provider),
+      lastSeenAt: identity.lastSeenAt,
+    }));
+  }
+  const choices = new Map<
+    string,
+    { externalThreadIds: string[]; id: string; label: string; lastSeenAt: string }
+  >();
+  for (const identity of identities) {
+    const id = slackConversationId(identity.externalThreadId);
+    if (!id) {
+      continue;
+    }
+    const userLabel = slackUserLabel(identity);
+    const baseLabel = slackConversationLabel(id) || id;
+    const label = id.split(":")[1]?.startsWith("D") && userLabel
+      ? `DM with ${userLabel} · ${baseLabel}`
+      : baseLabel;
+    const existing = choices.get(id);
+    if (!existing) {
+      choices.set(id, {
+        externalThreadIds: [identity.externalThreadId],
+        id,
+        label,
+        lastSeenAt: identity.lastSeenAt,
+      });
+      continue;
+    }
+    existing.externalThreadIds.push(identity.externalThreadId);
+    if (identity.lastSeenAt > existing.lastSeenAt) {
+      existing.lastSeenAt = identity.lastSeenAt;
+      existing.label = label;
+    }
+  }
+  return Array.from(choices.values()).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+}
+
+function normalizeAllowedChatIdsForProvider(values: string[], provider = "") {
+  if (provider !== "slack") {
+    return values;
+  }
+  return Array.from(new Set(values.map((value) => slackConversationId(value) || value)));
 }
 
 function approvalRouteType(route: Record<string, unknown>) {
@@ -876,13 +967,21 @@ export function EditProviderDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const config = record(connection.config);
-  const knownIdentities = connection.knownIdentities ?? [];
+  const knownIdentities = useMemo(
+    () => connection.knownIdentities ?? [],
+    [connection.knownIdentities]
+  );
+  const replyChoices = useMemo(
+    () => conversationChoices(knownIdentities, connection.provider),
+    [knownIdentities, connection.provider]
+  );
   const selectedChatIds = stringList(allowedChatIds);
 
-  function setKnownConversationAllowed(threadId: string, checked: boolean) {
+  function setKnownConversationAllowed(threadId: string, checked: boolean, aliases: string[] = []) {
+    const removableIds = new Set([threadId, ...aliases]);
     const next = checked
       ? appendListValue(selectedChatIds, threadId)
-      : removeListValue(selectedChatIds, threadId);
+      : selectedChatIds.filter((value) => !removableIds.has(value));
     setAllowedChatIds(listText(next));
   }
 
@@ -905,7 +1004,10 @@ export function EditProviderDialog({
     }));
     const common = {
       allowAllSenders: allowAllSenders,
-      allowedChatIds: stringList(allowedChatIds),
+      allowedChatIds: normalizeAllowedChatIdsForProvider(
+        stringList(allowedChatIds),
+        connection.provider
+      ),
       allowedSenderIds: stringList(allowedSenderIds),
       approvalRoutes,
       replyOnUnsupportedMessages: boolConfigDefault(
@@ -1003,21 +1105,25 @@ export function EditProviderDialog({
 
             {!allowAllSenders ? (
               <div className="space-y-3 p-3">
-                {knownIdentities.length > 0 ? (
+                {replyChoices.length > 0 ? (
                   <div className="grid gap-2">
-                    {knownIdentities.map((identity) => {
-                      const checked = selectedChatIds.includes(identity.externalThreadId);
+                    {replyChoices.map((choice) => {
+                      const checked =
+                        selectedChatIds.includes(choice.id) ||
+                        choice.externalThreadIds.some((threadId) =>
+                          selectedChatIds.includes(threadId)
+                        );
                       return (
                         <label
                           className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
-                          key={identity.externalThreadId}
+                          key={choice.id}
                         >
                           <span className="min-w-0">
                             <span className="block truncate font-medium text-foreground">
-                            {identityLabel(identity, connection.provider)}
+                              {choice.label}
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
-                              Last message {displayDate(identity.lastSeenAt)}
+                              Last message {displayDate(choice.lastSeenAt)}
                             </span>
                           </span>
                           <input
@@ -1025,8 +1131,9 @@ export function EditProviderDialog({
                             className="size-4 shrink-0 accent-primary"
                             onChange={(event) =>
                               setKnownConversationAllowed(
-                                identity.externalThreadId,
-                                event.target.checked
+                                choice.id,
+                                event.target.checked,
+                                choice.externalThreadIds
                               )
                             }
                             type="checkbox"

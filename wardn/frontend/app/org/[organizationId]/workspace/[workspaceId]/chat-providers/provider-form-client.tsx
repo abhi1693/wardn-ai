@@ -175,11 +175,6 @@ function appendListValue(values: string[], value: string) {
   return Array.from(new Set([...values, normalized]));
 }
 
-function removeListValue(values: string[], value: string) {
-  const normalized = value.trim();
-  return values.filter((item) => item.trim() !== normalized);
-}
-
 function friendlyIdentityId(value?: string | null) {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) {
@@ -209,14 +204,53 @@ function slackThreadLabel(value?: string | null) {
   return `Slack ${kind} ${channelId} · ${threadTs}`;
 }
 
+function slackConversationId(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId, threadTs] = trimmed.split(":");
+  if (!teamId || !channelId || !threadTs) {
+    return "";
+  }
+  return `${teamId}:${channelId}`;
+}
+
+function slackConversationLabel(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId] = trimmed.split(":");
+  if (!teamId || !channelId) {
+    return "";
+  }
+  const kind = channelId.startsWith("D")
+    ? "DM"
+    : channelId.startsWith("G")
+      ? "Private channel"
+      : channelId.startsWith("C")
+        ? "Channel"
+        : "Conversation";
+  return `Slack ${kind} ${channelId}`;
+}
+
+function isSlackDmThread(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [, channelId, threadTs] = trimmed.split(":");
+  return Boolean(channelId?.startsWith("D") && threadTs);
+}
+
+function slackUserLabel(
+  identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]
+) {
+  return identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+}
+
 function identityLabel(
   identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number],
   provider = ""
 ) {
   if (provider === "slack") {
     const threadLabel = slackThreadLabel(identity.externalThreadId);
-    const userLabel =
-      identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+    const userLabel = slackUserLabel(identity);
+    if (threadLabel && userLabel && isSlackDmThread(identity.externalThreadId)) {
+      return `${userLabel} · ${threadLabel}`;
+    }
     if (threadLabel && userLabel) {
       return `${threadLabel} · ${userLabel}`;
     }
@@ -230,6 +264,58 @@ function identityLabel(
     friendlyIdentityId(identity.externalThreadId) ||
     "Unknown sender"
   );
+}
+
+function conversationChoices(
+  identities: NonNullable<ChatProviderConnectionRead["knownIdentities"]>,
+  provider = ""
+) {
+  if (provider !== "slack") {
+    return identities.map((identity) => ({
+      externalThreadIds: [identity.externalThreadId],
+      id: identity.externalThreadId,
+      label: identityLabel(identity, provider),
+      lastSeenAt: identity.lastSeenAt,
+    }));
+  }
+  const choices = new Map<
+    string,
+    { externalThreadIds: string[]; id: string; label: string; lastSeenAt: string }
+  >();
+  for (const identity of identities) {
+    const id = slackConversationId(identity.externalThreadId);
+    if (!id) {
+      continue;
+    }
+    const userLabel = slackUserLabel(identity);
+    const baseLabel = slackConversationLabel(id) || id;
+    const label = id.split(":")[1]?.startsWith("D") && userLabel
+      ? `DM with ${userLabel} · ${baseLabel}`
+      : baseLabel;
+    const existing = choices.get(id);
+    if (!existing) {
+      choices.set(id, {
+        externalThreadIds: [identity.externalThreadId],
+        id,
+        label,
+        lastSeenAt: identity.lastSeenAt,
+      });
+      continue;
+    }
+    existing.externalThreadIds.push(identity.externalThreadId);
+    if (identity.lastSeenAt > existing.lastSeenAt) {
+      existing.lastSeenAt = identity.lastSeenAt;
+      existing.label = label;
+    }
+  }
+  return Array.from(choices.values()).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+}
+
+function normalizeAllowedChatIdsForProvider(values: string[], provider = "") {
+  if (provider !== "slack") {
+    return values;
+  }
+  return Array.from(new Set(values.map((value) => slackConversationId(value) || value)));
 }
 
 function linkedThreadLabel(
@@ -458,16 +544,35 @@ export function ChatProviderFormClient({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  const knownIdentities = connection?.knownIdentities ?? [];
+  const knownIdentities = useMemo(
+    () => connection?.knownIdentities ?? [],
+    [connection?.knownIdentities]
+  );
+  const replyChoices = useMemo(
+    () => conversationChoices(knownIdentities, provider),
+    [knownIdentities, provider]
+  );
+  const approvalThreadChoices = useMemo(
+    () =>
+      provider === "slack"
+        ? knownIdentities.filter((identity) => isSlackDmThread(identity.externalThreadId))
+        : knownIdentities,
+    [knownIdentities, provider]
+  );
   const selectedChatIds = stringList(allowedChatIds);
   const selectedApproverCount = Object.keys(approvalThreadsByUserId).length;
   const missingApprovalLinks = Object.entries(approvalThreadsByUserId)
-    .filter(([, threadId]) => !threadId.trim())
+    .filter(([, threadId]) => !threadId.trim() || (provider === "slack" && !isSlackDmThread(threadId)))
     .map(([userId]) => userId);
 
   const selectedApprovalThreadIds = useMemo(
-    () => new Set(Object.values(approvalThreadsByUserId).filter(Boolean)),
-    [approvalThreadsByUserId]
+    () =>
+      new Set(
+        Object.values(approvalThreadsByUserId).filter(
+          (threadId) => threadId && (provider !== "slack" || isSlackDmThread(threadId))
+        )
+      ),
+    [approvalThreadsByUserId, provider]
   );
 
   function applyProviderDefaults(nextProvider: ProviderType) {
@@ -486,10 +591,11 @@ export function ChatProviderFormClient({
     }
   }
 
-  function setKnownConversationAllowed(threadId: string, checked: boolean) {
+  function setKnownConversationAllowed(threadId: string, checked: boolean, aliases: string[] = []) {
+    const removableIds = new Set([threadId, ...aliases]);
     const next = checked
       ? appendListValue(selectedChatIds, threadId)
-      : removeListValue(selectedChatIds, threadId);
+      : selectedChatIds.filter((value) => !removableIds.has(value));
     setAllowedChatIds(listText(next));
   }
 
@@ -520,13 +626,13 @@ export function ChatProviderFormClient({
     );
     const approvalRoutes = Object.entries(approvalThreadsByUserId).map(([userId, threadId]) => ({
       displayName: memberLabels.get(userId) ?? userId,
-      externalThreadId: threadId,
+      externalThreadId: provider === "slack" && !isSlackDmThread(threadId) ? "" : threadId,
       routeType: "workspace_member",
       userId,
     }));
     const common = {
       allowAllSenders: allowAllSenders,
-      allowedChatIds: stringList(allowedChatIds),
+      allowedChatIds: normalizeAllowedChatIdsForProvider(stringList(allowedChatIds), provider),
       allowedSenderIds: stringList(allowedSenderIds),
       approvalRoutes,
       replyOnUnsupportedMessages: boolConfigDefault(
@@ -1033,7 +1139,9 @@ export function ChatProviderFormClient({
                 <div className="flex flex-col gap-3 rounded-md border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-medium text-foreground">
-                      {allowAllSenders ? "Every sender can start a chat" : "Only selected threads"}
+                      {allowAllSenders
+                        ? "Every sender can start a chat"
+                        : "Only selected conversations"}
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       Reply access controls who can interact with this connected account.
@@ -1051,21 +1159,25 @@ export function ChatProviderFormClient({
                 </div>
 
                 {!allowAllSenders ? (
-                  knownIdentities.length > 0 ? (
+                  replyChoices.length > 0 ? (
                     <div className="grid gap-2">
-                      {knownIdentities.map((identity) => {
-                        const checked = selectedChatIds.includes(identity.externalThreadId);
+                      {replyChoices.map((choice) => {
+                        const checked =
+                          selectedChatIds.includes(choice.id) ||
+                          choice.externalThreadIds.some((threadId) =>
+                            selectedChatIds.includes(threadId)
+                          );
                         return (
                           <label
                             className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
-                            key={identity.externalThreadId}
+                            key={choice.id}
                           >
                             <span className="min-w-0">
                               <span className="block truncate font-medium text-foreground">
-                                {identityLabel(identity, provider)}
+                                {choice.label}
                               </span>
                               <span className="block truncate text-xs text-muted-foreground">
-                                Last message {displayDate(identity.lastSeenAt)}
+                                Last message {displayDate(choice.lastSeenAt)}
                               </span>
                             </span>
                             <input
@@ -1073,8 +1185,9 @@ export function ChatProviderFormClient({
                               className="size-4 shrink-0 accent-primary"
                               onChange={(event) =>
                                 setKnownConversationAllowed(
-                                  identity.externalThreadId,
-                                  event.target.checked
+                                  choice.id,
+                                  event.target.checked,
+                                  choice.externalThreadIds
                                 )
                               }
                               type="checkbox"
@@ -1135,10 +1248,11 @@ export function ChatProviderFormClient({
                   then link that member to a known thread on this provider. Without the linked
                   thread, Wardn cannot send the approval URL externally.
                 </div>
-                {knownIdentities.length === 0 ? (
+                {approvalThreadChoices.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                    No provider threads are known yet. Ask the approver to message this connected
-                    account, refresh this page, then link that thread here.
+                    {provider === "slack"
+                      ? "No eligible direct messages are known yet. Ask the approver to send this app a direct message, refresh this page, then link that DM here."
+                      : "No provider threads are known yet. Ask the approver to message this connected account, refresh this page, then link that thread here."}
                   </div>
                 ) : null}
 
@@ -1147,7 +1261,9 @@ export function ChatProviderFormClient({
                     {workspaceMembers.map((member) => {
                       const checked = Object.hasOwn(approvalThreadsByUserId, member.userId);
                       const threadId = approvalThreadsByUserId[member.userId] ?? "";
-                      const missingLink = checked && !threadId;
+                      const validThreadId =
+                        provider === "slack" && !isSlackDmThread(threadId) ? "" : threadId;
+                      const missingLink = checked && !validThreadId;
                       return (
                         <div
                           className={cn(
@@ -1181,21 +1297,21 @@ export function ChatProviderFormClient({
                           </label>
                           <div className="space-y-1">
                             <Select
-                              disabled={!checked || knownIdentities.length === 0}
+                              disabled={!checked || approvalThreadChoices.length === 0}
                               onValueChange={(value) =>
                                 setWorkspaceMemberThread(member.userId, value)
                               }
-                              value={threadId || NO_THREAD_VALUE}
+                              value={validThreadId || NO_THREAD_VALUE}
                             >
                               <SelectTrigger aria-label={`Approval thread for ${member.email}`}>
                                 <SelectValue placeholder="Link provider thread" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value={NO_THREAD_VALUE}>No linked thread</SelectItem>
-                                {knownIdentities.map((identity) => {
+                                {approvalThreadChoices.map((identity) => {
                                   const linkedToAnother =
                                     selectedApprovalThreadIds.has(identity.externalThreadId) &&
-                                    threadId !== identity.externalThreadId;
+                                    validThreadId !== identity.externalThreadId;
                                   return (
                                     <SelectItem
                                       disabled={linkedToAnother}
@@ -1213,10 +1329,11 @@ export function ChatProviderFormClient({
                               <div className="text-xs text-red-700">
                                 Select the provider thread for this approver.
                               </div>
-                            ) : threadId ? (
+                            ) : validThreadId ? (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Link2 className="size-3" />
-                                Linked to {linkedThreadLabel(knownIdentities, threadId, provider)}
+                                Linked to{" "}
+                                {linkedThreadLabel(knownIdentities, validThreadId, provider)}
                               </div>
                             ) : null}
                           </div>

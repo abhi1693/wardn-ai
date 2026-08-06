@@ -73,12 +73,30 @@ def external_thread_id(*, team_id: str, channel_id: str, thread_ts: str) -> str:
     return f"{team_id}:{channel_id}:{thread_ts}"
 
 
+def external_conversation_id(*, team_id: str, channel_id: str) -> str:
+    return f"{team_id}:{channel_id}"
+
+
 def parse_external_thread_id(value: str) -> tuple[str, str, str]:
     team_id, separator, remainder = value.partition(":")
     channel_id, channel_separator, thread_ts = remainder.partition(":")
     if not separator or not channel_separator or not team_id or not channel_id or not thread_ts:
         return "", "", ""
     return team_id, channel_id, thread_ts
+
+
+def parse_external_conversation_id(value: str) -> tuple[str, str]:
+    team_id, separator, channel_id = value.partition(":")
+    if not separator or not team_id or not channel_id or ":" in channel_id:
+        return "", ""
+    return team_id, channel_id
+
+
+def conversation_id_from_thread_id(value: str) -> str:
+    team_id, channel_id, _thread_ts = parse_external_thread_id(value)
+    if not team_id or not channel_id:
+        return ""
+    return external_conversation_id(team_id=team_id, channel_id=channel_id)
 
 
 def event_user_id(event: dict[str, Any]) -> str:

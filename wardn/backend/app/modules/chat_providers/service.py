@@ -540,9 +540,14 @@ def sender_allowed(connection: ChatProviderConnection, message: ProviderTextMess
         return True
     allowed_senders = {str(item).strip() for item in config.get("allowed_sender_ids", [])}
     allowed_chats = {str(item).strip() for item in config.get("allowed_chat_ids", [])}
+    message_chat_ids = {message.external_thread_id} if message.external_thread_id else set()
+    if connection.provider == PROVIDER_SLACK and message.external_thread_id:
+        slack_conversation_id = slack.conversation_id_from_thread_id(message.external_thread_id)
+        if slack_conversation_id:
+            message_chat_ids.add(slack_conversation_id)
     return (
         bool(message.external_user_id and message.external_user_id in allowed_senders)
-        or bool(message.external_thread_id and message.external_thread_id in allowed_chats)
+        or bool(message_chat_ids & allowed_chats)
     )
 
 
@@ -629,6 +634,14 @@ async def validate_approval_routes(
                     raise InvalidChatProviderConnectionError(
                         "chat provider approval route thread is not known for this provider"
                     )
+                if connection.provider == PROVIDER_SLACK:
+                    _team_id, channel_id, _thread_ts = slack.parse_external_thread_id(
+                        external_thread_id
+                    )
+                    if not channel_id.startswith("D"):
+                        raise InvalidChatProviderConnectionError(
+                            "Slack approval routes must use a direct message thread"
+                        )
             continue
         raise InvalidChatProviderConnectionError(
             "chat provider approval route must be an internal workspace approver"

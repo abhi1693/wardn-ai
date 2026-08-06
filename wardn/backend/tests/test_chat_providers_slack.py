@@ -170,3 +170,5 @@ def test_slack_external_thread_id_round_trips() -> None:
         "C123",
         "1700000000.000100",
     )
+    assert slack.conversation_id_from_thread_id(thread_id) == "T123:C123"
+    assert slack.parse_external_conversation_id("T123:C123") == ("T123", "C123")
