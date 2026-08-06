@@ -765,6 +765,10 @@ function buildOutputRoutes(
   return routes.length ? routes : [{ routeType: "chat" }];
 }
 
+function uniqueRouteKeys(...routeLists: string[][]) {
+  return Array.from(new Set(routeLists.flat().filter(Boolean)));
+}
+
 function routeLabelForKey(key: string, providerOptions: ProviderRouteOption[]) {
   if (key === "chat") {
     return "Built-in chat";
@@ -1034,9 +1038,21 @@ export function ScheduledTaskFormClient({
     }
   }
 
-  async function testSelectedRoutes() {
+  async function testRoutes(keys: string[]) {
     setFeedback(null);
-    await Promise.all(form.selectedRoutes.map((key) => testRoute(key)));
+    await Promise.all(keys.map((key) => testRoute(key)));
+  }
+
+  async function testAllConfiguredRoutes() {
+    await testRoutes(configuredTestRouteKeys);
+  }
+
+  async function testOutputRoutes() {
+    await testRoutes(form.selectedRoutes);
+  }
+
+  async function testNotificationRoutes() {
+    await testRoutes(notificationTestRouteKeys);
   }
 
   function toggleRoute(key: string) {
@@ -1234,8 +1250,17 @@ export function ScheduledTaskFormClient({
     (schedule) => !scheduleDraftIsValid(schedule)
   ).length;
   const activeNotificationCount = Object.values(form.notificationRules).filter(Boolean).length;
+  const configuredTestRouteKeys = uniqueRouteKeys(
+    form.selectedRoutes,
+    form.notificationRoutes,
+    form.approvalRoutes
+  );
+  const notificationTestRouteKeys = uniqueRouteKeys(
+    form.notificationRoutes,
+    form.approvalRoutes
+  );
   const failedRouteTests = Object.entries(routeTests).filter(
-    ([key, state]) => form.selectedRoutes.includes(key) && state.status === "failed"
+    ([key, state]) => configuredTestRouteKeys.includes(key) && state.status === "failed"
   );
   const selectedOutputLabels = form.selectedRoutes.map((key) =>
     routeLabelForKey(key, providerOptions)
@@ -1256,7 +1281,7 @@ export function ScheduledTaskFormClient({
       : null,
     form.selectedRoutes.length === 0 ? "Select at least one output destination." : null,
     failedRouteTests.length > 0
-      ? `${failedRouteTests.length} selected destination test${
+      ? `${failedRouteTests.length} selected route test${
           failedRouteTests.length === 1 ? "" : "s"
         } failed.`
       : null,
@@ -1343,8 +1368,8 @@ export function ScheduledTaskFormClient({
               <Link href={scheduledTasksHref}>Cancel</Link>
             </Button>
             <Button
-              disabled={isTestingRoutes || form.selectedRoutes.length === 0}
-              onClick={testSelectedRoutes}
+              disabled={isTestingRoutes || configuredTestRouteKeys.length === 0}
+              onClick={testAllConfiguredRoutes}
               size="sm"
               type="button"
               variant="outline"
@@ -1354,7 +1379,7 @@ export function ScheduledTaskFormClient({
               ) : (
                 <Send className="size-4" />
               )}
-              Run test
+              Test all routes
             </Button>
             <Button
               className="bg-teal-700 text-white hover:bg-teal-800"
@@ -1959,7 +1984,7 @@ export function ScheduledTaskFormClient({
               </div>
               <Button
                 disabled={isTestingRoutes || form.selectedRoutes.length === 0}
-                onClick={testSelectedRoutes}
+                onClick={testOutputRoutes}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -1969,7 +1994,7 @@ export function ScheduledTaskFormClient({
                 ) : (
                   <Send className="size-4" />
                 )}
-                Test selected
+                Test outputs
               </Button>
             </div>
             <div className="grid gap-2 p-4">
@@ -2064,13 +2089,54 @@ export function ScheduledTaskFormClient({
             )}
             id="task-notifications"
           >
-            <div className={sectionHeaderClass()}>
-              <h2 className="text-sm font-semibold text-slate-950">Notifications</h2>
-              <div className="mt-0.5 text-xs text-slate-500">
-                {activeNotificationCount} enabled rule{activeNotificationCount === 1 ? "" : "s"}
+            <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">Notifications</h2>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {activeNotificationCount} enabled rule{activeNotificationCount === 1 ? "" : "s"} ·{" "}
+                  {form.notificationRoutes.length} alert route
+                  {form.notificationRoutes.length === 1 ? "" : "s"} ·{" "}
+                  {form.approvalRoutes.length} approval route
+                  {form.approvalRoutes.length === 1 ? "" : "s"}
+                </div>
               </div>
+              <Button
+                disabled={isTestingRoutes || notificationTestRouteKeys.length === 0}
+                onClick={testNotificationRoutes}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isTestingRoutes ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <Send className="size-4" />
+                )}
+                Test alerts
+              </Button>
             </div>
             <div className="grid gap-4 p-4">
+              <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-3">
+                <div>
+                  <div className="font-medium text-slate-900">Outputs</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Final assistant results. Configure these on the Outputs step.
+                  </p>
+                </div>
+                <div>
+                  <div className="font-medium text-slate-900">Notification routes</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Event alerts for failures, empty runs, delivery problems, and changes.
+                  </p>
+                </div>
+                <div>
+                  <div className="font-medium text-slate-900">Approval routes</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Human approval prompts when a tool call needs a decision.
+                  </p>
+                </div>
+              </div>
+
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                 {notificationRuleOptions.map((option) => (
                   <button
@@ -2095,7 +2161,14 @@ export function ScheduledTaskFormClient({
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="rounded-md border border-slate-200 bg-white">
                   <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                    <div className="text-sm font-medium text-slate-900">Notification route</div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">
+                        Notification routes
+                      </div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        Event alerts, not final task output
+                      </div>
+                    </div>
                     <Badge variant="secondary">{form.notificationRoutes.length}</Badge>
                   </div>
                   <div className="grid gap-2 p-3">
@@ -2108,6 +2181,7 @@ export function ScheduledTaskFormClient({
                       />
                       <MessageSquare className="size-4 text-slate-500" />
                       <span>Built-in chat</span>
+                      {form.notificationRoutes.includes("chat") ? routeTestBadge("chat") : null}
                     </label>
                     {providerOptions.map((option) => (
                       <label
@@ -2127,6 +2201,9 @@ export function ScheduledTaskFormClient({
                             {option.source}
                           </span>
                         </span>
+                        {form.notificationRoutes.includes(option.key)
+                          ? routeTestBadge(option.key)
+                          : null}
                       </label>
                     ))}
                   </div>
@@ -2134,7 +2211,12 @@ export function ScheduledTaskFormClient({
 
                 <div className="rounded-md border border-slate-200 bg-white">
                   <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                    <div className="text-sm font-medium text-slate-900">Approval route</div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">Approval routes</div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        Tool-call approval prompts
+                      </div>
+                    </div>
                     <Badge variant="secondary">{form.approvalRoutes.length}</Badge>
                   </div>
                   <div className="grid gap-2 p-3">
@@ -2147,6 +2229,7 @@ export function ScheduledTaskFormClient({
                       />
                       <MessageSquare className="size-4 text-slate-500" />
                       <span>Built-in chat</span>
+                      {form.approvalRoutes.includes("chat") ? routeTestBadge("chat") : null}
                     </label>
                     {providerOptions.map((option) => (
                       <label
@@ -2166,11 +2249,24 @@ export function ScheduledTaskFormClient({
                             {option.source}
                           </span>
                         </span>
+                        {form.approvalRoutes.includes(option.key)
+                          ? routeTestBadge(option.key)
+                          : null}
                       </label>
                     ))}
                   </div>
                 </div>
               </div>
+
+              {failedRouteTests.length > 0 ? (
+                <div className="grid gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {failedRouteTests.map(([key, state]) => (
+                    <div className="min-w-0 truncate" key={key}>
+                      {routeLabelForKey(key, providerOptions)}: {state.error || "Test failed."}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="text-xs font-semibold uppercase text-slate-500">
