@@ -51,7 +51,7 @@ function statusVariant(status: string) {
   if (status === "succeeded" || status === "completed" || status === "sent") {
     return "success" as const;
   }
-  if (status === "failed" || status === "blocked") {
+  if (status === "failed" || status === "blocked" || status === "not_configured") {
     return "destructive" as const;
   }
   if (status === "running" || status === "submitted" || status === "waiting_confirmation") {

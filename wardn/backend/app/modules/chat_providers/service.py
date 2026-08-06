@@ -81,11 +81,12 @@ PROVIDER_ASSISTANT_EMPTY_REPLY = (
 )
 PROVIDER_APPROVAL_PENDING_REPLY = (
     "This request needs workspace approval before I can continue. "
-    "Selected workspace approvers can review the pending approval in Wardn."
+    "I sent the approval request to a linked workspace approver."
 )
-PROVIDER_APPROVAL_PENDING_ADMIN_REPLY = (
+PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY = (
     "This request needs workspace approval before I can continue. "
-    "A workspace admin can review the pending approval in Wardn."
+    "No linked approver thread is configured for this provider, "
+    "so an approver must review it in Wardn."
 )
 PROVIDER_TYPING_REFRESH_SECONDS = 4.0
 WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS = 5
@@ -560,12 +561,15 @@ def normalized_approval_routes(routes: Any) -> list[dict[str, Any]]:
             continue
         seen.add(user_id)
         display_name = str(route.get("display_name") or route.get("displayName") or "").strip()
+        external_thread_id = str(
+            route.get("external_thread_id") or route.get("externalThreadId") or ""
+        ).strip()
         normalized.append(
             {
                 "route_type": "workspace_member",
                 "user_id": str(user_id),
                 "connection_id": None,
-                "external_thread_id": "",
+                "external_thread_id": external_thread_id,
                 "display_name": display_name,
             }
         )
@@ -580,6 +584,7 @@ def configured_approval_routes(connection: ChatProviderConnection) -> list[dict[
 async def validate_approval_routes(
     session: AsyncSession,
     *,
+    connection: ChatProviderConnection | None = None,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
     routes: list[dict[str, Any]],
@@ -604,6 +609,22 @@ async def validate_approval_routes(
             organization_id=organization_id,
             workspace_id=workspace_id,
         ):
+            external_thread_id = str(route.get("external_thread_id") or "").strip()
+            if not external_thread_id:
+                raise InvalidChatProviderConnectionError(
+                    "chat provider approval route must link the workspace member "
+                    "to a provider thread"
+                )
+            if connection is not None:
+                linked_thread = await repository.get_thread(
+                    session,
+                    connection_id=connection.id,
+                    external_thread_id=external_thread_id,
+                )
+                if linked_thread is None:
+                    raise InvalidChatProviderConnectionError(
+                        "chat provider approval route thread is not known for this provider"
+                    )
             continue
         raise InvalidChatProviderConnectionError(
             "chat provider approval route must be an internal workspace approver"
@@ -1012,6 +1033,7 @@ async def create_workspace_chat_provider_connection(
     config = normalize_connection_config(payload.provider, payload.config)
     await validate_approval_routes(
         session,
+        connection=None,
         organization_id=organization_id,
         workspace_id=workspace_id,
         routes=config.get("approval_routes", []),
@@ -1104,6 +1126,7 @@ async def update_workspace_chat_provider_connection(
         next_config = normalize_connection_config(connection.provider, payload.config)
         await validate_approval_routes(
             session,
+            connection=connection,
             organization_id=organization_id,
             workspace_id=workspace_id,
             routes=next_config.get("approval_routes", []),
@@ -1840,7 +1863,7 @@ async def process_provider_text_message(
                     conversation_id=conversation_id,
                     initiating_event_id=message.event_id,
                 )
-                or PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
+                or PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY
             )
         if not reply_text:
             reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
@@ -2116,19 +2139,18 @@ def approval_event_payload(
     }
 
 
-async def record_internal_admin_approval_request(
+async def record_unrouted_approval_request(
     session: AsyncSession,
     connection: ChatProviderConnection,
     *,
     approval: AgentToolApproval,
     conversation_id: uuid.UUID,
     initiating_event_id: str,
+    route: dict[str, Any] | None = None,
+    error: str = "No linked approver thread is configured for this chat provider.",
 ) -> None:
     text = approval_reply_text(approval)
-    route = {
-        "route_type": "chat",
-        "display_name": "Workspace admins",
-    }
+    route = route or {"route_type": "none", "display_name": "No external approval route"}
     session.add(
         ChatProviderEvent(
             organization_id=connection.organization_id,
@@ -2139,17 +2161,21 @@ async def record_internal_admin_approval_request(
             external_event_id=approval_route_event_id(
                 approval=approval,
                 initiating_event_id=initiating_event_id,
-                route_key="workspace-admin",
+                route_key=(
+                    f"unrouted:{route.get('route_type')}:"
+                    f"{route.get('user_id') or route.get('display_name') or 'none'}"
+                ),
             ),
             direction="outbound",
             event_type="approval.request",
-            status="processed",
+            status="failed",
             payload=approval_event_payload(
                 connection=connection,
                 approval=approval,
                 route=route,
                 text=text,
             ),
+            error=error,
             processed_at=datetime.now(UTC),
         )
     )
@@ -2163,6 +2189,8 @@ async def record_workspace_member_approval_request(
     conversation_id: uuid.UUID,
     initiating_event_id: str,
     route: dict[str, Any],
+    thread: ChatProviderThread,
+    provider_payload: dict[str, Any],
 ) -> None:
     user_id = str(route.get("user_id") or "").strip()
     text = approval_reply_text(approval)
@@ -2171,21 +2199,23 @@ async def record_workspace_member_approval_request(
             organization_id=connection.organization_id,
             workspace_id=connection.workspace_id,
             connection_id=connection.id,
+            thread_id=thread.id,
             conversation_id=conversation_id,
             provider=connection.provider,
             external_event_id=approval_route_event_id(
                 approval=approval,
                 initiating_event_id=initiating_event_id,
-                route_key=f"workspace-member:{user_id}",
+                route_key=f"workspace-member:{user_id}:{thread.external_thread_id}",
             ),
             direction="outbound",
             event_type="approval.request",
-            status="processed",
+            status="sent",
             payload=approval_event_payload(
                 connection=connection,
                 approval=approval,
                 route=route,
                 text=text,
+                provider_payload=provider_payload,
             ),
             processed_at=datetime.now(UTC),
         )
@@ -2202,7 +2232,7 @@ async def dispatch_provider_approval_request(
 ) -> bool:
     routes = configured_approval_routes(connection)
     if not routes:
-        await record_internal_admin_approval_request(
+        await record_unrouted_approval_request(
             session,
             connection,
             approval=approval,
@@ -2212,8 +2242,57 @@ async def dispatch_provider_approval_request(
         return False
 
     delivered = False
+    recorded = False
     for route in routes:
         if route.get("route_type") != "workspace_member":
+            continue
+        external_thread_id = str(route.get("external_thread_id") or "").strip()
+        if not external_thread_id:
+            await record_unrouted_approval_request(
+                session,
+                connection,
+                approval=approval,
+                conversation_id=conversation_id,
+                initiating_event_id=initiating_event_id,
+                route=route,
+            )
+            recorded = True
+            continue
+        thread = await repository.get_thread(
+            session,
+            connection_id=connection.id,
+            external_thread_id=external_thread_id,
+        )
+        if thread is None:
+            await record_unrouted_approval_request(
+                session,
+                connection,
+                approval=approval,
+                conversation_id=conversation_id,
+                initiating_event_id=initiating_event_id,
+                route=route,
+                error="Linked approver thread is no longer known for this chat provider.",
+            )
+            recorded = True
+            continue
+        try:
+            provider_payload = await send_provider_text_message(
+                session,
+                connection,
+                external_thread_id=thread.external_thread_id,
+                text=approval_reply_text(approval),
+            )
+        except ChatProviderDeliveryError as exc:
+            await record_unrouted_approval_request(
+                session,
+                connection,
+                approval=approval,
+                conversation_id=conversation_id,
+                initiating_event_id=initiating_event_id,
+                route=route,
+                error=str(exc),
+            )
+            recorded = True
             continue
         await record_workspace_member_approval_request(
             session,
@@ -2222,15 +2301,19 @@ async def dispatch_provider_approval_request(
             conversation_id=conversation_id,
             initiating_event_id=initiating_event_id,
             route=route,
+            thread=thread,
+            provider_payload=provider_payload,
         )
         delivered = True
-    if not delivered:
-        await record_internal_admin_approval_request(
+        recorded = True
+    if not delivered and not recorded:
+        await record_unrouted_approval_request(
             session,
             connection,
             approval=approval,
             conversation_id=conversation_id,
             initiating_event_id=initiating_event_id,
+            error="No selected workspace approver has a linked provider thread.",
         )
     return delivered
 
@@ -2255,7 +2338,7 @@ async def route_pending_approval_request_reply(
     return (
         PROVIDER_APPROVAL_PENDING_REPLY
         if approval_routed
-        else PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
+        else PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY
     )
 
 
@@ -2265,7 +2348,7 @@ async def pending_approval_reply_text(
     conversation_id: uuid.UUID,
 ) -> str:
     approval = await latest_pending_approval(session, connection, conversation_id)
-    return PROVIDER_APPROVAL_PENDING_ADMIN_REPLY if approval is not None else ""
+    return PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY if approval is not None else ""
 
 
 async def send_provider_text_message(

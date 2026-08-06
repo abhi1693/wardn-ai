@@ -1825,8 +1825,10 @@ def provider_event_recipient(
         payload.get("approvalRequest")
     )
     route_type = str(payload.get("routeType") or "").strip()
-    if route_type == "chat":
-        display_route_type = "Wardn admin fallback"
+    if route_type == "none":
+        display_route_type = "No external approval route"
+    elif route_type == "chat":
+        display_route_type = "Wardn approval route"
     elif route_type == "workspace_member":
         display_route_type = "Wardn approver"
     elif is_approval_request:
@@ -1834,8 +1836,8 @@ def provider_event_recipient(
     else:
         display_route_type = "Chat provider"
     status = event.status
-    if is_approval_request and not provider_delivered:
-        status = "available"
+    if is_approval_request and not provider_delivered and status == "processed":
+        status = "not_configured"
     return AgentRunDeliveryRecipientRead(
         id=event.id,
         source="chat_provider_reply",
@@ -2096,7 +2098,7 @@ async def deliver_provider_rerun_reply(
                 conversation_id=conversation_id,
                 initiating_event_id=thread.last_external_message_id or f"rerun:{agent_run_id}",
             )
-            or chat_provider_service.PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
+            or chat_provider_service.PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY
         )
     if not reply_text:
         reply_text = chat_provider_service.PROVIDER_ASSISTANT_EMPTY_REPLY

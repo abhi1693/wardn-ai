@@ -12,7 +12,11 @@ from app.modules.agents.approval_expiry import (
     agent_tool_approval_is_expired,
 )
 from app.modules.agents.approval_links import agent_tool_approval_url
-from app.modules.agents.chat_orchestrator import chat_stream_error_text, run_agent_chat
+from app.modules.agents.chat_orchestrator import (
+    chat_stream_error_text,
+    filter_agent_runtime_tools_for_guardrails,
+    run_agent_chat,
+)
 from app.modules.agents.exceptions import AgentNotFoundError, InvalidAgentScopeError
 from app.modules.agents.mappers import (
     conversation_message_response,
@@ -29,7 +33,7 @@ from app.modules.agents.schemas import (
     AgentToolApprovalRead,
 )
 from app.modules.agents.tool_execution import action_review_payload, mcp_result_text
-from app.modules.agents.types import AgentChatTextEvent
+from app.modules.agents.types import AgentChatTextEvent, AgentInstalledTool
 from app.modules.chat_providers import repository as chat_provider_repository
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
@@ -46,6 +50,16 @@ from app.modules.users.models import User
 logger = logging.getLogger(__name__)
 AgentToolApprovalScheduler = Callable[[uuid.UUID], None]
 APPROVAL_EXPIRED_ERROR = "Tool approval expired before it was approved."
+
+
+def installed_agent_tools(rows: list[tuple[Any, ...]]) -> dict[str, AgentInstalledTool]:
+    return {
+        str(tool_schema.id): AgentInstalledTool(
+            tool_schema=tool_schema,
+            installation=installation,
+        )
+        for tool_schema, installation in rows
+    }
 
 
 def approval_workspace_member_route_user_ids(config: Any) -> set[uuid.UUID]:
@@ -277,16 +291,39 @@ async def generate_approval_continuation_message(
     chat_messages.append(
         AgentChatMessage(role="user", parts=text_parts(approval_continuation_prompt(approval)))
     )
+    installed_tools = installed_agent_tools(
+        await repository.list_workspace_available_tools(session, workspace_id=workspace_id)
+    )
+    runtime_tools = agent_runtime_tools(
+        await repository.list_agent_tool_runtime_rows(session, agent_id=agent.id)
+    )
+    guardrail_filter = await filter_agent_runtime_tools_for_guardrails(
+        session,
+        runtime_tools,
+        user=user,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+        installed_tools=installed_tools,
+    )
+    agent_run = None
+    if approval.agent_run_id is not None:
+        agent_run = await repository.get_agent_run(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_run_id=approval.agent_run_id,
+        )
     stream = run_agent_chat(
         agent,
         credential,
         AgentChatRequest(id=str(approval.conversation_id), messages=chat_messages),
-        {},
+        guardrail_filter,
         user=user,
         organization_id=organization_id,
         workspace_id=workspace_id,
         conversation=None,
-        agent_run=None,
+        agent_run=agent_run,
     )
     chunks: list[str] = []
     try:

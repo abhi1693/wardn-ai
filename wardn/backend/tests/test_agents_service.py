@@ -8,7 +8,14 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from app.modules.agents import chat_orchestrator, provider_clients, service, skills, tool_execution
+from app.modules.agents import (
+    approvals,
+    chat_orchestrator,
+    provider_clients,
+    service,
+    skills,
+    tool_execution,
+)
 from app.modules.agents.models import (
     Agent,
     AgentMCPServerAssignment,
@@ -27,7 +34,11 @@ from app.modules.agents.schemas import (
     WorkspaceSkillAgentAssignmentRequest,
     WorkspaceSkillApproveRequest,
 )
-from app.modules.agents.types import AgentRuntimeTool, AgentRuntimeToolGuardrailFilter
+from app.modules.agents.types import (
+    AgentChatTextEvent,
+    AgentRuntimeTool,
+    AgentRuntimeToolGuardrailFilter,
+)
 from app.modules.chat_providers.models import (
     ChatProviderConnection,
     ChatProviderEvent,
@@ -1576,6 +1587,230 @@ async def test_cancel_workspace_agent_run_marks_run_and_active_approvals(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeypatch) -> None:
+    session = FakeSession()
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    conversation_id = uuid4()
+    agent_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace OpenAI",
+        provider="openai",
+        visibility="workspace",
+        auth_method="api_key",
+        api_key_secret_handle_id=uuid4(),
+        is_active=True,
+    )
+    agent = Agent(
+        id=agent_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=uuid4(),
+        provider_credential_id=credential.id,
+        name="Runtime assistant",
+        instructions="Operate tools.",
+        scope="workspace",
+        model_name="gpt-5",
+        skill_ids=[],
+        is_active=True,
+    )
+    installation = MCPServerInstallation(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        server_name="io.github.AIops-tools/k8s-aiops",
+        config_name="rancher-qa-omsllc",
+        installed_version="1.0.0",
+        status="enabled",
+        runtime_config={},
+        secret_references={},
+    )
+    server = MCPServerVersion(
+        id=uuid4(),
+        organization_id=organization_id,
+        name=installation.server_name,
+        version=installation.installed_version,
+        description="K8s AIOps",
+        server_json={},
+        packages=[],
+        remotes=[],
+        icons=[],
+        is_latest=True,
+        status="active",
+    )
+    tool_schema = MCPServerToolSchema(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        tool_name="scale_statefulset",
+        title="Scale StatefulSet",
+        description="Scale a Kubernetes StatefulSet",
+        input_schema={"type": "object"},
+        annotations={},
+        is_active=True,
+    )
+    assignment = AgentMCPServerAssignment(
+        id=uuid4(),
+        agent_id=agent_id,
+        installation_id=installation.id,
+    )
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        trigger_type="whatsapp",
+        status="waiting_confirmation",
+        started_at=datetime(2026, 8, 2, 19, 43, tzinfo=UTC),
+        error="",
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run.id,
+        requested_by_id=agent.created_by_id,
+        installation_id=installation.id,
+        tool_schema_id=tool_schema.id,
+        tool_call_id="call-scale",
+        tool_name="scale_statefulset",
+        arguments={"name": "rancher-qa-omsllc", "replicas": 1},
+        status="completed",
+        result='{"ok": true}',
+        error="",
+    )
+    user = User(id=uuid4(), email="owner@example.com")
+    captured: dict[str, object] = {}
+
+    async def validate_provider_credential(*args, **kwargs):
+        return credential
+
+    async def list_conversation_messages(*args, **kwargs):
+        return [
+            persisted_conversation_message(
+                conversation_id,
+                role="user",
+                content="Scale it back up",
+                sequence=1,
+            )
+        ]
+
+    async def list_workspace_available_tools(*args, **kwargs):
+        return [(tool_schema, installation)]
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return [(assignment, tool_schema, installation, server)]
+
+    async def filter_agent_runtime_tools_for_guardrails(
+        _session,
+        runtime_tools,
+        *,
+        user,
+        organization_id,
+        workspace_id,
+        agent,
+        installed_tools=None,
+    ):
+        captured["filter_runtime_tools"] = runtime_tools
+        captured["filter_installed_tools"] = installed_tools
+        return AgentRuntimeToolGuardrailFilter(
+            allowed_tools=runtime_tools,
+            denied_tools={},
+            installed_tools=installed_tools,
+        )
+
+    async def get_agent_run(*args, **kwargs):
+        captured["agent_run_id"] = kwargs["agent_run_id"]
+        return agent_run
+
+    def run_agent_chat(*args, **kwargs):
+        captured["run_agent_chat_args"] = args
+        captured["run_agent_chat_kwargs"] = kwargs
+
+        async def stream():
+            yield AgentChatTextEvent(text="Scaled it back up.")
+
+        return stream()
+
+    async def append_conversation_message(*args, **kwargs):
+        captured["assistant_message"] = kwargs
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=kwargs["conversation_id"],
+            role=kwargs["role"],
+            content=kwargs["content"],
+            parts=kwargs["parts"],
+            sequence=2,
+            agent_run_id=kwargs["agent_run_id"],
+        )
+
+    async def append_agent_run_step(*args, **kwargs):
+        captured["agent_run_step"] = kwargs
+
+    monkeypatch.setattr(approvals, "validate_provider_credential", validate_provider_credential)
+    monkeypatch.setattr(
+        approvals.repository,
+        "list_conversation_messages",
+        list_conversation_messages,
+    )
+    monkeypatch.setattr(
+        approvals.repository,
+        "list_workspace_available_tools",
+        list_workspace_available_tools,
+    )
+    monkeypatch.setattr(
+        approvals.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+    monkeypatch.setattr(
+        approvals,
+        "filter_agent_runtime_tools_for_guardrails",
+        filter_agent_runtime_tools_for_guardrails,
+    )
+    monkeypatch.setattr(approvals.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(approvals, "run_agent_chat", run_agent_chat)
+    monkeypatch.setattr(
+        approvals.repository,
+        "append_conversation_message",
+        append_conversation_message,
+    )
+    monkeypatch.setattr(approvals.repository, "append_agent_run_step", append_agent_run_step)
+
+    message = await approvals.generate_approval_continuation_message(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        agent=agent,
+        approval=approval,
+    )
+
+    assert message is not None
+    assert captured["agent_run_id"] == agent_run.id
+    runtime_tools = captured["filter_runtime_tools"]
+    installed_tools = captured["filter_installed_tools"]
+    assert runtime_tools
+    assert installed_tools == {
+        str(tool_schema.id): approvals.AgentInstalledTool(tool_schema, installation)
+    }
+    run_args = captured["run_agent_chat_args"]
+    assert isinstance(run_args[3], AgentRuntimeToolGuardrailFilter)
+    assert run_args[3].allowed_tools == runtime_tools
+    assert run_args[3].installed_tools == installed_tools
+    assert captured["run_agent_chat_kwargs"]["agent_run"] is agent_run
+    assert captured["assistant_message"]["content"] == "Scaled it back up."
+    assert captured["agent_run_step"]["agent_run_id"] == agent_run.id
+
+
+@pytest.mark.asyncio
 async def test_rerun_workspace_agent_run_replays_message_and_delivers_provider_reply(
     monkeypatch,
 ) -> None:
@@ -1810,7 +2045,7 @@ async def test_deliver_provider_rerun_reply_routes_approval_without_sending_url_
     assert outbound_events[0].payload["agentRunId"] == str(agent_run_id)
 
 
-def test_provider_event_recipient_marks_internal_approval_as_available() -> None:
+def test_provider_event_recipient_marks_unrouted_approval_as_not_configured() -> None:
     event = ChatProviderEvent(
         id=uuid4(),
         organization_id=uuid4(),
@@ -1838,7 +2073,7 @@ def test_provider_event_recipient_marks_internal_approval_as_available() -> None
     assert recipient.display_name == "Workspace Owner"
     assert recipient.provider == ""
     assert recipient.route_type == "Wardn approver"
-    assert recipient.status == "available"
+    assert recipient.status == "not_configured"
     assert recipient.delivered_at is None
 
 

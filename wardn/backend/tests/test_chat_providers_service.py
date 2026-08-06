@@ -327,6 +327,7 @@ async def test_validate_approval_routes_accepts_superuser_without_membership(
         routes=[
             {
                 "route_type": "workspace_member",
+                "external_thread_id": "15551234567@s.whatsapp.net",
                 "user_id": str(approver.id),
             }
         ],
@@ -375,10 +376,36 @@ async def test_validate_approval_routes_accepts_organization_admin_without_works
         routes=[
             {
                 "route_type": "workspace_member",
+                "external_thread_id": "15551234567@s.whatsapp.net",
                 "user_id": str(approver.id),
             }
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_validate_approval_routes_requires_linked_provider_thread(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    approver = User(id=uuid4(), email="owner@example.com", is_active=True, is_superuser=True)
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+
+    with pytest.raises(InvalidChatProviderConnectionError, match="provider thread"):
+        await service.validate_approval_routes(
+            FakeSession(),
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            routes=[
+                {
+                    "route_type": "workspace_member",
+                    "user_id": str(approver.id),
+                }
+            ],
+        )
 
 
 @pytest.mark.asyncio
@@ -418,6 +445,7 @@ async def test_validate_approval_routes_rejects_external_or_inactive_users(
             routes=[
                 {
                     "route_type": "workspace_member",
+                    "external_thread_id": "15551234567@s.whatsapp.net",
                     "user_id": str(approver.id),
                 }
             ],
@@ -1097,7 +1125,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
 
 
 @pytest.mark.asyncio
-async def test_process_provider_text_message_records_selected_workspace_member_approval(
+async def test_process_provider_text_message_reports_unlinked_workspace_member_approval(
     monkeypatch,
 ) -> None:
     fake_session = FakeSession()
@@ -1206,7 +1234,9 @@ async def test_process_provider_text_message_records_selected_workspace_member_a
     )
 
     assert processed
-    assert sent_messages == [(requester_thread_id, service.PROVIDER_APPROVAL_PENDING_REPLY)]
+    assert sent_messages == [
+        (requester_thread_id, service.PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY)
+    ]
     assert "Open this Wardn approval page" not in sent_messages[0][1]
     approval_events = [
         item
@@ -1215,13 +1245,162 @@ async def test_process_provider_text_message_records_selected_workspace_member_a
     ]
     assert len(approval_events) == 1
     assert approval_events[0].thread_id is None
-    assert approval_events[0].status == "processed"
+    assert approval_events[0].status == "failed"
+    assert "linked approver thread" in approval_events[0].error
     assert approval_events[0].payload["approvalId"] == str(approval.id)
     assert approval_events[0].payload["agentRunId"] == str(agent_run_id)
     assert approval_events[0].payload["externalDelivery"] is False
     assert approval_events[0].payload["routeType"] == "workspace_member"
     assert approval_events[0].payload["userId"] == str(approver_user_id)
     assert "Open this Wardn approval page" in approval_events[0].payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_sends_approval_to_linked_workspace_member_thread(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    requester_thread_id = "15551234567@s.whatsapp.net"
+    approver_thread_id = "15557654321@s.whatsapp.net"
+    approver_user_id = uuid4()
+    connection.config = {
+        **connection.config,
+        "approval_routes": [
+            {
+                "route_type": "workspace_member",
+                "user_id": str(approver_user_id),
+                "external_thread_id": approver_thread_id,
+                "display_name": "Workspace Owner",
+            }
+        ],
+    }
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    requester_thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id=requester_thread_id,
+        external_user_id=requester_thread_id,
+        external_user_display_name="Outside User",
+    )
+    approver_thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id=approver_thread_id,
+        external_user_id=approver_thread_id,
+        external_user_display_name="Workspace Owner",
+    )
+    conversation_id = requester_thread.conversation_id
+    agent_id = uuid4()
+    agent_run_id = uuid4()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        requested_by_id=connection.created_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="restart_workload",
+        arguments={"name": "api"},
+        status="pending",
+        result="",
+        error="",
+    )
+    sent_messages: list[tuple[str, str]] = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def get_thread(*args, **kwargs):
+        if kwargs["external_thread_id"] == approver_thread_id:
+            return approver_thread
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return requester_thread, conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"tool_approval"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content="",
+            parts=[],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def latest_pending_approval(*args, **kwargs):
+        return approval
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent_messages.append((kwargs["external_thread_id"], kwargs["text"]))
+        return {"message_id": f"msg-{len(sent_messages)}"}
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service.repository, "get_thread", get_thread)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "latest_pending_approval", latest_pending_approval)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-linked-approval-1",
+            external_thread_id=requester_thread_id,
+            external_user_id=requester_thread_id,
+            external_user_display_name="Outside User",
+            text="Restart the workload",
+            raw={"messageId": "wa-inbound-linked-approval-1"},
+        ),
+    )
+
+    assert processed
+    assert sent_messages[0][0] == approver_thread_id
+    assert "Open this Wardn approval page" in sent_messages[0][1]
+    assert sent_messages[1] == (requester_thread_id, service.PROVIDER_APPROVAL_PENDING_REPLY)
+    assert "Open this Wardn approval page" not in sent_messages[1][1]
+    approval_events = [
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.event_type == "approval.request"
+    ]
+    assert len(approval_events) == 1
+    assert approval_events[0].thread_id == approver_thread.id
+    assert approval_events[0].status == "sent"
+    assert approval_events[0].payload["approvalId"] == str(approval.id)
+    assert approval_events[0].payload["externalDelivery"] is True
+    assert approval_events[0].payload["routeType"] == "workspace_member"
+    assert approval_events[0].payload["userId"] == str(approver_user_id)
+    assert approval_events[0].payload["externalThreadId"] == approver_thread_id
+    assert connection.provider in approval_events[0].payload
 
 
 @pytest.mark.asyncio
@@ -1334,7 +1513,9 @@ async def test_process_provider_text_message_never_sends_approval_to_requester_r
     )
 
     assert processed
-    assert sent_messages == [(requester_thread_id, service.PROVIDER_APPROVAL_PENDING_ADMIN_REPLY)]
+    assert sent_messages == [
+        (requester_thread_id, service.PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY)
+    ]
     assert "Open this Wardn approval page" not in sent_messages[0][1]
     approval_events = [
         item
@@ -1343,10 +1524,10 @@ async def test_process_provider_text_message_never_sends_approval_to_requester_r
     ]
     assert len(approval_events) == 1
     assert approval_events[0].thread_id is None
-    assert approval_events[0].status == "processed"
+    assert approval_events[0].status == "failed"
     assert approval_events[0].payload["externalDelivery"] is False
-    assert approval_events[0].payload["routeType"] == "chat"
-    assert approval_events[0].payload["displayName"] == "Workspace admins"
+    assert approval_events[0].payload["routeType"] == "none"
+    assert approval_events[0].payload["displayName"] == "No external approval route"
 
 
 @pytest.mark.asyncio

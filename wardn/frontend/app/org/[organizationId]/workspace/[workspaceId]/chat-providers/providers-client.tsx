@@ -2,7 +2,6 @@
 
 import {
   Bot,
-  CheckCircle2,
   KeyRound,
   Loader2,
   MessageCircle,
@@ -18,6 +17,7 @@ import {
   Trash2,
   Webhook,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
@@ -49,13 +49,10 @@ import type {
   ChatProviderConnectionRead,
   ChatProviderWorkspaceMemberRead,
   ChatProviderPairingStatusResponse,
-  SecretHandleRead,
   SecretStoreRead,
 } from "@/lib/api/generated/model";
 import {
-  workspaceChatProvidersCreate,
   workspaceChatProvidersDelete,
-  workspaceChatProvidersGet,
   workspaceChatProvidersPairingStatus,
   workspaceChatProvidersResetPairingQr,
   workspaceChatProvidersUpdate,
@@ -67,11 +64,7 @@ type ProviderType = "whatsapp_local" | "telegram";
 
 type ChatProvidersClientProps = {
   connections: ChatProviderConnectionRead[];
-  defaultWhatsappBridgeBaseUrl: string;
   organizationId: string;
-  secretHandles: SecretHandleRead[];
-  secretStores: SecretStoreRead[];
-  workspaceMembers: ChatProviderWorkspaceMemberRead[];
   workspaceId: string;
 };
 
@@ -216,13 +209,29 @@ function approvalRouteUserId(route: Record<string, unknown>) {
   return String(route.user_id ?? route.userId ?? "").trim();
 }
 
+function approvalRouteThreadId(route: Record<string, unknown>) {
+  return String(route.external_thread_id ?? route.externalThreadId ?? "").trim();
+}
+
 function approvalRoutesConfig(config: unknown) {
   return objectArrayConfig(config, "approval_routes", "approvalRoutes");
 }
 
 function providerApprovalRouteCount(config: unknown) {
   return approvalRoutesConfig(config).filter(
-    (route) => approvalRouteType(route) === "workspace_member" && approvalRouteUserId(route)
+    (route) =>
+      approvalRouteType(route) === "workspace_member" &&
+      approvalRouteUserId(route) &&
+      approvalRouteThreadId(route)
+  ).length;
+}
+
+function providerUnlinkedApprovalRouteCount(config: unknown) {
+  return approvalRoutesConfig(config).filter(
+    (route) =>
+      approvalRouteType(route) === "workspace_member" &&
+      approvalRouteUserId(route) &&
+      !approvalRouteThreadId(route)
   ).length;
 }
 
@@ -348,7 +357,7 @@ function providerCounts(
   return { active, connected, needsSetup, total: connections.length, whatsapp: whatsapp.length };
 }
 
-function ConnectProviderDialog({
+export function ConnectProviderDialog({
   activeSecretStores,
   connectionCount,
   defaultWhatsappBridgeBaseUrl,
@@ -654,7 +663,7 @@ function ConnectProviderDialog({
   );
 }
 
-function EditProviderDialog({
+export function EditProviderDialog({
   connection,
   isSaving,
   onOpenChange,
@@ -907,13 +916,13 @@ function EditProviderDialog({
                 <div className="mt-1 text-xs text-muted-foreground">
                   {selectedApprovalMemberIds.length > 0
                     ? "Approval links are available to selected workspace members"
-                    : "No member route selected; workspace admins review in Wardn"}
+                    : "No approval delivery route is configured"}
                 </div>
               </div>
               <Badge variant={selectedApprovalMemberIds.length > 0 ? "success" : "secondary"}>
                 {selectedApprovalMemberIds.length > 0
                   ? `${selectedApprovalMemberIds.length} selected`
-                  : "Admin fallback"}
+                  : "No delivery route"}
               </Badge>
             </div>
             <div className="space-y-3 p-3">
@@ -1132,37 +1141,28 @@ function PairingDialog({
 
 export function ChatProvidersClient({
   connections,
-  defaultWhatsappBridgeBaseUrl,
   organizationId,
-  secretStores,
-  workspaceMembers,
   workspaceId,
 }: ChatProvidersClientProps) {
   const router = useRouter();
-  const activeSecretStores = secretStores.filter((store) => store.isActive);
   const [connectionOverrides, setConnectionOverrides] = useState<
     Record<string, ChatProviderConnectionRead>
   >({});
   const [deletedConnectionIds, setDeletedConnectionIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [connectOpen, setConnectOpen] = useState(false);
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairingConnection, setPairingConnection] = useState<ChatProviderConnectionRead | null>(
     null
   );
-  const [editConnection, setEditConnection] = useState<ChatProviderConnectionRead | null>(null);
   const [pairingStatuses, setPairingStatuses] = useState<
     Record<string, ChatProviderPairingStatusResponse>
   >({});
-  const [isCreating, setIsCreating] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [busyConnectionId, setBusyConnectionId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const chatProvidersBasePath = `/org/${organizationId}/workspace/${workspaceId}/chat-providers`;
   const activePairingStatus = pairingConnection
     ? pairingStatuses[pairingConnection.id]
     : undefined;
-  const editConnectionId = editConnection?.id;
 
   const deletedConnectionIdSet = useMemo(
     () => new Set(deletedConnectionIds),
@@ -1183,26 +1183,8 @@ export function ChatProvidersClient({
   const replaceConnection = useCallback((connection: ChatProviderConnectionRead) => {
     setConnectionOverrides((current) => ({ ...current, [connection.id]: connection }));
     setDeletedConnectionIds((current) => current.filter((id) => id !== connection.id));
-    setEditConnection((current) => (current?.id === connection.id ? connection : current));
     setPairingConnection((current) => (current?.id === connection.id ? connection : current));
   }, []);
-
-  const refreshConnection = useCallback(
-    async (connectionId: string) => {
-      try {
-        const connection = await workspaceChatProvidersGet(
-          organizationId,
-          workspaceId,
-          connectionId
-        );
-        replaceConnection(connection);
-        return connection;
-      } catch {
-        return null;
-      }
-    },
-    [organizationId, replaceConnection, workspaceId]
-  );
 
   const counts = useMemo(
     () => providerCounts(localConnections, pairingStatuses),
@@ -1285,45 +1267,12 @@ export function ChatProvidersClient({
     };
   }, [localConnections, organizationId, workspaceId]);
 
-  useEffect(() => {
-    if (!editConnectionId) {
-      return;
-    }
-    const connectionId = editConnectionId;
-    let ignore = false;
-
-    async function refreshOpenConnection() {
-      try {
-        const connection = await workspaceChatProvidersGet(
-          organizationId,
-          workspaceId,
-          connectionId
-        );
-        if (!ignore) {
-          replaceConnection(connection);
-        }
-      } catch {
-        // The dialog can keep showing the last known provider state.
-      }
-    }
-
-    void refreshOpenConnection();
-    const intervalId = window.setInterval(() => {
-      void refreshOpenConnection();
-    }, 5_000);
-    return () => {
-      ignore = true;
-      window.clearInterval(intervalId);
-    };
-  }, [editConnectionId, organizationId, replaceConnection, workspaceId]);
-
   async function refreshPairingStatus(
     connection: ChatProviderConnectionRead,
     refreshQr = false
   ) {
     setBusyConnectionId(connection.id);
     setError(null);
-    setNotice(null);
     try {
       const status = refreshQr
         ? await workspaceChatProvidersResetPairingQr(
@@ -1394,79 +1343,9 @@ export function ChatProvidersClient({
     workspaceId,
   ]);
 
-  async function createProvider(payload: ChatProviderConnectionCreate) {
-    if (isCreating) {
-      return;
-    }
-    setIsCreating(true);
-    setError(null);
-    setNotice(null);
-
-    try {
-      const connection = await workspaceChatProvidersCreate(
-        organizationId,
-        workspaceId,
-        payload
-      );
-      replaceConnection(connection);
-      setNotice("Provider connection created.");
-      router.refresh();
-      if (connection.provider === "whatsapp_local") {
-        setPairingConnection(connection);
-        setPairingOpen(true);
-        setConnectOpen(false);
-        await refreshPairingStatus(connection, true);
-      } else {
-        setConnectOpen(false);
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Provider connection could not be saved.");
-    } finally {
-      setIsCreating(false);
-    }
-  }
-
-  async function updateProvider(
-    connection: ChatProviderConnectionRead,
-    payload: {
-      config: Record<string, unknown>;
-      displayName: string;
-      isActive: boolean;
-      name: string;
-    }
-  ) {
-    if (isUpdating) {
-      return;
-    }
-    setIsUpdating(true);
-    setBusyConnectionId(connection.id);
-    setError(null);
-    setNotice(null);
-    try {
-      const updated = await workspaceChatProvidersUpdate(
-        organizationId,
-        workspaceId,
-        connection.id,
-        payload
-      );
-      replaceConnection(updated);
-      setNotice("Provider connection updated.");
-      setEditConnection(null);
-      router.refresh();
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Provider connection could not be updated."
-      );
-    } finally {
-      setBusyConnectionId(null);
-      setIsUpdating(false);
-    }
-  }
-
   async function toggleConnection(connection: ChatProviderConnectionRead) {
     setBusyConnectionId(connection.id);
     setError(null);
-    setNotice(null);
     try {
       const updated = await workspaceChatProvidersUpdate(
         organizationId,
@@ -1490,7 +1369,6 @@ export function ChatProvidersClient({
   async function deleteConnection(connection: ChatProviderConnectionRead) {
     setBusyConnectionId(connection.id);
     setError(null);
-    setNotice(null);
     try {
       await workspaceChatProvidersDelete(organizationId, workspaceId, connection.id);
       setConnectionOverrides((current) => {
@@ -1520,11 +1398,6 @@ export function ChatProvidersClient({
     setPairingConnection(connection);
     setPairingOpen(true);
     void refreshPairingStatus(connection, refreshQr);
-  }
-
-  function openEdit(connection: ChatProviderConnectionRead) {
-    setEditConnection(connection);
-    void refreshConnection(connection.id);
   }
 
   const summaryItems = [
@@ -1565,20 +1438,16 @@ export function ChatProvidersClient({
               value={search}
             />
           </div>
-          <Button onClick={() => setConnectOpen(true)} type="button">
-            <Plus className="size-4" />
-            Connect provider
+          <Button asChild>
+            <Link href={`${chatProvidersBasePath}/new`}>
+              <Plus className="size-4" />
+              Connect provider
+            </Link>
           </Button>
         </div>
       </div>
 
       {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
-      {notice ? (
-        <AsyncFeedback className="flex items-center gap-2" variant="success">
-          <CheckCircle2 className="size-4" />
-          {notice}
-        </AsyncFeedback>
-      ) : null}
 
       {localConnections.length === 0 ? (
         <Card className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -1591,9 +1460,11 @@ export function ChatProvidersClient({
               Pair a personal WhatsApp linked device to this workspace agent.
             </div>
           </div>
-          <Button onClick={() => setConnectOpen(true)} size="sm" type="button">
-            <Plus className="size-4" />
-            Connect WhatsApp
+          <Button asChild size="sm">
+            <Link href={`${chatProvidersBasePath}/new`}>
+              <Plus className="size-4" />
+              Connect WhatsApp
+            </Link>
           </Button>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Bot className="size-3.5" />
@@ -1630,6 +1501,7 @@ export function ChatProvidersClient({
               "allowAllSenders"
             );
             const approvalRouteCount = providerApprovalRouteCount(config);
+            const unlinkedApprovalRouteCount = providerUnlinkedApprovalRouteCount(config);
 
             return (
               <Card
@@ -1694,9 +1566,11 @@ export function ChatProvidersClient({
                       <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                         <div className="truncate text-xs text-muted-foreground">Approvals</div>
                         <div className="truncate text-sm font-medium">
-                          {approvalRouteCount > 0
+                          {unlinkedApprovalRouteCount > 0
+                            ? "Needs thread link"
+                            : approvalRouteCount > 0
                             ? `${approvalRouteCount} approver${approvalRouteCount === 1 ? "" : "s"}`
-                            : "Admin fallback"}
+                            : "No delivery route"}
                         </div>
                       </div>
                     </div>
@@ -1728,14 +1602,11 @@ export function ChatProvidersClient({
                         Open QR
                       </Button>
                     ) : null}
-                    <Button
-                      onClick={() => openEdit(connection)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Settings2 className="size-4" />
-                      Edit
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`${chatProvidersBasePath}/${connection.id}/edit`}>
+                        <Settings2 className="size-4" />
+                        Edit
+                      </Link>
                     </Button>
                     <Button
                       aria-label={
@@ -1775,30 +1646,6 @@ export function ChatProvidersClient({
         </div>
       )}
 
-      <ConnectProviderDialog
-        activeSecretStores={activeSecretStores}
-        connectionCount={localConnections.length}
-        defaultWhatsappBridgeBaseUrl={defaultWhatsappBridgeBaseUrl}
-        isCreating={isCreating}
-        onCreate={createProvider}
-        onOpenChange={setConnectOpen}
-        open={connectOpen}
-      />
-      {editConnection ? (
-        <EditProviderDialog
-          connection={editConnection}
-          isSaving={isUpdating}
-          key={editConnection.id}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditConnection(null);
-            }
-          }}
-          onSave={updateProvider}
-          open
-          workspaceMembers={workspaceMembers}
-        />
-      ) : null}
       <PairingDialog
         busy={Boolean(pairingConnection && busyConnectionId === pairingConnection.id)}
         connection={pairingConnection}
