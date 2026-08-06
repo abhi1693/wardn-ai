@@ -81,7 +81,7 @@ def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProv
 
 
 @pytest.mark.asyncio
-async def test_deliver_conversation_reply_to_provider_thread_sends_latest_assistant(
+async def test_deliver_conversation_reply_to_provider_thread_sends_run_assistant(
     monkeypatch,
 ) -> None:
     fake_session = FakeSession()
@@ -107,7 +107,9 @@ async def test_deliver_conversation_reply_to_provider_thread_sends_latest_assist
     async def get_thread_connection_for_conversation(*args, **kwargs):
         return thread, connection
 
-    async def latest_assistant_message(*args, **kwargs):
+    async def latest_assistant_message_for_run(*args, **kwargs):
+        assert kwargs["conversation_id"] == conversation_id
+        assert kwargs["agent_run_id"] == agent_run_id
         return ConversationMessage(
             id=uuid4(),
             conversation_id=conversation_id,
@@ -135,7 +137,11 @@ async def test_deliver_conversation_reply_to_provider_thread_sends_latest_assist
         "get_thread_connection_for_conversation",
         get_thread_connection_for_conversation,
     )
-    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(
+        service.agent_repository,
+        "latest_assistant_message_for_run",
+        latest_assistant_message_for_run,
+    )
     monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
     monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
 

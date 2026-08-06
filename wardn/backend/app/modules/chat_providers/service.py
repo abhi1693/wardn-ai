@@ -2170,7 +2170,11 @@ async def deliver_conversation_reply_to_provider_thread(
     thread, connection = thread_connection
     if not connection.is_active:
         return
-    assistant_message = await latest_assistant_message(session, conversation_id)
+    assistant_message = await agent_repository.latest_assistant_message_for_run(
+        session,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+    )
     if await assistant_message_run_canceled(session, connection, assistant_message):
         return
     reply_text = assistant_message.content.strip() if assistant_message is not None else ""

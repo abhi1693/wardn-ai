@@ -326,6 +326,13 @@ async def run_agent_run_resume_worker_once(
                 "Queued %s stale agent run approval resume jobs.",
                 stale_enqueued,
             )
+        orphaned_failed = await repository.fail_stale_orphaned_agent_runs(
+            session,
+            now=now,
+            stale_before=now - timedelta(seconds=lease_seconds),
+        )
+        if orphaned_failed:
+            logger.warning("Failed %s stale orphaned agent runs.", orphaned_failed)
         job = await repository.claim_next_agent_run_resume_job(
             session,
             worker_id=worker_id,
@@ -335,7 +342,7 @@ async def run_agent_run_resume_worker_once(
         await session.commit()
 
     if job is None:
-        return bool(recovered or stale_enqueued)
+        return bool(recovered or stale_enqueued or orphaned_failed)
     await execute_agent_run_resume_job(
         job,
         worker_id=worker_id,

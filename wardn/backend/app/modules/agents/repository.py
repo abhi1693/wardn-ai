@@ -380,6 +380,25 @@ async def list_conversation_messages(
     return list(result.scalars().all())
 
 
+async def latest_assistant_message_for_run(
+    session: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> ConversationMessage | None:
+    result = await session.execute(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.agent_run_id == agent_run_id,
+            ConversationMessage.role == "assistant",
+        )
+        .order_by(ConversationMessage.sequence.desc(), ConversationMessage.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def append_conversation_message(
     session: AsyncSession,
     *,
@@ -953,6 +972,66 @@ async def enqueue_stale_agent_run_resume_jobs(
         if job is not None and job.status == "queued":
             enqueued += 1
     return enqueued
+
+
+async def fail_stale_orphaned_agent_runs(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    stale_before: datetime,
+    limit: int = 50,
+) -> int:
+    active_resume_job_exists = (
+        select(AgentRunResumeJob.id)
+        .where(
+            AgentRunResumeJob.agent_run_id == AgentRun.id,
+            AgentRunResumeJob.status.in_(("queued", "running")),
+        )
+        .exists()
+    )
+    active_approval_exists = (
+        select(AgentToolApproval.id)
+        .where(
+            AgentToolApproval.agent_run_id == AgentRun.id,
+            AgentToolApproval.status.in_(("pending", "running", "completed")),
+        )
+        .exists()
+    )
+    result = await session.execute(
+        select(AgentRun)
+        .where(
+            AgentRun.status == "running",
+            AgentRun.updated_at <= stale_before,
+            ~active_resume_job_exists,
+            ~active_approval_exists,
+        )
+        .order_by(AgentRun.updated_at.asc(), AgentRun.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    failed = 0
+    error = (
+        "The run was abandoned by a worker restart or shutdown and cannot be "
+        "safely resumed from its last in-memory execution state."
+    )
+    for agent_run in result.scalars().all():
+        await append_agent_run_step(
+            session,
+            agent_run_id=agent_run.id,
+            step_type="run_recovery_failed",
+            status="failed",
+            title="Run abandoned",
+            payload={"error": error},
+        )
+        await finish_agent_run(
+            session,
+            agent_run,
+            status="failed",
+            error=error,
+            now=now,
+        )
+        failed += 1
+    return failed
 
 
 async def finish_agent_run(

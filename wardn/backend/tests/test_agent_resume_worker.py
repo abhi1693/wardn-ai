@@ -83,6 +83,10 @@ async def test_worker_once_recovers_stale_approvals_before_claiming(monkeypatch)
         seen["claim"] = (session, kwargs)
         return job
 
+    async def fail_orphaned(session, *, now, stale_before):
+        seen["fail_orphaned"] = (session, now, stale_before)
+        return 3
+
     async def execute(claimed_job, **kwargs):
         seen["execute"] = (claimed_job, kwargs)
 
@@ -96,6 +100,11 @@ async def test_worker_once_recovers_stale_approvals_before_claiming(monkeypatch)
         resume_worker.repository,
         "enqueue_stale_agent_run_resume_jobs",
         enqueue_stale,
+    )
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "fail_stale_orphaned_agent_runs",
+        fail_orphaned,
     )
     monkeypatch.setattr(
         resume_worker.repository,
@@ -119,6 +128,7 @@ async def test_worker_once_recovers_stale_approvals_before_claiming(monkeypatch)
     assert worked is True
     assert seen["recover"][0] is session
     assert seen["enqueue_stale"][0] is session
+    assert seen["fail_orphaned"][0] is session
     assert stale_now - stale_before == timedelta(seconds=60)
     assert seen["claim"][0] is session
     assert seen["execute"][0] is job
@@ -140,6 +150,10 @@ async def test_worker_once_counts_stale_requeue_as_work_without_claim(monkeypatc
         seen["claim"] = session
         return None
 
+    async def fail_orphaned(session, *, now, stale_before):
+        seen["fail_orphaned"] = session
+        return 0
+
     session_factory = FakeSessionFactory()
     monkeypatch.setattr(
         resume_worker.repository,
@@ -150,6 +164,11 @@ async def test_worker_once_counts_stale_requeue_as_work_without_claim(monkeypatc
         resume_worker.repository,
         "enqueue_stale_agent_run_resume_jobs",
         enqueue_stale,
+    )
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "fail_stale_orphaned_agent_runs",
+        fail_orphaned,
     )
     monkeypatch.setattr(
         resume_worker.repository,
@@ -168,6 +187,64 @@ async def test_worker_once_counts_stale_requeue_as_work_without_claim(monkeypatc
 
     assert worked is True
     assert seen["enqueue_stale"] is session_factory.sessions[0]
+    assert seen["fail_orphaned"] is session_factory.sessions[0]
+    assert seen["claim"] is session_factory.sessions[0]
+    assert session_factory.sessions[0].commits == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_once_counts_orphaned_runs_as_work_without_claim(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    async def recover(session, *, now):
+        return 0
+
+    async def enqueue_stale(session, *, now, stale_before):
+        return 0
+
+    async def fail_orphaned(session, *, now, stale_before):
+        seen["fail_orphaned"] = (session, now, stale_before)
+        return 2
+
+    async def claim(session, **kwargs):
+        seen["claim"] = session
+        return None
+
+    session_factory = FakeSessionFactory()
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "recover_expired_agent_run_resume_jobs",
+        recover,
+    )
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "enqueue_stale_agent_run_resume_jobs",
+        enqueue_stale,
+    )
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "fail_stale_orphaned_agent_runs",
+        fail_orphaned,
+    )
+    monkeypatch.setattr(
+        resume_worker.repository,
+        "claim_next_agent_run_resume_job",
+        claim,
+    )
+
+    worked = await resume_worker.run_agent_run_resume_worker_once(
+        worker_id="worker-1",
+        session_factory=session_factory,
+        lease_seconds=60,
+        heartbeat_seconds=10,
+        retry_base_seconds=5,
+        retry_max_seconds=30,
+    )
+
+    session, now, stale_before = seen["fail_orphaned"]
+    assert worked is True
+    assert session is session_factory.sessions[0]
+    assert now - stale_before == timedelta(seconds=60)
     assert seen["claim"] is session_factory.sessions[0]
     assert session_factory.sessions[0].commits == 1
 
