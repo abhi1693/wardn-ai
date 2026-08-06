@@ -10,6 +10,8 @@ import {
   workspaceAgentRunsRerun,
 } from "@/lib/api/generated/workspace-agent-runs/workspace-agent-runs";
 
+const rerunTimeoutMs = 10 * 60_000;
+
 type AgentRunActionsProps = {
   canCancel?: boolean;
   canRerun?: boolean;
@@ -62,7 +64,9 @@ export function AgentRunActions({
     }
     setBusyAction("rerun");
     try {
-      const response = await workspaceAgentRunsRerun(organizationId, workspaceId, runId);
+      const response = await workspaceAgentRunsRerun(organizationId, workspaceId, runId, {
+        timeoutMs: rerunTimeoutMs,
+      });
       router.push(runHref(organizationId, workspaceId, response.run.id));
       router.refresh();
     } catch (error) {

@@ -41,6 +41,21 @@ function requestSignal(signal: AbortSignal | null | undefined, timeoutMs: number
   return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
+function isAbortOrTimeoutError(cause: unknown) {
+  return (
+    typeof DOMException !== "undefined" &&
+    cause instanceof DOMException &&
+    (cause.name === "AbortError" || cause.name === "TimeoutError")
+  );
+}
+
+function fetchTransportError(cause: unknown) {
+  if (isAbortOrTimeoutError(cause)) {
+    return new ApiError(0, undefined, "Wardn API request timed out.", { cause });
+  }
+  return new ApiError(0, undefined, "Wardn API is unavailable.", { cause });
+}
+
 function redirectBrowserOnUnauthorized(response: Response) {
   if (
     response.status !== 401 ||
@@ -65,7 +80,7 @@ export async function apiRawFetch(path: string, options: ApiRequestOptions = {})
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
-    throw new ApiError(0, undefined, "Wardn API is unavailable.", { cause });
+    throw fetchTransportError(cause);
   }
 }
 
@@ -101,6 +116,6 @@ export async function apiStreamFetch(input: RequestInfo | URL, init?: RequestIni
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
-    throw new ApiError(0, undefined, "Wardn API is unavailable.", { cause });
+    throw fetchTransportError(cause);
   }
 }
