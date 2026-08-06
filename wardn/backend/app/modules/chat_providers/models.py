@@ -32,7 +32,7 @@ class ChatProviderConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
         ),
         CheckConstraint(
-            "provider IN ('telegram', 'whatsapp_local')",
+            "provider IN ('telegram', 'whatsapp_local', 'slack')",
             name="ck_chat_provider_connections_provider",
         ),
         CheckConstraint("btrim(name) <> ''", name="ck_chat_provider_connections_name"),

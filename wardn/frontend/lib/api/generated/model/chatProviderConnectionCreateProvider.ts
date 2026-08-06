@@ -11,4 +11,5 @@ export type ChatProviderConnectionCreateProvider = typeof ChatProviderConnection
 export const ChatProviderConnectionCreateProvider = {
   telegram: 'telegram',
   whatsapp_local: 'whatsapp_local',
+  slack: 'slack',
 } as const;

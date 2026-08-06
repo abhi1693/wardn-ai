@@ -42,6 +42,20 @@ async def list_active_whatsapp_connections(
     return list(result.scalars().all())
 
 
+async def list_active_slack_connections(
+    session: AsyncSession,
+) -> list[ChatProviderConnection]:
+    result = await session.execute(
+        select(ChatProviderConnection)
+        .where(
+            ChatProviderConnection.provider == "slack",
+            ChatProviderConnection.is_active.is_(True),
+        )
+        .order_by(ChatProviderConnection.created_at.asc(), ChatProviderConnection.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_connection(
     session: AsyncSession,
     *,

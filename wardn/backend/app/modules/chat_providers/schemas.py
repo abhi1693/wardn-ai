@@ -6,7 +6,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.core.schemas import APIModel
 
-ChatProviderType = Literal["telegram", "whatsapp_local"]
+ChatProviderType = Literal["telegram", "whatsapp_local", "slack"]
 ChatProviderApprovalRouteType = Literal["chat", "chat_provider", "workspace_member"]
 
 
@@ -59,6 +59,27 @@ class WhatsAppLocalProviderConfig(APIModel):
     approval_routes: list[ChatProviderApprovalRoute] = Field(default_factory=list)
 
     @field_validator("account_name", "bridge_base_url", "bridge_user_id", "outbound_webhook_url")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("allowed_sender_ids", "allowed_chat_ids")
+    @classmethod
+    def normalize_allowed_ids(cls, value: list[str]) -> list[str]:
+        return sorted({item.strip() for item in value if item.strip()})
+
+
+class SlackProviderConfig(APIModel):
+    team_id: str = Field(default="", max_length=255)
+    app_id: str = Field(default="", max_length=255)
+    bot_user_id: str = Field(default="", max_length=255)
+    reply_on_unsupported_messages: bool = False
+    allow_all_senders: bool = True
+    allowed_sender_ids: list[str] = Field(default_factory=list)
+    allowed_chat_ids: list[str] = Field(default_factory=list)
+    approval_routes: list[ChatProviderApprovalRoute] = Field(default_factory=list)
+
+    @field_validator("team_id", "app_id", "bot_user_id")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return value.strip()

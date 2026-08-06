@@ -15,7 +15,7 @@ from app.modules.agents.resume_worker import (
     run_agent_run_resume_worker_loop,
     run_agent_run_resume_worker_once,
 )
-from app.modules.chat_providers.bridge_worker import run_whatsapp_bridge_event_worker_loop
+from app.modules.chat_providers.bridge_worker import run_chat_provider_event_worker_loop
 from app.modules.mcp_registry.job_handlers import build_job_handlers
 from app.modules.mcp_registry.job_worker import (
     default_worker_id,
@@ -156,7 +156,7 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
     chat_provider_event_task: asyncio.Task[None] | None = None
     if settings.chat_provider_event_worker_enabled:
         chat_provider_event_task = asyncio.create_task(
-            run_whatsapp_bridge_event_worker_loop(
+            run_chat_provider_event_worker_loop(
                 poll_interval_seconds=settings.chat_provider_event_worker_poll_interval_seconds,
                 stream_seconds=settings.chat_provider_event_worker_stream_seconds,
                 retry_base_seconds=settings.chat_provider_event_worker_retry_base_seconds,

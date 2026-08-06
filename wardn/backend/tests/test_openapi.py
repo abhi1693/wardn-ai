@@ -721,6 +721,7 @@ def test_workspace_chat_providers_openapi_contract() -> None:
     assert connection["patch"]["operationId"] == "workspace_chat_providers_update"
     assert connection["delete"]["operationId"] == "workspace_chat_providers_delete"
     assert telegram_webhook["post"]["operationId"] == "chat_provider_webhooks_telegram_receive"
+    assert "/api/v1/chat-providers/slack/{connection_id}/events" not in schema["paths"]
     assert whatsapp_local_webhook["post"]["operationId"] == (
         "chat_provider_webhooks_whatsapp_local_receive"
     )

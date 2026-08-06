@@ -437,7 +437,7 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
     monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
     monkeypatch.setattr(
         job_commands,
-        "run_whatsapp_bridge_event_worker_loop",
+        "run_chat_provider_event_worker_loop",
         run_chat_provider_worker,
     )
     monkeypatch.setattr(

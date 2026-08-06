@@ -1900,7 +1900,8 @@
           "provider": {
             "enum": [
               "telegram",
-              "whatsapp_local"
+              "whatsapp_local",
+              "slack"
             ],
             "title": "Provider",
             "type": "string"

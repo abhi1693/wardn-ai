@@ -50,7 +50,7 @@ import {
 import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
-type ProviderType = "whatsapp_local" | "telegram";
+type ProviderType = "whatsapp_local" | "telegram" | "slack";
 
 type ChatProviderFormClientProps = {
   basePath: string;
@@ -80,6 +80,13 @@ const providerOptions = [
     icon: Bot,
     detail: "Connect a workspace Telegram bot.",
   },
+  {
+    value: "slack" as const,
+    label: "Slack app",
+    shortLabel: "Slack",
+    icon: MessageCircle,
+    detail: "Connect Slack mentions and direct messages.",
+  },
 ];
 
 function randomSecret() {
@@ -92,6 +99,10 @@ function randomSecret() {
 
 function defaultBridgeUserId() {
   return Date.now().toString().slice(-8);
+}
+
+function isSlackTeamId(value: string) {
+  return /^T[A-Z0-9]+$/.test(value.trim());
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -244,6 +255,16 @@ function displayHost(value: string) {
   }
 }
 
+function defaultProviderName(provider: ProviderType) {
+  if (provider === "telegram") {
+    return "Workspace Telegram";
+  }
+  if (provider === "slack") {
+    return "Workspace Slack";
+  }
+  return "Personal WhatsApp";
+}
+
 function statusLabel(
   connection: ChatProviderConnectionRead,
   pairing?: ChatProviderPairingStatusResponse
@@ -358,6 +379,11 @@ export function ChatProviderFormClient({
   const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const [webhookSecret, setWebhookSecret] = useState(randomSecret);
   const [botToken, setBotToken] = useState("");
+  const [slackAppToken, setSlackAppToken] = useState("");
+  const [slackAppId, setSlackAppId] = useState(stringConfig(initialConfig, "app_id", "appId"));
+  const [slackBotUserId, setSlackBotUserId] = useState(
+    stringConfig(initialConfig, "bot_user_id", "botUserId")
+  );
   const [allowAllSenders, setAllowAllSenders] = useState(
     boolConfigDefault(initialConfig, true, "allow_all_senders", "allowAllSenders")
   );
@@ -395,9 +421,14 @@ export function ChatProviderFormClient({
       return;
     }
     setProvider(nextProvider);
-    setName(nextProvider === "telegram" ? "Workspace Telegram" : "Personal WhatsApp");
+    setName(defaultProviderName(nextProvider));
     if (nextProvider === "whatsapp_local") {
       setBridgeBaseUrl(normalizedDefaultBridgeUrl);
+    }
+    if (nextProvider === "slack") {
+      setBridgeUserId("");
+    } else {
+      setBridgeUserId(defaultBridgeUserId());
     }
   }
 
@@ -462,6 +493,14 @@ export function ChatProviderFormClient({
           "outbound_webhook_url",
           "outboundWebhookUrl"
         ),
+      };
+    }
+    if (provider === "slack") {
+      return {
+        ...common,
+        appId: slackAppId.trim(),
+        botUserId: slackBotUserId.trim(),
+        teamId: bridgeUserId.trim(),
       };
     }
     return common;
@@ -572,13 +611,20 @@ export function ChatProviderFormClient({
         const secretValues: Record<string, string> = { webhook_secret: webhookSecret.trim() };
         if (provider === "telegram") {
           secretValues.bot_token = botToken.trim();
+        } else if (provider === "slack") {
+          delete secretValues.webhook_secret;
+          secretValues.app_token = slackAppToken.trim();
+          secretValues.bot_token = botToken.trim();
         } else {
           secretValues.outbound_secret = webhookSecret.trim();
         }
         const payload: ChatProviderConnectionCreate = {
           config: providerConfigPayload(),
           displayName: normalizedName,
-          externalId: bridgeUserId.trim(),
+          externalId:
+            provider === "slack"
+              ? bridgeUserId.trim()
+              : bridgeUserId.trim() || defaultBridgeUserId(),
           name: normalizedName,
           provider,
           secretStoreId,
@@ -611,8 +657,12 @@ export function ChatProviderFormClient({
     missingApprovalLinks.length === 0 &&
     (mode === "edit" ||
       (secretStoreId.length > 0 &&
-        webhookSecret.trim().length > 0 &&
+        (provider === "slack" || webhookSecret.trim().length > 0) &&
         (provider !== "telegram" || botToken.trim().length > 0) &&
+        (provider !== "slack" ||
+          (botToken.trim().length > 0 &&
+            slackAppToken.trim().length > 0 &&
+            isSlackTeamId(bridgeUserId))) &&
         (provider !== "whatsapp_local" || bridgeBaseUrl.trim().length > 0)));
 
   return (
@@ -707,7 +757,7 @@ export function ChatProviderFormClient({
                     />
                     Active
                   </label>
-                ) : provider === "telegram" ? (
+                ) : provider === "telegram" || provider === "slack" ? (
                   <div className="space-y-2">
                     <Label htmlFor="chat-provider-bot-token">Bot token</Label>
                     <Input
@@ -758,12 +808,17 @@ export function ChatProviderFormClient({
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="chat-provider-external">
-                      {provider === "whatsapp_local" ? "Bridge user ID" : "External ID"}
+                      {provider === "whatsapp_local"
+                        ? "Bridge user ID"
+                        : provider === "slack"
+                          ? "Slack team ID"
+                          : "External ID"}
                     </Label>
                     <Input
                       id="chat-provider-external"
                       maxLength={255}
                       onChange={(event) => setBridgeUserId(event.target.value)}
+                      placeholder={provider === "slack" ? "T0123456789" : undefined}
                       required
                       value={bridgeUserId}
                     />
@@ -780,25 +835,56 @@ export function ChatProviderFormClient({
                       />
                     </div>
                   ) : null}
+                  {provider === "slack" ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-provider-slack-app">Slack app ID</Label>
+                        <Input
+                          id="chat-provider-slack-app"
+                          maxLength={255}
+                          onChange={(event) => setSlackAppId(event.target.value)}
+                          value={slackAppId}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-provider-slack-bot-user">Bot user ID</Label>
+                        <Input
+                          id="chat-provider-slack-bot-user"
+                          maxLength={255}
+                          onChange={(event) => setSlackBotUserId(event.target.value)}
+                          value={slackBotUserId}
+                        />
+                      </div>
+                    </>
+                  ) : null}
                   <div className="space-y-2 sm:col-span-2">
                     <div className="flex items-center justify-between gap-3">
-                      <Label htmlFor="chat-provider-webhook-secret">Webhook secret</Label>
-                      <Button
-                        onClick={() => setWebhookSecret(randomSecret())}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        <KeyRound className="size-4" />
-                        Generate
-                      </Button>
+                      <Label htmlFor="chat-provider-webhook-secret">
+                        {provider === "slack" ? "App-level token" : "Webhook secret"}
+                      </Label>
+                      {provider === "slack" ? null : (
+                        <Button
+                          onClick={() => setWebhookSecret(randomSecret())}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <KeyRound className="size-4" />
+                          Generate
+                        </Button>
+                      )}
                     </div>
                     <Input
                       autoComplete="off"
                       id="chat-provider-webhook-secret"
-                      onChange={(event) => setWebhookSecret(event.target.value)}
+                      onChange={(event) =>
+                        provider === "slack"
+                          ? setSlackAppToken(event.target.value)
+                          : setWebhookSecret(event.target.value)
+                      }
                       required
-                      value={webhookSecret}
+                      type={provider === "slack" ? "password" : "text"}
+                      value={provider === "slack" ? slackAppToken : webhookSecret}
                     />
                   </div>
                 </div>

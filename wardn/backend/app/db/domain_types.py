@@ -32,6 +32,7 @@ class ConversationRole(StrEnum):
 class ChatProviderType(StrEnum):
     TELEGRAM = "telegram"
     WHATSAPP_LOCAL = "whatsapp_local"
+    SLACK = "slack"
 
 
 class ChatProviderEventDirection(StrEnum):

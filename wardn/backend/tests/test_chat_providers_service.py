@@ -751,6 +751,99 @@ async def test_send_whatsapp_local_text_message_reconnects_and_retries_bridge(
 
 
 @pytest.mark.asyncio
+async def test_send_slack_text_message_posts_thread_reply(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+
+    class FakeSlackClient:
+        requests: list[dict] = []
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+        async def post(self, url, *, headers=None, json=None, **kwargs):
+            self.requests.append({"url": str(url), "headers": headers or {}, "json": json})
+            request = httpx.Request("POST", str(url))
+            return httpx.Response(
+                200,
+                json={"ok": True, "channel": "C123", "ts": "1700000001.000200"},
+                request=request,
+            )
+
+    async def connection_secret_handle_id(*args, **kwargs):
+        return uuid4()
+
+    async def resolve_secret(*args, **kwargs):
+        return ResolvedSecret("xoxb-token")
+
+    monkeypatch.setattr(service, "connection_secret_handle_id", connection_secret_handle_id)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeSlackClient)
+
+    result = await service.send_slack_text_message(
+        FakeSession(),
+        connection,
+        external_thread_id="T123:C123:1700000000.000100",
+        text="done",
+    )
+
+    assert result == {"ok": True, "channel": "C123", "ts": "1700000001.000200"}
+    assert FakeSlackClient.requests == [
+        {
+            "url": "https://slack.com/api/chat.postMessage",
+            "headers": {"Authorization": "Bearer xoxb-token"},
+            "json": {
+                "channel": "C123",
+                "text": "done",
+                "thread_ts": "1700000000.000100",
+                "unfurl_links": False,
+                "unfurl_media": False,
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_slack_socket_mode_event_rejects_wrong_team(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+    connection.external_id = "T123"
+    connection.config = {"allow_all_senders": True, "team_id": "T123"}
+
+    async def active_connection(*args, **kwargs):
+        return connection
+
+    async def process_provider_text_message(*args, **kwargs):
+        raise AssertionError("wrong-team Slack events must not be processed")
+
+    monkeypatch.setattr(service, "active_connection", active_connection)
+    monkeypatch.setattr(service, "process_provider_text_message", process_provider_text_message)
+
+    with pytest.raises(ChatProviderWebhookAuthError):
+        await service.handle_slack_socket_mode_event(
+            FakeSession(),
+            connection_id=connection.id,
+            payload={
+                "type": "event_callback",
+                "team_id": "T999",
+                "event_id": "Ev1",
+                "event": {
+                    "type": "app_mention",
+                    "team": "T999",
+                    "channel": "C1",
+                    "user": "U1",
+                    "text": "<@B1> hi",
+                    "ts": "1700000000.000100",
+                },
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_pending_approval_reply_text_does_not_include_approval_page(monkeypatch) -> None:
     connection = make_connection()
     approval = AgentToolApproval(

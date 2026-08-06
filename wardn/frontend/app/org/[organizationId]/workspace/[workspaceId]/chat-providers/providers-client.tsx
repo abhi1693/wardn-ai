@@ -60,7 +60,7 @@ import {
 import { formatUserDateTime } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
-type ProviderType = "whatsapp_local" | "telegram";
+type ProviderType = "whatsapp_local" | "telegram" | "slack";
 
 type ChatProvidersClientProps = {
   connections: ChatProviderConnectionRead[];
@@ -88,6 +88,12 @@ const providerOptions: ProviderOption[] = [
     shortLabel: "Telegram",
     icon: Bot,
   },
+  {
+    value: "slack",
+    label: "Slack app",
+    shortLabel: "Slack",
+    icon: MessageCircle,
+  },
 ];
 
 const needsSetupStatuses = new Set(["not_configured", "needs_pairing", "error"]);
@@ -102,6 +108,10 @@ function randomSecret() {
 
 function defaultBridgeUserId() {
   return Date.now().toString().slice(-8);
+}
+
+function isSlackTeamId(value: string) {
+  return /^T[A-Z0-9]+$/.test(value.trim());
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -241,6 +251,16 @@ function workspaceMemberLabel(member: ChatProviderWorkspaceMemberRead) {
 
 function providerOption(provider: string) {
   return providerOptions.find((option) => option.value === provider) ?? providerOptions[0];
+}
+
+function defaultProviderName(provider: ProviderType, connectionCount: number) {
+  if (provider === "telegram") {
+    return "Workspace Telegram";
+  }
+  if (provider === "slack") {
+    return "Workspace Slack";
+  }
+  return connectionCount > 0 ? `Personal WhatsApp ${connectionCount + 1}` : "Personal WhatsApp";
 }
 
 function displayDate(value?: string | null) {
@@ -402,29 +422,36 @@ export function ConnectProviderDialog({
   const [secretStoreId, setSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
   const [webhookSecret, setWebhookSecret] = useState(randomSecret);
   const [botToken, setBotToken] = useState("");
+  const [slackAppToken, setSlackAppToken] = useState("");
+  const [slackAppId, setSlackAppId] = useState("");
+  const [slackBotUserId, setSlackBotUserId] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function applyProviderDefaults(nextProvider: ProviderType) {
     setProvider(nextProvider);
-    setName(
-      nextProvider === "telegram"
-        ? "Workspace Telegram"
-        : connectionCount > 0
-          ? `Personal WhatsApp ${connectionCount + 1}`
-          : "Personal WhatsApp"
-    );
+    setName(defaultProviderName(nextProvider, connectionCount));
     if (nextProvider === "whatsapp_local") {
       setBridgeBaseUrl(normalizedDefaultBridgeUrl);
     }
-    setAdvancedOpen(false);
+    if (nextProvider === "slack") {
+      setBridgeUserId("");
+    } else {
+      setBridgeUserId(defaultBridgeUserId());
+    }
+    setAdvancedOpen(nextProvider === "slack");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedName = name.trim();
-    const normalizedBridgeUserId = bridgeUserId.trim() || defaultBridgeUserId();
+    const normalizedBridgeUserId =
+      provider === "slack" ? bridgeUserId.trim() : bridgeUserId.trim() || defaultBridgeUserId();
     const secretValues: Record<string, string> = { webhook_secret: webhookSecret.trim() };
     if (provider === "telegram") {
+      secretValues.bot_token = botToken.trim();
+    } else if (provider === "slack") {
+      delete secretValues.webhook_secret;
+      secretValues.app_token = slackAppToken.trim();
       secretValues.bot_token = botToken.trim();
     } else {
       secretValues.outbound_secret = webhookSecret.trim();
@@ -447,6 +474,25 @@ export function ConnectProviderDialog({
             secretStoreId,
             secretValues,
           }
+        : provider === "slack"
+          ? {
+              config: {
+                allowAllSenders: true,
+                allowedChatIds: [],
+                allowedSenderIds: [],
+                appId: slackAppId.trim(),
+                approvalRoutes: [],
+                botUserId: slackBotUserId.trim(),
+                replyOnUnsupportedMessages: false,
+                teamId: normalizedBridgeUserId,
+              },
+              displayName: normalizedName,
+              externalId: normalizedBridgeUserId,
+              name: normalizedName,
+              provider,
+              secretStoreId,
+              secretValues,
+            }
         : {
             config: {
               accountName: normalizedBridgeUserId,
@@ -469,13 +515,18 @@ export function ConnectProviderDialog({
     await onCreate(payload);
     setWebhookSecret(randomSecret());
     setBotToken("");
+    setSlackAppToken("");
   }
 
   const canCreate =
     name.trim().length > 0 &&
     secretStoreId.length > 0 &&
-    webhookSecret.trim().length > 0 &&
+    (provider === "slack" || webhookSecret.trim().length > 0) &&
     (provider !== "telegram" || botToken.trim().length > 0) &&
+    (provider !== "slack" ||
+      (botToken.trim().length > 0 &&
+        slackAppToken.trim().length > 0 &&
+        isSlackTeamId(bridgeUserId))) &&
     (provider !== "whatsapp_local" || bridgeBaseUrl.trim().length > 0);
 
   return (
@@ -512,7 +563,9 @@ export function ConnectProviderDialog({
                     <div className="mt-1 text-xs leading-5 text-muted-foreground">
                       {option.value === "whatsapp_local"
                         ? "Personal number pairing"
-                        : "Bot token integration"}
+                        : option.value === "slack"
+                          ? "Socket Mode integration"
+                          : "Bot token integration"}
                     </div>
                   </div>
                 </button>
@@ -607,12 +660,17 @@ export function ConnectProviderDialog({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="chat-provider-external">
-                    {provider === "whatsapp_local" ? "Bridge user ID" : "External ID"}
+                    {provider === "whatsapp_local"
+                      ? "Bridge user ID"
+                      : provider === "slack"
+                        ? "Slack team ID"
+                        : "External ID"}
                   </Label>
                   <Input
                     id="chat-provider-external"
                     maxLength={255}
                     onChange={(event) => setBridgeUserId(event.target.value)}
+                    placeholder={provider === "slack" ? "T0123456789" : undefined}
                     required
                     value={bridgeUserId}
                   />
@@ -629,25 +687,56 @@ export function ConnectProviderDialog({
                     />
                   </div>
                 ) : null}
+                {provider === "slack" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="chat-provider-slack-app">Slack app ID</Label>
+                      <Input
+                        id="chat-provider-slack-app"
+                        maxLength={255}
+                        onChange={(event) => setSlackAppId(event.target.value)}
+                        value={slackAppId}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="chat-provider-slack-bot-user">Bot user ID</Label>
+                      <Input
+                        id="chat-provider-slack-bot-user"
+                        maxLength={255}
+                        onChange={(event) => setSlackBotUserId(event.target.value)}
+                        value={slackBotUserId}
+                      />
+                    </div>
+                  </>
+                ) : null}
                 <div className="space-y-2 sm:col-span-2">
                   <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="chat-provider-webhook-secret">Webhook secret</Label>
-                    <Button
-                      onClick={() => setWebhookSecret(randomSecret())}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <KeyRound className="size-4" />
-                      Generate
-                    </Button>
+                    <Label htmlFor="chat-provider-webhook-secret">
+                      {provider === "slack" ? "App-level token" : "Webhook secret"}
+                    </Label>
+                    {provider === "slack" ? null : (
+                      <Button
+                        onClick={() => setWebhookSecret(randomSecret())}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <KeyRound className="size-4" />
+                        Generate
+                      </Button>
+                    )}
                   </div>
                   <Input
                     autoComplete="off"
                     id="chat-provider-webhook-secret"
-                    onChange={(event) => setWebhookSecret(event.target.value)}
+                    onChange={(event) =>
+                      provider === "slack"
+                        ? setSlackAppToken(event.target.value)
+                        : setWebhookSecret(event.target.value)
+                    }
                     required
-                    value={webhookSecret}
+                    type={provider === "slack" ? "password" : "text"}
+                    value={provider === "slack" ? slackAppToken : webhookSecret}
                   />
                 </div>
               </div>
@@ -780,6 +869,14 @@ export function EditProviderDialog({
         bridgeBaseUrl: stringConfig(config, "bridge_base_url", "bridgeBaseUrl"),
         bridgeUserId: stringConfig(config, "bridge_user_id", "bridgeUserId"),
         outboundWebhookUrl: stringConfig(config, "outbound_webhook_url", "outboundWebhookUrl"),
+      };
+    }
+    if (connection.provider === "slack") {
+      return {
+        ...common,
+        appId: stringConfig(config, "app_id", "appId"),
+        botUserId: stringConfig(config, "bot_user_id", "botUserId"),
+        teamId: stringConfig(config, "team_id", "teamId") || connection.externalId,
       };
     }
     return common;

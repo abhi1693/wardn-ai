@@ -21,7 +21,7 @@ from app.modules.agents.conversations import AgentSessionFactory
 from app.modules.agents.mappers import text_parts
 from app.modules.agents.models import AgentToolApproval, ConversationMessage
 from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
-from app.modules.chat_providers import repository, telegram, whatsapp_local
+from app.modules.chat_providers import repository, slack, telegram, whatsapp_local
 from app.modules.chat_providers.exceptions import (
     ChatProviderConnectionNotFoundError,
     ChatProviderDeliveryError,
@@ -44,6 +44,7 @@ from app.modules.chat_providers.schemas import (
     ChatProviderPairingStatusResponse,
     ChatProviderWebhookResponse,
     ChatProviderWorkspaceMemberRead,
+    SlackProviderConfig,
     TelegramProviderConfig,
     WhatsAppLocalProviderConfig,
 )
@@ -64,12 +65,13 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_TELEGRAM = "telegram"
 PROVIDER_WHATSAPP_LOCAL = "whatsapp_local"
+PROVIDER_SLACK = "slack"
 SECRET_ACCESS_TOKEN = "access_token"
+SECRET_APP_TOKEN = "app_token"
 SECRET_BOT_TOKEN = "bot_token"
 SECRET_OUTBOUND_SECRET = "outbound_secret"
-SECRET_SIGNING_SECRET = "signing_secret"
 SECRET_WEBHOOK_SECRET = "webhook_secret"
-SUPPORTED_PROVIDERS = {PROVIDER_TELEGRAM, PROVIDER_WHATSAPP_LOCAL}
+SUPPORTED_PROVIDERS = {PROVIDER_TELEGRAM, PROVIDER_WHATSAPP_LOCAL, PROVIDER_SLACK}
 CHAT_PROVIDER_SECRET_PURPOSE = "chat_provider"
 CHAT_PROVIDER_SECRET_OWNER_TYPE = "chat_provider_connection"
 CHAT_PROVIDER_DUPLICATE_CONSTRAINTS = {
@@ -165,11 +167,13 @@ class ProviderTypingHandle:
 
 def provider_config_model(
     provider: str,
-) -> type[TelegramProviderConfig] | type[WhatsAppLocalProviderConfig]:
+) -> type[TelegramProviderConfig] | type[WhatsAppLocalProviderConfig] | type[SlackProviderConfig]:
     if provider == PROVIDER_TELEGRAM:
         return TelegramProviderConfig
     if provider == PROVIDER_WHATSAPP_LOCAL:
         return WhatsAppLocalProviderConfig
+    if provider == PROVIDER_SLACK:
+        return SlackProviderConfig
     raise InvalidChatProviderConnectionError("unsupported chat provider")
 
 
@@ -712,6 +716,8 @@ def required_secret_keys(provider: str) -> set[str]:
         return {SECRET_BOT_TOKEN, SECRET_WEBHOOK_SECRET}
     if provider == PROVIDER_WHATSAPP_LOCAL:
         return {SECRET_WEBHOOK_SECRET}
+    if provider == PROVIDER_SLACK:
+        return {SECRET_APP_TOKEN, SECRET_BOT_TOKEN}
     raise InvalidChatProviderConnectionError("unsupported chat provider")
 
 
@@ -720,13 +726,17 @@ def supported_secret_keys(provider: str) -> set[str]:
         return {
             SECRET_ACCESS_TOKEN,
             SECRET_BOT_TOKEN,
-            SECRET_SIGNING_SECRET,
             SECRET_WEBHOOK_SECRET,
         }
     if provider == PROVIDER_WHATSAPP_LOCAL:
         return {
             SECRET_OUTBOUND_SECRET,
             SECRET_WEBHOOK_SECRET,
+        }
+    if provider == PROVIDER_SLACK:
+        return {
+            SECRET_APP_TOKEN,
+            SECRET_BOT_TOKEN,
         }
     raise InvalidChatProviderConnectionError("unsupported chat provider")
 
@@ -1356,6 +1366,102 @@ def provider_unsupported_from_whatsapp_local(
     )
 
 
+def provider_message_from_slack(
+    message: slack.SlackTextMessage,
+) -> ProviderTextMessage:
+    return ProviderTextMessage(
+        event_id=message.event_id,
+        external_thread_id=slack.external_thread_id(
+            team_id=message.team_id,
+            channel_id=message.channel_id,
+            thread_ts=message.thread_ts,
+        ),
+        external_user_id=message.user_id,
+        external_user_display_name=message.user_display_name,
+        text=message.text,
+        raw=message.raw,
+    )
+
+
+def provider_unsupported_from_slack(
+    message: slack.SlackUnsupportedMessage,
+) -> ProviderUnsupportedMessage:
+    return ProviderUnsupportedMessage(
+        event_id=message.event_id,
+        external_thread_id=slack.external_thread_id(
+            team_id=message.team_id,
+            channel_id=message.channel_id,
+            thread_ts=message.thread_ts,
+        ),
+        external_user_id=message.user_id,
+        external_user_display_name=message.user_display_name,
+        message_type=message.message_type,
+        raw=message.raw,
+    )
+
+
+def slack_bot_user_id(connection: ChatProviderConnection) -> str:
+    config = SlackProviderConfig.model_validate(connection.config or {})
+    return config.bot_user_id
+
+
+def configured_slack_team_id(connection: ChatProviderConnection) -> str:
+    config = SlackProviderConfig.model_validate(connection.config or {})
+    return config.team_id or connection.external_id
+
+
+def slack_payload_team_id(payload: dict[str, Any]) -> str:
+    event = slack.event_payload(payload)
+    return slack.event_team_id(payload, event)
+
+
+async def known_slack_thread_ids(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    payload: dict[str, Any],
+) -> set[str]:
+    event = slack.event_payload(payload)
+    if slack.string_field(event, "type") != "message":
+        return set()
+    team_id = slack.event_team_id(payload, event)
+    channel_id = slack.string_field(event, "channel")
+    explicit_thread_ts = slack.string_field(event, "thread_ts")
+    message_ts = slack.string_field(event, "ts", "event_ts")
+    if not team_id or not channel_id or not explicit_thread_ts or explicit_thread_ts == message_ts:
+        return set()
+    external_thread_id = slack.external_thread_id(
+        team_id=team_id,
+        channel_id=channel_id,
+        thread_ts=explicit_thread_ts,
+    )
+    thread = await repository.get_thread(
+        session,
+        connection_id=connection.id,
+        external_thread_id=external_thread_id,
+    )
+    return {external_thread_id} if thread is not None else set()
+
+
+async def slack_app_token(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+) -> str:
+    secret_handle_id = await connection_secret_handle_id(
+        session,
+        connection,
+        SECRET_APP_TOKEN,
+    )
+    if secret_handle_id is None:
+        raise ChatProviderDeliveryError("Slack app token is not configured")
+    app_token = await resolve_secret(
+        session,
+        connection.organization_id,
+        secret_handle_id,
+        workspace_id=connection.workspace_id,
+    )
+    return app_token.value
+
+
 async def handle_telegram_webhook(
     session: AsyncSession,
     *,
@@ -1403,6 +1509,82 @@ async def handle_telegram_webhook(
         response.failed += 1
         logger.exception(
             "Failed to process Telegram chat provider message.",
+            extra={
+                "organization_id": str(connection.organization_id),
+                "workspace_id": str(connection.workspace_id),
+                "chat_provider_connection_id": str(connection.id),
+                "chat_provider_event_id": text_message.event_id,
+            },
+        )
+    else:
+        if processed:
+            response.processed += 1
+        else:
+            response.duplicates += 1
+    return response
+
+
+async def handle_slack_socket_mode_event(
+    session: AsyncSession,
+    *,
+    connection_id: uuid.UUID,
+    payload: dict[str, Any],
+    session_factory: AgentSessionFactory | None = None,
+) -> ChatProviderWebhookResponse:
+    connection = await active_connection(session, connection_id, provider=PROVIDER_SLACK)
+    configured_team_id = configured_slack_team_id(connection)
+    payload_team_id = slack_payload_team_id(payload)
+    if configured_team_id and payload_team_id != configured_team_id:
+        raise ChatProviderWebhookAuthError("Slack event team does not match this connection")
+
+    response = ChatProviderWebhookResponse()
+    if payload.get("type") != "event_callback":
+        response.received += 1
+        response.ignored += 1
+        return response
+
+    bot_user_id = slack_bot_user_id(connection)
+    known_thread_ids = await known_slack_thread_ids(session, connection, payload)
+    unsupported = slack.unsupported_message(
+        payload,
+        bot_user_id=bot_user_id,
+        known_thread_ids=known_thread_ids,
+    )
+    if unsupported is not None:
+        response.received += 1
+        handled = await record_unsupported_provider_message(
+            session,
+            connection,
+            provider_unsupported_from_slack(unsupported),
+        )
+        if handled:
+            response.ignored += 1
+        else:
+            response.duplicates += 1
+        return response
+
+    text_message = slack.text_message(
+        payload,
+        bot_user_id=bot_user_id,
+        known_thread_ids=known_thread_ids,
+    )
+    if text_message is None:
+        response.received += 1
+        response.ignored += 1
+        return response
+
+    response.received += 1
+    try:
+        processed = await process_provider_text_message(
+            session,
+            connection,
+            provider_message_from_slack(text_message),
+            session_factory=session_factory,
+        )
+    except Exception:
+        response.failed += 1
+        logger.exception(
+            "Failed to process Slack chat provider message.",
             extra={
                 "organization_id": str(connection.organization_id),
                 "workspace_id": str(connection.workspace_id),
@@ -2099,6 +2281,8 @@ def provider_display_name(provider: str) -> str:
         return "Telegram"
     if provider == PROVIDER_WHATSAPP_LOCAL:
         return "WhatsApp"
+    if provider == PROVIDER_SLACK:
+        return "Slack"
     return "Chat provider"
 
 
@@ -2548,6 +2732,13 @@ async def send_provider_text_message(
             text=text,
             reply_to_message_id=reply_to_message_id,
         )
+    if connection.provider == PROVIDER_SLACK:
+        return await send_slack_text_message(
+            session,
+            connection,
+            external_thread_id=external_thread_id,
+            text=text,
+        )
     raise ChatProviderDeliveryError("unsupported chat provider")
 
 
@@ -2559,6 +2750,8 @@ def provider_response_message_id(
         return telegram.response_message_id(payload)
     if connection.provider == PROVIDER_WHATSAPP_LOCAL:
         return whatsapp_local.response_message_id(payload)
+    if connection.provider == PROVIDER_SLACK:
+        return slack.response_message_id(payload)
     return ""
 
 
@@ -2592,6 +2785,43 @@ async def send_telegram_text_message(
         raise ChatProviderDeliveryError(
             f"Telegram message delivery failed with HTTP {response.status_code}"
         )
+    return response_payload
+
+
+async def send_slack_text_message(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    external_thread_id: str,
+    text: str,
+) -> dict[str, Any]:
+    bot_token_secret_handle_id = await connection_secret_handle_id(
+        session,
+        connection,
+        SECRET_BOT_TOKEN,
+    )
+    if bot_token_secret_handle_id is None:
+        raise ChatProviderDeliveryError("Slack bot token is not configured")
+    bot_token = await resolve_secret(
+        session,
+        connection.organization_id,
+        bot_token_secret_handle_id,
+        workspace_id=connection.workspace_id,
+    )
+    _team_id, channel_id, thread_ts = slack.parse_external_thread_id(external_thread_id)
+    if not channel_id or not thread_ts:
+        raise ChatProviderDeliveryError("Slack thread identifier is invalid")
+    payload = slack.text_message_payload(channel_id=channel_id, thread_ts=thread_ts, text=text)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {bot_token.value}"},
+            json=payload,
+        )
+    response_payload = response_json(response)
+    if response.status_code >= 400 or response_payload.get("ok") is False:
+        error = str(response_payload.get("error") or f"HTTP {response.status_code}")
+        raise ChatProviderDeliveryError(f"Slack message delivery failed: {error}")
     return response_payload
 
 
