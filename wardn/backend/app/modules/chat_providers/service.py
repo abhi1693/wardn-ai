@@ -1609,12 +1609,10 @@ async def hydrate_slack_known_identity_metadata(
     except Exception:
         logger.debug("Slack identity hydration failed.", exc_info=True)
         return
-    changed = False
     for thread in threads:
         display_name = user_names.get(thread.external_user_id, "")
         if display_name and not thread.external_user_display_name:
             thread.external_user_display_name = display_name
-            changed = True
         channel_id = slack.external_id_channel_id(thread.external_thread_id)
         channel_display_name = channel_names.get(channel_id, "")
         if channel_display_name:
@@ -1622,9 +1620,6 @@ async def hydrate_slack_known_identity_metadata(
             if metadata.get("slack_channel_display_name") != channel_display_name:
                 metadata["slack_channel_display_name"] = channel_display_name
                 thread.provider_metadata = metadata
-                changed = True
-    if changed:
-        await session.flush()
 
 
 async def handle_telegram_webhook(

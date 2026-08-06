@@ -34,11 +34,13 @@ class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
         self.commits = 0
+        self.flushes = 0
 
     def add(self, instance: object) -> None:
         self.added.append(instance)
 
     async def flush(self) -> None:
+        self.flushes += 1
         now = datetime(2026, 8, 2, tzinfo=UTC)
         for instance in self.added:
             if getattr(instance, "id", None) is None:
@@ -716,6 +718,75 @@ async def test_connection_response_includes_known_provider_identities(monkeypatc
     assert len(response.known_identities) == 1
     assert response.known_identities[0].display_name == "Abhimanyu Saharan"
     assert response.known_identities[0].external_thread_id == "164750684061759@lid"
+
+
+@pytest.mark.asyncio
+async def test_connection_response_hydrates_slack_identities_without_flush(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+    connection.name = "Home Slack"
+    connection.external_id = "T0TEAM"
+    now = datetime(2026, 8, 6, tzinfo=UTC)
+    connection.created_at = now
+    connection.updated_at = now
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="T0TEAM:D0DM",
+        external_user_id="U0USER",
+        external_user_display_name="",
+        provider_metadata={},
+    )
+    thread.created_at = now
+    thread.updated_at = now
+    fake_session = FakeSession()
+
+    async def connection_secret_handle_ids(*args, **kwargs):
+        return {}
+
+    async def list_threads_for_connection(*args, **kwargs):
+        return [thread]
+
+    async def slack_bot_token_value(*args, **kwargs):
+        return "xoxb-token"
+
+    def response_json(response):
+        if response.request.url.path.endswith("/users.info"):
+            return {
+                "ok": True,
+                "user": {
+                    "profile": {
+                        "display_name": "Abhimanyu",
+                        "real_name": "Abhimanyu Saharan",
+                    },
+                    "name": "abhimanyu",
+                },
+            }
+        return {"ok": True, "channel": {"name": "wardn-ai"}}
+
+    async def fake_get(self, url, **kwargs):
+        return httpx.Response(200, json={}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(service, "connection_secret_handle_ids", connection_secret_handle_ids)
+    monkeypatch.setattr(
+        service.repository,
+        "list_threads_for_connection",
+        list_threads_for_connection,
+    )
+    monkeypatch.setattr(service, "slack_bot_token_value", slack_bot_token_value)
+    monkeypatch.setattr(service, "response_json", response_json)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    response = await service.connection_response(fake_session, connection)
+
+    assert fake_session.flushes == 0
+    assert response.known_identities[0].display_name == "Abhimanyu Saharan"
+    assert response.known_identities[0].provider_metadata == {
+        "slack_channel_display_name": "#wardn-ai"
+    }
+    assert thread.external_user_display_name == "Abhimanyu Saharan"
 
 
 @pytest.mark.asyncio
