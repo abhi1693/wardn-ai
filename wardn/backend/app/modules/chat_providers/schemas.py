@@ -2,11 +2,33 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.core.schemas import APIModel
 
 ChatProviderType = Literal["telegram", "whatsapp_local"]
+ChatProviderApprovalRouteType = Literal["chat", "chat_provider"]
+
+
+class ChatProviderApprovalRoute(APIModel):
+    route_type: ChatProviderApprovalRouteType
+    connection_id: uuid.UUID | None = None
+    external_thread_id: str = Field(default="", max_length=255)
+    display_name: str = Field(default="", max_length=255)
+
+    @field_validator("external_thread_id", "display_name")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_route(self) -> "ChatProviderApprovalRoute":
+        if self.route_type == "chat_provider":
+            if self.connection_id is None:
+                raise ValueError("chat provider approval route requires a connection")
+            if not self.external_thread_id:
+                raise ValueError("chat provider approval route requires a conversation")
+        return self
 
 
 class TelegramProviderConfig(APIModel):
@@ -14,6 +36,7 @@ class TelegramProviderConfig(APIModel):
     allow_all_senders: bool = True
     allowed_sender_ids: list[str] = Field(default_factory=list)
     allowed_chat_ids: list[str] = Field(default_factory=list)
+    approval_routes: list[ChatProviderApprovalRoute] = Field(default_factory=list)
 
     @field_validator("allowed_sender_ids", "allowed_chat_ids")
     @classmethod
@@ -30,6 +53,7 @@ class WhatsAppLocalProviderConfig(APIModel):
     allow_all_senders: bool = True
     allowed_sender_ids: list[str] = Field(default_factory=list)
     allowed_chat_ids: list[str] = Field(default_factory=list)
+    approval_routes: list[ChatProviderApprovalRoute] = Field(default_factory=list)
 
     @field_validator("account_name", "bridge_base_url", "bridge_user_id", "outbound_webhook_url")
     @classmethod

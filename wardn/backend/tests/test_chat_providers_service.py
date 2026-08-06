@@ -134,6 +134,46 @@ def test_provider_config_defaults_allow_all_senders() -> None:
     )["allow_all_senders"] is True
 
 
+def test_provider_config_normalizes_approval_routes() -> None:
+    connection_id = uuid4()
+
+    config = service.normalize_connection_config(
+        service.PROVIDER_WHATSAPP_LOCAL,
+        {
+            "approvalRoutes": [
+                {
+                    "routeType": "chat_provider",
+                    "connectionId": str(connection_id),
+                    "externalThreadId": "owner@s.whatsapp.net",
+                    "displayName": "Workspace Owner",
+                },
+                {
+                    "routeType": "chat_provider",
+                    "connectionId": str(connection_id),
+                    "externalThreadId": "owner@s.whatsapp.net",
+                    "displayName": "Duplicate",
+                },
+                {"routeType": "chat"},
+            ]
+        },
+    )
+
+    assert config["approval_routes"] == [
+        {
+            "route_type": "chat_provider",
+            "connection_id": str(connection_id),
+            "external_thread_id": "owner@s.whatsapp.net",
+            "display_name": "Workspace Owner",
+        },
+        {
+            "route_type": "chat",
+            "connection_id": None,
+            "external_thread_id": "",
+            "display_name": "",
+        },
+    ]
+
+
 @pytest.mark.asyncio
 async def test_connection_response_includes_known_provider_identities(monkeypatch) -> None:
     connection = make_connection()
@@ -803,6 +843,274 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert inbound_event.thread_id == thread.id
     assert outbound_event.status == "sent"
     assert outbound_event.payload["agentRunId"] == str(assistant_agent_run_id)
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_sends_approval_to_selected_owner_route(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    requester_thread_id = "15551234567@s.whatsapp.net"
+    owner_thread_id = "15557654321@s.whatsapp.net"
+    connection.config = {
+        **connection.config,
+        "approval_routes": [
+            {
+                "route_type": "chat_provider",
+                "connection_id": str(connection.id),
+                "external_thread_id": owner_thread_id,
+                "display_name": "Workspace Owner",
+            }
+        ],
+    }
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id=requester_thread_id,
+        external_user_id=requester_thread_id,
+        external_user_display_name="Outside User",
+    )
+    owner_thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id=owner_thread_id,
+        external_user_id=owner_thread_id,
+        external_user_display_name="Workspace Owner",
+    )
+    conversation_id = thread.conversation_id
+    agent_id = uuid4()
+    agent_run_id = uuid4()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        requested_by_id=connection.created_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="restart_workload",
+        arguments={"name": "api"},
+        status="pending",
+        result="",
+        error="",
+    )
+    sent_messages: list[tuple[str, str]] = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"tool_approval"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content="",
+            parts=[],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def latest_pending_approval(*args, **kwargs):
+        return approval
+
+    async def get_connection(*args, **kwargs):
+        assert kwargs["connection_id"] == connection.id
+        return connection
+
+    async def get_thread(*args, **kwargs):
+        assert kwargs["external_thread_id"] == owner_thread_id
+        return owner_thread
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent_messages.append((kwargs["external_thread_id"], kwargs["text"]))
+        return {"message_id": f"msg-{len(sent_messages)}"}
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "latest_pending_approval", latest_pending_approval)
+    monkeypatch.setattr(service.repository, "get_connection", get_connection)
+    monkeypatch.setattr(service.repository, "get_thread", get_thread)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-approval-1",
+            external_thread_id=requester_thread_id,
+            external_user_id=requester_thread_id,
+            external_user_display_name="Outside User",
+            text="Restart the workload",
+            raw={"messageId": "wa-inbound-approval-1"},
+        ),
+    )
+
+    assert processed
+    assert sent_messages[0][0] == owner_thread_id
+    assert "Open this Wardn approval page" in sent_messages[0][1]
+    assert sent_messages[1] == (requester_thread_id, service.PROVIDER_APPROVAL_PENDING_REPLY)
+    approval_events = [
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.event_type == "approval.request"
+    ]
+    assert len(approval_events) == 1
+    assert approval_events[0].thread_id == owner_thread.id
+    assert approval_events[0].payload["approvalId"] == str(approval.id)
+    assert approval_events[0].payload["agentRunId"] == str(agent_run_id)
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_never_sends_approval_to_requester_route(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    requester_thread_id = "15551234567@s.whatsapp.net"
+    connection.config = {
+        **connection.config,
+        "approval_routes": [
+            {
+                "route_type": "chat_provider",
+                "connection_id": str(connection.id),
+                "external_thread_id": requester_thread_id,
+                "display_name": "Outside User",
+            }
+        ],
+    }
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id=requester_thread_id,
+        external_user_id=requester_thread_id,
+        external_user_display_name="Outside User",
+    )
+    conversation_id = thread.conversation_id
+    agent_id = uuid4()
+    agent_run_id = uuid4()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        requested_by_id=connection.created_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="restart_workload",
+        arguments={"name": "api"},
+        status="pending",
+        result="",
+        error="",
+    )
+    sent_messages: list[tuple[str, str]] = []
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"tool_approval"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content="",
+            parts=[],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def latest_pending_approval(*args, **kwargs):
+        return approval
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent_messages.append((kwargs["external_thread_id"], kwargs["text"]))
+        return {"message_id": f"msg-{len(sent_messages)}"}
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "latest_pending_approval", latest_pending_approval)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-approval-requester-1",
+            external_thread_id=requester_thread_id,
+            external_user_id=requester_thread_id,
+            external_user_display_name="Outside User",
+            text="Restart the workload",
+            raw={"messageId": "wa-inbound-approval-requester-1"},
+        ),
+    )
+
+    assert processed
+    assert sent_messages == [(requester_thread_id, service.PROVIDER_APPROVAL_PENDING_ADMIN_REPLY)]
+    assert "Open this Wardn approval page" not in sent_messages[0][1]
+    approval_events = [
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.event_type == "approval.request"
+    ]
+    assert len(approval_events) == 1
+    assert approval_events[0].thread_id is None
+    assert approval_events[0].payload["routeType"] == "chat"
+    assert approval_events[0].payload["displayName"] == "Workspace admins"
 
 
 @pytest.mark.asyncio

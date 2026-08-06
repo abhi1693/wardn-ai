@@ -1818,16 +1818,35 @@ def provider_event_recipient(
     event: ChatProviderEvent,
     thread: ChatProviderThread | None,
 ) -> AgentRunDeliveryRecipientRead:
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    is_approval_request = event.event_type == "approval.request" or bool(
+        payload.get("approvalRequest")
+    )
+    route_type = str(payload.get("routeType") or "").strip()
+    if route_type == "chat":
+        display_route_type = "Workspace admin"
+    elif is_approval_request:
+        display_route_type = "Approval route"
+    else:
+        display_route_type = "Chat provider"
     return AgentRunDeliveryRecipientRead(
         id=event.id,
         source="chat_provider_reply",
-        routeType="Chat provider",
+        routeType=display_route_type,
         provider=event.provider,
         connectionId=event.connection_id,
-        externalThreadId=thread.external_thread_id if thread is not None else "",
-        displayName=thread.external_user_display_name if thread is not None else "",
+        externalThreadId=(
+            thread.external_thread_id
+            if thread is not None
+            else str(payload.get("externalThreadId") or "")
+        ),
+        displayName=(
+            thread.external_user_display_name
+            if thread is not None and thread.external_user_display_name
+            else str(payload.get("displayName") or "")
+        ),
         status=event.status,
-        outputKind="assistant",
+        outputKind="approval" if is_approval_request else "assistant",
         error=event.error,
         deliveredAt=event.processed_at,
         createdAt=event.created_at,
