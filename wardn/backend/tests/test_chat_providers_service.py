@@ -592,6 +592,50 @@ async def test_validate_approval_routes_rejects_slack_channel_thread(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_validate_approval_routes_accepts_slack_dm_conversation(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+    connection.external_id = "T123"
+    connection.config = {"allow_all_senders": True, "team_id": "T123"}
+    approver = User(id=uuid4(), email="owner@example.com", is_active=True, is_superuser=True)
+    linked_thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        external_thread_id="T123:D123:1786026685.810419",
+        external_user_id="U123",
+        external_user_display_name="Asha",
+    )
+
+    async def get_user_by_id(*args, **kwargs):
+        return approver
+
+    async def get_thread_by_external_thread_prefix(*args, **kwargs):
+        return linked_thread
+
+    monkeypatch.setattr(service, "get_user_by_id", get_user_by_id)
+    monkeypatch.setattr(
+        service.repository,
+        "get_thread_by_external_thread_prefix",
+        get_thread_by_external_thread_prefix,
+    )
+
+    await service.validate_approval_routes(
+        FakeSession(),
+        connection=connection,
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        routes=[
+            {
+                "route_type": "workspace_member",
+                "external_thread_id": "T123:D123",
+                "user_id": str(approver.id),
+            }
+        ],
+    )
+
+
+@pytest.mark.asyncio
 async def test_validate_approval_routes_rejects_external_or_inactive_users(
     monkeypatch,
 ) -> None:
@@ -868,6 +912,53 @@ async def test_send_slack_text_message_posts_thread_reply(monkeypatch) -> None:
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_slack_text_message_posts_dm_without_thread(monkeypatch) -> None:
+    connection = make_connection(service.PROVIDER_SLACK)
+
+    class FakeSlackClient:
+        requests: list[dict] = []
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return None
+
+        async def post(self, url, *, headers=None, json=None, **kwargs):
+            self.requests.append({"url": str(url), "headers": headers or {}, "json": json})
+            request = httpx.Request("POST", str(url))
+            return httpx.Response(200, json={"ok": True, "channel": "D123"}, request=request)
+
+    async def connection_secret_handle_id(*args, **kwargs):
+        return uuid4()
+
+    async def resolve_secret(*args, **kwargs):
+        return ResolvedSecret("xoxb-token")
+
+    monkeypatch.setattr(service, "connection_secret_handle_id", connection_secret_handle_id)
+    monkeypatch.setattr(service, "resolve_secret", resolve_secret)
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeSlackClient)
+
+    result = await service.send_slack_text_message(
+        FakeSession(),
+        connection,
+        external_thread_id="T123:D123",
+        text="approval",
+    )
+
+    assert result == {"ok": True, "channel": "D123"}
+    assert FakeSlackClient.requests[0]["json"] == {
+        "channel": "D123",
+        "text": "approval",
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
 
 
 @pytest.mark.asyncio

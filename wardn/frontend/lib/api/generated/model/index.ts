@@ -69,6 +69,7 @@ export * from './chatProviderConnectionUpdate';
 export * from './chatProviderConnectionUpdateConfig';
 export * from './chatProviderConnectionUpdateSecretHandleIds';
 export * from './chatProviderKnownIdentityRead';
+export * from './chatProviderKnownIdentityReadProviderMetadata';
 export * from './chatProviderPairingStatusResponse';
 export * from './chatProviderPairingStatusResponseRawStatus';
 export * from './chatProviderPairingStatusResponseStatus';

@@ -127,6 +127,24 @@ async def get_thread(
     return result.scalar_one_or_none()
 
 
+async def get_thread_by_external_thread_prefix(
+    session: AsyncSession,
+    *,
+    connection_id: uuid.UUID,
+    external_thread_prefix: str,
+) -> ChatProviderThread | None:
+    result = await session.execute(
+        select(ChatProviderThread)
+        .where(
+            ChatProviderThread.connection_id == connection_id,
+            ChatProviderThread.external_thread_id.like(f"{external_thread_prefix}:%"),
+        )
+        .order_by(ChatProviderThread.updated_at.desc(), ChatProviderThread.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_threads_for_connection(
     session: AsyncSession,
     *,

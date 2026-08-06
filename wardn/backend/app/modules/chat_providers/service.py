@@ -625,22 +625,30 @@ async def validate_approval_routes(
                     "to a provider thread"
                 )
             if connection is not None:
-                linked_thread = await repository.get_thread(
-                    session,
-                    connection_id=connection.id,
-                    external_thread_id=external_thread_id,
-                )
+                linked_thread = None
+                if connection.provider == PROVIDER_SLACK:
+                    channel_id = slack.external_id_channel_id(external_thread_id)
+                    if channel_id.startswith("D"):
+                        linked_thread = await repository.get_thread_by_external_thread_prefix(
+                            session,
+                            connection_id=connection.id,
+                            external_thread_prefix=external_thread_id,
+                        )
+                if linked_thread is None:
+                    linked_thread = await repository.get_thread(
+                        session,
+                        connection_id=connection.id,
+                        external_thread_id=external_thread_id,
+                    )
                 if linked_thread is None:
                     raise InvalidChatProviderConnectionError(
                         "chat provider approval route thread is not known for this provider"
                     )
                 if connection.provider == PROVIDER_SLACK:
-                    _team_id, channel_id, _thread_ts = slack.parse_external_thread_id(
-                        external_thread_id
-                    )
+                    channel_id = slack.external_id_channel_id(external_thread_id)
                     if not channel_id.startswith("D"):
                         raise InvalidChatProviderConnectionError(
-                            "Slack approval routes must use a direct message thread"
+                            "Slack approval routes must use a direct message"
                         )
             continue
         raise InvalidChatProviderConnectionError(
@@ -945,17 +953,21 @@ async def connection_response(
     session: AsyncSession,
     connection: ChatProviderConnection,
 ) -> ChatProviderConnectionRead:
+    threads = await repository.list_threads_for_connection(
+        session,
+        connection_id=connection.id,
+    )
+    if connection.provider == PROVIDER_SLACK:
+        await hydrate_slack_known_identity_metadata(session, connection, threads)
     known_identities = [
         ChatProviderKnownIdentityRead(
             external_thread_id=thread.external_thread_id,
             external_user_id=thread.external_user_id,
             display_name=thread.external_user_display_name,
+            provider_metadata=dict(thread.provider_metadata or {}),
             last_seen_at=thread.updated_at,
         )
-        for thread in await repository.list_threads_for_connection(
-            session,
-            connection_id=connection.id,
-        )
+        for thread in threads
     ]
     return ChatProviderConnectionRead(
         id=connection.id,
@@ -1473,6 +1485,146 @@ async def slack_app_token(
         workspace_id=connection.workspace_id,
     )
     return app_token.value
+
+
+async def slack_bot_token_value(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+) -> str:
+    secret_handle_id = await connection_secret_handle_id(session, connection, SECRET_BOT_TOKEN)
+    if secret_handle_id is None:
+        return ""
+    secret = await resolve_secret(
+        session,
+        connection.organization_id,
+        secret_handle_id,
+        workspace_id=connection.workspace_id,
+    )
+    return secret.value
+
+
+def slack_profile_display_name(payload: dict[str, Any]) -> str:
+    user = payload.get("user")
+    if not isinstance(user, dict):
+        return ""
+    profile = user.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+    for value in (
+        profile.get("real_name"),
+        profile.get("display_name"),
+        user.get("real_name"),
+        user.get("name"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def slack_channel_display_name(payload: dict[str, Any]) -> str:
+    channel = payload.get("channel")
+    if not isinstance(channel, dict):
+        return ""
+    name = str(channel.get("name") or "").strip()
+    if not name:
+        return ""
+    return name if bool(channel.get("is_im")) else f"#{name}"
+
+
+async def slack_api_get(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    *,
+    bot_token: str,
+    params: dict[str, str],
+) -> dict[str, Any]:
+    response = await client.get(
+        f"https://slack.com/api/{endpoint}",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        params=params,
+    )
+    payload = response_json(response)
+    if response.status_code >= 400 or payload.get("ok") is False:
+        return {}
+    return payload
+
+
+async def hydrate_slack_known_identity_metadata(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    threads: list[ChatProviderThread],
+) -> None:
+    if not threads:
+        return
+    try:
+        bot_token = await slack_bot_token_value(session, connection)
+    except Exception:
+        logger.debug(
+            "Skipping Slack identity hydration; bot token resolution failed.",
+            exc_info=True,
+        )
+        return
+    if not bot_token:
+        return
+    user_ids = {
+        thread.external_user_id
+        for thread in threads
+        if thread.external_user_id
+        and not thread.external_user_display_name
+        and thread.external_user_id.startswith("U")
+    }
+    channel_ids: set[str] = set()
+    for thread in threads:
+        metadata = dict(thread.provider_metadata or {})
+        if metadata.get("slack_channel_display_name"):
+            continue
+        channel_id = slack.external_id_channel_id(thread.external_thread_id)
+        if channel_id:
+            channel_ids.add(channel_id)
+    user_names: dict[str, str] = {}
+    channel_names: dict[str, str] = {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for user_id in sorted(user_ids):
+                payload = await slack_api_get(
+                    client,
+                    "users.info",
+                    bot_token=bot_token,
+                    params={"user": user_id},
+                )
+                display_name = slack_profile_display_name(payload)
+                if display_name:
+                    user_names[user_id] = display_name
+            for channel_id in sorted(channel_ids):
+                payload = await slack_api_get(
+                    client,
+                    "conversations.info",
+                    bot_token=bot_token,
+                    params={"channel": channel_id},
+                )
+                display_name = slack_channel_display_name(payload)
+                if display_name:
+                    channel_names[channel_id] = display_name
+    except Exception:
+        logger.debug("Slack identity hydration failed.", exc_info=True)
+        return
+    changed = False
+    for thread in threads:
+        display_name = user_names.get(thread.external_user_id, "")
+        if display_name and not thread.external_user_display_name:
+            thread.external_user_display_name = display_name
+            changed = True
+        channel_id = slack.external_id_channel_id(thread.external_thread_id)
+        channel_display_name = channel_names.get(channel_id, "")
+        if channel_display_name:
+            metadata = dict(thread.provider_metadata or {})
+            if metadata.get("slack_channel_display_name") != channel_display_name:
+                metadata["slack_channel_display_name"] = channel_display_name
+                thread.provider_metadata = metadata
+                changed = True
+    if changed:
+        await session.flush()
 
 
 async def handle_telegram_webhook(
@@ -2634,6 +2786,14 @@ async def dispatch_provider_approval_request(
             connection_id=connection.id,
             external_thread_id=external_thread_id,
         )
+        if thread is None and connection.provider == PROVIDER_SLACK:
+            channel_id = slack.external_id_channel_id(external_thread_id)
+            if channel_id.startswith("D"):
+                thread = await repository.get_thread_by_external_thread_prefix(
+                    session,
+                    connection_id=connection.id,
+                    external_thread_prefix=external_thread_id,
+                )
         if thread is None:
             await record_unrouted_approval_request(
                 session,
@@ -2650,7 +2810,7 @@ async def dispatch_provider_approval_request(
             provider_payload = await send_provider_text_message(
                 session,
                 connection,
-                external_thread_id=thread.external_thread_id,
+                external_thread_id=external_thread_id,
                 text=approval_reply_text(approval),
             )
         except ChatProviderDeliveryError as exc:
@@ -2822,9 +2982,20 @@ async def send_slack_text_message(
         workspace_id=connection.workspace_id,
     )
     _team_id, channel_id, thread_ts = slack.parse_external_thread_id(external_thread_id)
-    if not channel_id or not thread_ts:
-        raise ChatProviderDeliveryError("Slack thread identifier is invalid")
-    payload = slack.text_message_payload(channel_id=channel_id, thread_ts=thread_ts, text=text)
+    if not channel_id:
+        _team_id, channel_id = slack.parse_external_conversation_id(external_thread_id)
+    if not channel_id:
+        raise ChatProviderDeliveryError("Slack conversation identifier is invalid")
+    payload = (
+        slack.text_message_payload(channel_id=channel_id, thread_ts=thread_ts, text=text)
+        if thread_ts
+        else {
+            "channel": channel_id,
+            "text": slack.outbound_text_body(text),
+            "unfurl_links": False,
+            "unfurl_media": False,
+        }
+    )
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(
             "https://slack.com/api/chat.postMessage",

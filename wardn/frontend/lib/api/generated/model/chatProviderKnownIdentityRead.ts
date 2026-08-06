@@ -4,10 +4,12 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { ChatProviderKnownIdentityReadProviderMetadata } from './chatProviderKnownIdentityReadProviderMetadata';
 
 export interface ChatProviderKnownIdentityRead {
   displayName?: string;
   externalThreadId: string;
   externalUserId?: string;
   lastSeenAt: string;
+  providerMetadata?: ChatProviderKnownIdentityReadProviderMetadata;
 }

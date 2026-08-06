@@ -138,6 +138,7 @@ class ChatProviderKnownIdentityRead(APIModel):
     external_thread_id: str
     external_user_id: str = ""
     display_name: str = ""
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
     last_seen_at: datetime
 
 

@@ -2162,6 +2162,11 @@
             "format": "date-time",
             "title": "Lastseenat",
             "type": "string"
+          },
+          "providerMetadata": {
+            "additionalProperties": true,
+            "title": "Providermetadata",
+            "type": "object"
           }
         },
         "required": [

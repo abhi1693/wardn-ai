@@ -220,6 +220,10 @@ function slackThreadLabel(value?: string | null) {
 
 function slackConversationId(value?: string | null) {
   const trimmed = value?.trim() ?? "";
+  const [directTeamId, directChannelId] = trimmed.split(":");
+  if (directTeamId && directChannelId && !trimmed.split(":")[2]) {
+    return `${directTeamId}:${directChannelId}`;
+  }
   const [teamId, channelId, threadTs] = trimmed.split(":");
   if (!teamId || !channelId || !threadTs) {
     return "";
@@ -243,10 +247,21 @@ function slackConversationLabel(value?: string | null) {
   return `Slack ${kind} ${channelId}`;
 }
 
+function slackProviderMetadata(
+  identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]
+) {
+  return record((identity as { providerMetadata?: unknown }).providerMetadata);
+}
+
 function isSlackDmThread(value?: string | null) {
   const trimmed = value?.trim() ?? "";
   const [, channelId, threadTs] = trimmed.split(":");
   return Boolean(channelId?.startsWith("D") && threadTs);
+}
+
+function isSlackDmConversation(value?: string | null) {
+  const channelId = value?.trim().split(":")[1] ?? "";
+  return channelId.startsWith("D");
 }
 
 function slackUserLabel(
@@ -263,7 +278,7 @@ function identityLabel(
     const threadLabel = slackThreadLabel(identity.externalThreadId);
     const userLabel = slackUserLabel(identity);
     if (threadLabel && userLabel && isSlackDmThread(identity.externalThreadId)) {
-      return `${userLabel} · ${threadLabel}`;
+      return `Direct message with ${userLabel}`;
     }
     if (threadLabel && userLabel) {
       return `${threadLabel} · ${userLabel}`;
@@ -302,10 +317,16 @@ function conversationChoices(
       continue;
     }
     const userLabel = slackUserLabel(identity);
-    const baseLabel = slackConversationLabel(id) || id;
-    const label = id.split(":")[1]?.startsWith("D") && userLabel
-      ? `DM with ${userLabel} · ${baseLabel}`
-      : baseLabel;
+    const metadata = slackProviderMetadata(identity);
+    const channelLabel = stringConfig(
+      metadata,
+      "slack_channel_display_name",
+      "slackChannelDisplayName"
+    );
+    const isDm = isSlackDmConversation(id);
+    const label = isDm && userLabel
+      ? `Direct message with ${userLabel}`
+      : channelLabel || slackConversationLabel(id) || id;
     const existing = choices.get(id);
     if (!existing) {
       choices.set(id, {

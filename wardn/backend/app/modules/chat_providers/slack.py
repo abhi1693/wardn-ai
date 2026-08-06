@@ -92,6 +92,14 @@ def parse_external_conversation_id(value: str) -> tuple[str, str]:
     return team_id, channel_id
 
 
+def external_id_channel_id(value: str) -> str:
+    _team_id, channel_id, _thread_ts = parse_external_thread_id(value)
+    if channel_id:
+        return channel_id
+    _team_id, channel_id = parse_external_conversation_id(value)
+    return channel_id
+
+
 def conversation_id_from_thread_id(value: str) -> str:
     team_id, channel_id, _thread_ts = parse_external_thread_id(value)
     if not team_id or not channel_id:
