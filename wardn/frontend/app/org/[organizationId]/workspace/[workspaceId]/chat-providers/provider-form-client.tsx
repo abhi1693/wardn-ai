@@ -294,6 +294,26 @@ function statusTone(
   return "warning" as const;
 }
 
+function mergePairingStatus(
+  current: ChatProviderPairingStatusResponse | undefined,
+  next: ChatProviderPairingStatusResponse,
+  options: { preserveQr: boolean }
+) {
+  const { preserveQr } = options;
+  if (next.status === "connected" || next.status === "error" || next.qrPayload || !preserveQr) {
+    return next;
+  }
+  const currentQr = current?.qrPayload ?? "";
+  if (!currentQr) {
+    return next;
+  }
+  return {
+    ...next,
+    qrExpiresAt: current?.qrExpiresAt ?? next.qrExpiresAt,
+    qrPayload: currentQr,
+  };
+}
+
 function initialApprovalThreadMap(
   config: unknown,
   workspaceMembers: ChatProviderWorkspaceMemberRead[]
@@ -467,7 +487,9 @@ export function ChatProviderFormClient({
             connection.id,
             { timeoutMs: 15_000 }
           );
-      setPairingStatus(status);
+      setPairingStatus((current) =>
+        mergePairingStatus(current, status, { preserveQr: !resetQr })
+      );
       if (status.status === "error") {
         setError(status.message || "WhatsApp bridge status failed.");
       }
@@ -490,6 +512,51 @@ export function ChatProviderFormClient({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection?.id]);
+
+  useEffect(() => {
+    if (
+      !connection ||
+      connection.provider !== "whatsapp_local" ||
+      !pairingStatus?.qrPayload ||
+      pairingStatus.status === "connected"
+    ) {
+      return;
+    }
+    const activeConnection = connection;
+    let ignore = false;
+    async function pollPairingStatus() {
+      try {
+        const status = await workspaceChatProvidersPairingStatus(
+          organizationId,
+          workspaceId,
+          activeConnection.id,
+          { timeoutMs: 15_000 }
+        );
+        if (!ignore) {
+          setPairingStatus((current) =>
+            mergePairingStatus(current, status, { preserveQr: true })
+          );
+        }
+      } catch {
+        // Keep polling; transient bridge/API errors should not dismiss the QR.
+      }
+    }
+
+    void pollPairingStatus();
+    const intervalId = window.setInterval(() => {
+      void pollPairingStatus();
+    }, 3_000);
+    return () => {
+      ignore = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    connection,
+    organizationId,
+    pairingStatus?.qrPayload,
+    pairingStatus?.status,
+    workspaceId,
+  ]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

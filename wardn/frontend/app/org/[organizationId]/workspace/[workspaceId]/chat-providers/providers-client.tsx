@@ -357,6 +357,26 @@ function providerCounts(
   return { active, connected, needsSetup, total: connections.length, whatsapp: whatsapp.length };
 }
 
+function mergePairingStatus(
+  current: ChatProviderPairingStatusResponse | undefined,
+  next: ChatProviderPairingStatusResponse,
+  options: { preserveQr: boolean }
+) {
+  const { preserveQr } = options;
+  if (next.status === "connected" || next.status === "error" || next.qrPayload || !preserveQr) {
+    return next;
+  }
+  const currentQr = current?.qrPayload ?? "";
+  if (!currentQr) {
+    return next;
+  }
+  return {
+    ...next,
+    qrExpiresAt: current?.qrExpiresAt ?? next.qrExpiresAt,
+    qrPayload: currentQr,
+  };
+}
+
 export function ConnectProviderDialog({
   activeSecretStores,
   connectionCount,
@@ -1287,7 +1307,12 @@ export function ChatProvidersClient({
             connection.id,
             { timeoutMs: 15_000 }
           );
-      setPairingStatuses((current) => ({ ...current, [connection.id]: status }));
+      setPairingStatuses((current) => ({
+        ...current,
+        [connection.id]: mergePairingStatus(current[connection.id], status, {
+          preserveQr: !refreshQr,
+        }),
+      }));
       if (status.status === "error") {
         setError(status.message || "WhatsApp bridge status failed.");
       }
@@ -1319,7 +1344,12 @@ export function ChatProvidersClient({
           { timeoutMs: 15_000 }
         );
         if (!ignore) {
-          setPairingStatuses((current) => ({ ...current, [connection.id]: status }));
+          setPairingStatuses((current) => ({
+            ...current,
+            [connection.id]: mergePairingStatus(current[connection.id], status, {
+              preserveQr: true,
+            }),
+          }));
         }
       } catch {
         // Keep polling; transient bridge/API errors should not dismiss the QR.
