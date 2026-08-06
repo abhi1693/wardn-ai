@@ -28,6 +28,11 @@ from app.modules.agents.schemas import (
     WorkspaceSkillApproveRequest,
 )
 from app.modules.agents.types import AgentRuntimeTool, AgentRuntimeToolGuardrailFilter
+from app.modules.chat_providers.models import (
+    ChatProviderConnection,
+    ChatProviderEvent,
+    ChatProviderThread,
+)
 from app.modules.guardrails.service import GuardrailDecision
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.schemas import LLMProviderModelListResponse, LLMProviderModelRead
@@ -1670,6 +1675,171 @@ async def test_rerun_workspace_agent_run_replays_message_and_delivers_provider_r
         "agent_run_id": new_run_id,
     }
     assert captured["response_run_id"] == new_run_id
+
+
+@pytest.mark.asyncio
+async def test_deliver_provider_rerun_reply_routes_approval_without_sending_url_to_requester(
+    monkeypatch,
+) -> None:
+    session = FakeSession()
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    conversation_id = uuid4()
+    agent_run_id = uuid4()
+    connection = ChatProviderConnection(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=uuid4(),
+        provider="whatsapp_local",
+        name="Personal WhatsApp",
+        external_id="personal",
+        display_name="Personal WhatsApp",
+        config={
+            "approval_routes": [
+                {
+                    "route_type": "workspace_member",
+                    "user_id": str(uuid4()),
+                    "display_name": "Workspace Owner",
+                }
+            ]
+        },
+        is_active=True,
+    )
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Outside User",
+        last_external_message_id="wa-inbound-1",
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=uuid4(),
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        requested_by_id=connection.created_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="scale_statefulset",
+        arguments={"name": "zeus-mqtt", "replicas": 0},
+        status="pending",
+        result="",
+        error="",
+    )
+    captured: dict[str, object] = {}
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        return thread, connection
+
+    async def latest_assistant_message(*args, **kwargs):
+        return None
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def route_pending_approval_request_reply(*args, **kwargs):
+        captured["approval_route"] = kwargs
+        return chat_provider_service.PROVIDER_APPROVAL_PENDING_REPLY
+
+    async def send_provider_text_message(*args, **kwargs):
+        captured["sent_message"] = kwargs
+        return {"message_id": "wa-outbound-1"}
+
+    def provider_response_message_id(*args, **kwargs):
+        return "wa-outbound-1"
+
+    from app.modules.chat_providers import service as chat_provider_service
+
+    monkeypatch.setattr(
+        service.chat_provider_repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "latest_assistant_message",
+        latest_assistant_message,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "assistant_message_run_canceled",
+        assistant_message_run_canceled,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "route_pending_approval_request_reply",
+        route_pending_approval_request_reply,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "send_provider_text_message",
+        send_provider_text_message,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "provider_response_message_id",
+        provider_response_message_id,
+    )
+
+    await service.deliver_provider_rerun_reply(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+    )
+
+    assert captured["approval_route"]["conversation_id"] == conversation_id
+    assert captured["approval_route"]["initiating_event_id"] == "wa-inbound-1"
+    sent_message = captured["sent_message"]
+    assert sent_message["external_thread_id"] == thread.external_thread_id
+    assert sent_message["text"] == chat_provider_service.PROVIDER_APPROVAL_PENDING_REPLY
+    assert "Open this Wardn approval page" not in sent_message["text"]
+    assert f"/agents/{approval.agent_id}/approvals/{approval.id}" not in sent_message["text"]
+    outbound_events = [item for item in session.added if isinstance(item, ChatProviderEvent)]
+    assert len(outbound_events) == 1
+    assert outbound_events[0].event_type == "message.text"
+    assert outbound_events[0].payload["agentRunId"] == str(agent_run_id)
+
+
+def test_provider_event_recipient_marks_internal_approval_as_available() -> None:
+    event = ChatProviderEvent(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        connection_id=uuid4(),
+        provider="whatsapp_local",
+        external_event_id="approval:1",
+        direction="outbound",
+        event_type="approval.request",
+        status="processed",
+        payload={
+            "approvalRequest": True,
+            "externalDelivery": False,
+            "routeType": "workspace_member",
+            "displayName": "Workspace Owner",
+            "agentRunId": str(uuid4()),
+        },
+        error="",
+        processed_at=datetime(2026, 8, 2, tzinfo=UTC),
+        created_at=datetime(2026, 8, 2, tzinfo=UTC),
+    )
+
+    recipient = service.provider_event_recipient(event, None)
+
+    assert recipient.display_name == "Workspace Owner"
+    assert recipient.provider == ""
+    assert recipient.route_type == "Wardn approver"
+    assert recipient.status == "available"
+    assert recipient.delivered_at is None
 
 
 def test_conversation_id_from_payload_only_accepts_canonical_wardn_uuids() -> None:

@@ -1819,38 +1819,43 @@ def provider_event_recipient(
     thread: ChatProviderThread | None,
 ) -> AgentRunDeliveryRecipientRead:
     payload = event.payload if isinstance(event.payload, dict) else {}
+    provider_payload = payload.get(event.provider)
+    provider_delivered = isinstance(provider_payload, dict)
     is_approval_request = event.event_type == "approval.request" or bool(
         payload.get("approvalRequest")
     )
     route_type = str(payload.get("routeType") or "").strip()
     if route_type == "chat":
-        display_route_type = "Workspace admin"
+        display_route_type = "Wardn admin fallback"
     elif route_type == "workspace_member":
-        display_route_type = "Workspace member"
+        display_route_type = "Wardn approver"
     elif is_approval_request:
         display_route_type = "Approval route"
     else:
         display_route_type = "Chat provider"
+    status = event.status
+    if is_approval_request and not provider_delivered:
+        status = "available"
     return AgentRunDeliveryRecipientRead(
         id=event.id,
         source="chat_provider_reply",
         routeType=display_route_type,
-        provider=event.provider,
+        provider=event.provider if provider_delivered else "",
         connectionId=event.connection_id,
         externalThreadId=(
             thread.external_thread_id
-            if thread is not None
+            if provider_delivered and thread is not None
             else str(payload.get("externalThreadId") or "")
         ),
         displayName=(
             thread.external_user_display_name
-            if thread is not None and thread.external_user_display_name
+            if provider_delivered and thread is not None and thread.external_user_display_name
             else str(payload.get("displayName") or "")
         ),
-        status=event.status,
+        status=status,
         outputKind="approval" if is_approval_request else "assistant",
         error=event.error,
-        deliveredAt=event.processed_at,
+        deliveredAt=event.processed_at if provider_delivered else None,
         createdAt=event.created_at,
     )
 
@@ -2077,10 +2082,21 @@ async def deliver_provider_rerun_reply(
         return
     reply_text = assistant_message.content.strip() if assistant_message is not None else ""
     if not reply_text:
-        reply_text = await chat_provider_service.pending_approval_reply_text(
+        reply_text = await chat_provider_service.route_pending_approval_request_reply(
             session,
             connection,
-            conversation_id,
+            conversation_id=conversation_id,
+            initiating_event_id=thread.last_external_message_id or f"rerun:{agent_run_id}",
+        )
+    elif chat_provider_service.reply_exposes_wardn_approval_url(reply_text):
+        reply_text = (
+            await chat_provider_service.route_pending_approval_request_reply(
+                session,
+                connection,
+                conversation_id=conversation_id,
+                initiating_event_id=thread.last_external_message_id or f"rerun:{agent_run_id}",
+            )
+            or chat_provider_service.PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
         )
     if not reply_text:
         reply_text = chat_provider_service.PROVIDER_ASSISTANT_EMPTY_REPLY

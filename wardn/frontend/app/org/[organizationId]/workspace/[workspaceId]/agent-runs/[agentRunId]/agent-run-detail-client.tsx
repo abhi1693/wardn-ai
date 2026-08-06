@@ -57,6 +57,9 @@ function statusVariant(status: string) {
   if (status === "running" || status === "submitted" || status === "waiting_confirmation") {
     return "secondary" as const;
   }
+  if (status === "available" || status === "processed") {
+    return "secondary" as const;
+  }
   return "outline" as const;
 }
 
@@ -637,8 +640,8 @@ export function AgentRunDetailClient({
                 <h2 className="text-base font-semibold tracking-normal">Output Recipients</h2>
               </div>
               <div className="mt-1 text-sm text-muted-foreground">
-                {deliveryRecipients.length} recorded delivery
-                {deliveryRecipients.length === 1 ? "" : "ies"} for this run.
+                {deliveryRecipients.length} output recipient
+                {deliveryRecipients.length === 1 ? "" : "s"} recorded for this run.
               </div>
             </div>
           </div>

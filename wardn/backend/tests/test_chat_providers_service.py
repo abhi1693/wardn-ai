@@ -602,7 +602,7 @@ async def test_send_whatsapp_local_text_message_reconnects_and_retries_bridge(
 
 
 @pytest.mark.asyncio
-async def test_pending_approval_reply_text_includes_approval_page(monkeypatch) -> None:
+async def test_pending_approval_reply_text_does_not_include_approval_page(monkeypatch) -> None:
     connection = make_connection()
     approval = AgentToolApproval(
         id=uuid4(),
@@ -637,11 +637,12 @@ async def test_pending_approval_reply_text_includes_approval_page(monkeypatch) -
         approval.conversation_id,
     )
 
-    assert "I need approval to run search_repositories" in text
+    assert "workspace approval" in text
+    assert "Open this Wardn approval page" not in text
     assert (
         f"/org/{connection.organization_id}/workspace/{connection.workspace_id}"
         f"/agents/{approval.agent_id}/approvals/{approval.id}"
-    ) in text
+    ) not in text
 
 
 @pytest.mark.asyncio
@@ -1214,8 +1215,10 @@ async def test_process_provider_text_message_records_selected_workspace_member_a
     ]
     assert len(approval_events) == 1
     assert approval_events[0].thread_id is None
+    assert approval_events[0].status == "processed"
     assert approval_events[0].payload["approvalId"] == str(approval.id)
     assert approval_events[0].payload["agentRunId"] == str(agent_run_id)
+    assert approval_events[0].payload["externalDelivery"] is False
     assert approval_events[0].payload["routeType"] == "workspace_member"
     assert approval_events[0].payload["userId"] == str(approver_user_id)
     assert "Open this Wardn approval page" in approval_events[0].payload["message"]
@@ -1340,6 +1343,8 @@ async def test_process_provider_text_message_never_sends_approval_to_requester_r
     ]
     assert len(approval_events) == 1
     assert approval_events[0].thread_id is None
+    assert approval_events[0].status == "processed"
+    assert approval_events[0].payload["externalDelivery"] is False
     assert approval_events[0].payload["routeType"] == "chat"
     assert approval_events[0].payload["displayName"] == "Workspace admins"
 

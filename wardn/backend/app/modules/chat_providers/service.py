@@ -81,7 +81,7 @@ PROVIDER_ASSISTANT_EMPTY_REPLY = (
 )
 PROVIDER_APPROVAL_PENDING_REPLY = (
     "This request needs workspace approval before I can continue. "
-    "I sent the approval request to the selected workspace approvers."
+    "Selected workspace approvers can review the pending approval in Wardn."
 )
 PROVIDER_APPROVAL_PENDING_ADMIN_REPLY = (
     "This request needs workspace approval before I can continue. "
@@ -1826,24 +1826,22 @@ async def process_provider_text_message(
             return True
         reply_text = assistant_message.content.strip() if assistant_message is not None else ""
         if not reply_text:
-            approval = await latest_pending_approval(
+            reply_text = await route_pending_approval_request_reply(
                 session,
                 connection,
-                conversation_id,
+                conversation_id=conversation_id,
+                initiating_event_id=message.event_id,
             )
-            if approval is not None:
-                approval_sent = await dispatch_provider_approval_request(
+        elif reply_exposes_wardn_approval_url(reply_text):
+            reply_text = (
+                await route_pending_approval_request_reply(
                     session,
                     connection,
-                    approval=approval,
                     conversation_id=conversation_id,
                     initiating_event_id=message.event_id,
                 )
-                reply_text = (
-                    PROVIDER_APPROVAL_PENDING_REPLY
-                    if approval_sent
-                    else PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
-                )
+                or PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
+            )
         if not reply_text:
             reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
         outbound_payload = await send_provider_text_message(
@@ -2065,6 +2063,11 @@ def approval_reply_text(approval: AgentToolApproval) -> str:
     )
 
 
+def reply_exposes_wardn_approval_url(text: str) -> bool:
+    normalized = text.casefold()
+    return "/agents/" in normalized and "/approvals/" in normalized
+
+
 async def latest_pending_approval(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -2104,6 +2107,7 @@ def approval_event_payload(
         "agentRunId": str(approval.agent_run_id) if approval.agent_run_id is not None else "",
         "approvalId": str(approval.id),
         "approvalRequest": True,
+        "externalDelivery": provider_payload is not None,
         "routeType": str(route.get("route_type") or ""),
         "userId": str(route.get("user_id") or ""),
         "externalThreadId": str(route.get("external_thread_id") or ""),
@@ -2139,7 +2143,7 @@ async def record_internal_admin_approval_request(
             ),
             direction="outbound",
             event_type="approval.request",
-            status="sent",
+            status="processed",
             payload=approval_event_payload(
                 connection=connection,
                 approval=approval,
@@ -2176,7 +2180,7 @@ async def record_workspace_member_approval_request(
             ),
             direction="outbound",
             event_type="approval.request",
-            status="sent",
+            status="processed",
             payload=approval_event_payload(
                 connection=connection,
                 approval=approval,
@@ -2231,13 +2235,37 @@ async def dispatch_provider_approval_request(
     return delivered
 
 
+async def route_pending_approval_request_reply(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    conversation_id: uuid.UUID,
+    initiating_event_id: str,
+) -> str:
+    approval = await latest_pending_approval(session, connection, conversation_id)
+    if approval is None:
+        return ""
+    approval_routed = await dispatch_provider_approval_request(
+        session,
+        connection,
+        approval=approval,
+        conversation_id=conversation_id,
+        initiating_event_id=initiating_event_id,
+    )
+    return (
+        PROVIDER_APPROVAL_PENDING_REPLY
+        if approval_routed
+        else PROVIDER_APPROVAL_PENDING_ADMIN_REPLY
+    )
+
+
 async def pending_approval_reply_text(
     session: AsyncSession,
     connection: ChatProviderConnection,
     conversation_id: uuid.UUID,
 ) -> str:
     approval = await latest_pending_approval(session, connection, conversation_id)
-    return approval_reply_text(approval) if approval is not None else ""
+    return PROVIDER_APPROVAL_PENDING_ADMIN_REPLY if approval is not None else ""
 
 
 async def send_provider_text_message(
