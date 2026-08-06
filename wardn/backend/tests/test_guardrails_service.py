@@ -10,6 +10,7 @@ from app.modules.agents import tool_execution as agent_tool_execution
 from app.modules.agents.models import Agent, AgentRun, AgentToolApproval, WorkspaceConversation
 from app.modules.agents.schemas import AgentToolApprovalDecisionRequest
 from app.modules.agents.types import AgentRuntimeTool
+from app.modules.chat_providers.models import ChatProviderConnection, ChatProviderThread
 from app.modules.guardrails import repository, service
 from app.modules.guardrails.exceptions import InvalidGuardrailPolicyError
 from app.modules.guardrails.models import GuardrailPolicy
@@ -19,7 +20,7 @@ from app.modules.mcp_registry.models import (
     MCPServerToolSchema,
     MCPServerVersion,
 )
-from app.modules.organizations.models import Workspace
+from app.modules.organizations.models import OrganizationMembership, Workspace, WorkspaceMembership
 from app.modules.users.models import User
 from tests.database_fakes import EmptyResult
 
@@ -1115,6 +1116,234 @@ async def test_get_agent_tool_approval_returns_review_and_url(monkeypatch) -> No
     assert response.action_review
     assert response.action_review["targetConnection"]["serverName"] == installation.server_name
     assert response.action_review["tool"]["title"] == "Search repositories"
+
+
+@pytest.mark.asyncio
+async def test_get_chat_provider_tool_approval_allows_selected_workspace_member(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    requester_id = uuid4()
+    user = User(id=uuid4(), email="approver@example.com", is_superuser=False)
+    organization_membership = OrganizationMembership(
+        id=uuid4(),
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+    workspace_membership = WorkspaceMembership(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    conversation_id = uuid4()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=conversation_id,
+        agent_run_id=uuid4(),
+        requested_by_id=requester_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="restart_workload",
+        arguments={"name": "api"},
+        status="pending",
+        result="",
+        error="",
+        created_at=datetime(2026, 7, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+    connection = ChatProviderConnection(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=requester_id,
+        provider="whatsapp_local",
+        name="Personal WhatsApp",
+        external_id="personal",
+        config={
+            "approval_routes": [
+                {
+                    "route_type": "workspace_member",
+                    "user_id": str(user.id),
+                    "display_name": "Approver",
+                }
+            ]
+        },
+        is_active=True,
+    )
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, organization_membership, workspace_membership
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        return thread, connection
+
+    async def list_agent_tool_runtime_rows(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_approvals.chat_provider_repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
+    monkeypatch.setattr(
+        agent_service.repository,
+        "list_agent_tool_runtime_rows",
+        list_agent_tool_runtime_rows,
+    )
+
+    response = await agent_approvals.get_agent_tool_approval(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent.id,
+        approval.id,
+    )
+
+    assert response.id == approval.id
+    assert response.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_get_chat_provider_tool_approval_rejects_non_admin_fallback_member(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    requester_id = uuid4()
+    user = User(id=uuid4(), email="member@example.com", is_superuser=False)
+    organization_membership = OrganizationMembership(
+        id=uuid4(),
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+    workspace_membership = WorkspaceMembership(
+        id=uuid4(),
+        workspace_id=workspace_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Workspace Assistant",
+        instructions="Use tools.",
+        scope="workspace",
+        model_name="gpt-5.5",
+        is_active=True,
+    )
+    conversation_id = uuid4()
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        conversation_id=conversation_id,
+        agent_run_id=uuid4(),
+        requested_by_id=requester_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="restart_workload",
+        arguments={"name": "api"},
+        status="pending",
+        result="",
+        error="",
+        created_at=datetime(2026, 7, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, tzinfo=UTC),
+    )
+    connection = ChatProviderConnection(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=requester_id,
+        provider="whatsapp_local",
+        name="Personal WhatsApp",
+        external_id="personal",
+        config={"approval_routes": []},
+        is_active=True,
+    )
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+    )
+
+    async def require_workspace_member(*args, **kwargs):
+        return None, organization_membership, workspace_membership
+
+    async def get_agent(*args, **kwargs):
+        return agent
+
+    async def get_tool_approval(*args, **kwargs):
+        return approval
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        return thread, connection
+
+    monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
+    monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
+    monkeypatch.setattr(
+        agent_approvals.chat_provider_repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
+
+    with pytest.raises(agent_approvals.InvalidAgentScopeError):
+        await agent_approvals.get_agent_tool_approval(
+            FakeSession(),
+            user,
+            organization_id,
+            workspace_id,
+            agent.id,
+            approval.id,
+        )
 
 
 @pytest.mark.asyncio

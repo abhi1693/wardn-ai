@@ -5,7 +5,9 @@
  * OpenAPI spec version: 0.0.1
  */
 import type { ChatProviderConnectionRead } from './chatProviderConnectionRead';
+import type { ChatProviderWorkspaceMemberRead } from './chatProviderWorkspaceMemberRead';
 
 export interface ChatProviderConnectionListResponse {
   connections: ChatProviderConnectionRead[];
+  workspaceMembers?: ChatProviderWorkspaceMemberRead[];
 }

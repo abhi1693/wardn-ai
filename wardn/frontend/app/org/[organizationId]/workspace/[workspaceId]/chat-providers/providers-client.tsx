@@ -47,6 +47,7 @@ import {
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
+  ChatProviderWorkspaceMemberRead,
   ChatProviderPairingStatusResponse,
   SecretHandleRead,
   SecretStoreRead,
@@ -70,6 +71,7 @@ type ChatProvidersClientProps = {
   organizationId: string;
   secretHandles: SecretHandleRead[];
   secretStores: SecretStoreRead[];
+  workspaceMembers: ChatProviderWorkspaceMemberRead[];
   workspaceId: string;
 };
 
@@ -210,16 +212,8 @@ function approvalRouteType(route: Record<string, unknown>) {
   return String(route.route_type ?? route.routeType ?? "").trim();
 }
 
-function approvalRouteConnectionId(route: Record<string, unknown>) {
-  return String(route.connection_id ?? route.connectionId ?? "").trim();
-}
-
-function approvalRouteExternalThreadId(route: Record<string, unknown>) {
-  return String(route.external_thread_id ?? route.externalThreadId ?? "").trim();
-}
-
-function approvalRouteDisplayName(route: Record<string, unknown>) {
-  return String(route.display_name ?? route.displayName ?? "").trim();
+function approvalRouteUserId(route: Record<string, unknown>) {
+  return String(route.user_id ?? route.userId ?? "").trim();
 }
 
 function approvalRoutesConfig(config: unknown) {
@@ -228,8 +222,12 @@ function approvalRoutesConfig(config: unknown) {
 
 function providerApprovalRouteCount(config: unknown) {
   return approvalRoutesConfig(config).filter(
-    (route) => approvalRouteType(route) === "chat_provider" && approvalRouteExternalThreadId(route)
+    (route) => approvalRouteType(route) === "workspace_member" && approvalRouteUserId(route)
   ).length;
+}
+
+function workspaceMemberLabel(member: ChatProviderWorkspaceMemberRead) {
+  return member.displayName?.trim() || member.email || "Workspace member";
 }
 
 function providerOption(provider: string) {
@@ -662,6 +660,7 @@ function EditProviderDialog({
   onOpenChange,
   onSave,
   open,
+  workspaceMembers,
 }: {
   connection: ChatProviderConnectionRead;
   isSaving: boolean;
@@ -676,6 +675,7 @@ function EditProviderDialog({
     }
   ) => Promise<void>;
   open: boolean;
+  workspaceMembers: ChatProviderWorkspaceMemberRead[];
 }) {
   const initialConfig = record(connection.config);
   const [name, setName] = useState(connection.name);
@@ -690,15 +690,16 @@ function EditProviderDialog({
     listText(arrayConfig(initialConfig, "allowed_chat_ids", "allowedChatIds"))
   );
   const initialApprovalRoutes = approvalRoutesConfig(initialConfig);
-  const [approvalRouteChatIds, setApprovalRouteChatIds] = useState(
-    listText(
-      initialApprovalRoutes
-        .filter(
-          (route) =>
-            approvalRouteType(route) === "chat_provider" &&
-            approvalRouteConnectionId(route) === connection.id
-        )
-        .map(approvalRouteExternalThreadId)
+  const [selectedApprovalMemberIds, setSelectedApprovalMemberIds] = useState(() =>
+    Array.from(
+      new Set(
+        initialApprovalRoutes
+          .filter((route) => approvalRouteType(route) === "workspace_member")
+          .map(approvalRouteUserId)
+          .filter((userId) =>
+            workspaceMembers.some((member) => member.userId === userId)
+          )
+      )
     )
   );
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -706,7 +707,6 @@ function EditProviderDialog({
   const config = record(connection.config);
   const knownIdentities = connection.knownIdentities ?? [];
   const selectedChatIds = stringList(allowedChatIds);
-  const selectedApprovalChatIds = stringList(approvalRouteChatIds);
 
   function setKnownConversationAllowed(threadId: string, checked: boolean) {
     const next = checked
@@ -715,48 +715,23 @@ function EditProviderDialog({
     setAllowedChatIds(listText(next));
   }
 
-  function setKnownConversationApproval(threadId: string, checked: boolean) {
-    const next = checked
-      ? appendListValue(selectedApprovalChatIds, threadId)
-      : removeListValue(selectedApprovalChatIds, threadId);
-    setApprovalRouteChatIds(listText(next));
+  function setWorkspaceMemberApproval(userId: string, checked: boolean) {
+    setSelectedApprovalMemberIds((current) => {
+      return checked
+        ? appendListValue(current, userId)
+        : removeListValue(current, userId);
+    });
   }
 
   function providerConfigPayload() {
-    const knownIdentityLabels = new Map(
-      knownIdentities.map((identity) => [identity.externalThreadId, identityLabel(identity)])
+    const memberLabels = new Map(
+      workspaceMembers.map((member) => [member.userId, workspaceMemberLabel(member)])
     );
-    const preservedApprovalRoutes = initialApprovalRoutes
-      .filter((route) => {
-        return !(
-          approvalRouteType(route) === "chat_provider" &&
-          approvalRouteConnectionId(route) === connection.id
-        );
-      })
-      .map((route) => {
-        const routeType = approvalRouteType(route);
-        if (routeType === "chat") {
-          return { routeType: "chat" };
-        }
-        return {
-          connectionId: approvalRouteConnectionId(route),
-          displayName: approvalRouteDisplayName(route),
-          externalThreadId: approvalRouteExternalThreadId(route),
-          routeType,
-        };
-      })
-      .filter((route) => {
-        return route.routeType === "chat" || Boolean(route.connectionId && route.externalThreadId);
-      });
-    const approvalRoutes = [
-      ...preservedApprovalRoutes,
-      ...selectedApprovalChatIds.map((threadId) => ({
-        connectionId: connection.id,
-        displayName: knownIdentityLabels.get(threadId) ?? threadId,
-        externalThreadId: threadId,
-        routeType: "chat_provider",
-      })),
-    ];
+    const approvalRoutes = selectedApprovalMemberIds.map((userId) => ({
+      displayName: memberLabels.get(userId) ?? userId,
+      routeType: "workspace_member",
+      userId,
+    }));
     const common = {
       allowAllSenders: allowAllSenders,
       allowedChatIds: stringList(allowedChatIds),
@@ -930,55 +905,51 @@ function EditProviderDialog({
               <div>
                 <div className="text-sm font-medium text-foreground">Approvals</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {selectedApprovalChatIds.length > 0
-                    ? "Approval links go only to selected owner conversations"
-                    : "No external approval route; workspace admins review in Wardn"}
+                  {selectedApprovalMemberIds.length > 0
+                    ? "Approval links are available to selected workspace members"
+                    : "No member route selected; workspace admins review in Wardn"}
                 </div>
               </div>
-              <Badge variant={selectedApprovalChatIds.length > 0 ? "success" : "secondary"}>
-                {selectedApprovalChatIds.length > 0
-                  ? `${selectedApprovalChatIds.length} selected`
+              <Badge variant={selectedApprovalMemberIds.length > 0 ? "success" : "secondary"}>
+                {selectedApprovalMemberIds.length > 0
+                  ? `${selectedApprovalMemberIds.length} selected`
                   : "Admin fallback"}
               </Badge>
             </div>
             <div className="space-y-3 p-3">
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                Reply access does not grant approval access. Select only workspace owners or
-                trusted approvers here. Approval links are never sent back to the external thread
-                that triggered the approval.
+                Reply access does not grant approval access. Select workspace owners,
+                admins, or trusted members here. Approval links stay inside Wardn and are never
+                sent to the external chat that triggered the request.
               </div>
 
-              {knownIdentities.length > 0 ? (
+              {workspaceMembers.length > 0 ? (
                 <div className="grid gap-2">
-                  {knownIdentities.map((identity) => {
-                    const threadId = identity.externalThreadId;
-                    const checked = selectedApprovalChatIds.includes(threadId);
-                    const canReply = allowAllSenders || selectedChatIds.includes(threadId);
+                  {workspaceMembers.map((member) => {
+                    const checked = selectedApprovalMemberIds.includes(member.userId);
                     return (
                       <label
                         className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
-                        key={`approval-${threadId}`}
+                        key={`approval-${member.userId}`}
                       >
                         <span className="min-w-0">
                           <span className="flex min-w-0 items-center gap-2">
                             <span className="truncate font-medium text-foreground">
-                              {identityLabel(identity)}
+                              {workspaceMemberLabel(member)}
                             </span>
-                            {canReply ? (
-                              <Badge className="shrink-0" variant="outline">
-                                Can chat
-                              </Badge>
-                            ) : null}
+                            <Badge className="shrink-0" variant="outline">
+                              {member.role}
+                            </Badge>
                           </span>
                           <span className="mt-1 block truncate text-xs text-muted-foreground">
-                            Last message {displayDate(identity.lastSeenAt)}
+                            {member.email}
                           </span>
                         </span>
                         <input
                           checked={checked}
                           className="size-4 shrink-0 accent-primary"
                           onChange={(event) =>
-                            setKnownConversationApproval(threadId, event.target.checked)
+                            setWorkspaceMemberApproval(member.userId, event.target.checked)
                           }
                           type="checkbox"
                         />
@@ -988,8 +959,7 @@ function EditProviderDialog({
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                  No conversations have messaged this provider yet. Ask the approver to send a
-                  message to this provider first.
+                  No active workspace members are available for approval routing.
                 </div>
               )}
             </div>
@@ -1165,6 +1135,7 @@ export function ChatProvidersClient({
   defaultWhatsappBridgeBaseUrl,
   organizationId,
   secretStores,
+  workspaceMembers,
   workspaceId,
 }: ChatProvidersClientProps) {
   const router = useRouter();
@@ -1724,7 +1695,7 @@ export function ChatProvidersClient({
                         <div className="truncate text-xs text-muted-foreground">Approvals</div>
                         <div className="truncate text-sm font-medium">
                           {approvalRouteCount > 0
-                            ? `${approvalRouteCount} owner route${approvalRouteCount === 1 ? "" : "s"}`
+                            ? `${approvalRouteCount} approver${approvalRouteCount === 1 ? "" : "s"}`
                             : "Admin fallback"}
                         </div>
                       </div>
@@ -1825,6 +1796,7 @@ export function ChatProvidersClient({
           }}
           onSave={updateProvider}
           open
+          workspaceMembers={workspaceMembers}
         />
       ) : null}
       <PairingDialog

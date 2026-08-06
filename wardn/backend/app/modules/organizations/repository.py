@@ -9,6 +9,7 @@ from app.modules.organizations.models import (
     Workspace,
     WorkspaceMembership,
 )
+from app.modules.users.models import User
 
 
 async def list_organizations_for_user(
@@ -180,6 +181,32 @@ async def get_workspace_membership(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def list_workspace_members(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> list[tuple[WorkspaceMembership, User]]:
+    result = await session.execute(
+        select(WorkspaceMembership, User)
+        .join(User, User.id == WorkspaceMembership.user_id)
+        .join(Workspace, Workspace.id == WorkspaceMembership.workspace_id)
+        .where(
+            Workspace.organization_id == organization_id,
+            WorkspaceMembership.workspace_id == workspace_id,
+            WorkspaceMembership.is_active.is_(True),
+            User.is_active.is_(True),
+        )
+        .order_by(
+            WorkspaceMembership.role.asc(),
+            User.display_name.asc(),
+            User.email.asc(),
+            WorkspaceMembership.id.asc(),
+        )
+    )
+    return list(result.all())
 
 
 async def count_active_workspaces_for_organization(

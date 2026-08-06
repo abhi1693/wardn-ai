@@ -15,12 +15,11 @@ type WorkspaceChatProvidersPageProps = {
 };
 
 async function getProviderConnections(organizationId: string, workspaceId: string) {
-  const payload = await backendJson<ChatProviderConnectionListResponse>(
+  return await backendJson<ChatProviderConnectionListResponse>(
     `/api/v1/organizations/${encodeURIComponent(
       organizationId
     )}/workspaces/${encodeURIComponent(workspaceId)}/chat-providers`
   );
-  return payload.connections;
 }
 
 async function getSecretStores(organizationId: string, workspaceId: string) {
@@ -45,7 +44,7 @@ export default async function WorkspaceChatProvidersPage({
   params,
 }: WorkspaceChatProvidersPageProps) {
   const { organizationId, workspaceId } = await params;
-  const [workspaceContext, connections, secretStores, secretHandles] = await Promise.all([
+  const [workspaceContext, providerPayload, secretStores, secretHandles] = await Promise.all([
     getWorkspaceContext({ organizationId, workspaceId }),
     getProviderConnections(organizationId, workspaceId),
     getSecretStores(organizationId, workspaceId),
@@ -66,13 +65,14 @@ export default async function WorkspaceChatProvidersPage({
       workspaceContext={workspaceContext}
     >
       <ChatProvidersClient
-        connections={connections}
+        connections={providerPayload.connections}
         defaultWhatsappBridgeBaseUrl={
           process.env.WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL?.trim() ?? ""
         }
         organizationId={organization.id}
         secretHandles={secretHandles}
         secretStores={secretStores}
+        workspaceMembers={providerPayload.workspaceMembers ?? []}
         workspaceId={workspace.id}
       />
     </AppShell>

@@ -1825,6 +1825,8 @@ def provider_event_recipient(
     route_type = str(payload.get("routeType") or "").strip()
     if route_type == "chat":
         display_route_type = "Workspace admin"
+    elif route_type == "workspace_member":
+        display_route_type = "Workspace member"
     elif is_approval_request:
         display_route_type = "Approval route"
     else:

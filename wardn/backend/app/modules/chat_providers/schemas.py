@@ -7,12 +7,13 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from app.core.schemas import APIModel
 
 ChatProviderType = Literal["telegram", "whatsapp_local"]
-ChatProviderApprovalRouteType = Literal["chat", "chat_provider"]
+ChatProviderApprovalRouteType = Literal["chat", "chat_provider", "workspace_member"]
 
 
 class ChatProviderApprovalRoute(APIModel):
     route_type: ChatProviderApprovalRouteType
     connection_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
     external_thread_id: str = Field(default="", max_length=255)
     display_name: str = Field(default="", max_length=255)
 
@@ -28,6 +29,8 @@ class ChatProviderApprovalRoute(APIModel):
                 raise ValueError("chat provider approval route requires a connection")
             if not self.external_thread_id:
                 raise ValueError("chat provider approval route requires a conversation")
+        if self.route_type == "workspace_member" and self.user_id is None:
+            raise ValueError("workspace member approval route requires a user")
         return self
 
 
@@ -117,6 +120,13 @@ class ChatProviderKnownIdentityRead(APIModel):
     last_seen_at: datetime
 
 
+class ChatProviderWorkspaceMemberRead(APIModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str = ""
+    role: str
+
+
 class ChatProviderConnectionRead(APIModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -138,6 +148,7 @@ class ChatProviderConnectionRead(APIModel):
 
 class ChatProviderConnectionListResponse(APIModel):
     connections: list[ChatProviderConnectionRead]
+    workspace_members: list[ChatProviderWorkspaceMemberRead] = Field(default_factory=list)
 
 
 class ChatProviderPairingStatusResponse(APIModel):

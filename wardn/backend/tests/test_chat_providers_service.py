@@ -135,23 +135,27 @@ def test_provider_config_defaults_allow_all_senders() -> None:
 
 
 def test_provider_config_normalizes_approval_routes() -> None:
-    connection_id = uuid4()
+    user_id = uuid4()
 
     config = service.normalize_connection_config(
         service.PROVIDER_WHATSAPP_LOCAL,
         {
             "approvalRoutes": [
                 {
-                    "routeType": "chat_provider",
-                    "connectionId": str(connection_id),
-                    "externalThreadId": "owner@s.whatsapp.net",
+                    "routeType": "workspace_member",
+                    "userId": str(user_id),
                     "displayName": "Workspace Owner",
                 },
                 {
-                    "routeType": "chat_provider",
-                    "connectionId": str(connection_id),
-                    "externalThreadId": "owner@s.whatsapp.net",
+                    "routeType": "workspace_member",
+                    "userId": str(user_id),
                     "displayName": "Duplicate",
+                },
+                {
+                    "routeType": "chat_provider",
+                    "connectionId": str(uuid4()),
+                    "externalThreadId": "legacy@s.whatsapp.net",
+                    "displayName": "Legacy contact",
                 },
                 {"routeType": "chat"},
             ]
@@ -160,16 +164,11 @@ def test_provider_config_normalizes_approval_routes() -> None:
 
     assert config["approval_routes"] == [
         {
-            "route_type": "chat_provider",
-            "connection_id": str(connection_id),
-            "external_thread_id": "owner@s.whatsapp.net",
-            "display_name": "Workspace Owner",
-        },
-        {
-            "route_type": "chat",
+            "route_type": "workspace_member",
+            "user_id": str(user_id),
             "connection_id": None,
             "external_thread_id": "",
-            "display_name": "",
+            "display_name": "Workspace Owner",
         },
     ]
 
@@ -846,20 +845,19 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
 
 
 @pytest.mark.asyncio
-async def test_process_provider_text_message_sends_approval_to_selected_owner_route(
+async def test_process_provider_text_message_records_selected_workspace_member_approval(
     monkeypatch,
 ) -> None:
     fake_session = FakeSession()
     connection = make_connection()
     requester_thread_id = "15551234567@s.whatsapp.net"
-    owner_thread_id = "15557654321@s.whatsapp.net"
+    approver_user_id = uuid4()
     connection.config = {
         **connection.config,
         "approval_routes": [
             {
-                "route_type": "chat_provider",
-                "connection_id": str(connection.id),
-                "external_thread_id": owner_thread_id,
+                "route_type": "workspace_member",
+                "user_id": str(approver_user_id),
                 "display_name": "Workspace Owner",
             }
         ],
@@ -874,16 +872,6 @@ async def test_process_provider_text_message_sends_approval_to_selected_owner_ro
         external_thread_id=requester_thread_id,
         external_user_id=requester_thread_id,
         external_user_display_name="Outside User",
-    )
-    owner_thread = ChatProviderThread(
-        id=uuid4(),
-        organization_id=connection.organization_id,
-        workspace_id=connection.workspace_id,
-        connection_id=connection.id,
-        conversation_id=uuid4(),
-        external_thread_id=owner_thread_id,
-        external_user_id=owner_thread_id,
-        external_user_display_name="Workspace Owner",
     )
     conversation_id = thread.conversation_id
     agent_id = uuid4()
@@ -939,14 +927,6 @@ async def test_process_provider_text_message_sends_approval_to_selected_owner_ro
     async def latest_pending_approval(*args, **kwargs):
         return approval
 
-    async def get_connection(*args, **kwargs):
-        assert kwargs["connection_id"] == connection.id
-        return connection
-
-    async def get_thread(*args, **kwargs):
-        assert kwargs["external_thread_id"] == owner_thread_id
-        return owner_thread
-
     async def send_provider_text_message(*args, **kwargs):
         sent_messages.append((kwargs["external_thread_id"], kwargs["text"]))
         return {"message_id": f"msg-{len(sent_messages)}"}
@@ -958,8 +938,6 @@ async def test_process_provider_text_message_sends_approval_to_selected_owner_ro
     monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
     monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
     monkeypatch.setattr(service, "latest_pending_approval", latest_pending_approval)
-    monkeypatch.setattr(service.repository, "get_connection", get_connection)
-    monkeypatch.setattr(service.repository, "get_thread", get_thread)
     monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
 
     processed = await service.process_provider_text_message(
@@ -976,18 +954,20 @@ async def test_process_provider_text_message_sends_approval_to_selected_owner_ro
     )
 
     assert processed
-    assert sent_messages[0][0] == owner_thread_id
-    assert "Open this Wardn approval page" in sent_messages[0][1]
-    assert sent_messages[1] == (requester_thread_id, service.PROVIDER_APPROVAL_PENDING_REPLY)
+    assert sent_messages == [(requester_thread_id, service.PROVIDER_APPROVAL_PENDING_REPLY)]
+    assert "Open this Wardn approval page" not in sent_messages[0][1]
     approval_events = [
         item
         for item in fake_session.added
         if isinstance(item, ChatProviderEvent) and item.event_type == "approval.request"
     ]
     assert len(approval_events) == 1
-    assert approval_events[0].thread_id == owner_thread.id
+    assert approval_events[0].thread_id is None
     assert approval_events[0].payload["approvalId"] == str(approval.id)
     assert approval_events[0].payload["agentRunId"] == str(agent_run_id)
+    assert approval_events[0].payload["routeType"] == "workspace_member"
+    assert approval_events[0].payload["userId"] == str(approver_user_id)
+    assert "Open this Wardn approval page" in approval_events[0].payload["message"]
 
 
 @pytest.mark.asyncio

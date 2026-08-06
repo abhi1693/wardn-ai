@@ -30,16 +30,104 @@ from app.modules.agents.schemas import (
 )
 from app.modules.agents.tool_execution import action_review_payload, mcp_result_text
 from app.modules.agents.types import AgentChatTextEvent
+from app.modules.chat_providers import repository as chat_provider_repository
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
-from app.modules.organizations.service import require_workspace_member
+from app.modules.organizations.models import OrganizationMembership, WorkspaceMembership
+from app.modules.organizations.service import (
+    WORKSPACE_ADMIN_ROLES,
+    require_workspace_member,
+    workspace_role_for_user,
+)
 from app.modules.users import repository as users_repository
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 AgentToolApprovalScheduler = Callable[[uuid.UUID], None]
 APPROVAL_EXPIRED_ERROR = "Tool approval expired before it was approved."
+
+
+def approval_workspace_member_route_user_ids(config: Any) -> set[uuid.UUID]:
+    if not isinstance(config, dict):
+        return set()
+    routes = config.get("approval_routes") or config.get("approvalRoutes") or []
+    if not isinstance(routes, list):
+        return set()
+    user_ids: set[uuid.UUID] = set()
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        route_type = str(route.get("route_type") or route.get("routeType") or "").strip()
+        if route_type != "workspace_member":
+            continue
+        try:
+            user_ids.add(uuid.UUID(str(route.get("user_id") or route.get("userId") or "")))
+        except (TypeError, ValueError):
+            continue
+    return user_ids
+
+
+def workspace_membership_context(
+    value: Any,
+) -> tuple[OrganizationMembership | None, WorkspaceMembership | None]:
+    if not isinstance(value, tuple) or len(value) < 3:
+        return None, None
+    organization_membership = value[1]
+    workspace_membership = value[2]
+    return (
+        organization_membership
+        if isinstance(organization_membership, OrganizationMembership)
+        else None,
+        workspace_membership if isinstance(workspace_membership, WorkspaceMembership) else None,
+    )
+
+
+async def user_can_access_chat_provider_approval(
+    session: AsyncSession,
+    user: User,
+    approval: AgentToolApproval,
+    *,
+    organization_membership: OrganizationMembership | None,
+    workspace_membership: WorkspaceMembership | None,
+) -> bool:
+    if approval.conversation_id is None:
+        return False
+    thread_connection = await chat_provider_repository.get_thread_connection_for_conversation(
+        session,
+        organization_id=approval.organization_id,
+        workspace_id=approval.workspace_id,
+        conversation_id=approval.conversation_id,
+    )
+    if thread_connection is None:
+        return False
+    _thread, connection = thread_connection
+    selected_user_ids = approval_workspace_member_route_user_ids(connection.config)
+    role = workspace_role_for_user(user, organization_membership, workspace_membership)
+    if selected_user_ids:
+        return user.id in selected_user_ids or role in WORKSPACE_ADMIN_ROLES
+    return role in WORKSPACE_ADMIN_ROLES
+
+
+async def ensure_agent_tool_approval_access(
+    session: AsyncSession,
+    user: User,
+    approval: AgentToolApproval,
+    *,
+    organization_membership: OrganizationMembership | None,
+    workspace_membership: WorkspaceMembership | None,
+) -> None:
+    if not approval.requested_by_id or approval.requested_by_id == user.id or user.is_superuser:
+        return
+    if await user_can_access_chat_provider_approval(
+        session,
+        user,
+        approval,
+        organization_membership=organization_membership,
+        workspace_membership=workspace_membership,
+    ):
+        return
+    raise InvalidAgentScopeError("tool approval belongs to another user")
 
 
 def conversation_message_to_chat_message(message: ConversationMessage) -> AgentChatMessage:
@@ -128,7 +216,8 @@ async def get_agent_tool_approval(
     agent_id: uuid.UUID,
     approval_id: uuid.UUID,
 ) -> AgentToolApprovalRead:
-    await require_workspace_member(session, user, organization_id, workspace_id)
+    access_context = await require_workspace_member(session, user, organization_id, workspace_id)
+    organization_membership, workspace_membership = workspace_membership_context(access_context)
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
@@ -146,8 +235,13 @@ async def get_agent_tool_approval(
     )
     if approval is None:
         raise AgentNotFoundError("tool approval not found")
-    if approval.requested_by_id and approval.requested_by_id != user.id and not user.is_superuser:
-        raise InvalidAgentScopeError("tool approval belongs to another user")
+    await ensure_agent_tool_approval_access(
+        session,
+        user,
+        approval,
+        organization_membership=organization_membership,
+        workspace_membership=workspace_membership,
+    )
     return agent_tool_approval_read(
         approval,
         action_review=await approval_action_review(session, approval, agent=agent),
@@ -327,7 +421,8 @@ async def complete_agent_tool_approval(
     agent_id: uuid.UUID,
     approval_id: uuid.UUID,
 ) -> AgentToolApprovalDecisionResponse:
-    await require_workspace_member(session, user, organization_id, workspace_id)
+    access_context = await require_workspace_member(session, user, organization_id, workspace_id)
+    organization_membership, workspace_membership = workspace_membership_context(access_context)
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
@@ -345,8 +440,13 @@ async def complete_agent_tool_approval(
     )
     if approval is None:
         raise AgentNotFoundError("tool approval not found")
-    if approval.requested_by_id and approval.requested_by_id != user.id and not user.is_superuser:
-        raise InvalidAgentScopeError("tool approval belongs to another user")
+    await ensure_agent_tool_approval_access(
+        session,
+        user,
+        approval,
+        organization_membership=organization_membership,
+        workspace_membership=workspace_membership,
+    )
     if approval.status == "pending" and agent_tool_approval_is_expired(approval):
         await expire_agent_tool_approval(session, approval)
         return agent_tool_approval_decision_response(approval)
@@ -519,7 +619,8 @@ async def decide_agent_tool_approval(
     *,
     schedule_completion: AgentToolApprovalScheduler | None = None,
 ) -> AgentToolApprovalDecisionResponse:
-    await require_workspace_member(session, user, organization_id, workspace_id)
+    access_context = await require_workspace_member(session, user, organization_id, workspace_id)
+    organization_membership, workspace_membership = workspace_membership_context(access_context)
     agent = await repository.get_agent(
         session,
         organization_id=organization_id,
@@ -537,8 +638,13 @@ async def decide_agent_tool_approval(
     )
     if approval is None:
         raise AgentNotFoundError("tool approval not found")
-    if approval.requested_by_id and approval.requested_by_id != user.id and not user.is_superuser:
-        raise InvalidAgentScopeError("tool approval belongs to another user")
+    await ensure_agent_tool_approval_access(
+        session,
+        user,
+        approval,
+        organization_membership=organization_membership,
+        workspace_membership=workspace_membership,
+    )
     if approval.status == "pending" and agent_tool_approval_is_expired(approval):
         await expire_agent_tool_approval(session, approval)
         return agent_tool_approval_decision_response(approval)

@@ -73,6 +73,7 @@ export * from './chatProviderPairingStatusResponse';
 export * from './chatProviderPairingStatusResponseRawStatus';
 export * from './chatProviderPairingStatusResponseStatus';
 export * from './chatProviderWebhookResponse';
+export * from './chatProviderWorkspaceMemberRead';
 export * from './conversationMessageRead';
 export * from './conversationMessageReadPartsItem';
 export * from './conversationMessageReadRole';

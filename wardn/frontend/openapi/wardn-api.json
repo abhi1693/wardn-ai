@@ -1949,6 +1949,13 @@
             },
             "title": "Connections",
             "type": "array"
+          },
+          "workspaceMembers": {
+            "items": {
+              "$ref": "#/components/schemas/ChatProviderWorkspaceMemberRead"
+            },
+            "title": "Workspacemembers",
+            "type": "array"
           }
         },
         "required": [
@@ -2271,6 +2278,35 @@
           }
         },
         "title": "ChatProviderWebhookResponse",
+        "type": "object"
+      },
+      "ChatProviderWorkspaceMemberRead": {
+        "properties": {
+          "displayName": {
+            "default": "",
+            "title": "Displayname",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "userId": {
+            "format": "uuid",
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "role"
+        ],
+        "title": "ChatProviderWorkspaceMemberRead",
         "type": "object"
       },
       "ConversationMessageRead": {
