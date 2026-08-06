@@ -159,6 +159,7 @@ async def test_deliver_conversation_reply_to_provider_thread_sends_latest_assist
     assert outbound_event.status == "sent"
     assert outbound_event.event_type == "message.text"
     assert outbound_event.payload["agentRunId"] == str(agent_run_id)
+    assert outbound_event.payload["providerReplyKind"] == "assistant"
     assert outbound_event.payload[connection.provider] == {"id": "wa-outbound-1"}
 
 

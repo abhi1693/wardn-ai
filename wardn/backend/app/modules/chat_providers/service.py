@@ -2231,7 +2231,11 @@ async def deliver_conversation_reply_to_provider_thread(
             direction="outbound",
             event_type="message.text",
             status="sent",
-            payload={connection.provider: outbound_payload, "agentRunId": str(agent_run_id)},
+            payload={
+                connection.provider: outbound_payload,
+                "agentRunId": str(agent_run_id),
+                "providerReplyKind": "assistant",
+            },
             processed_at=datetime.now(UTC),
         )
     )

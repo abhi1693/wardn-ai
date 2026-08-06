@@ -193,7 +193,7 @@ async def has_provider_reply_for_agent_run(
             ChatProviderEvent.workspace_id == workspace_id,
             ChatProviderEvent.direction == "outbound",
             ChatProviderEvent.payload["agentRunId"].as_string() == str(agent_run_id),
-            ChatProviderEvent.payload["approvalRequest"].as_boolean().is_distinct_from(True),
+            ChatProviderEvent.payload["providerReplyKind"].as_string() == "assistant",
         )
         .limit(1)
     )
