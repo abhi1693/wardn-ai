@@ -240,18 +240,24 @@ async def execute_agent_run_resume_job(
                         "approvalId": str(claimed.approval_id),
                     },
                 )
+                await session.commit()
+
+            async with session_factory() as session:
                 await approvals.complete_agent_tool_approval(
                     session,
                     user,
-                    claimed.organization_id,
-                    claimed.workspace_id,
-                    claimed.agent_id,
-                    claimed.approval_id,
+                    job.organization_id,
+                    job.workspace_id,
+                    job.agent_id,
+                    job.approval_id,
                     checkpoint_after_execution=session.commit,
+                    session_factory=session_factory,
                 )
+
+            async with session_factory() as session:
                 completed = await repository.complete_agent_run_resume_job(
                     session,
-                    claimed.id,
+                    job.id,
                     worker_id=worker_id,
                     now=datetime.now(UTC),
                 )

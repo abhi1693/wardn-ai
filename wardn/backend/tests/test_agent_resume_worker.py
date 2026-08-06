@@ -200,6 +200,7 @@ async def test_execute_resume_job_continues_approved_run_and_marks_job_complete(
         approval_id,
         *,
         checkpoint_after_execution,
+        session_factory,
     ):
         seen["complete_approval"] = (
             session,
@@ -208,6 +209,7 @@ async def test_execute_resume_job_continues_approved_run_and_marks_job_complete(
             workspace_id,
             agent_id,
             approval_id,
+            session_factory,
         )
         await checkpoint_after_execution()
 
@@ -244,23 +246,28 @@ async def test_execute_resume_job_continues_approved_run_and_marks_job_complete(
         retry_max_seconds=30,
     )
 
-    session = session_factory.sessions[0]
-    assert seen["get_owned"] == (session, job.id, "worker-1")
-    assert seen["get_user"] == (session, user.id)
+    claim_session = session_factory.sessions[0]
+    approval_session = session_factory.sessions[1]
+    complete_session = session_factory.sessions[2]
+    assert seen["get_owned"] == (claim_session, job.id, "worker-1")
+    assert seen["get_user"] == (claim_session, user.id)
     assert seen["append_step"][2:5] == (
         "approval_resume_running",
         "running",
         "Approval resume",
     )
-    assert seen["complete_approval"][:2] == (session, user)
+    assert seen["complete_approval"][:2] == (approval_session, user)
     assert seen["complete_approval"][2:] == (
         job.organization_id,
         job.workspace_id,
         job.agent_id,
         job.approval_id,
+        session_factory,
     )
-    assert seen["complete_job"][0:3] == (session, job.id, "worker-1")
-    assert session.commits == 2
+    assert seen["complete_job"][0:3] == (complete_session, job.id, "worker-1")
+    assert claim_session.commits == 1
+    assert approval_session.commits == 1
+    assert complete_session.commits == 1
 
 
 @pytest.mark.asyncio

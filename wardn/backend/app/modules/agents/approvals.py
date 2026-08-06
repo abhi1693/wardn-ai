@@ -15,6 +15,7 @@ from app.modules.agents.chat_orchestrator import (
     filter_agent_runtime_tools_for_guardrails,
     run_agent_chat,
 )
+from app.modules.agents.conversations import AgentSessionFactory, agent_stream_unit_of_work
 from app.modules.agents.exceptions import AgentNotFoundError, InvalidAgentScopeError
 from app.modules.agents.mappers import (
     conversation_message_response,
@@ -272,6 +273,8 @@ async def generate_approval_continuation_message(
     workspace_id: uuid.UUID,
     agent: Agent,
     approval: AgentToolApproval,
+    *,
+    session_factory: AgentSessionFactory | None = None,
 ) -> ConversationMessage | None:
     if approval.conversation_id is None or approval.status != "completed":
         return None
@@ -334,6 +337,7 @@ async def generate_approval_continuation_message(
         workspace_id=workspace_id,
         conversation=conversation,
         agent_run=agent_run,
+        session_factory=session_factory,
     )
     chunks: list[str] = []
     activity_parts: dict[str, dict[str, Any]] = {}
@@ -382,44 +386,93 @@ async def generate_approval_continuation_message(
                 is_progress_update = event.status == "running" and (
                     event.progress is not None or event.message is not None
                 )
-                await repository.append_agent_run_step(
-                    session,
-                    agent_run_id=agent_run.id,
-                    step_type=(
+                step_payload = {
+                    "agent_run_id": agent_run.id,
+                    "step_type": (
                         "tool_progress"
                         if is_progress_update
                         else "tool_call"
                         if event.status == "running"
                         else "tool_result"
                     ),
-                    status=event.status,
-                    title=event.tool_name,
-                    payload=sanitize_run_payload(data),
-                )
+                    "status": event.status,
+                    "title": event.tool_name,
+                    "payload": sanitize_run_payload(data),
+                }
+                if session_factory is None:
+                    await repository.append_agent_run_step(
+                        session,
+                        **step_payload,
+                    )
+                else:
+                    async with agent_stream_unit_of_work(session_factory) as step_session:
+                        await repository.append_agent_run_step(
+                            step_session,
+                            **step_payload,
+                        )
     content = "".join(chunks).strip()
     parts = list(activity_parts.values())
     if content:
         parts.extend(text_parts(content))
     if not parts:
         return None
-    message = await repository.append_conversation_message(
-        session,
-        conversation_id=approval.conversation_id,
-        role="assistant",
-        content=content,
-        parts=parts,
-        agent_run_id=approval.agent_run_id,
-    )
-    if approval.agent_run_id is not None and content:
-        await repository.append_agent_run_step(
-            session,
+    async def write_assistant_message(write_session: AsyncSession) -> ConversationMessage:
+        message = await repository.append_conversation_message(
+            write_session,
+            conversation_id=approval.conversation_id,
+            role="assistant",
+            content=content,
+            parts=parts,
             agent_run_id=approval.agent_run_id,
-            step_type="model_output",
-            status="succeeded",
-            title="Assistant response",
-            payload={"content": sanitize_run_payload(content)},
         )
-    return message
+        if approval.agent_run_id is not None and content:
+            await repository.append_agent_run_step(
+                write_session,
+                agent_run_id=approval.agent_run_id,
+                step_type="model_output",
+                status="succeeded",
+                title="Assistant response",
+                payload={"content": sanitize_run_payload(content)},
+            )
+        return message
+
+    if session_factory is None:
+        return await write_assistant_message(session)
+    async with agent_stream_unit_of_work(session_factory) as write_session:
+        return await write_assistant_message(write_session)
+
+
+async def finish_agent_run_after_tool_approval(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+    approval_status: str,
+    approval_error: str,
+) -> None:
+    agent_run = await repository.get_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+    )
+    if agent_run is None:
+        return
+    run_status = "succeeded" if approval_status == "completed" else "failed"
+    if approval_status == "completed":
+        active_approvals = await repository.list_active_tool_approvals_for_agent_run(
+            session,
+            agent_run_id=agent_run.id,
+        )
+        if active_approvals:
+            run_status = "waiting_confirmation"
+    await repository.finish_agent_run(
+        session,
+        agent_run,
+        status=run_status,
+        error=approval_error,
+    )
 
 
 def agent_tool_approval_decision_response(
@@ -526,6 +579,7 @@ async def complete_agent_tool_approval(
     approval_id: uuid.UUID,
     *,
     checkpoint_after_execution: ApprovalCompletionCheckpoint | None = None,
+    session_factory: AgentSessionFactory | None = None,
 ) -> AgentToolApprovalDecisionResponse:
     access_context = await require_workspace_member(session, user, organization_id, workspace_id)
     organization_membership, workspace_membership = workspace_membership_context(access_context)
@@ -651,29 +705,28 @@ async def complete_agent_tool_approval(
             workspace_id,
             agent,
             approval,
+            session_factory=session_factory,
         )
     if approval.agent_run_id is not None:
-        agent_run = await repository.get_agent_run(
-            session,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            agent_run_id=approval.agent_run_id,
-        )
-        if agent_run is not None:
-            run_status = "succeeded" if approval.status == "completed" else "failed"
-            if approval.status == "completed":
-                active_approvals = await repository.list_active_tool_approvals_for_agent_run(
-                    session,
-                    agent_run_id=agent_run.id,
-                )
-                if active_approvals:
-                    run_status = "waiting_confirmation"
-            await repository.finish_agent_run(
+        if session_factory is None:
+            await finish_agent_run_after_tool_approval(
                 session,
-                agent_run,
-                status=run_status,
-                error=approval.error,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent_run_id=approval.agent_run_id,
+                approval_status=approval.status,
+                approval_error=approval.error,
             )
+        else:
+            async with agent_stream_unit_of_work(session_factory) as finish_session:
+                await finish_agent_run_after_tool_approval(
+                    finish_session,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run_id=approval.agent_run_id,
+                    approval_status=approval.status,
+                    approval_error=approval.error,
+                )
     return agent_tool_approval_decision_response(
         approval,
         assistant_message=assistant_message,

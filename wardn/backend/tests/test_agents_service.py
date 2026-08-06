@@ -36,6 +36,7 @@ from app.modules.agents.schemas import (
 )
 from app.modules.agents.types import (
     AgentChatTextEvent,
+    AgentChatToolActivityEvent,
     AgentRuntimeTool,
     AgentRuntimeToolGuardrailFilter,
 )
@@ -1735,11 +1736,18 @@ async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeyp
         captured["run_agent_chat_kwargs"] = kwargs
 
         async def stream():
+            yield AgentChatToolActivityEvent(
+                id="tool-1",
+                tool_name="statefulset_get",
+                status="completed",
+                result='{"name":"zeus-mqtt"}',
+            )
             yield AgentChatTextEvent(text="Scaled it back up.")
 
         return stream()
 
-    async def append_conversation_message(*args, **kwargs):
+    async def append_conversation_message(session_arg, **kwargs):
+        captured["assistant_message_session"] = session_arg
         captured["assistant_message"] = kwargs
         return ConversationMessage(
             id=uuid4(),
@@ -1751,8 +1759,9 @@ async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeyp
             agent_run_id=kwargs["agent_run_id"],
         )
 
-    async def append_agent_run_step(*args, **kwargs):
-        captured["agent_run_step"] = kwargs
+    async def append_agent_run_step(session_arg, **kwargs):
+        captured.setdefault("agent_run_step_sessions", []).append(session_arg)
+        captured.setdefault("agent_run_steps", []).append(kwargs)
 
     monkeypatch.setattr(approvals, "validate_provider_credential", validate_provider_credential)
     monkeypatch.setattr(
@@ -1784,6 +1793,7 @@ async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeyp
     )
     monkeypatch.setattr(approvals.repository, "append_agent_run_step", append_agent_run_step)
 
+    session_factory = FreshSessionFactory()
     message = await approvals.generate_approval_continuation_message(
         session,
         user,
@@ -1791,6 +1801,7 @@ async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeyp
         workspace_id,
         agent=agent,
         approval=approval,
+        session_factory=session_factory,
     )
 
     assert message is not None
@@ -1806,8 +1817,16 @@ async def test_generate_approval_continuation_keeps_runtime_tool_context(monkeyp
     assert run_args[3].allowed_tools == runtime_tools
     assert run_args[3].installed_tools == installed_tools
     assert captured["run_agent_chat_kwargs"]["agent_run"] is agent_run
+    assert captured["run_agent_chat_kwargs"]["session_factory"] is session_factory
     assert captured["assistant_message"]["content"] == "Scaled it back up."
-    assert captured["agent_run_step"]["agent_run_id"] == agent_run.id
+    assert captured["assistant_message_session"] is not session
+    assert captured["agent_run_step_sessions"]
+    assert all(step_session is not session for step_session in captured["agent_run_step_sessions"])
+    assert {step["step_type"] for step in captured["agent_run_steps"]} == {
+        "tool_result",
+        "model_output",
+    }
+    assert all(step["agent_run_id"] == agent_run.id for step in captured["agent_run_steps"])
 
 
 @pytest.mark.asyncio
