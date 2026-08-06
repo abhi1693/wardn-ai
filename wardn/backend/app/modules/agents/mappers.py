@@ -127,6 +127,7 @@ def agent_run_response(
         workspaceId=agent_run.workspace_id,
         agentId=agent_run.agent_id,
         conversationId=agent_run.conversation_id,
+        previousAgentRunId=agent_run.previous_agent_run_id,
         triggeredById=agent_run.triggered_by_id,
         triggerType=trigger_type or agent_run.trigger_type,
         status=agent_run.status,

@@ -2113,6 +2113,7 @@ async def rerun_workspace_agent_run(
         ),
         workspace_id=workspace_id,
         trigger_type=original_run.trigger_type,
+        previous_agent_run_id=original_run.id,
         on_agent_run_created=capture_agent_run_id,
     )
     await session.commit()
@@ -2545,6 +2546,7 @@ async def stream_agent_chat(
     *,
     session_factory: AgentSessionFactory | None = None,
     trigger_type: str = "chat",
+    previous_agent_run_id: uuid.UUID | None = None,
     on_agent_run_created: Callable[[uuid.UUID], None] | None = None,
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
@@ -2597,6 +2599,7 @@ async def stream_agent_chat(
         workspace_id=workspace_id,
         agent_id=agent.id,
         conversation_id=conversation.id if conversation is not None else None,
+        previous_agent_run_id=previous_agent_run_id,
         triggered_by_id=user.id,
         trigger_type=trigger_type,
     )

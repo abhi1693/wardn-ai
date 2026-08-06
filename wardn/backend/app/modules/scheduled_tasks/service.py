@@ -2012,18 +2012,13 @@ async def latest_scheduled_agent_run(
     workspace_id: uuid.UUID,
     conversation_id: uuid.UUID,
 ) -> AgentRun | None:
-    result = await session.execute(
-        select(AgentRun)
-        .where(
-            AgentRun.organization_id == organization_id,
-            AgentRun.workspace_id == workspace_id,
-            AgentRun.conversation_id == conversation_id,
-            AgentRun.trigger_type == SCHEDULED_AGENT_TRIGGER,
-        )
-        .order_by(AgentRun.started_at.desc(), AgentRun.created_at.desc(), AgentRun.id.desc())
-        .limit(1)
+    return await agent_repository.latest_agent_run_for_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        trigger_type=SCHEDULED_AGENT_TRIGGER,
     )
-    return result.scalar_one_or_none()
 
 
 async def ensure_task_conversation(
@@ -2103,6 +2098,12 @@ async def prepare_agent_run_for_task(
 ) -> tuple[uuid.UUID, uuid.UUID, Any]:
     conversation = await ensure_task_conversation(session, task=task, actor=actor)
     run.conversation_id = conversation.id
+    previous_agent_run = await latest_scheduled_agent_run(
+        session,
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        conversation_id=conversation.id,
+    )
     stream = await agent_service.stream_agent_chat(
         session,
         actor,
@@ -2120,6 +2121,7 @@ async def prepare_agent_run_for_task(
         workspace_id=task.workspace_id,
         session_factory=session_factory,
         trigger_type=SCHEDULED_AGENT_TRIGGER,
+        previous_agent_run_id=previous_agent_run.id if previous_agent_run is not None else None,
     )
     agent_run = await latest_scheduled_agent_run(
         session,

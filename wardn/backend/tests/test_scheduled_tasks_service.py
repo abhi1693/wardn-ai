@@ -1061,7 +1061,7 @@ async def test_prepare_agent_run_uses_scheduled_trigger(monkeypatch) -> None:
         title="Scheduled: Daily digest",
         is_active=True,
     )
-    agent_run = AgentRun(
+    previous_agent_run = AgentRun(
         id=uuid4(),
         organization_id=task.organization_id,
         workspace_id=task.workspace_id,
@@ -1073,16 +1073,34 @@ async def test_prepare_agent_run_uses_scheduled_trigger(monkeypatch) -> None:
         started_at=datetime(2026, 8, 4, 8, 0, tzinfo=UTC),
         error="",
     )
-    captured = SimpleNamespace(trigger_type="", payload=None, session_factory=None)
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=task.organization_id,
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        conversation_id=conversation.id,
+        triggered_by_id=actor.id,
+        trigger_type=service.SCHEDULED_AGENT_TRIGGER,
+        status="running",
+        started_at=datetime(2026, 8, 5, 8, 0, tzinfo=UTC),
+        error="",
+    )
+    captured = SimpleNamespace(
+        previous_agent_run_id=None,
+        trigger_type="",
+        payload=None,
+        session_factory=None,
+    )
 
     async def ensure_task_conversation(*args, **kwargs):
         return conversation
 
     async def latest_scheduled_agent_run(*args, **kwargs):
-        return agent_run
+        return latest_scheduled_agent_runs.pop(0)
 
     async def stream_agent_chat(*args, **kwargs):
         captured.payload = args[4]
+        captured.previous_agent_run_id = kwargs["previous_agent_run_id"]
         captured.trigger_type = kwargs["trigger_type"]
         captured.session_factory = kwargs["session_factory"]
 
@@ -1092,6 +1110,7 @@ async def test_prepare_agent_run_uses_scheduled_trigger(monkeypatch) -> None:
         return stream()
 
     session_factory = object()
+    latest_scheduled_agent_runs = [previous_agent_run, agent_run]
     monkeypatch.setattr(service, "ensure_task_conversation", ensure_task_conversation)
     monkeypatch.setattr(service, "latest_scheduled_agent_run", latest_scheduled_agent_run)
     monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
@@ -1107,6 +1126,7 @@ async def test_prepare_agent_run_uses_scheduled_trigger(monkeypatch) -> None:
     assert conversation_id == conversation.id
     assert agent_run_id == agent_run.id
     assert run.agent_run_id == agent_run.id
+    assert captured.previous_agent_run_id == previous_agent_run.id
     assert captured.trigger_type == service.SCHEDULED_AGENT_TRIGGER
     assert captured.session_factory is session_factory
     assert captured.payload.id == str(conversation.id)

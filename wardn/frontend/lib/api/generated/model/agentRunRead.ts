@@ -19,6 +19,7 @@ export interface AgentRunRead {
   inputTokens?: number;
   organizationId: string;
   outputTokens?: number;
+  previousAgentRunId?: string | null;
   spanId?: string;
   startedAt: string;
   status: string;

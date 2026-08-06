@@ -2170,6 +2170,14 @@ async def process_provider_text_message(
             event.processed_at = datetime.now(UTC)
             await session.flush()
             return True
+        trigger_type = agent_run_trigger_type(connection.provider)
+        previous_agent_run = await agent_repository.latest_agent_run_for_conversation(
+            session,
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            conversation_id=conversation_id,
+            trigger_type=trigger_type,
+        )
         typing_handle = await start_provider_typing(
             session,
             connection,
@@ -2191,7 +2199,8 @@ async def process_provider_text_message(
             ),
             workspace_id=connection.workspace_id,
             session_factory=session_factory,
-            trigger_type=agent_run_trigger_type(connection.provider),
+            trigger_type=trigger_type,
+            previous_agent_run_id=previous_agent_run.id if previous_agent_run is not None else None,
         )
         await session.commit()
         async for _chunk in stream:

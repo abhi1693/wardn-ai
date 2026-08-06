@@ -6,7 +6,12 @@ import httpx
 import pytest
 
 from app.core.config import Settings
-from app.modules.agents.models import AgentToolApproval, ConversationMessage, WorkspaceConversation
+from app.modules.agents.models import (
+    AgentRun,
+    AgentToolApproval,
+    ConversationMessage,
+    WorkspaceConversation,
+)
 from app.modules.agents.schemas import (
     AgentConversationResponse,
     AgentRead,
@@ -59,7 +64,7 @@ class FakeSession:
         self.commits += 1
 
     async def execute(self, *args, **kwargs):
-        return SimpleNamespace()
+        return SimpleNamespace(scalar_one_or_none=lambda: None)
 
 
 def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProviderConnection:
@@ -1476,7 +1481,23 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     )
     conversation_id = thread.conversation_id
     agent_id = uuid4()
-    captured_chat = SimpleNamespace(payload=None, committed_before_stream=False, trigger_type="")
+    captured_chat = SimpleNamespace(
+        payload=None,
+        committed_before_stream=False,
+        previous_agent_run_id=None,
+        trigger_type="",
+    )
+    previous_agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_id=agent_id,
+        conversation_id=conversation_id,
+        trigger_type="whatsapp",
+        status="succeeded",
+        started_at=datetime(2026, 8, 2, 8, 0, tzinfo=UTC),
+        error="",
+    )
 
     async def get_event_by_external_id(*args, **kwargs):
         return None
@@ -1489,6 +1510,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
 
     async def stream_agent_chat(*args, **kwargs):
         captured_chat.payload = args[4]
+        captured_chat.previous_agent_run_id = kwargs["previous_agent_run_id"]
         captured_chat.trigger_type = kwargs["trigger_type"]
 
         async def stream():
@@ -1516,7 +1538,19 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     async def assistant_message_run_canceled(*args, **kwargs):
         return False
 
+    async def latest_agent_run_for_conversation(*args, **kwargs):
+        assert kwargs["organization_id"] == connection.organization_id
+        assert kwargs["workspace_id"] == connection.workspace_id
+        assert kwargs["conversation_id"] == conversation_id
+        assert kwargs["trigger_type"] == "whatsapp"
+        return previous_agent_run
+
     monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(
+        service.agent_repository,
+        "latest_agent_run_for_conversation",
+        latest_agent_run_for_conversation,
+    )
     monkeypatch.setattr(service, "provider_actor", provider_actor)
     monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
     monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
@@ -1551,6 +1585,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert processed
     assert fake_session.commits == 1
     assert captured_chat.committed_before_stream
+    assert captured_chat.previous_agent_run_id == previous_agent_run.id
     assert captured_chat.trigger_type == "whatsapp"
     assert captured_chat.payload.id == str(conversation_id)
     assert captured_chat.payload.messages[0].parts == [

@@ -881,6 +881,7 @@ async def test_stream_agent_chat_creates_agent_run_without_conversation(monkeypa
             "workspace_id": workspace_id,
             "agent_id": agent.id,
             "conversation_id": None,
+            "previous_agent_run_id": None,
             "triggered_by_id": user.id,
             "trigger_type": "chat",
         }

@@ -566,6 +566,18 @@
             "title": "Outputtokens",
             "type": "integer"
           },
+          "previousAgentRunId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousagentrunid"
+          },
           "spanId": {
             "default": "",
             "title": "Spanid",

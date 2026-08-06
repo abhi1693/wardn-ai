@@ -16,6 +16,7 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -448,6 +449,11 @@ export function AgentRunDetailClient({
   const skillSearches = skillEvents.filter((event) => event.eventType === "search").length;
   const skillFetches = skillEvents.filter((event) => event.eventType === "fetch").length;
   const deliveryRecipients = detail.deliveryRecipients ?? [];
+  const previousRunHref = detail.run.previousAgentRunId
+    ? `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+        workspaceId
+      )}/agent-runs/${encodeURIComponent(detail.run.previousAgentRunId)}`
+    : "";
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -614,6 +620,19 @@ export function AgentRunDetailClient({
             <div className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">Finished</span>
               <span className="text-right font-medium">{formatDate(detail.run.finishedAt)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Previous run</span>
+              {previousRunHref ? (
+                <Link
+                  className="max-w-40 truncate font-mono text-xs underline-offset-4 hover:underline"
+                  href={previousRunHref}
+                >
+                  {detail.run.previousAgentRunId}
+                </Link>
+              ) : (
+                <span className="text-right font-medium">None</span>
+              )}
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">Trace</span>

@@ -474,6 +474,7 @@ async def create_agent_run(
     agent_id: uuid.UUID,
     conversation_id: uuid.UUID | None,
     triggered_by_id: uuid.UUID | None,
+    previous_agent_run_id: uuid.UUID | None = None,
     trigger_type: str = "chat",
     now: datetime | None = None,
 ) -> AgentRun:
@@ -483,6 +484,7 @@ async def create_agent_run(
         workspace_id=workspace_id,
         agent_id=agent_id,
         conversation_id=conversation_id,
+        previous_agent_run_id=previous_agent_run_id,
         triggered_by_id=triggered_by_id,
         trigger_type=trigger_type,
         status="running",
@@ -1088,6 +1090,31 @@ async def get_agent_run(
     if for_update:
         statement = statement.with_for_update()
     result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def latest_agent_run_for_conversation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    trigger_type: str | None = None,
+) -> AgentRun | None:
+    statement = select(AgentRun).where(
+        AgentRun.organization_id == organization_id,
+        AgentRun.workspace_id == workspace_id,
+        AgentRun.conversation_id == conversation_id,
+    )
+    if trigger_type is not None:
+        statement = statement.where(AgentRun.trigger_type == trigger_type)
+    result = await session.execute(
+        statement.order_by(
+            AgentRun.started_at.desc(),
+            AgentRun.created_at.desc(),
+            AgentRun.id.desc(),
+        ).limit(1)
+    )
     return result.scalar_one_or_none()
 
 

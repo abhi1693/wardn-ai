@@ -96,6 +96,7 @@ class AgentRunRead(APIModel):
     workspace_id: uuid.UUID
     agent_id: uuid.UUID
     conversation_id: uuid.UUID | None = None
+    previous_agent_run_id: uuid.UUID | None = None
     triggered_by_id: uuid.UUID | None = None
     trigger_type: str
     status: str

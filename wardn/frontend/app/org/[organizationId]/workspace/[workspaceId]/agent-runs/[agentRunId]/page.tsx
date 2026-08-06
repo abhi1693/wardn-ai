@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, MessageSquare } from "lucide-react";
+import { ArrowLeft, ExternalLink, History, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -52,6 +52,11 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
       )}/chat/${encodeURIComponent(detail.run.conversationId)}`
     : "";
   const traceHref = grafanaTraceHref(detail.run.traceId ?? "");
+  const previousRunHref = detail.run.previousAgentRunId
+    ? `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
+        workspaceId
+      )}/agent-runs/${encodeURIComponent(detail.run.previousAgentRunId)}`
+    : "";
 
   return (
     <AppShell
@@ -80,6 +85,14 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
               <Link href={chatHref}>
                 <MessageSquare className="size-4" />
                 Chat
+              </Link>
+            </Button>
+          ) : null}
+          {previousRunHref ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={previousRunHref}>
+                <History className="size-4" />
+                Previous run
               </Link>
             </Button>
           ) : null}
