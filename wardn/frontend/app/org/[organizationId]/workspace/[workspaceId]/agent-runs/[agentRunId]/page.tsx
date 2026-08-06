@@ -8,6 +8,7 @@ import type { AgentRunDetailResponse } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
+import { AgentRunActions } from "../agent-run-actions";
 import { AgentRunDetailClient } from "./agent-run-detail-client";
 
 type AgentRunPageProps = {
@@ -57,6 +58,13 @@ export default async function AgentRunPage({ params }: AgentRunPageProps) {
       active="workspace-runs"
       actions={
         <div className="flex gap-2">
+          <AgentRunActions
+            canCancel={detail.run.canCancel}
+            canRerun={detail.run.canRerun}
+            organizationId={organizationId}
+            runId={detail.run.id}
+            workspaceId={workspaceId}
+          />
           <Button asChild size="sm" variant="outline">
             <Link
               href={`/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(

@@ -25,6 +25,8 @@ import type { AgentRunListResponse, AgentRunRead } from "@/lib/api/generated/mod
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
+import { AgentRunActions } from "./agent-run-actions";
+
 type AgentRunsPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string }>;
 };
@@ -169,7 +171,7 @@ export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
                 <TableHead>Trigger</TableHead>
                 <TableHead>Tools</TableHead>
                 <TableHead>Tokens</TableHead>
-                <TableHead className="w-32 text-right">Actions</TableHead>
+                <TableHead className="w-48 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -196,6 +198,14 @@ export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
                     <TableCell>{metricValue(run.totalTokens)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
+                        <AgentRunActions
+                          canCancel={run.canCancel}
+                          canRerun={run.canRerun}
+                          organizationId={organization.id}
+                          runId={run.id}
+                          variant="icon"
+                          workspaceId={workspace.id}
+                        />
                         {run.conversationId ? (
                           <Button asChild size="icon" title="Open chat" variant="outline">
                             <Link

@@ -235,6 +235,14 @@ def test_openapi_exposes_expected_paths() -> None:
             ),
             (
                 "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/agent-runs/{agent_run_id}/cancel"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+                "/agent-runs/{agent_run_id}/rerun"
+            ),
+            (
+                "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
                 "/mcp/runtime/installations/{installation_id}"
             ),
             (
@@ -581,6 +589,18 @@ def test_workspace_agents_openapi_contract() -> None:
             "/agent-runs/{agent_run_id}"
         )
     ]
+    cancel_run = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agent-runs/{agent_run_id}/cancel"
+        )
+    ]
+    rerun = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agent-runs/{agent_run_id}/rerun"
+        )
+    ]
     agent = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -635,6 +655,14 @@ def test_workspace_agents_openapi_contract() -> None:
     }
     assert run["get"]["operationId"] == "workspace_agent_runs_get"
     assert run["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRunDetailResponse"
+    }
+    assert cancel_run["post"]["operationId"] == "workspace_agent_runs_cancel"
+    assert cancel_run["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRunDetailResponse"
+    }
+    assert rerun["post"]["operationId"] == "workspace_agent_runs_rerun"
+    assert rerun["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentRunDetailResponse"
     }
     assert agent["get"]["operationId"] == "workspace_agents_get"

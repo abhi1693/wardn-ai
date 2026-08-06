@@ -16,6 +16,7 @@ from app.core.pagination import InvalidCursorError
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
     DuplicateAgentError,
+    InvalidAgentRunError,
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
@@ -133,6 +134,7 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     LimitExceededError: _definition(403, "limit_exceeded"),
     AgentNotFoundError: _definition(404, "agent_not_found"),
     DuplicateAgentError: _definition(409, "agent_already_exists"),
+    InvalidAgentRunError: _definition(400, "invalid_agent_run"),
     InvalidAgentScopeError: _definition(400, "invalid_agent_scope"),
     InvalidAgentToolAssignmentError: _definition(400, "invalid_agent_tool_assignment"),
     ChatProviderConnectionNotFoundError: _definition(404, "chat_provider_not_found"),

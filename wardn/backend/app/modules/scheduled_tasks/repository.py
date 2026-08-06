@@ -328,6 +328,32 @@ async def list_run_deliveries(
     return deliveries
 
 
+async def list_deliveries_for_agent_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> list[tuple[WorkspaceScheduledTaskDelivery, WorkspaceScheduledTaskRun]]:
+    result = await session.execute(
+        select(WorkspaceScheduledTaskDelivery, WorkspaceScheduledTaskRun)
+        .join(
+            WorkspaceScheduledTaskRun,
+            WorkspaceScheduledTaskRun.id == WorkspaceScheduledTaskDelivery.task_run_id,
+        )
+        .where(
+            WorkspaceScheduledTaskRun.organization_id == organization_id,
+            WorkspaceScheduledTaskRun.workspace_id == workspace_id,
+            WorkspaceScheduledTaskRun.agent_run_id == agent_run_id,
+        )
+        .order_by(
+            WorkspaceScheduledTaskDelivery.created_at.asc(),
+            WorkspaceScheduledTaskDelivery.id.asc(),
+        )
+    )
+    return list(result.all())
+
+
 async def list_run_notifications(
     session: AsyncSession,
     *,

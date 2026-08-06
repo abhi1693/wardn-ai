@@ -4,10 +4,12 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { AgentRunDeliveryRecipientRead } from './agentRunDeliveryRecipientRead';
 import type { AgentRunRead } from './agentRunRead';
 import type { AgentRunStepRead } from './agentRunStepRead';
 
 export interface AgentRunDetailResponse {
+  deliveryRecipients?: AgentRunDeliveryRecipientRead[];
   run: AgentRunRead;
   steps: AgentRunStepRead[];
 }

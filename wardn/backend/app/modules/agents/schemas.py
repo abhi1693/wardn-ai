@@ -106,6 +106,8 @@ class AgentRunRead(APIModel):
     tool_calls: int = 0
     trace_id: str = ""
     span_id: str = ""
+    can_cancel: bool = False
+    can_rerun: bool = False
     started_at: datetime
     finished_at: datetime | None = None
     error: str
@@ -132,9 +134,25 @@ class AgentRunListResponse(APIModel):
     runs: list[AgentRunRead]
 
 
+class AgentRunDeliveryRecipientRead(APIModel):
+    id: uuid.UUID | None = None
+    source: Literal["scheduled_task_delivery", "chat_provider_reply"]
+    route_type: str
+    provider: str = ""
+    connection_id: uuid.UUID | None = None
+    external_thread_id: str = ""
+    display_name: str = ""
+    status: str
+    output_kind: str = ""
+    error: str = ""
+    delivered_at: datetime | None = None
+    created_at: datetime | None = None
+
+
 class AgentRunDetailResponse(APIModel):
     run: AgentRunRead
     steps: list[AgentRunStepRead]
+    delivery_recipients: list[AgentRunDeliveryRecipientRead] = Field(default_factory=list)
 
 
 class AgentToolApprovalDecisionRequest(APIModel):

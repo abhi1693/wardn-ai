@@ -7,6 +7,8 @@
 
 export interface AgentRunRead {
   agentId: string;
+  canCancel?: boolean;
+  canRerun?: boolean;
   conversationId?: string | null;
   /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd?: string;

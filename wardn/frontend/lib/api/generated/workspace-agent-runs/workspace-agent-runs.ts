@@ -63,3 +63,57 @@ export const workspaceAgentRunsGet = async (organizationId: string,
 );}
 
 
+export const getWorkspaceAgentRunsCancelUrl = (organizationId: string,
+    workspaceId: string,
+    agentRunId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs/${agentRunId}/cancel`
+}
+
+/**
+ * @summary Cancel Workspace Agent Run Route
+ */
+export const workspaceAgentRunsCancel = async (organizationId: string,
+    workspaceId: string,
+    agentRunId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRunDetailResponse> => {
+
+  return apiRequest<AgentRunDetailResponse>(getWorkspaceAgentRunsCancelUrl(organizationId,workspaceId,agentRunId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+export const getWorkspaceAgentRunsRerunUrl = (organizationId: string,
+    workspaceId: string,
+    agentRunId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agent-runs/${agentRunId}/rerun`
+}
+
+/**
+ * @summary Rerun Workspace Agent Run Route
+ */
+export const workspaceAgentRunsRerun = async (organizationId: string,
+    workspaceId: string,
+    agentRunId: string, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRunDetailResponse> => {
+
+  return apiRequest<AgentRunDetailResponse>(getWorkspaceAgentRunsRerunUrl(organizationId,workspaceId,agentRunId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+

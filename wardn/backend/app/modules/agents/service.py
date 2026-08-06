@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -87,6 +87,7 @@ from app.modules.agents.dynamic_tools import (
 )
 from app.modules.agents.exceptions import (
     AgentNotFoundError,
+    InvalidAgentRunError,
     InvalidAgentScopeError,
     InvalidAgentToolAssignmentError,
 )
@@ -164,6 +165,7 @@ from app.modules.agents.schemas import (
     AgentConversationResponse,
     AgentListResponse,
     AgentRead,
+    AgentRunDeliveryRecipientRead,
     AgentRunDetailResponse,
     AgentRunListResponse,
     AgentSkillActivityRead,
@@ -225,6 +227,8 @@ from app.modules.agents.types import (
 )
 from app.modules.agents.types import AgentToolCall as AgentToolCall
 from app.modules.agents.types import AgentToolExecutionResult as AgentToolExecutionResult
+from app.modules.chat_providers import repository as chat_provider_repository
+from app.modules.chat_providers.models import ChatProviderEvent, ChatProviderThread
 from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
@@ -248,6 +252,11 @@ from app.modules.organizations.service import (
     require_workspace_admin,
     require_workspace_member,
 )
+from app.modules.scheduled_tasks import repository as scheduled_task_repository
+from app.modules.scheduled_tasks.models import (
+    WorkspaceScheduledTaskDelivery,
+    WorkspaceScheduledTaskRun,
+)
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -268,6 +277,8 @@ QUICK_START_AGENT_INSTRUCTIONS = (
     "workspace tools through Wardn's tool search and execution flow. Ask before destructive "
     "actions."
 )
+CANCELABLE_AGENT_RUN_STATUSES = {"running", "submitted", "waiting_confirmation"}
+CANCELED_RUN_ERROR = "Run canceled by user."
 GUIDED_SKILL_WORKFLOWS = [
     {
         "id": "kubernetes-ops",
@@ -1759,6 +1770,97 @@ async def get_workspace_conversation(
     )
 
 
+def agent_run_can_cancel(agent_run) -> bool:
+    return agent_run.status in CANCELABLE_AGENT_RUN_STATUSES
+
+
+def replayable_step_message(steps) -> str:
+    for step in reversed(steps):
+        if step.step_type != "model_input":
+            continue
+        payload = step.payload if isinstance(step.payload, dict) else {}
+        message = str(payload.get("message") or "").strip()
+        if message:
+            return message
+    return ""
+
+
+def agent_run_can_rerun(agent_run, steps: list | None = None) -> bool:
+    if agent_run.conversation_id is not None:
+        return True
+    return bool(replayable_step_message(steps or []))
+
+
+def scheduled_delivery_recipient(
+    delivery: WorkspaceScheduledTaskDelivery,
+    task_run: WorkspaceScheduledTaskRun,
+) -> AgentRunDeliveryRecipientRead:
+    summary = task_run.delivery_summary if isinstance(task_run.delivery_summary, dict) else {}
+    route_type = "Built-in chat" if delivery.route_type == "chat" else "Chat provider"
+    return AgentRunDeliveryRecipientRead(
+        id=delivery.id,
+        source="scheduled_task_delivery",
+        routeType=route_type,
+        provider=delivery.provider,
+        connectionId=delivery.connection_id,
+        externalThreadId=delivery.external_thread_id,
+        displayName=delivery.display_name
+        or ("Built-in chat" if delivery.route_type == "chat" else delivery.external_thread_id),
+        status=delivery.status,
+        outputKind=str(summary.get("outputKind") or ""),
+        error=delivery.error,
+        deliveredAt=delivery.delivered_at,
+        createdAt=delivery.created_at,
+    )
+
+
+def provider_event_recipient(
+    event: ChatProviderEvent,
+    thread: ChatProviderThread | None,
+) -> AgentRunDeliveryRecipientRead:
+    return AgentRunDeliveryRecipientRead(
+        id=event.id,
+        source="chat_provider_reply",
+        routeType="Chat provider",
+        provider=event.provider,
+        connectionId=event.connection_id,
+        externalThreadId=thread.external_thread_id if thread is not None else "",
+        displayName=thread.external_user_display_name if thread is not None else "",
+        status=event.status,
+        outputKind="assistant",
+        error=event.error,
+        deliveredAt=event.processed_at,
+        createdAt=event.created_at,
+    )
+
+
+async def agent_run_delivery_recipients(
+    session: AsyncSession,
+    agent_run,
+) -> list[AgentRunDeliveryRecipientRead]:
+    recipients = [
+        scheduled_delivery_recipient(delivery, task_run)
+        for delivery, task_run in await scheduled_task_repository.list_deliveries_for_agent_run(
+            session,
+            organization_id=agent_run.organization_id,
+            workspace_id=agent_run.workspace_id,
+            agent_run_id=agent_run.id,
+        )
+    ]
+    provider_events = await chat_provider_repository.list_outbound_events_for_agent_run(
+        session,
+        organization_id=agent_run.organization_id,
+        workspace_id=agent_run.workspace_id,
+        agent_run_id=agent_run.id,
+    )
+    for event, thread in provider_events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if payload.get("scheduledTaskRunId"):
+            continue
+        recipients.append(provider_event_recipient(event, thread))
+    return recipients
+
+
 async def list_workspace_agent_runs(
     session: AsyncSession,
     user: User,
@@ -1788,6 +1890,8 @@ async def list_workspace_agent_runs(
             agent_run_response(
                 agent_run,
                 usage_summaries.get(agent_run.id),
+                can_cancel=agent_run_can_cancel(agent_run),
+                can_rerun=True,
                 trigger_type=response_trigger_type(agent_run, provider_triggers),
             )
             for agent_run in runs
@@ -1828,11 +1932,227 @@ async def get_workspace_agent_run(
         run=agent_run_response(
             agent_run,
             usage_summary,
+            can_cancel=agent_run_can_cancel(agent_run),
+            can_rerun=agent_run_can_rerun(agent_run, steps),
             trace_id=trace_id,
             span_id=span_id,
             trigger_type=response_trigger_type(agent_run, provider_triggers),
         ),
         steps=[agent_run_step_response(step) for step in steps],
+        deliveryRecipients=await agent_run_delivery_recipients(session, agent_run),
+    )
+
+
+async def cancel_workspace_agent_run(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> AgentRunDetailResponse:
+    await require_workspace_admin(session, user, organization_id, workspace_id)
+    agent_run = await repository.get_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+        for_update=True,
+    )
+    if agent_run is None:
+        raise AgentNotFoundError("agent run not found")
+    if not agent_run_can_cancel(agent_run):
+        raise InvalidAgentRunError("only running, submitted, or waiting runs can be canceled")
+    now = datetime.now(UTC)
+    approvals = await repository.list_active_tool_approvals_for_agent_run(
+        session,
+        agent_run_id=agent_run.id,
+    )
+    for approval in approvals:
+        approval.status = "denied" if approval.status == "pending" else "failed"
+        approval.error = CANCELED_RUN_ERROR
+        approval.decided_by_id = user.id
+        if approval.conversation_id is not None:
+            await repository.update_conversation_tool_activity(
+                session,
+                conversation_id=approval.conversation_id,
+                approval_id=approval.id,
+                data_update={"status": approval.status, "error": approval.error},
+            )
+    await repository.append_agent_run_step(
+        session,
+        agent_run_id=agent_run.id,
+        step_type="cancellation",
+        status="canceled",
+        title="Run canceled",
+        payload={"message": CANCELED_RUN_ERROR, "canceledById": str(user.id)},
+    )
+    await repository.finish_agent_run(
+        session,
+        agent_run,
+        status="canceled",
+        error=CANCELED_RUN_ERROR,
+        now=now,
+    )
+    return await get_workspace_agent_run(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        agent_run.id,
+    )
+
+
+async def agent_run_replay_message(
+    session: AsyncSession,
+    agent_run,
+    steps: list | None = None,
+) -> AgentChatMessage | None:
+    if agent_run.conversation_id is not None:
+        messages = await repository.list_conversation_messages(
+            session,
+            conversation_id=agent_run.conversation_id,
+        )
+        for message in reversed(messages):
+            if message.agent_run_id == agent_run.id and message.role == "user":
+                content = message.content.strip()
+                if content:
+                    return AgentChatMessage(role="user", parts=message.parts or text_parts(content))
+    message = replayable_step_message(steps or [])
+    if message:
+        return AgentChatMessage(role="user", parts=text_parts(message))
+    return None
+
+
+async def deliver_provider_rerun_reply(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> None:
+    thread_connection = await chat_provider_repository.get_thread_connection_for_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+    )
+    if thread_connection is None:
+        return
+    thread, connection = thread_connection
+    if not connection.is_active:
+        return
+    from app.modules.chat_providers import service as chat_provider_service
+
+    assistant_message = await chat_provider_service.latest_assistant_message(
+        session,
+        conversation_id,
+    )
+    if await chat_provider_service.assistant_message_run_canceled(
+        session,
+        connection,
+        assistant_message,
+    ):
+        return
+    reply_text = assistant_message.content.strip() if assistant_message is not None else ""
+    if not reply_text:
+        reply_text = await chat_provider_service.pending_approval_reply_text(
+            session,
+            connection,
+            conversation_id,
+        )
+    if not reply_text:
+        reply_text = chat_provider_service.PROVIDER_ASSISTANT_EMPTY_REPLY
+    outbound_payload = await chat_provider_service.send_provider_text_message(
+        session,
+        connection,
+        external_thread_id=thread.external_thread_id,
+        text=reply_text,
+        reply_to_message_id=thread.last_external_message_id,
+    )
+    outbound_message_id = chat_provider_service.provider_response_message_id(
+        connection,
+        outbound_payload,
+    )
+    session.add(
+        ChatProviderEvent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            thread_id=thread.id,
+            conversation_id=conversation_id,
+            provider=connection.provider,
+            external_event_id=outbound_message_id or f"rerun:{agent_run_id}:{thread.id}",
+            direction="outbound",
+            event_type="message.text",
+            status="sent",
+            payload={connection.provider: outbound_payload, "agentRunId": str(agent_run_id)},
+            processed_at=datetime.now(UTC),
+        )
+    )
+    await session.flush()
+
+
+async def rerun_workspace_agent_run(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> AgentRunDetailResponse:
+    await require_workspace_member(session, user, organization_id, workspace_id)
+    original_run = await repository.get_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+    )
+    if original_run is None:
+        raise AgentNotFoundError("agent run not found")
+    steps = await repository.list_agent_run_steps(session, agent_run_id=original_run.id)
+    replay_message = await agent_run_replay_message(session, original_run, steps)
+    if replay_message is None:
+        raise InvalidAgentRunError("agent run does not have a replayable user message")
+
+    created_agent_run_id: uuid.UUID | None = None
+
+    def capture_agent_run_id(next_agent_run_id: uuid.UUID) -> None:
+        nonlocal created_agent_run_id
+        created_agent_run_id = next_agent_run_id
+
+    stream = await stream_agent_chat(
+        session,
+        user,
+        organization_id,
+        original_run.agent_id,
+        AgentChatRequest(
+            id=str(original_run.conversation_id) if original_run.conversation_id else "",
+            messages=[replay_message],
+        ),
+        workspace_id=workspace_id,
+        trigger_type=original_run.trigger_type,
+        on_agent_run_created=capture_agent_run_id,
+    )
+    await session.commit()
+    async for _chunk in stream:
+        pass
+    if created_agent_run_id is None:
+        raise InvalidAgentRunError("agent run could not be rerun")
+    if original_run.trigger_type in {"telegram", "whatsapp", "whatsapp_local"}:
+        if original_run.conversation_id is not None:
+            await deliver_provider_rerun_reply(
+                session,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                conversation_id=original_run.conversation_id,
+                agent_run_id=created_agent_run_id,
+            )
+    return await get_workspace_agent_run(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+        created_agent_run_id,
     )
 
 
@@ -2243,6 +2563,7 @@ async def stream_agent_chat(
     *,
     session_factory: AgentSessionFactory | None = None,
     trigger_type: str = "chat",
+    on_agent_run_created: Callable[[uuid.UUID], None] | None = None,
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
         session,
@@ -2297,6 +2618,8 @@ async def stream_agent_chat(
         triggered_by_id=user.id,
         trigger_type=trigger_type,
     )
+    if on_agent_run_created is not None:
+        on_agent_run_created(agent_run.id)
     await repository.append_agent_run_step(
         session,
         agent_run_id=agent_run.id,

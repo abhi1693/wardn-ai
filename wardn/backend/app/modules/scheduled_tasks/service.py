@@ -2277,7 +2277,11 @@ async def send_provider_delivery(
             direction="outbound",
             event_type="message.text",
             status="sent",
-            payload={connection.provider: payload, "scheduledTaskRunId": str(run.id)},
+            payload={
+                connection.provider: payload,
+                "scheduledTaskRunId": str(run.id),
+                **({"agentRunId": str(run.agent_run_id)} if run.agent_run_id is not None else {}),
+            },
             processed_at=now,
         )
     )

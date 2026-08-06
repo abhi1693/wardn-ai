@@ -698,6 +698,9 @@ async def finish_agent_run(
     error: str = "",
     now: datetime | None = None,
 ) -> AgentRun:
+    if agent_run.status == "canceled" and status != "canceled":
+        await session.refresh(agent_run)
+        return agent_run
     agent_run.status = status
     agent_run.error = error
     agent_run.finished_at = now or datetime.now(UTC)
@@ -731,14 +734,16 @@ async def get_agent_run(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
     agent_run_id: uuid.UUID,
+    for_update: bool = False,
 ) -> AgentRun | None:
-    result = await session.execute(
-        select(AgentRun).where(
-            AgentRun.id == agent_run_id,
-            AgentRun.organization_id == organization_id,
-            AgentRun.workspace_id == workspace_id,
-        )
+    statement = select(AgentRun).where(
+        AgentRun.id == agent_run_id,
+        AgentRun.organization_id == organization_id,
+        AgentRun.workspace_id == workspace_id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 

@@ -14,6 +14,7 @@ from app.modules.agents.models import (
     AgentMCPServerAssignment,
     AgentRun,
     AgentRunStep,
+    AgentToolApproval,
     ConversationMessage,
     WorkspaceApprovedSkill,
     WorkspaceConversation,
@@ -1463,6 +1464,212 @@ async def test_list_workspace_agent_runs_includes_usage_and_provider_trigger(
     assert response.runs[0].output_tokens == 45
     assert response.runs[0].total_tokens == 168
     assert response.runs[0].tool_calls == 3
+    assert response.runs[0].can_rerun is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_workspace_agent_run_marks_run_and_active_approvals(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    now = datetime(2026, 8, 2, 19, 43, tzinfo=UTC)
+    agent_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=uuid4(),
+        conversation_id=uuid4(),
+        triggered_by_id=uuid4(),
+        trigger_type="whatsapp",
+        status="waiting_confirmation",
+        started_at=now,
+        error="",
+        created_at=now,
+        updated_at=now,
+    )
+    approval = AgentToolApproval(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=agent_run.agent_id,
+        conversation_id=agent_run.conversation_id,
+        agent_run_id=agent_run.id,
+        requested_by_id=agent_run.triggered_by_id,
+        installation_id=uuid4(),
+        tool_schema_id=uuid4(),
+        tool_call_id="call-1",
+        tool_name="github_search",
+        arguments={},
+        status="pending",
+        result="",
+        error="",
+    )
+    user = User(id=uuid4(), email="owner@example.com")
+    captured: dict[str, object] = {}
+
+    async def require_workspace_admin(*args, **kwargs):
+        captured["admin_checked"] = True
+
+    async def get_agent_run(*args, **kwargs):
+        captured["for_update"] = kwargs.get("for_update")
+        return agent_run
+
+    async def list_active_tool_approvals_for_agent_run(*args, **kwargs):
+        captured["approval_agent_run_id"] = kwargs["agent_run_id"]
+        return [approval]
+
+    async def update_conversation_tool_activity(*args, **kwargs):
+        captured["activity_update"] = kwargs["data_update"]
+
+    async def append_agent_run_step(*args, **kwargs):
+        captured["step"] = kwargs
+
+    async def get_workspace_agent_run(*args, **kwargs):
+        captured["response_run_id"] = args[-1]
+        return service.AgentRunDetailResponse(
+            run=service.agent_run_response(agent_run),
+            steps=[],
+            deliveryRecipients=[],
+        )
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(
+        service.repository,
+        "list_active_tool_approvals_for_agent_run",
+        list_active_tool_approvals_for_agent_run,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "update_conversation_tool_activity",
+        update_conversation_tool_activity,
+    )
+    monkeypatch.setattr(service.repository, "append_agent_run_step", append_agent_run_step)
+    monkeypatch.setattr(service, "get_workspace_agent_run", get_workspace_agent_run)
+
+    response = await service.cancel_workspace_agent_run(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        agent_run.id,
+    )
+
+    assert captured["admin_checked"] is True
+    assert captured["for_update"] is True
+    assert captured["approval_agent_run_id"] == agent_run.id
+    assert captured["activity_update"] == {
+        "status": "denied",
+        "error": service.CANCELED_RUN_ERROR,
+    }
+    assert captured["step"]["step_type"] == "cancellation"
+    assert approval.status == "denied"
+    assert approval.error == service.CANCELED_RUN_ERROR
+    assert approval.decided_by_id == user.id
+    assert agent_run.status == "canceled"
+    assert agent_run.error == service.CANCELED_RUN_ERROR
+    assert response.run.id == agent_run.id
+
+
+@pytest.mark.asyncio
+async def test_rerun_workspace_agent_run_replays_message_and_delivers_provider_reply(
+    monkeypatch,
+) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    conversation_id = uuid4()
+    now = datetime(2026, 8, 2, 19, 43, tzinfo=UTC)
+    original_run = AgentRun(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_id=uuid4(),
+        conversation_id=conversation_id,
+        triggered_by_id=uuid4(),
+        trigger_type="whatsapp",
+        status="canceled",
+        started_at=now,
+        error=service.CANCELED_RUN_ERROR,
+        created_at=now,
+        updated_at=now,
+    )
+    new_run_id = uuid4()
+    user_message = persisted_conversation_message(
+        conversation_id,
+        role="user",
+        content="Check the Telegraf pods",
+        sequence=1,
+    )
+    user_message.agent_run_id = original_run.id
+    user = User(id=uuid4(), email="owner@example.com")
+    captured: dict[str, object] = {}
+
+    async def require_workspace_member(*args, **kwargs):
+        captured["member_checked"] = True
+
+    async def get_agent_run(*args, **kwargs):
+        return original_run
+
+    async def list_agent_run_steps(*args, **kwargs):
+        return []
+
+    async def list_conversation_messages(*args, **kwargs):
+        return [user_message]
+
+    async def stream_agent_chat(*args, **kwargs):
+        captured["chat_agent_id"] = args[3]
+        captured["chat_payload"] = args[4]
+        captured["trigger_type"] = kwargs["trigger_type"]
+        kwargs["on_agent_run_created"](new_run_id)
+
+        async def stream():
+            yield "data: {}\n\n"
+
+        return stream()
+
+    async def deliver_provider_rerun_reply(*args, **kwargs):
+        captured["delivered"] = kwargs
+
+    async def get_workspace_agent_run(*args, **kwargs):
+        captured["response_run_id"] = args[-1]
+        return service.AgentRunDetailResponse(
+            run=service.agent_run_response(original_run),
+            steps=[],
+            deliveryRecipients=[],
+        )
+
+    monkeypatch.setattr(service, "require_workspace_member", require_workspace_member)
+    monkeypatch.setattr(service.repository, "get_agent_run", get_agent_run)
+    monkeypatch.setattr(service.repository, "list_agent_run_steps", list_agent_run_steps)
+    monkeypatch.setattr(
+        service.repository,
+        "list_conversation_messages",
+        list_conversation_messages,
+    )
+    monkeypatch.setattr(service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "deliver_provider_rerun_reply", deliver_provider_rerun_reply)
+    monkeypatch.setattr(service, "get_workspace_agent_run", get_workspace_agent_run)
+
+    await service.rerun_workspace_agent_run(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        original_run.id,
+    )
+
+    payload = captured["chat_payload"]
+    assert captured["member_checked"] is True
+    assert captured["chat_agent_id"] == original_run.agent_id
+    assert payload.id == str(conversation_id)
+    assert service.text_from_chat_message(payload.messages[0]) == "Check the Telegraf pods"
+    assert captured["trigger_type"] == "whatsapp"
+    assert captured["delivered"] == {
+        "organization_id": organization_id,
+        "workspace_id": workspace_id,
+        "conversation_id": conversation_id,
+        "agent_run_id": new_run_id,
+    }
+    assert captured["response_run_id"] == new_run_id
 
 
 def test_conversation_id_from_payload_only_accepts_canonical_wardn_uuids() -> None:

@@ -19,7 +19,7 @@ from app.modules.agents import service as agent_service
 from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.conversations import AgentSessionFactory
 from app.modules.agents.mappers import text_parts
-from app.modules.agents.models import AgentToolApproval
+from app.modules.agents.models import AgentToolApproval, ConversationMessage
 from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
 from app.modules.chat_providers import repository, telegram, whatsapp_local
 from app.modules.chat_providers.exceptions import (
@@ -1607,7 +1607,13 @@ async def process_provider_text_message(
             pass
         await stop_provider_typing(typing_handle)
         typing_handle = None
-        reply_text = await latest_assistant_text(session, conversation_id)
+        assistant_message = await latest_assistant_message(session, conversation_id)
+        if await assistant_message_run_canceled(session, connection, assistant_message):
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.flush()
+            return True
+        reply_text = assistant_message.content.strip() if assistant_message is not None else ""
         if not reply_text:
             reply_text = await pending_approval_reply_text(
                 session,
@@ -1635,7 +1641,14 @@ async def process_provider_text_message(
             direction="outbound",
             event_type="message.text",
             status="sent",
-            payload={connection.provider: outbound_payload},
+            payload={
+                connection.provider: outbound_payload,
+                **(
+                    {"agentRunId": str(assistant_message.agent_run_id)}
+                    if assistant_message is not None and assistant_message.agent_run_id is not None
+                    else {}
+                ),
+            },
             processed_at=datetime.now(UTC),
         )
         session.add(outbound_event)
@@ -1779,15 +1792,39 @@ def agent_run_trigger_type(provider: str) -> str:
     return provider
 
 
-async def latest_assistant_text(session: AsyncSession, conversation_id: uuid.UUID) -> str:
+async def latest_assistant_message(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+) -> ConversationMessage | None:
     messages = await agent_repository.list_conversation_messages(
         session,
         conversation_id=conversation_id,
     )
     for message in reversed(messages):
         if message.role == "assistant":
-            return message.content.strip()
-    return ""
+            return message
+    return None
+
+
+async def latest_assistant_text(session: AsyncSession, conversation_id: uuid.UUID) -> str:
+    message = await latest_assistant_message(session, conversation_id)
+    return message.content.strip() if message is not None else ""
+
+
+async def assistant_message_run_canceled(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    message: ConversationMessage | None,
+) -> bool:
+    if message is None or message.agent_run_id is None:
+        return False
+    agent_run = await agent_repository.get_agent_run(
+        session,
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        agent_run_id=message.agent_run_id,
+    )
+    return agent_run is not None and agent_run.status == "canceled"
 
 
 def approval_reply_text(approval: AgentToolApproval) -> str:

@@ -156,3 +156,45 @@ async def list_events_for_connection(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def list_outbound_events_for_agent_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> list[tuple[ChatProviderEvent, ChatProviderThread | None]]:
+    result = await session.execute(
+        select(ChatProviderEvent, ChatProviderThread)
+        .outerjoin(ChatProviderThread, ChatProviderThread.id == ChatProviderEvent.thread_id)
+        .where(
+            ChatProviderEvent.organization_id == organization_id,
+            ChatProviderEvent.workspace_id == workspace_id,
+            ChatProviderEvent.direction == "outbound",
+            ChatProviderEvent.payload["agentRunId"].as_string() == str(agent_run_id),
+        )
+        .order_by(ChatProviderEvent.created_at.asc(), ChatProviderEvent.id.asc())
+    )
+    return list(result.all())
+
+
+async def get_thread_connection_for_conversation(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> tuple[ChatProviderThread, ChatProviderConnection] | None:
+    result = await session.execute(
+        select(ChatProviderThread, ChatProviderConnection)
+        .join(ChatProviderConnection, ChatProviderConnection.id == ChatProviderThread.connection_id)
+        .where(
+            ChatProviderThread.organization_id == organization_id,
+            ChatProviderThread.workspace_id == workspace_id,
+            ChatProviderThread.conversation_id == conversation_id,
+        )
+        .order_by(ChatProviderThread.updated_at.desc(), ChatProviderThread.id.desc())
+        .limit(1)
+    )
+    return result.one_or_none()

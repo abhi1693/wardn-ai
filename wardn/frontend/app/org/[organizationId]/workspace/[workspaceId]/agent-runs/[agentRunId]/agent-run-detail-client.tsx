@@ -10,6 +10,7 @@ import {
   Database,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Timer,
   Wrench,
@@ -20,7 +21,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiErrorMessage, apiRequest } from "@/lib/api/client";
-import type { AgentRunDetailResponse, AgentRunStepRead } from "@/lib/api/generated/model";
+import type {
+  AgentRunDeliveryRecipientRead,
+  AgentRunDetailResponse,
+  AgentRunStepRead,
+} from "@/lib/api/generated/model";
 import {
   formatUserDateTime,
   parseUserDateTime,
@@ -43,7 +48,7 @@ function isActiveRun(status: string) {
 }
 
 function statusVariant(status: string) {
-  if (status === "succeeded" || status === "completed") {
+  if (status === "succeeded" || status === "completed" || status === "sent") {
     return "success" as const;
   }
   if (status === "failed" || status === "blocked") {
@@ -99,6 +104,47 @@ function triggerLabel(triggerType: string) {
     whatsapp_local: "WhatsApp",
   };
   return labels[triggerType] ?? triggerType;
+}
+
+function providerLabel(provider: string) {
+  const labels: Record<string, string> = {
+    chat: "Built-in chat",
+    telegram: "Telegram",
+    whatsapp: "WhatsApp",
+    whatsapp_local: "WhatsApp",
+  };
+  return labels[provider] ?? provider;
+}
+
+function outputKindLabel(outputKind?: string | null) {
+  if (outputKind === "approval") {
+    return "Approval";
+  }
+  if (outputKind === "empty") {
+    return "No output";
+  }
+  if (outputKind === "assistant") {
+    return "Assistant";
+  }
+  return outputKind || "Output";
+}
+
+function recipientName(recipient: AgentRunDeliveryRecipientRead) {
+  return (
+    recipient.displayName?.trim() ||
+    recipient.externalThreadId?.trim() ||
+    providerLabel(recipient.provider ?? "") ||
+    recipient.routeType
+  );
+}
+
+function recipientMeta(recipient: AgentRunDeliveryRecipientRead) {
+  const parts = [
+    providerLabel(recipient.provider ?? ""),
+    recipient.routeType,
+    recipient.externalThreadId,
+  ].filter(Boolean);
+  return parts.join(" / ");
 }
 
 function latestActivityTime(detail: AgentRunDetailResponse) {
@@ -398,6 +444,7 @@ export function AgentRunDetailClient({
   );
   const skillSearches = skillEvents.filter((event) => event.eventType === "search").length;
   const skillFetches = skillEvents.filter((event) => event.eventType === "fetch").length;
+  const deliveryRecipients = detail.deliveryRecipients ?? [];
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -580,6 +627,54 @@ export function AgentRunDetailClient({
           </CardContent>
         </Card>
       </section>
+
+      {deliveryRecipients.length > 0 ? (
+        <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Send className="size-4 text-muted-foreground" />
+                <h2 className="text-base font-semibold tracking-normal">Output Recipients</h2>
+              </div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {deliveryRecipients.length} recorded delivery
+                {deliveryRecipients.length === 1 ? "" : "ies"} for this run.
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-border/80">
+            {deliveryRecipients.map((recipient, index) => (
+              <div
+                className="grid gap-3 px-5 py-4 md:grid-cols-[minmax(0,1fr)_auto]"
+                key={recipient.id ?? `${recipient.source}-${index}`}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="truncate text-sm font-semibold">
+                      {recipientName(recipient)}
+                    </div>
+                    <Badge variant="outline">{outputKindLabel(recipient.outputKind)}</Badge>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {recipientMeta(recipient)}
+                  </div>
+                  {recipient.error ? (
+                    <div className="mt-2 text-xs leading-5 text-red-700">{recipient.error}</div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-start justify-end gap-2">
+                  <Badge variant={statusVariant(recipient.status)}>{recipient.status}</Badge>
+                  {recipient.deliveredAt ? (
+                    <span className="text-xs leading-6 text-muted-foreground">
+                      {formatDate(recipient.deliveredAt)}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">

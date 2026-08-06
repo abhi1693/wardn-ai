@@ -20,6 +20,8 @@ export * from './agentChatRequest';
 export * from './agentConversationResponse';
 export * from './agentListResponse';
 export * from './agentRead';
+export * from './agentRunDeliveryRecipientRead';
+export * from './agentRunDeliveryRecipientReadSource';
 export * from './agentRunDetailResponse';
 export * from './agentRunListResponse';
 export * from './agentRunRead';

@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.core.config import Settings
-from app.modules.agents.models import AgentToolApproval, WorkspaceConversation
+from app.modules.agents.models import AgentToolApproval, ConversationMessage, WorkspaceConversation
 from app.modules.agents.schemas import (
     AgentConversationResponse,
     AgentRead,
@@ -740,17 +740,31 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
 
         return stream()
 
-    async def latest_assistant_text(*args, **kwargs):
-        return "Workspace looks healthy."
+    assistant_agent_run_id = uuid4()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=assistant_agent_run_id,
+            role="assistant",
+            content="Workspace looks healthy.",
+            parts=[{"type": "text", "text": "Workspace looks healthy."}],
+            sequence=2,
+        )
 
     async def send_provider_text_message(*args, **kwargs):
         return {"messageId": "wa-reply-1"}
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
 
     monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
     monkeypatch.setattr(service, "provider_actor", provider_actor)
     monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
     monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
-    monkeypatch.setattr(service, "latest_assistant_text", latest_assistant_text)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
     monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
 
     processed = await service.process_provider_text_message(
@@ -788,6 +802,90 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert inbound_event.status == "processed"
     assert inbound_event.thread_id == thread.id
     assert outbound_event.status == "sent"
+    assert outbound_event.payload["agentRunId"] == str(assistant_agent_run_id)
+
+
+@pytest.mark.asyncio
+async def test_process_provider_text_message_skips_reply_when_run_was_canceled(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    conversation_id = thread.conversation_id
+    agent_id = uuid4()
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=uuid4(),
+            role="assistant",
+            content="Workspace looks healthy.",
+            parts=[{"type": "text", "text": "Workspace looks healthy."}],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return True
+
+    async def send_provider_text_message(*args, **kwargs):
+        raise AssertionError("canceled run replies must not be delivered")
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-canceled-1",
+            external_thread_id="15551234567@s.whatsapp.net",
+            external_user_id="15551234567@s.whatsapp.net",
+            external_user_display_name="Asha",
+            text="What changed today?",
+            raw={"messageId": "wa-inbound-canceled-1"},
+        ),
+    )
+
+    outbound_events = [
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "outbound"
+    ]
+
+    assert processed
+    assert outbound_events == []
 
 
 @pytest.mark.asyncio
@@ -831,11 +929,24 @@ async def test_process_provider_text_message_sends_whatsapp_typing_indicator(
 
         return stream()
 
-    async def latest_assistant_text(*args, **kwargs):
-        return "Workspace looks healthy."
+    assistant_agent_run_id = uuid4()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=assistant_agent_run_id,
+            role="assistant",
+            content="Workspace looks healthy.",
+            parts=[{"type": "text", "text": "Workspace looks healthy."}],
+            sequence=2,
+        )
 
     async def send_provider_text_message(*args, **kwargs):
         return {"message_id": "wa-reply-1"}
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
 
     async def send_provider_typing_target(target, *, typing):
         typing_calls.append(
@@ -850,7 +961,8 @@ async def test_process_provider_text_message_sends_whatsapp_typing_indicator(
     monkeypatch.setattr(service, "provider_actor", provider_actor)
     monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
     monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
-    monkeypatch.setattr(service, "latest_assistant_text", latest_assistant_text)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
     monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
     monkeypatch.setattr(service, "send_provider_typing_target", send_provider_typing_target)
     monkeypatch.setattr(service, "PROVIDER_TYPING_REFRESH_SECONDS", 60.0)

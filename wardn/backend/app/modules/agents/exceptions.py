@@ -17,3 +17,6 @@ class InvalidAgentScopeError(AgentError):
 class InvalidAgentToolAssignmentError(AgentError):
     pass
 
+
+class InvalidAgentRunError(AgentError):
+    pass

@@ -31,6 +31,7 @@ from app.modules.agents.schemas import (
 from app.modules.agents.service import (
     approve_workspace_skill,
     assign_workspace_skill_agents,
+    cancel_workspace_agent_run,
     complete_agent_tool_approval_background,
     decide_agent_tool_approval,
     get_agent,
@@ -43,6 +44,7 @@ from app.modules.agents.service import (
     list_workspace_skills,
     quick_start_workspace_agent,
     remove_workspace_skill,
+    rerun_workspace_agent_run,
     search_workspace_skills,
     stream_agent_chat,
     update_agent_skills,
@@ -198,6 +200,58 @@ async def get_workspace_agent_run_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRunDetailResponse:
     return await get_workspace_agent_run(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_run_id,
+    )
+
+
+@workspace_runs_router.post(
+    "/{agent_run_id}/cancel",
+    response_model=AgentRunDetailResponse,
+    operation_id="workspace_agent_runs_cancel",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def cancel_workspace_agent_run_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentRunDetailResponse:
+    return await cancel_workspace_agent_run(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        agent_run_id,
+    )
+
+
+@workspace_runs_router.post(
+    "/{agent_run_id}/rerun",
+    response_model=AgentRunDetailResponse,
+    operation_id="workspace_agent_runs_rerun",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def rerun_workspace_agent_run_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    agent_run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentRunDetailResponse:
+    return await rerun_workspace_agent_run(
         session,
         current_user,
         organization_id,
