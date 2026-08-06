@@ -56,6 +56,29 @@ def test_slack_dm_extracts_threaded_text_message() -> None:
     assert message.text == "continue"
 
 
+def test_slack_dm_without_channel_type_extracts_text_message() -> None:
+    payload = {
+        "team_id": "T123",
+        "event_id": "Ev127",
+        "type": "event_callback",
+        "event": {
+            "type": "message",
+            "channel": "D123",
+            "user": "U234",
+            "text": "hi",
+            "ts": "1700000001.000200",
+        },
+    }
+
+    message = slack.text_message(payload, bot_user_id="U999")
+
+    assert message is not None
+    assert message.channel_id == "D123"
+    assert message.thread_ts == "1700000001.000200"
+    assert message.message_ts == "1700000001.000200"
+    assert message.text == "hi"
+
+
 def test_slack_channel_message_requires_known_thread() -> None:
     payload = {
         "team_id": "T123",

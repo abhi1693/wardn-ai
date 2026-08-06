@@ -124,7 +124,7 @@ def event_is_allowed_message_thread(
     known_thread_ids: set[str] | None = None,
 ) -> bool:
     channel_type = event_channel_type(event)
-    if channel_type in {"im", "mpim"}:
+    if channel_type in {"im", "mpim"} or channel_id.startswith("D"):
         return True
     message_ts = string_field(event, "ts", "event_ts")
     explicit_thread_ts = string_field(event, "thread_ts")

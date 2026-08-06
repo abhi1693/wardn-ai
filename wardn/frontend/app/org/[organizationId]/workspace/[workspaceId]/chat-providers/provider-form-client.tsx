@@ -193,7 +193,37 @@ function friendlyIdentityId(value?: string | null) {
   return normalized || trimmed;
 }
 
-function identityLabel(identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]) {
+function slackThreadLabel(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId, threadTs] = trimmed.split(":");
+  if (!teamId || !channelId || !threadTs) {
+    return "";
+  }
+  const kind = channelId.startsWith("D")
+    ? "DM"
+    : channelId.startsWith("G")
+      ? "Private channel"
+      : channelId.startsWith("C")
+        ? "Channel"
+        : "Thread";
+  return `Slack ${kind} ${channelId} · ${threadTs}`;
+}
+
+function identityLabel(
+  identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number],
+  provider = ""
+) {
+  if (provider === "slack") {
+    const threadLabel = slackThreadLabel(identity.externalThreadId);
+    const userLabel =
+      identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+    if (threadLabel && userLabel) {
+      return `${threadLabel} · ${userLabel}`;
+    }
+    if (threadLabel) {
+      return threadLabel;
+    }
+  }
   return (
     identity.displayName?.trim() ||
     friendlyIdentityId(identity.externalUserId) ||
@@ -204,10 +234,11 @@ function identityLabel(identity: NonNullable<ChatProviderConnectionRead["knownId
 
 function linkedThreadLabel(
   identities: NonNullable<ChatProviderConnectionRead["knownIdentities"]>,
-  threadId: string
+  threadId: string,
+  provider = ""
 ) {
   const identity = identities.find((item) => item.externalThreadId === threadId);
-  return identity ? identityLabel(identity) : friendlyIdentityId(threadId) || threadId;
+  return identity ? identityLabel(identity, provider) : friendlyIdentityId(threadId) || threadId;
 }
 
 function approvalRouteType(route: Record<string, unknown>) {
@@ -263,6 +294,29 @@ function defaultProviderName(provider: ProviderType) {
     return "Workspace Slack";
   }
   return "Personal WhatsApp";
+}
+
+function runtimeSessionLabel(provider: string) {
+  if (provider === "slack") {
+    return "Team";
+  }
+  if (provider === "telegram") {
+    return "Bot";
+  }
+  return "Session";
+}
+
+function runtimeBridgeLabel(provider: string, bridgeUrl: string, appId = "") {
+  if (provider === "whatsapp_local") {
+    return displayHost(bridgeUrl);
+  }
+  if (provider === "slack") {
+    return appId ? `Slack Socket Mode (${appId})` : "Slack Socket Mode";
+  }
+  if (provider === "telegram") {
+    return "Telegram API";
+  }
+  return "Provider API";
 }
 
 function statusLabel(
@@ -1008,7 +1062,7 @@ export function ChatProviderFormClient({
                           >
                             <span className="min-w-0">
                               <span className="block truncate font-medium text-foreground">
-                                {identityLabel(identity)}
+                                {identityLabel(identity, provider)}
                               </span>
                               <span className="block truncate text-xs text-muted-foreground">
                                 Last message {displayDate(identity.lastSeenAt)}
@@ -1148,7 +1202,7 @@ export function ChatProviderFormClient({
                                       key={identity.externalThreadId}
                                       value={identity.externalThreadId}
                                     >
-                                      {identityLabel(identity)}
+                                      {identityLabel(identity, provider)}
                                       {linkedToAnother ? " (already linked)" : ""}
                                     </SelectItem>
                                   );
@@ -1162,7 +1216,7 @@ export function ChatProviderFormClient({
                             ) : threadId ? (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Link2 className="size-3" />
-                                Linked to {linkedThreadLabel(knownIdentities, threadId)}
+                                Linked to {linkedThreadLabel(knownIdentities, threadId, provider)}
                               </div>
                             ) : null}
                           </div>
@@ -1246,7 +1300,9 @@ export function ChatProviderFormClient({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Session</span>
+                  <span className="text-muted-foreground">
+                    {runtimeSessionLabel(connection.provider)}
+                  </span>
                   <span className="truncate font-medium">
                     {pairingStatus?.phoneNumber || bridgeUserId}
                   </span>
@@ -1254,9 +1310,11 @@ export function ChatProviderFormClient({
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Bridge</span>
                   <span className="truncate font-medium">
-                    {connection.provider === "whatsapp_local"
-                      ? displayHost(pairingStatus?.bridgeBaseUrl || bridgeBaseUrl)
-                      : "Telegram API"}
+                    {runtimeBridgeLabel(
+                      connection.provider,
+                      pairingStatus?.bridgeBaseUrl || bridgeBaseUrl,
+                      slackAppId
+                    )}
                   </span>
                 </div>
               </CardContent>

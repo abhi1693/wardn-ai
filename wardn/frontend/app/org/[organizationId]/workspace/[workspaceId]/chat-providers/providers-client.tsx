@@ -202,7 +202,37 @@ function friendlyIdentityId(value?: string | null) {
   return normalized || trimmed;
 }
 
-function identityLabel(identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number]) {
+function slackThreadLabel(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  const [teamId, channelId, threadTs] = trimmed.split(":");
+  if (!teamId || !channelId || !threadTs) {
+    return "";
+  }
+  const kind = channelId.startsWith("D")
+    ? "DM"
+    : channelId.startsWith("G")
+      ? "Private channel"
+      : channelId.startsWith("C")
+        ? "Channel"
+        : "Thread";
+  return `Slack ${kind} ${channelId} · ${threadTs}`;
+}
+
+function identityLabel(
+  identity: NonNullable<ChatProviderConnectionRead["knownIdentities"]>[number],
+  provider = ""
+) {
+  if (provider === "slack") {
+    const threadLabel = slackThreadLabel(identity.externalThreadId);
+    const userLabel =
+      identity.displayName?.trim() || friendlyIdentityId(identity.externalUserId);
+    if (threadLabel && userLabel) {
+      return `${threadLabel} · ${userLabel}`;
+    }
+    if (threadLabel) {
+      return threadLabel;
+    }
+  }
   return (
     identity.displayName?.trim() ||
     friendlyIdentityId(identity.externalUserId) ||
@@ -261,6 +291,29 @@ function defaultProviderName(provider: ProviderType, connectionCount: number) {
     return "Workspace Slack";
   }
   return connectionCount > 0 ? `Personal WhatsApp ${connectionCount + 1}` : "Personal WhatsApp";
+}
+
+function runtimeSessionLabel(provider: string) {
+  if (provider === "slack") {
+    return "Team";
+  }
+  if (provider === "telegram") {
+    return "Bot";
+  }
+  return "Session";
+}
+
+function runtimeBridgeLabel(provider: string, bridgeUrl: string, appId = "") {
+  if (provider === "whatsapp_local") {
+    return displayHost(bridgeUrl);
+  }
+  if (provider === "slack") {
+    return appId ? `Slack Socket Mode (${appId})` : "Slack Socket Mode";
+  }
+  if (provider === "telegram") {
+    return "Telegram API";
+  }
+  return "Provider API";
 }
 
 function displayDate(value?: string | null) {
@@ -961,7 +1014,7 @@ export function EditProviderDialog({
                         >
                           <span className="min-w-0">
                             <span className="block truncate font-medium text-foreground">
-                              {identityLabel(identity)}
+                            {identityLabel(identity, connection.provider)}
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
                               Last message {displayDate(identity.lastSeenAt)}
@@ -1620,6 +1673,7 @@ export function ChatProvidersClient({
             const bridgeUserId =
               stringConfig(config, "bridge_user_id", "bridgeUserId", "account_name", "accountName") ||
               connection.externalId;
+            const slackAppId = stringConfig(config, "app_id", "appId");
             const isBusy = busyConnectionId === connection.id;
             const allowAllSenders = boolConfigDefault(
               config,
@@ -1662,7 +1716,9 @@ export function ChatProvidersClient({
                     <div className="flex min-w-0 items-center gap-3 text-sm">
                       <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
                       <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                        <div className="truncate text-xs text-muted-foreground">Session</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {runtimeSessionLabel(connection.provider)}
+                        </div>
                         <div className="truncate text-sm font-medium">
                           {pairingStatus?.phoneNumber || bridgeUserId}
                         </div>
@@ -1673,9 +1729,11 @@ export function ChatProvidersClient({
                       <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                         <div className="truncate text-xs text-muted-foreground">Bridge</div>
                         <div className="truncate text-sm font-medium">
-                          {connection.provider === "whatsapp_local"
-                            ? displayHost(effectiveBridgeBaseUrl)
-                            : "Telegram API"}
+                          {runtimeBridgeLabel(
+                            connection.provider,
+                            effectiveBridgeBaseUrl,
+                            slackAppId
+                          )}
                         </div>
                       </div>
                     </div>
