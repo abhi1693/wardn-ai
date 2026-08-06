@@ -20,7 +20,11 @@ from app.modules.agents.approval_links import agent_tool_approval_url
 from app.modules.agents.conversations import AgentSessionFactory
 from app.modules.agents.mappers import text_parts
 from app.modules.agents.models import AgentToolApproval, ConversationMessage
-from app.modules.agents.schemas import AgentChatMessage, AgentChatRequest
+from app.modules.agents.schemas import (
+    AgentChatMessage,
+    AgentChatRequest,
+    AgentToolApprovalDecisionRequest,
+)
 from app.modules.chat_providers import repository, slack, telegram, whatsapp_local
 from app.modules.chat_providers.exceptions import (
     ChatProviderConnectionNotFoundError,
@@ -90,6 +94,11 @@ PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY = (
     "No linked approver thread is configured for this provider, "
     "so an approver must review it in Wardn."
 )
+PROVIDER_APPROVAL_APPROVED_REPLY = (
+    "Approved. I will continue the run and send the result back to the requester."
+)
+PROVIDER_APPROVAL_DENIED_REPLY = "Denied. The run was stopped."
+PROVIDER_APPROVAL_NO_PENDING_REPLY = "There is no pending approval for this chat."
 PROVIDER_PROGRESS_THROTTLE_SECONDS = 15.0
 PROVIDER_TYPING_REFRESH_SECONDS = 4.0
 WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS = 5
@@ -2493,6 +2502,14 @@ async def process_provider_text_message(
     await session.flush()
     typing_handle: ProviderTypingHandle | None = None
     try:
+        decision_handled = await process_provider_approval_decision_message(
+            session,
+            connection,
+            message,
+            event,
+        )
+        if decision_handled:
+            return True
         if not sender_allowed(connection, message):
             thread = await record_provider_thread_identity(session, connection, message)
             event.thread_id = thread.id
@@ -2699,6 +2716,242 @@ async def process_provider_text_message(
         raise
     finally:
         await stop_provider_typing(typing_handle)
+    return True
+
+
+def parse_provider_approval_decision(text: str) -> str | None:
+    normalized = text.casefold().strip()
+    normalized = normalized.strip(" \t\r\n.!?")
+    if normalized in {"approve", "approved", "yes", "y"}:
+        return "approve"
+    if normalized in {"deny", "denied", "reject", "rejected", "no", "n"}:
+        return "deny"
+    return None
+
+
+def provider_approval_route_matches_thread(
+    connection: ChatProviderConnection,
+    route: dict[str, Any],
+    external_thread_id: str,
+) -> bool:
+    route_thread_id = str(route.get("external_thread_id") or "").strip()
+    if not route_thread_id:
+        return False
+    if route_thread_id == external_thread_id:
+        return True
+    if connection.provider != PROVIDER_SLACK:
+        return False
+    route_channel_id = slack.external_id_channel_id(route_thread_id)
+    if not route_channel_id.startswith("D"):
+        return False
+    return external_thread_id.startswith(f"{route_thread_id}:")
+
+
+def provider_approval_route_for_message(
+    connection: ChatProviderConnection,
+    message: ProviderTextMessage,
+) -> dict[str, Any] | None:
+    for route in configured_approval_routes(connection):
+        if route.get("route_type") != "workspace_member":
+            continue
+        if provider_approval_route_matches_thread(connection, route, message.external_thread_id):
+            return route
+    return None
+
+
+async def provider_approval_thread_for_message(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    message: ProviderTextMessage,
+    route: dict[str, Any],
+) -> ChatProviderThread | None:
+    thread = await repository.get_thread(
+        session,
+        connection_id=connection.id,
+        external_thread_id=message.external_thread_id,
+    )
+    if thread is not None:
+        return thread
+    if connection.provider != PROVIDER_SLACK:
+        return None
+    route_thread_id = str(route.get("external_thread_id") or "").strip()
+    route_channel_id = slack.external_id_channel_id(route_thread_id)
+    if route_channel_id.startswith("D"):
+        return await repository.get_thread_by_external_thread_prefix(
+            session,
+            connection_id=connection.id,
+            external_thread_prefix=route_thread_id,
+        )
+    return None
+
+
+async def latest_pending_provider_approval_for_thread(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    thread: ChatProviderThread,
+    route: dict[str, Any],
+) -> AgentToolApproval | None:
+    route_user_id = str(route.get("user_id") or "").strip()
+    events = await repository.list_sent_approval_request_events_for_thread(
+        session,
+        connection_id=connection.id,
+        thread_id=thread.id,
+    )
+    for approval_event in events:
+        payload = approval_event.payload if isinstance(approval_event.payload, dict) else {}
+        if str(payload.get("userId") or "").strip() != route_user_id:
+            continue
+        try:
+            approval_id = uuid.UUID(str(payload.get("approvalId") or ""))
+        except (TypeError, ValueError):
+            continue
+        try:
+            agent_id = uuid.UUID(str(payload.get("agentId") or ""))
+        except (TypeError, ValueError):
+            approval = await agent_repository.get_tool_approval_by_id(
+                session,
+                organization_id=connection.organization_id,
+                workspace_id=connection.workspace_id,
+                approval_id=approval_id,
+            )
+        else:
+            approval = await agent_repository.get_tool_approval(
+                session,
+                organization_id=connection.organization_id,
+                workspace_id=connection.workspace_id,
+                agent_id=agent_id,
+                approval_id=approval_id,
+            )
+        if approval is not None and approval.status == "pending":
+            return approval
+    return None
+
+
+async def record_provider_approval_decision_reply(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    thread: ChatProviderThread,
+    approval: AgentToolApproval | None,
+    inbound_event_id: str,
+    decision: str,
+    reply_text: str,
+    provider_payload: dict[str, Any] | None,
+    error: str = "",
+) -> None:
+    outbound_message_id = (
+        provider_response_message_id(connection, provider_payload)
+        if provider_payload is not None
+        else None
+    )
+    payload = {
+        **({connection.provider: provider_payload} if provider_payload is not None else {}),
+        "approvalDecision": decision,
+        "approvalId": str(approval.id) if approval is not None else "",
+        "agentRunId": (
+            str(approval.agent_run_id)
+            if approval is not None and approval.agent_run_id
+            else ""
+        ),
+        "externalDelivery": provider_payload is not None,
+        "externalThreadId": thread.external_thread_id,
+        "message": reply_text,
+        "providerReplyKind": "approval_decision",
+    }
+    session.add(
+        ChatProviderEvent(
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            thread_id=thread.id,
+            conversation_id=thread.conversation_id,
+            provider=connection.provider,
+            external_event_id=outbound_message_id or f"approval-decision:{inbound_event_id}",
+            direction="outbound",
+            event_type="message.text",
+            status="failed" if error else "sent",
+            payload=payload,
+            error=error,
+            processed_at=datetime.now(UTC),
+        )
+    )
+
+
+async def process_provider_approval_decision_message(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    message: ProviderTextMessage,
+    event: ChatProviderEvent,
+) -> bool:
+    decision = parse_provider_approval_decision(message.text)
+    if decision is None:
+        return False
+    route = provider_approval_route_for_message(connection, message)
+    if route is None:
+        return False
+    thread = await provider_approval_thread_for_message(session, connection, message, route)
+    if thread is None:
+        return False
+    event.thread_id = thread.id
+    event.conversation_id = thread.conversation_id
+    thread.last_external_message_id = message.event_id
+    await session.flush()
+    approval = await latest_pending_provider_approval_for_thread(session, connection, thread, route)
+    if approval is None:
+        reply_text = PROVIDER_APPROVAL_NO_PENDING_REPLY
+    else:
+        try:
+            approver_id = uuid.UUID(str(route.get("user_id") or ""))
+        except (TypeError, ValueError) as exc:
+            raise InvalidChatProviderConnectionError(
+                "chat provider approval route has an invalid workspace member"
+            ) from exc
+        approver = await get_user_by_id(session, approver_id)
+        if approver is None or not approver.is_active:
+            raise InvalidChatProviderConnectionError(
+                "chat provider approval route approver is inactive"
+            )
+        await agent_service.decide_agent_tool_approval(
+            session,
+            approver,
+            connection.organization_id,
+            connection.workspace_id,
+            approval.agent_id,
+            approval.id,
+            AgentToolApprovalDecisionRequest(decision=decision),
+            schedule_completion=agent_service.enqueue_agent_tool_approval_resume,
+        )
+        reply_text = (
+            PROVIDER_APPROVAL_APPROVED_REPLY
+            if decision == "approve"
+            else PROVIDER_APPROVAL_DENIED_REPLY
+        )
+    provider_payload: dict[str, Any] | None = None
+    delivery_error = ""
+    try:
+        provider_payload = await send_provider_text_message(
+            session,
+            connection,
+            external_thread_id=message.external_thread_id,
+            text=reply_text,
+            reply_to_message_id=message.event_id,
+        )
+    except ChatProviderDeliveryError as exc:
+        delivery_error = str(exc)
+    await record_provider_approval_decision_reply(
+        session,
+        connection,
+        thread=thread,
+        approval=approval,
+        inbound_event_id=message.event_id,
+        decision=decision,
+        reply_text=reply_text,
+        provider_payload=provider_payload,
+        error=delivery_error,
+    )
+    event.status = "processed"
+    event.processed_at = datetime.now(UTC)
+    await session.flush()
     return True
 
 
@@ -3062,6 +3315,7 @@ def approval_event_payload(
 ) -> dict[str, Any]:
     return {
         **({connection.provider: provider_payload} if provider_payload is not None else {}),
+        "agentId": str(approval.agent_id),
         "agentRunId": str(approval.agent_run_id) if approval.agent_run_id is not None else "",
         "approvalId": str(approval.id),
         "approvalRequest": True,

@@ -211,6 +211,29 @@ async def list_outbound_events_for_agent_run(
     return list(result.all())
 
 
+async def list_sent_approval_request_events_for_thread(
+    session: AsyncSession,
+    *,
+    connection_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    limit: int = 10,
+) -> list[ChatProviderEvent]:
+    result = await session.execute(
+        select(ChatProviderEvent)
+        .where(
+            ChatProviderEvent.connection_id == connection_id,
+            ChatProviderEvent.thread_id == thread_id,
+            ChatProviderEvent.direction == "outbound",
+            ChatProviderEvent.event_type == "approval.request",
+            ChatProviderEvent.status == "sent",
+            ChatProviderEvent.payload["approvalRequest"].as_boolean().is_(True),
+        )
+        .order_by(ChatProviderEvent.created_at.desc(), ChatProviderEvent.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def has_provider_reply_for_agent_run(
     session: AsyncSession,
     *,
