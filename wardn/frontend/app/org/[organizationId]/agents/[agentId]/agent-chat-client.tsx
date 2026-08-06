@@ -59,6 +59,7 @@ import type {
 import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 import {
   workspaceAgentsQuickStart,
+  workspaceAgentsGetConversation,
   workspaceAgentsDecideToolApproval,
   workspaceAgentsUpdateWorkspaceAssistantModel,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
@@ -186,6 +187,14 @@ function chatCommandName(value: string) {
     return "";
   }
   return trimmed.split(/\s+/, 1)[0].slice(1).toLowerCase();
+}
+
+function hasUnresolvedToolActivity(messages: ReturnType<typeof uiMessages>) {
+  return messages.some((message) =>
+    toolActivities(message.parts).some((activity) =>
+      ["requires_confirmation", "running"].includes(activity.data?.status ?? "")
+    )
+  );
 }
 
 function displayDate(value?: string | null) {
@@ -653,6 +662,10 @@ export function AgentChatClient({
     transport,
   });
   const isRunning = status === "submitted" || status === "streaming";
+  const hasPendingConversationUpdate = useMemo(
+    () => hasUnresolvedToolActivity(messages),
+    [messages]
+  );
   const isComposerDisabled = isStartingNewChat;
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -818,6 +831,56 @@ export function AgentChatClient({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 176)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (!conversation?.id || isRunning || !hasPendingConversationUpdate) {
+      return;
+    }
+    const conversationId = conversation.id;
+    const abortController = new AbortController();
+    let timeoutId: number | undefined;
+
+    async function refreshConversation() {
+      try {
+        const data = await workspaceAgentsGetConversation(
+          organization.id,
+          workspaceId,
+          conversationId,
+          { signal: abortController.signal }
+        );
+        const nextMessages = uiMessages(data.messages);
+        setMessages((currentMessages) => {
+          if (JSON.stringify(currentMessages) === JSON.stringify(nextMessages)) {
+            return currentMessages;
+          }
+          return nextMessages;
+        });
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          return;
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          timeoutId = window.setTimeout(refreshConversation, 2500);
+        }
+      }
+    }
+
+    timeoutId = window.setTimeout(refreshConversation, 1000);
+    return () => {
+      abortController.abort();
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    conversation?.id,
+    hasPendingConversationUpdate,
+    isRunning,
+    organization.id,
+    setMessages,
+    workspaceId,
+  ]);
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
