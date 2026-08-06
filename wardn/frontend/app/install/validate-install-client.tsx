@@ -269,6 +269,10 @@ function formatRefreshTime(value: Date | null) {
   });
 }
 
+function refreshDetail(value: Date | null) {
+  return value ? `Refreshed ${formatRefreshTime(value)}` : "Not refreshed";
+}
+
 function runtimeStillBooting(status: string | undefined) {
   return !status || ["creating", "pending", "starting", "not_ready", "running"].includes(status);
 }
@@ -595,6 +599,7 @@ export function ValidateInstallClient({
   const [runtimeAction, setRuntimeAction] = useState<RuntimeAction | null>(null);
   const [lastRuntimeRefreshAt, setLastRuntimeRefreshAt] = useState<Date | null>(null);
   const [lastToolsRefreshAt, setLastToolsRefreshAt] = useState<Date | null>(null);
+  const isRemoteInstallation = installation.installType === "remote";
 
   const selectedTool = useMemo(
     () => tools.find((tool) => tool.toolName === selectedToolName) ?? null,
@@ -724,6 +729,10 @@ export function ValidateInstallClient({
     let cancelled = false;
 
     async function loadInitialRuntimeState() {
+      if (isRemoteInstallation) {
+        setIsLoadingRuntime(false);
+        return;
+      }
       try {
         const data = await fetchRuntimeState();
         if (!cancelled) {
@@ -747,7 +756,7 @@ export function ValidateInstallClient({
     return () => {
       cancelled = true;
     };
-  }, [fetchRuntimeState]);
+  }, [fetchRuntimeState, isRemoteInstallation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -877,6 +886,10 @@ export function ValidateInstallClient({
 
   const runtimeStatus = runtimeSession?.status;
   const runtimeHealth = runtimeState?.health ?? null;
+  const isRemoteRuntime =
+    isRemoteInstallation ||
+    runtimeSession?.runtimeKind === "remote" ||
+    runtimeHealth?.runtimeKind === "remote";
   const rawRuntimeDisplayStatus = runtimeHealth?.status || runtimeStatus;
   const toolsResponding = tools.length > 0 && !toolsError;
   const runtimeDisplayStatus =
@@ -900,10 +913,17 @@ export function ValidateInstallClient({
       : "",
   ].filter(Boolean);
   const policyDetails = runtimePolicyDetails(installation);
-  const canStartRuntime = Boolean(runtimeState?.canStart) && !runtimeBusy;
-  const canStopRuntime = Boolean(runtimeState?.canStop) && !runtimeBusy;
-  const canRestartRuntime = Boolean(runtimeState?.canRestart) && !runtimeBusy;
-  const canRedeployRuntime = Boolean(runtimeState?.canRedeploy) && !runtimeBusy;
+  const runtimeIsStopped =
+    runtimeDisplayStatus === "stopped" ||
+    runtimeDisplayStatus === "expired" ||
+    (!runtimeDisplayStatus && !isLoadingRuntime);
+  const canStartRuntime =
+    !isRemoteRuntime && (Boolean(runtimeState?.canStart) || runtimeIsStopped) && !runtimeBusy;
+  const canStopRuntime =
+    !isRemoteRuntime && Boolean(runtimeState?.canStop) && !runtimeBusy && !runtimeIsStopped;
+  const canRestartRuntime =
+    !isRemoteRuntime && Boolean(runtimeState?.canRestart) && !runtimeBusy && !runtimeIsStopped;
+  const canRedeployRuntime = !isRemoteRuntime && Boolean(runtimeState?.canRedeploy) && !runtimeBusy;
   const editHref = editInstallUrl(basePath, installation.id);
   const hubHref = hubServerHref(installation);
   const runtimeProvider = runtimeSession?.runtimeProvider || installation.runtimeProvider;
@@ -924,6 +944,23 @@ export function ValidateInstallClient({
       : runtimeSession?.podName
         ? "Single runtime pod"
         : "No live pod reported";
+  const toolPanelTitle = selectedTool?.title || selectedTool?.toolName || (
+    isLoadingTools ? "Discovering tools" : "Select a tool"
+  );
+  const emptyToolMessage = isLoadingTools
+    ? "Tool discovery is still running."
+    : toolsError
+      ? "Tool discovery failed. Resolve the error above, then try again."
+      : tools.length === 0
+        ? "No tools are available for validation yet."
+        : "Select a tool to configure validation arguments.";
+  const validateDisabledReason = isValidating
+    ? "Validation is running."
+    : isLoadingTools
+      ? "Tool discovery is still running."
+      : !selectedToolName
+        ? "Select a tool before validating."
+        : "";
   const metricCards = [
     {
       detail: installation.configName,
@@ -932,30 +969,43 @@ export function ValidateInstallClient({
       value: installation.status || "installed",
     },
     {
-      detail: `Refreshed ${formatRefreshTime(lastToolsRefreshAt)}`,
+      detail: refreshDetail(lastToolsRefreshAt),
       icon: Wrench,
       label: "Tools",
       value: discoveryDetail,
     },
-    {
-      detail: `Refreshed ${formatRefreshTime(lastRuntimeRefreshAt)}`,
-      icon: runtimeDisplayStatus === "tools_responding" ? AlertTriangle : Activity,
-      label: "Runtime",
-      value: runtimeStatusLabel(runtimeDisplayStatus),
-    },
-    {
-      detail: policyDetails.join(", ") || "No runtime policy details",
-      icon: ShieldCheck,
-      label: "Egress Policy",
-      value: policyDetails.length > 0 ? `${policyDetails.length} rules` : "Default",
-    },
+    ...(!isRemoteRuntime
+      ? [
+          {
+            detail: refreshDetail(lastRuntimeRefreshAt),
+            icon: runtimeDisplayStatus === "tools_responding" ? AlertTriangle : Activity,
+            label: "Runtime",
+            value: runtimeStatusLabel(runtimeDisplayStatus),
+          },
+          {
+            detail: policyDetails.join(", ") || "No runtime policy details",
+            icon: ShieldCheck,
+            label: "Egress Policy",
+            value: policyDetails.length > 0 ? `${policyDetails.length} rules` : "Default",
+          },
+        ]
+      : []),
   ];
+  const headerStatusLabel = isRemoteRuntime
+    ? installation.status || "enabled"
+    : isLoadingRuntime
+      ? "Loading"
+      : runtimeStatusLabel(runtimeDisplayStatus);
+  const headerStatusVariant = isRemoteRuntime
+    ? "outline"
+    : runtimeStatusBadgeVariant(runtimeDisplayStatus);
 
   useEffect(() => {
     const shouldPollRuntime =
-      runtimeAction !== null ||
-      runtimeStillBooting(rawRuntimeDisplayStatus) ||
-      Boolean(runtimeError && !toolsResponding);
+      !isRemoteRuntime &&
+      (runtimeAction !== null ||
+        runtimeStillBooting(rawRuntimeDisplayStatus) ||
+        Boolean(runtimeError && !toolsResponding));
     const shouldPollTools =
       !toolsResponding &&
       !isLoadingTools &&
@@ -974,6 +1024,7 @@ export function ValidateInstallClient({
     return () => window.clearInterval(intervalId);
   }, [
     isLoadingTools,
+    isRemoteRuntime,
     loadRuntimeState,
     loadTools,
     rawRuntimeDisplayStatus,
@@ -989,10 +1040,10 @@ export function ValidateInstallClient({
           <div className="flex flex-col gap-4 border-b border-border px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={runtimeStatusBadgeVariant(runtimeDisplayStatus)}>
-                  {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
+                <Badge variant={headerStatusVariant}>
+                  {headerStatusLabel}
                 </Badge>
-                <Badge variant="outline">{runtimeProvider}</Badge>
+                {!isRemoteRuntime ? <Badge variant="outline">{runtimeProvider}</Badge> : null}
                 <Badge variant="outline">{installation.installType}</Badge>
                 {installation.updateAvailable ? (
                   <Badge variant="secondary">Update available</Badge>
@@ -1024,7 +1075,12 @@ export function ValidateInstallClient({
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-1 divide-y divide-border md:grid-cols-4 md:divide-x md:divide-y-0">
+          <div
+            className={cn(
+              "grid grid-cols-1 divide-y divide-border md:divide-x md:divide-y-0",
+              isRemoteRuntime ? "md:grid-cols-2" : "md:grid-cols-4"
+            )}
+          >
             {metricCards.map((card) => {
               const Icon = card.icon;
               return (
@@ -1046,106 +1102,108 @@ export function ValidateInstallClient({
         </CardContent>
       </Card>
 
-      <Card className="rounded-md border-border bg-card shadow-none">
-        <CardContent className="flex flex-col gap-4 p-5 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Runtime Control
-              </span>
-              <Badge
-                variant={
-                  isLoadingRuntime
-                    ? "outline"
-                    : runtimeStatusBadgeVariant(runtimeDisplayStatus)
-                }
-              >
-                {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
-              </Badge>
-              <span className="text-xs text-muted-foreground">{runtimeReplicaDetail}</span>
-            </div>
-            {runtimeDetails.length > 0 ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                {runtimeDetails.map((detail) => (
-                  <span className="break-all" key={detail}>
+      {!isRemoteRuntime ? (
+        <Card className="rounded-md border-border bg-card shadow-none">
+          <CardContent className="flex flex-col gap-4 p-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  Runtime Control
+                </span>
+                <Badge
+                  variant={
+                    isLoadingRuntime
+                      ? "outline"
+                      : runtimeStatusBadgeVariant(runtimeDisplayStatus)
+                  }
+                >
+                  {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
+                </Badge>
+                <span className="text-xs text-muted-foreground">{runtimeReplicaDetail}</span>
+              </div>
+              {runtimeDetails.length > 0 ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {runtimeDetails.map((detail) => (
+                    <span className="break-all" key={detail}>
+                      {detail}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-1.5">
+                {policyDetails.map((detail) => (
+                  <Badge key={detail} variant="outline">
                     {detail}
-                  </span>
+                  </Badge>
                 ))}
               </div>
-            ) : null}
-            <div className="flex flex-wrap gap-1.5">
-              {policyDetails.map((detail) => (
-                <Badge key={detail} variant="outline">
-                  {detail}
-                </Badge>
-              ))}
+              {runtimeMessage ? (
+                <p className="max-w-4xl text-xs leading-5 text-muted-foreground">
+                  {runtimeMessage}
+                </p>
+              ) : null}
             </div>
-            {runtimeMessage ? (
-              <p className="max-w-4xl text-xs leading-5 text-muted-foreground">
-                {runtimeMessage}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={!canStartRuntime}
-              onClick={() => void runRuntimeAction("start")}
-              title="Start runtime"
-              type="button"
-              variant="outline"
-            >
-              {runtimeAction === "start" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Play className="size-4" />
-              )}
-              Start
-            </Button>
-            <Button
-              disabled={!canStopRuntime}
-              onClick={() => void runRuntimeAction("stop")}
-              title="Stop runtime"
-              type="button"
-              variant="destructive"
-            >
-              {runtimeAction === "stop" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <CircleStop className="size-4" />
-              )}
-              Stop
-            </Button>
-            <Button
-              disabled={!canRestartRuntime}
-              onClick={() => void runRuntimeAction("restart")}
-              title="Restart runtime"
-              type="button"
-              variant="secondary"
-            >
-              {runtimeAction === "restart" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
-              )}
-              Restart
-            </Button>
-            <Button
-              disabled={!canRedeployRuntime}
-              onClick={() => void runRuntimeAction("redeploy")}
-              title="Redeploy runtime"
-              type="button"
-              variant="secondary"
-            >
-              {runtimeAction === "redeploy" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RotateCcw className="size-4" />
-              )}
-              Redeploy
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={!canStartRuntime}
+                onClick={() => void runRuntimeAction("start")}
+                title="Start runtime"
+                type="button"
+                variant="outline"
+              >
+                {runtimeAction === "start" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="size-4" />
+                )}
+                Start
+              </Button>
+              <Button
+                disabled={!canStopRuntime}
+                onClick={() => void runRuntimeAction("stop")}
+                title="Stop runtime"
+                type="button"
+                variant="destructive"
+              >
+                {runtimeAction === "stop" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <CircleStop className="size-4" />
+                )}
+                Stop
+              </Button>
+              <Button
+                disabled={!canRestartRuntime}
+                onClick={() => void runRuntimeAction("restart")}
+                title="Restart runtime"
+                type="button"
+                variant="secondary"
+              >
+                {runtimeAction === "restart" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                Restart
+              </Button>
+              <Button
+                disabled={!canRedeployRuntime}
+                onClick={() => void runRuntimeAction("redeploy")}
+                title="Redeploy runtime"
+                type="button"
+                variant="secondary"
+              >
+                {runtimeAction === "redeploy" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="size-4" />
+                )}
+                Redeploy
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {runtimeError && runtimeDisplayStatus !== "tools_responding" ? (
         <AsyncFeedback className="rounded-md px-4 py-3" variant="error">
@@ -1188,6 +1246,7 @@ export function ValidateInstallClient({
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="h-10 rounded-md border-border bg-background pl-10 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                disabled={isLoadingTools || tools.length === 0}
                 onChange={(event) => setToolSearch(event.target.value)}
                 placeholder="Search tools"
                 value={toolSearch}
@@ -1242,7 +1301,7 @@ export function ValidateInstallClient({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <CardTitle className="text-xl font-semibold leading-7 tracking-normal text-foreground">
-                    {selectedTool?.title || selectedTool?.toolName || "Select a tool"}
+                    {toolPanelTitle}
                   </CardTitle>
                   {selectedTool?.toolName ? (
                     <div className="mt-1 font-mono text-xs text-muted-foreground">
@@ -1255,7 +1314,10 @@ export function ValidateInstallClient({
             <CardContent className="space-y-5 p-5">
               {!selectedTool ? (
                 <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-                  Select a tool to configure validation arguments.
+                  <div className="flex items-center gap-2">
+                    {isLoadingTools ? <Loader2 className="size-4 animate-spin" /> : null}
+                    {emptyToolMessage}
+                  </div>
                 </div>
               ) : (
                 <>
@@ -1434,6 +1496,7 @@ export function ValidateInstallClient({
               <Button
                 disabled={isValidating || isLoadingTools || !selectedToolName}
                 onClick={validateTool}
+                title={validateDisabledReason || "Validate selected tool"}
                 type="button"
               >
                 <Play className="size-4" />
