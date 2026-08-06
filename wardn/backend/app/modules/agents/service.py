@@ -1842,7 +1842,11 @@ def provider_event_recipient(
         id=event.id,
         source="chat_provider_reply",
         routeType=display_route_type,
-        provider=event.provider if provider_delivered else "",
+        provider=(
+            event.provider
+            if provider_delivered or payload.get("externalDelivery") is not False
+            else ""
+        ),
         connectionId=event.connection_id,
         externalThreadId=(
             thread.external_thread_id
@@ -2102,13 +2106,27 @@ async def deliver_provider_rerun_reply(
         )
     if not reply_text:
         reply_text = chat_provider_service.PROVIDER_ASSISTANT_EMPTY_REPLY
-    outbound_payload = await chat_provider_service.send_provider_text_message(
-        session,
-        connection,
-        external_thread_id=thread.external_thread_id,
-        text=reply_text,
-        reply_to_message_id=thread.last_external_message_id,
-    )
+    try:
+        outbound_payload = await chat_provider_service.send_provider_text_message(
+            session,
+            connection,
+            external_thread_id=thread.external_thread_id,
+            text=reply_text,
+            reply_to_message_id=thread.last_external_message_id,
+        )
+    except chat_provider_service.ChatProviderDeliveryError as exc:
+        await chat_provider_service.record_provider_text_delivery_failure(
+            session,
+            connection,
+            thread=thread,
+            conversation_id=conversation_id,
+            external_event_id=f"rerun:{agent_run_id}:{thread.id}:failed",
+            text=reply_text,
+            error=str(exc),
+            agent_run_id=agent_run_id,
+        )
+        await session.flush()
+        return
     outbound_message_id = chat_provider_service.provider_response_message_id(
         connection,
         outbound_payload,

@@ -2045,6 +2045,95 @@ async def test_deliver_provider_rerun_reply_routes_approval_without_sending_url_
     assert outbound_events[0].payload["agentRunId"] == str(agent_run_id)
 
 
+@pytest.mark.asyncio
+async def test_deliver_provider_rerun_reply_records_failed_delivery(monkeypatch) -> None:
+    from app.modules.chat_providers import service as chat_provider_service
+
+    session = FakeSession()
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    conversation_id = uuid4()
+    agent_run_id = uuid4()
+    connection = ChatProviderConnection(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=uuid4(),
+        provider="whatsapp_local",
+        name="Personal WhatsApp",
+        external_id="personal",
+        display_name="Personal WhatsApp",
+        config={"allow_all_senders": True},
+        is_active=True,
+    )
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Outside User",
+        last_external_message_id="wa-inbound-1",
+    )
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        return thread, connection
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content="Scaled the workload back up.",
+            parts=[{"type": "text", "text": "Scaled the workload back up."}],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def send_provider_text_message(*args, **kwargs):
+        raise chat_provider_service.ChatProviderDeliveryError(
+            "WhatsApp local bridge delivery failed"
+        )
+
+    monkeypatch.setattr(
+        service.chat_provider_repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
+    monkeypatch.setattr(chat_provider_service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(
+        chat_provider_service,
+        "assistant_message_run_canceled",
+        assistant_message_run_canceled,
+    )
+    monkeypatch.setattr(
+        chat_provider_service,
+        "send_provider_text_message",
+        send_provider_text_message,
+    )
+
+    await service.deliver_provider_rerun_reply(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+    )
+
+    outbound_events = [item for item in session.added if isinstance(item, ChatProviderEvent)]
+    assert len(outbound_events) == 1
+    assert outbound_events[0].event_type == "message.text"
+    assert outbound_events[0].status == "failed"
+    assert outbound_events[0].error == "WhatsApp local bridge delivery failed"
+    assert outbound_events[0].payload["agentRunId"] == str(agent_run_id)
+    assert outbound_events[0].payload["externalThreadId"] == thread.external_thread_id
+
+
 def test_provider_event_recipient_marks_unrouted_approval_as_not_configured() -> None:
     event = ChatProviderEvent(
         id=uuid4(),

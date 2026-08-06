@@ -1785,13 +1785,28 @@ async def process_provider_text_message(
                 command,
                 conversation_id,
             )
-            outbound_payload = await send_provider_text_message(
-                session,
-                connection,
-                external_thread_id=message.external_thread_id,
-                text=reply_text,
-                reply_to_message_id=message.event_id,
-            )
+            try:
+                outbound_payload = await send_provider_text_message(
+                    session,
+                    connection,
+                    external_thread_id=message.external_thread_id,
+                    text=reply_text,
+                    reply_to_message_id=message.event_id,
+                )
+            except ChatProviderDeliveryError as exc:
+                await record_provider_text_delivery_failure(
+                    session,
+                    connection,
+                    thread=thread,
+                    conversation_id=conversation_id,
+                    external_event_id=f"outbound:{message.event_id}",
+                    text=reply_text,
+                    error=str(exc),
+                )
+                event.status = "processed"
+                event.processed_at = datetime.now(UTC)
+                await session.flush()
+                return True
             outbound_message_id = provider_response_message_id(connection, outbound_payload)
             session.add(
                 ChatProviderEvent(
@@ -1867,13 +1882,34 @@ async def process_provider_text_message(
             )
         if not reply_text:
             reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
-        outbound_payload = await send_provider_text_message(
-            session,
-            connection,
-            external_thread_id=message.external_thread_id,
-            text=reply_text,
-            reply_to_message_id=message.event_id,
+        agent_run_id = (
+            assistant_message.agent_run_id
+            if assistant_message is not None and assistant_message.agent_run_id is not None
+            else None
         )
+        try:
+            outbound_payload = await send_provider_text_message(
+                session,
+                connection,
+                external_thread_id=message.external_thread_id,
+                text=reply_text,
+                reply_to_message_id=message.event_id,
+            )
+        except ChatProviderDeliveryError as exc:
+            await record_provider_text_delivery_failure(
+                session,
+                connection,
+                thread=thread,
+                conversation_id=conversation_id,
+                external_event_id=f"outbound:{message.event_id}",
+                text=reply_text,
+                error=str(exc),
+                agent_run_id=agent_run_id,
+            )
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.flush()
+            return True
         outbound_message_id = provider_response_message_id(connection, outbound_payload)
         outbound_event = ChatProviderEvent(
             organization_id=connection.organization_id,
@@ -1888,11 +1924,7 @@ async def process_provider_text_message(
             status="sent",
             payload={
                 connection.provider: outbound_payload,
-                **(
-                    {"agentRunId": str(assistant_message.agent_run_id)}
-                    if assistant_message is not None and assistant_message.agent_run_id is not None
-                    else {}
-                ),
+                **({"agentRunId": str(agent_run_id)} if agent_run_id is not None else {}),
             },
             processed_at=datetime.now(UTC),
         )
@@ -1909,6 +1941,45 @@ async def process_provider_text_message(
     finally:
         await stop_provider_typing(typing_handle)
     return True
+
+
+async def record_provider_text_delivery_failure(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    thread: ChatProviderThread,
+    conversation_id: uuid.UUID,
+    external_event_id: str,
+    text: str,
+    error: str,
+    agent_run_id: uuid.UUID | None = None,
+) -> None:
+    session.add(
+        ChatProviderEvent(
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            thread_id=thread.id,
+            conversation_id=conversation_id,
+            provider=connection.provider,
+            external_event_id=external_event_id,
+            direction="outbound",
+            event_type="message.text",
+            status="failed",
+            payload={
+                "agentRunId": str(agent_run_id) if agent_run_id is not None else "",
+                "deliveryFailure": True,
+                "externalDelivery": True,
+                "externalThreadId": thread.external_thread_id,
+                "displayName": thread.external_user_display_name
+                or thread.external_user_id
+                or thread.external_thread_id,
+                "message": text,
+            },
+            error=error,
+            processed_at=datetime.now(UTC),
+        )
+    )
 
 
 async def provider_actor(session: AsyncSession, connection: ChatProviderConnection) -> User:

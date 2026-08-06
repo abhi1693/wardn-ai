@@ -1729,6 +1729,104 @@ async def test_process_provider_text_message_sends_whatsapp_typing_indicator(
 
 
 @pytest.mark.asyncio
+async def test_process_provider_text_message_records_failed_assistant_reply(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    conversation_id = thread.conversation_id
+    agent_id = uuid4()
+    assistant_agent_run_id = uuid4()
+
+    async def get_event_by_external_id(*args, **kwargs):
+        return None
+
+    async def provider_actor(*args, **kwargs):
+        return actor
+
+    async def provider_thread_conversation(*args, **kwargs):
+        return thread, conversation_id, agent_id
+
+    async def start_provider_typing(*args, **kwargs):
+        return None
+
+    async def stream_agent_chat(*args, **kwargs):
+        async def stream():
+            yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        return stream()
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=assistant_agent_run_id,
+            role="assistant",
+            content="Workspace looks healthy.",
+            parts=[{"type": "text", "text": "Workspace looks healthy."}],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def send_provider_text_message(*args, **kwargs):
+        raise ChatProviderDeliveryError("WhatsApp local bridge delivery failed")
+
+    monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service, "provider_actor", provider_actor)
+    monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service, "start_provider_typing", start_provider_typing)
+    monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    processed = await service.process_provider_text_message(
+        fake_session,
+        connection,
+        service.ProviderTextMessage(
+            event_id="wa-inbound-delivery-failed-1",
+            external_thread_id="15551234567@s.whatsapp.net",
+            external_user_id="15551234567@s.whatsapp.net",
+            external_user_display_name="Asha",
+            text="What changed today?",
+            raw={"messageId": "wa-inbound-delivery-failed-1"},
+        ),
+    )
+
+    inbound_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "inbound"
+    )
+    outbound_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "outbound"
+    )
+
+    assert processed
+    assert inbound_event.status == "processed"
+    assert outbound_event.event_type == "message.text"
+    assert outbound_event.status == "failed"
+    assert outbound_event.error == "WhatsApp local bridge delivery failed"
+    assert outbound_event.payload["agentRunId"] == str(assistant_agent_run_id)
+    assert outbound_event.payload["externalThreadId"] == "15551234567@s.whatsapp.net"
+
+
+@pytest.mark.asyncio
 async def test_process_provider_text_message_new_command_starts_new_thread_conversation(
     monkeypatch,
 ) -> None:
