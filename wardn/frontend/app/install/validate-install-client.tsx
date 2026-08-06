@@ -3,20 +3,26 @@
 import { ApiError, apiRawFetch } from "@/lib/api/client";
 
 import {
+  Activity,
+  AlertTriangle,
   CheckCircle2,
   CircleHelp,
   CircleStop,
+  Edit2,
+  ExternalLink,
   Loader2,
   Play,
   RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Terminal,
+  Wrench,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { FeedbackMessages } from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/ui/badge";
 import { AsyncFeedback } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
@@ -63,6 +69,7 @@ type ArgumentFieldError = {
 
 type RefreshOptions = {
   reportError?: boolean;
+  showLoading?: boolean;
 };
 
 const mcpToolDiscoveryTimeoutMs = 120_000;
@@ -75,6 +82,9 @@ function runtimeStatusLabel(status: string | undefined) {
   if (!status) {
     return "Not started";
   }
+  if (status === "tools_responding") {
+    return "Tools responding";
+  }
   return status.replace(/_/g, " ");
 }
 
@@ -82,6 +92,9 @@ function runtimeStatusBadgeVariant(
   status: string | undefined
 ): "success" | "secondary" | "destructive" | "outline" {
   if (status === "idle" || status === "running" || status === "ready") {
+    return "success";
+  }
+  if (status === "tools_responding") {
     return "success";
   }
   if (status === "failed" || status === "not_ready") {
@@ -199,6 +212,7 @@ type GatewayRpcResponse = {
 };
 
 type ValidateInstallClientProps = {
+  basePath: string;
   installation: MCPServerInstallationRead;
   organizationId: string;
   workspaceId: string;
@@ -206,6 +220,57 @@ type ValidateInstallClientProps = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function metadataRecord(document: MCPServerInstallationRead["server"], key: string) {
+  const metadata = document._meta;
+  if (isRecord(metadata) && isRecord(metadata[key])) {
+    return metadata[key];
+  }
+  return null;
+}
+
+function hubServerHref(installation: MCPServerInstallationRead) {
+  for (const server of [installation.server, installation.latestServer]) {
+    const metadata = metadataRecord(server, "wardnCatalogSource");
+    if (!metadata || stringValue(metadata.provider) !== "wardn_hub") {
+      continue;
+    }
+    const baseUrl = stringValue(metadata.baseUrl).trim();
+    if (!baseUrl) {
+      continue;
+    }
+    try {
+      const serverPath = server.name.split("/").map(encodeURIComponent).join("/");
+      return new URL(`/servers/${serverPath}`, baseUrl.replace(/\/+$/, "/")).toString();
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function editInstallUrl(basePath: string, installationId: string) {
+  return `${basePath}/${encodeURIComponent(installationId)}/edit`;
+}
+
+function formatRefreshTime(value: Date | null) {
+  if (!value) {
+    return "Not refreshed";
+  }
+  return value.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function runtimeStillBooting(status: string | undefined) {
+  return !status || ["creating", "pending", "starting", "not_ready", "running"].includes(status);
 }
 
 function schemaVariants(schema: Record<string, unknown>) {
@@ -506,6 +571,7 @@ async function loadToolsFromGateway(
 }
 
 export function ValidateInstallClient({
+  basePath,
   installation,
   organizationId,
   workspaceId,
@@ -518,13 +584,17 @@ export function ValidateInstallClient({
   const [result, setResult] = useState<MCPServerInstallationToolValidationResponse | null>(null);
   const [runtimeState, setRuntimeState] =
     useState<MCPRuntimeInstallationControlResponse | null>(null);
-  const [error, setError] = useState("");
+  const [runtimeError, setRuntimeError] = useState("");
+  const [toolsError, setToolsError] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshNotice, setRefreshNotice] = useState("");
   const [isLoadingTools, setIsLoadingTools] = useState(true);
   const [isLoadingRuntime, setIsLoadingRuntime] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
   const [runtimeAction, setRuntimeAction] = useState<RuntimeAction | null>(null);
+  const [lastRuntimeRefreshAt, setLastRuntimeRefreshAt] = useState<Date | null>(null);
+  const [lastToolsRefreshAt, setLastToolsRefreshAt] = useState<Date | null>(null);
 
   const selectedTool = useMemo(
     () => tools.find((tool) => tool.toolName === selectedToolName) ?? null,
@@ -610,14 +680,19 @@ export function ValidateInstallClient({
   }, [installation, organizationId, workspaceId]);
 
   const loadRuntimeState = useCallback(async (options: RefreshOptions = {}) => {
-    const { reportError = true } = options;
+    const { reportError = true, showLoading = true } = options;
+    if (showLoading) {
+      setIsLoadingRuntime(true);
+    }
     try {
       const data = await fetchRuntimeState();
       setRuntimeState(data);
+      setRuntimeError("");
+      setLastRuntimeRefreshAt(new Date());
       return true;
     } catch (caught) {
       if (reportError) {
-        setError(caughtMessage(caught, "Runtime state could not be loaded."));
+        setRuntimeError(caughtMessage(caught, "Runtime state could not be loaded."));
       }
       return false;
     } finally {
@@ -626,13 +701,18 @@ export function ValidateInstallClient({
   }, [fetchRuntimeState]);
 
   const loadTools = useCallback(async (options: RefreshOptions = {}) => {
-    const { reportError = true } = options;
+    const { reportError = true, showLoading = true } = options;
+    if (showLoading) {
+      setIsLoadingTools(true);
+    }
     try {
       applyLoadedTools(await fetchTools());
+      setToolsError("");
+      setLastToolsRefreshAt(new Date());
       return true;
     } catch (caught) {
       if (reportError) {
-        setError(caughtMessage(caught, "Tools could not be loaded."));
+        setToolsError(caughtMessage(caught, "Tools could not be loaded."));
       }
       return false;
     } finally {
@@ -648,12 +728,12 @@ export function ValidateInstallClient({
         const data = await fetchRuntimeState();
         if (!cancelled) {
           setRuntimeState(data);
+          setRuntimeError("");
+          setLastRuntimeRefreshAt(new Date());
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(
-            caught instanceof Error ? caught.message : "Runtime state could not be loaded."
-          );
+          setRuntimeError(caughtMessage(caught, "Runtime state could not be loaded."));
         }
       } finally {
         if (!cancelled) {
@@ -677,10 +757,12 @@ export function ValidateInstallClient({
         const nextTools = await fetchTools();
         if (!cancelled) {
           applyLoadedTools(nextTools);
+          setToolsError("");
+          setLastToolsRefreshAt(new Date());
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Tools could not be loaded.");
+          setToolsError(caughtMessage(caught, "Tools could not be loaded."));
         }
       } finally {
         if (!cancelled) {
@@ -714,7 +796,9 @@ export function ValidateInstallClient({
     };
 
     setRuntimeAction(action);
-    setError("");
+    setRuntimeError("");
+    setToolsError("");
+    setValidationError("");
     setNotice("");
     setRefreshNotice("");
     setResult(null);
@@ -728,21 +812,21 @@ export function ValidateInstallClient({
         setArgumentValues({});
         setArgumentError(null);
       } else {
-        const toolsRefreshed = await loadTools({ reportError: false });
+        const toolsRefreshed = await loadTools({ reportError: false, showLoading: false });
         if (!toolsRefreshed) {
           setRefreshNotice(
             "Runtime control succeeded, but tools are still not ready to refresh. Try again in a few seconds."
           );
         }
       }
-      const runtimeRefreshed = await loadRuntimeState({ reportError: false });
+      const runtimeRefreshed = await loadRuntimeState({ reportError: false, showLoading: false });
       if (!runtimeRefreshed) {
         setRefreshNotice(
           "Runtime control succeeded, but the latest runtime state could not refresh. Try again in a few seconds."
         );
       }
     } catch (caught) {
-      setError(
+      setRuntimeError(
         caughtMessage(caught, `Runtime could not be ${runtimeActionLabels[action]}.`)
       );
     } finally {
@@ -753,7 +837,7 @@ export function ValidateInstallClient({
   async function validateTool() {
     const toolName = selectedToolName.trim();
     if (!toolName) {
-      setError("Tool name is required.");
+      setValidationError("Tool name is required.");
       return;
     }
 
@@ -764,7 +848,7 @@ export function ValidateInstallClient({
     }
 
     setIsValidating(true);
-    setError("");
+    setValidationError("");
     setArgumentError(null);
     setResult(null);
     try {
@@ -785,7 +869,7 @@ export function ValidateInstallClient({
       );
       setResult(data);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Tool validation failed.");
+      setValidationError(caught instanceof Error ? caught.message : "Tool validation failed.");
     } finally {
       setIsValidating(false);
     }
@@ -793,7 +877,16 @@ export function ValidateInstallClient({
 
   const runtimeStatus = runtimeSession?.status;
   const runtimeHealth = runtimeState?.health ?? null;
-  const runtimeDisplayStatus = runtimeHealth?.status || runtimeStatus;
+  const rawRuntimeDisplayStatus = runtimeHealth?.status || runtimeStatus;
+  const toolsResponding = tools.length > 0 && !toolsError;
+  const runtimeDisplayStatus =
+    toolsResponding &&
+    (runtimeError ||
+      rawRuntimeDisplayStatus === "failed" ||
+      rawRuntimeDisplayStatus === "not_ready" ||
+      (runtimeHealth !== null && !runtimeHealth.ready))
+      ? "tools_responding"
+      : rawRuntimeDisplayStatus;
   const healthDetails = runtimeHealth?.details ?? {};
   const desiredReplicas =
     typeof healthDetails.desiredReplicas === "number" ? healthDetails.desiredReplicas : null;
@@ -811,58 +904,155 @@ export function ValidateInstallClient({
   const canStopRuntime = Boolean(runtimeState?.canStop) && !runtimeBusy;
   const canRestartRuntime = Boolean(runtimeState?.canRestart) && !runtimeBusy;
   const canRedeployRuntime = Boolean(runtimeState?.canRedeploy) && !runtimeBusy;
+  const editHref = editInstallUrl(basePath, installation.id);
+  const hubHref = hubServerHref(installation);
+  const runtimeProvider = runtimeSession?.runtimeProvider || installation.runtimeProvider;
+  const runtimeMessage =
+    runtimeDisplayStatus === "tools_responding"
+      ? "Tool discovery is responding. The Kubernetes health read may still be catching up."
+      : runtimeHealth?.message || runtimeError || runtimeSession?.lastError || "";
+  const discoveryDetail = toolsResponding
+    ? `${tools.length} discovered`
+    : isLoadingTools
+      ? "Discovery running"
+      : toolsError
+        ? "Discovery failed"
+        : "No tools discovered";
+  const runtimeReplicaDetail =
+    desiredReplicas !== null && readyReplicas !== null
+      ? `${readyReplicas}/${desiredReplicas} replicas ready`
+      : runtimeSession?.podName
+        ? "Single runtime pod"
+        : "No live pod reported";
+  const metricCards = [
+    {
+      detail: installation.configName,
+      icon: Activity,
+      label: "Connection",
+      value: installation.status || "installed",
+    },
+    {
+      detail: `Refreshed ${formatRefreshTime(lastToolsRefreshAt)}`,
+      icon: Wrench,
+      label: "Tools",
+      value: discoveryDetail,
+    },
+    {
+      detail: `Refreshed ${formatRefreshTime(lastRuntimeRefreshAt)}`,
+      icon: runtimeDisplayStatus === "tools_responding" ? AlertTriangle : Activity,
+      label: "Runtime",
+      value: runtimeStatusLabel(runtimeDisplayStatus),
+    },
+    {
+      detail: policyDetails.join(", ") || "No runtime policy details",
+      icon: ShieldCheck,
+      label: "Egress Policy",
+      value: policyDetails.length > 0 ? `${policyDetails.length} rules` : "Default",
+    },
+  ];
+
+  useEffect(() => {
+    const shouldPollRuntime =
+      runtimeAction !== null ||
+      runtimeStillBooting(rawRuntimeDisplayStatus) ||
+      Boolean(runtimeError && !toolsResponding);
+    const shouldPollTools =
+      !toolsResponding &&
+      !isLoadingTools &&
+      (runtimeStillBooting(rawRuntimeDisplayStatus) || !rawRuntimeDisplayStatus);
+    if (!shouldPollRuntime && !shouldPollTools) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      if (shouldPollRuntime) {
+        void loadRuntimeState({ reportError: false, showLoading: false });
+      }
+      if (shouldPollTools) {
+        void loadTools({ reportError: false, showLoading: false });
+      }
+    }, 5_000);
+    return () => window.clearInterval(intervalId);
+  }, [
+    isLoadingTools,
+    loadRuntimeState,
+    loadTools,
+    rawRuntimeDisplayStatus,
+    runtimeAction,
+    runtimeError,
+    toolsResponding,
+  ]);
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
-          <CardContent className="flex h-full flex-col justify-between p-5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-              Server
-            </span>
-            <div>
-              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
+    <div className="space-y-5">
+      <Card className="overflow-hidden rounded-md border-border bg-card shadow-none">
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-4 border-b border-border px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={runtimeStatusBadgeVariant(runtimeDisplayStatus)}>
+                  {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
+                </Badge>
+                <Badge variant="outline">{runtimeProvider}</Badge>
+                <Badge variant="outline">{installation.installType}</Badge>
+                {installation.updateAvailable ? (
+                  <Badge variant="secondary">Update available</Badge>
+                ) : null}
+              </div>
+              <h2 className="mt-3 break-words text-2xl font-semibold leading-8 text-foreground">
                 {installation.server.title || installation.serverName}
-              </h3>
+              </h2>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                <span>{installation.configName}</span>
+                <span>{installation.serverName}</span>
+                <span>Version {installation.installedVersion}</span>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
-          <CardContent className="flex h-full flex-col justify-between p-5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-              Instance
-            </span>
-            <div>
-              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
-                {installation.configName}
-              </h3>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {hubHref ? (
+                <Button asChild size="sm" variant="outline">
+                  <a href={hubHref} rel="noreferrer" target="_blank">
+                    <ExternalLink className="size-4" />
+                    View in Hub
+                  </a>
+                </Button>
+              ) : null}
+              <Button asChild size="sm" variant="outline">
+                <Link href={editHref}>
+                  <Edit2 className="size-4" />
+                  Edit
+                </Link>
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="h-32 rounded-xl border-[var(--outline-variant)] bg-white shadow-none transition-shadow hover:shadow-sm">
-          <CardContent className="flex h-full flex-col justify-between p-5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-              Version
-            </span>
-            <div>
-              <h3 className="truncate text-xl font-bold leading-7 text-[var(--on-surface)]">
-                {installation.installedVersion}
-              </h3>
-              <p className="mt-1 text-sm leading-5 text-[var(--on-surface-variant)]">
-                {installation.installType}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+          <div className="grid grid-cols-1 divide-y divide-border md:grid-cols-4 md:divide-x md:divide-y-0">
+            {metricCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <div className="min-h-28 p-4" key={card.label}>
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    <Icon className="size-3.5" />
+                    {card.label}
+                  </div>
+                  <div className="mt-3 truncate text-lg font-semibold leading-6 text-foreground">
+                    {card.value}
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                    {card.detail}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
-      <Card className="rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-        <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0 space-y-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-              Runtime
-            </span>
+      <Card className="rounded-md border-border bg-card shadow-none">
+        <CardContent className="flex flex-col gap-4 p-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Runtime Control
+              </span>
               <Badge
                 variant={
                   isLoadingRuntime
@@ -872,14 +1062,10 @@ export function ValidateInstallClient({
               >
                 {isLoadingRuntime ? "Loading" : runtimeStatusLabel(runtimeDisplayStatus)}
               </Badge>
-              {runtimeSession?.runtimeProvider ? (
-                <span className="text-sm text-[var(--on-surface-variant)]">
-                  {runtimeSession.runtimeProvider}
-                </span>
-              ) : null}
+              <span className="text-xs text-muted-foreground">{runtimeReplicaDetail}</span>
             </div>
             {runtimeDetails.length > 0 ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--on-surface-variant)]">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 {runtimeDetails.map((detail) => (
                   <span className="break-all" key={detail}>
                     {detail}
@@ -894,9 +1080,9 @@ export function ValidateInstallClient({
                 </Badge>
               ))}
             </div>
-            {runtimeHealth?.message ? (
-              <p className="max-w-3xl text-xs leading-5 text-[var(--on-surface-variant)]">
-                {runtimeHealth.message}
+            {runtimeMessage ? (
+              <p className="max-w-4xl text-xs leading-5 text-muted-foreground">
+                {runtimeMessage}
               </p>
             ) : null}
           </div>
@@ -961,23 +1147,47 @@ export function ValidateInstallClient({
         </CardContent>
       </Card>
 
-      <FeedbackMessages error={error} notice={notice} />
+      {runtimeError && runtimeDisplayStatus !== "tools_responding" ? (
+        <AsyncFeedback className="rounded-md px-4 py-3" variant="error">
+          {runtimeError}
+        </AsyncFeedback>
+      ) : null}
+      {toolsError ? (
+        <AsyncFeedback className="rounded-md px-4 py-3" variant="error">
+          {toolsError}
+        </AsyncFeedback>
+      ) : null}
+      {validationError ? (
+        <AsyncFeedback className="rounded-md px-4 py-3" variant="error">
+          {validationError}
+        </AsyncFeedback>
+      ) : null}
+      {notice ? (
+        <AsyncFeedback className="rounded-md px-4 py-3" variant="success">
+          {notice}
+        </AsyncFeedback>
+      ) : null}
       {refreshNotice ? (
-        <AsyncFeedback className="mb-4 rounded-lg px-4 py-3" variant="info">
+        <AsyncFeedback className="rounded-md px-4 py-3" variant="info">
           {refreshNotice}
         </AsyncFeedback>
       ) : null}
 
       <div className="grid grid-cols-12 items-start gap-6">
-        <Card className="col-span-12 max-h-[600px] overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none lg:col-span-3">
-          <CardHeader className="border-b border-[var(--outline-variant)] p-4">
-            <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
-              Tools
-            </CardTitle>
+        <Card className="col-span-12 max-h-[600px] overflow-hidden rounded-md border-border bg-card shadow-none lg:col-span-3">
+          <CardHeader className="border-b border-border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Tools
+              </CardTitle>
+              <Badge variant={toolsResponding ? "success" : "outline"}>
+                {isLoadingTools ? "Loading" : tools.length}
+              </Badge>
+            </div>
             <div className="relative mt-3">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--outline)]" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                className="h-10 rounded-lg border-[var(--outline-variant)] bg-[var(--surface)] pl-10 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
+                className="h-10 rounded-md border-border bg-background pl-10 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20"
                 onChange={(event) => setToolSearch(event.target.value)}
                 placeholder="Search tools"
                 value={toolSearch}
@@ -986,33 +1196,39 @@ export function ValidateInstallClient({
           </CardHeader>
           <CardContent className="max-h-[508px] overflow-y-auto px-0 pb-4 pt-0">
             {isLoadingTools ? (
-              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
-                Loading tools...
+              <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading tools
               </div>
             ) : tools.length === 0 ? (
-              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
+              <div className="p-4 text-sm text-muted-foreground">
                 No tools were discovered for this server.
               </div>
             ) : filteredTools.length === 0 ? (
-              <div className="p-4 text-sm text-[var(--on-surface-variant)]">
+              <div className="p-4 text-sm text-muted-foreground">
                 No tools match this search.
               </div>
             ) : (
-              <div className="divide-y divide-[var(--outline-variant)]/30">
+              <div className="divide-y divide-border">
                 {filteredTools.map((tool) => (
                   <button
                     className={
                       tool.toolName === selectedToolName
-                        ? "block w-full border-l-4 border-primary bg-[var(--secondary-container)]/50 px-4 py-4 text-left"
-                        : "block w-full border-l-4 border-transparent px-4 py-4 text-left transition-colors hover:bg-[var(--surface-container)]"
+                        ? "block w-full border-l-4 border-primary bg-muted px-4 py-3 text-left"
+                        : "block w-full border-l-4 border-transparent px-4 py-3 text-left transition-colors hover:bg-muted/60"
                     }
                     key={tool.toolName}
                     onClick={() => selectTool(tool)}
                     type="button"
                   >
-                    <span className="block truncate text-sm font-semibold leading-5 text-[var(--on-surface)]">
+                    <span className="block truncate text-sm font-semibold leading-5 text-foreground">
                       {tool.title || tool.toolName}
                     </span>
+                    {tool.description ? (
+                      <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {tool.description}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -1021,33 +1237,38 @@ export function ValidateInstallClient({
         </Card>
 
         <div className="col-span-12 space-y-6 lg:col-span-9">
-          <Card className="overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-            <CardHeader className="border-b border-[var(--outline-variant)] p-6">
+          <Card className="overflow-hidden rounded-md border-border bg-card shadow-none">
+            <CardHeader className="border-b border-border p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <CardTitle className="text-2xl font-bold leading-8 tracking-normal text-[var(--on-surface)]">
+                  <CardTitle className="text-xl font-semibold leading-7 tracking-normal text-foreground">
                     {selectedTool?.title || selectedTool?.toolName || "Select a tool"}
                   </CardTitle>
+                  {selectedTool?.toolName ? (
+                    <div className="mt-1 font-mono text-xs text-muted-foreground">
+                      {selectedTool.toolName}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6 p-6">
+            <CardContent className="space-y-5 p-5">
               {!selectedTool ? (
-                <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-[var(--outline-variant)] text-sm text-[var(--on-surface-variant)]">
+                <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
                   Select a tool to configure validation arguments.
                 </div>
               ) : (
                 <>
                   {selectedTool.description ? (
                     <div className="space-y-3">
-                      <p className="whitespace-pre-wrap text-sm leading-5 text-[var(--on-surface)]/80">
+                      <p className="whitespace-pre-wrap text-sm leading-5 text-foreground/80">
                         {selectedTool.description}
                       </p>
                     </div>
                   ) : null}
 
                   {selectedInputs.length === 0 ? (
-                    <div className="rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] p-4 text-sm text-[var(--on-surface-variant)]">
+                    <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
                       This tool does not declare input fields.
                     </div>
                   ) : (
@@ -1064,7 +1285,7 @@ export function ValidateInstallClient({
                             <div className="flex items-end justify-between gap-3">
                               <div className="flex min-h-6 items-center gap-2">
                                 <label
-                                  className="text-xs font-semibold leading-4 text-[var(--on-surface)]"
+                                  className="text-xs font-semibold leading-4 text-foreground"
                                   htmlFor={inputId}
                                 >
                                   {input.name}
@@ -1073,14 +1294,14 @@ export function ValidateInstallClient({
                                 {input.description ? (
                                   <span
                                     aria-label={`${input.name} help`}
-                                    className="inline-flex text-[var(--on-surface-variant)]"
+                                    className="inline-flex text-muted-foreground"
                                     title={input.description}
                                   >
                                     <CircleHelp className="size-4" />
                                   </span>
                                 ) : null}
                               </div>
-                              <span className="rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--on-surface-variant)]">
+                              <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
                                 {input.type}
                               </span>
                             </div>
@@ -1088,7 +1309,7 @@ export function ValidateInstallClient({
                             {input.type === "boolean" ? (
                               <label
                                 className={cn(
-                                  "flex h-11 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-4 text-sm",
+                                  "flex h-11 items-center gap-2 rounded-md border border-border bg-background px-4 text-sm",
                                   fieldError && "!border-red-500"
                                 )}
                               >
@@ -1123,7 +1344,7 @@ export function ValidateInstallClient({
                                   aria-describedby={fieldError ? errorId : undefined}
                                   aria-invalid={Boolean(fieldError)}
                                   className={cn(
-                                    "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
+                                    "h-12 rounded-md border-border bg-background px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
                                     fieldError &&
                                       "!border-red-500 focus-visible:!border-red-600 focus-visible:!ring-red-100"
                                   )}
@@ -1144,7 +1365,7 @@ export function ValidateInstallClient({
                                 aria-describedby={fieldError ? errorId : undefined}
                                 aria-invalid={Boolean(fieldError)}
                                 className={cn(
-                                  "min-h-32 w-full rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                  "min-h-32 w-full rounded-md border border-border bg-background px-4 py-3 font-mono text-sm outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20",
                                   fieldError && "!border-red-500 focus:!border-red-600 focus:!ring-red-100"
                                 )}
                                 id={inputId}
@@ -1162,7 +1383,7 @@ export function ValidateInstallClient({
                                 aria-describedby={fieldError ? errorId : undefined}
                                 aria-invalid={Boolean(fieldError)}
                                 className={cn(
-                                  "h-12 rounded-lg border-[var(--outline-variant)] bg-white px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
+                                  "h-12 rounded-md border-border bg-background px-4 shadow-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20",
                                   fieldError &&
                                     "!border-red-500 focus-visible:!border-red-600 focus-visible:!ring-red-100"
                                 )}
@@ -1198,18 +1419,18 @@ export function ValidateInstallClient({
                     </div>
                   )}
 
-                  <details className="group rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface)]">
-                    <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)]">
+                  <details className="group rounded-md border border-border bg-muted/40">
+                    <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
                       Input schema reference
                     </summary>
-                    <pre className="max-h-72 overflow-auto border-t border-[var(--outline-variant)]/30 bg-white p-4 text-xs">
+                    <pre className="max-h-72 overflow-auto border-t border-border bg-background p-4 text-xs">
                       {JSON.stringify(selectedTool.inputSchema ?? {}, null, 2)}
                     </pre>
                   </details>
                 </>
               )}
             </CardContent>
-            <div className="flex justify-end border-t border-[var(--outline-variant)] bg-[var(--surface)] px-6 py-4">
+            <div className="flex justify-end border-t border-border bg-muted/30 px-5 py-4">
               <Button
                 disabled={isValidating || isLoadingTools || !selectedToolName}
                 onClick={validateTool}
@@ -1221,9 +1442,9 @@ export function ValidateInstallClient({
             </div>
           </Card>
 
-          <Card className="overflow-hidden rounded-xl border-[var(--outline-variant)] bg-white shadow-none">
-            <CardHeader className="border-b border-[var(--outline-variant)] px-6 py-4">
-              <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--on-surface-variant)]">
+          <Card className="overflow-hidden rounded-md border-border bg-card shadow-none">
+            <CardHeader className="border-b border-border px-5 py-4">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Result
               </CardTitle>
             </CardHeader>
@@ -1233,7 +1454,7 @@ export function ValidateInstallClient({
                   <div className="flex size-16 items-center justify-center rounded-full border-2 border-dashed border-[var(--outline-variant)] bg-[var(--surface-container)] text-[var(--outline)]">
                     <Terminal className="size-8" />
                   </div>
-                  <p className="text-sm leading-5 text-[var(--on-surface-variant)]">
+                  <p className="text-sm leading-5 text-muted-foreground">
                     Run validation to inspect the tool response.
                   </p>
                 </div>
@@ -1243,8 +1464,8 @@ export function ValidateInstallClient({
                   aria-live={result.status === "passed" ? "polite" : "assertive"}
                   className={
                     result.status === "passed"
-                      ? "rounded-lg border border-emerald-200 bg-emerald-50 p-4"
-                      : "rounded-lg border border-red-200 bg-red-50 p-4"
+                      ? "rounded-md border border-emerald-200 bg-emerald-50 p-4"
+                      : "rounded-md border border-red-200 bg-red-50 p-4"
                   }
                   role={result.status === "passed" ? "status" : "alert"}
                 >

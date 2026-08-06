@@ -61,6 +61,7 @@ export async function ValidateInstallView({
       workspaceContext={workspaceContext}
     >
       <ValidateInstallClient
+        basePath={installPath}
         installation={installation}
         organizationId={workspaceContext.selectedOrganization?.id ?? ""}
         workspaceId={workspaceContext.selectedWorkspace?.id ?? ""}
