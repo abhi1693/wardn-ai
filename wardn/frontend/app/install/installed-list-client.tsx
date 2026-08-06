@@ -6,8 +6,10 @@ import {
   Edit2,
   KeyRound,
   Play,
+  Search,
   ShieldOff,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -23,6 +25,8 @@ import {
 } from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -54,6 +58,8 @@ type ConnectionStatusLabel =
   | "Connected"
   | "Blocked by policy"
   | "Unhealthy";
+
+const ALL_FILTER_VALUE = "__all__";
 
 type ConnectionStatus = {
   detail: string;
@@ -135,6 +141,30 @@ function connectionStatus(installation: MCPServerInstallationRead): ConnectionSt
   };
 }
 
+type FilterOption = {
+  label: string;
+  value: string;
+};
+
+function connectionTypeLabel(installation: MCPServerInstallationRead) {
+  return installation.server.title || installation.serverName;
+}
+
+function normalizedSearchText(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function formatResultCount(count: number, total: number) {
+  const noun = total === 1 ? "connection" : "connections";
+  return `${count} of ${total} ${noun}`;
+}
+
+function sortedFilterOptions(options: Map<string, string>): FilterOption[] {
+  return Array.from(options.entries())
+    .map(([value, label]) => ({ label, value }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 type InstallationActionLinkProps = {
   children: ReactNode;
   disabled: boolean;
@@ -185,6 +215,10 @@ export function InstalledListClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState(ALL_FILTER_VALUE);
+  const [runtimeFilter, setRuntimeFilter] = useState(ALL_FILTER_VALUE);
+  const [connectionTypeFilter, setConnectionTypeFilter] = useState(ALL_FILTER_VALUE);
 
   const sortedInstallations = useMemo(
     () =>
@@ -197,6 +231,7 @@ export function InstalledListClient({
       }),
     [installations]
   );
+
   const statusCounts = useMemo(() => {
     const counts: Record<ConnectionStatusLabel, number> = {
       "Needs credential": 0,
@@ -209,6 +244,88 @@ export function InstalledListClient({
     });
     return counts;
   }, [installations]);
+
+  const statusFilterOptions = useMemo(
+    () =>
+      connectionStatuses
+        .filter((status) => statusCounts[status.label] > 0)
+        .map((status) => ({ label: status.label, value: status.label })),
+    [statusCounts]
+  );
+
+  const runtimeFilterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    installations.forEach((installation) => {
+      const label = runtimeDisplayName(installation.installType);
+      options.set(label, label);
+    });
+    return sortedFilterOptions(options);
+  }, [installations]);
+
+  const connectionTypeFilterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    installations.forEach((installation) => {
+      options.set(installation.serverName, connectionTypeLabel(installation));
+    });
+    return sortedFilterOptions(options);
+  }, [installations]);
+
+  const filteredInstallations = useMemo(() => {
+    const query = normalizedSearchText(searchQuery);
+
+    return sortedInstallations.filter((installation) => {
+      const status = connectionStatus(installation);
+      const runtimeLabel = runtimeDisplayName(installation.installType);
+
+      if (statusFilter !== ALL_FILTER_VALUE && status.label !== statusFilter) {
+        return false;
+      }
+      if (runtimeFilter !== ALL_FILTER_VALUE && runtimeLabel !== runtimeFilter) {
+        return false;
+      }
+      if (
+        connectionTypeFilter !== ALL_FILTER_VALUE &&
+        installation.serverName !== connectionTypeFilter
+      ) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+
+      const searchableText = [
+        connectionTypeLabel(installation),
+        installation.serverName,
+        installation.configName,
+        runtimeLabel,
+        installation.installType,
+        installation.runtimeProvider,
+      ]
+        .map(normalizedSearchText)
+        .join(" ");
+
+      return searchableText.includes(query);
+    });
+  }, [
+    connectionTypeFilter,
+    runtimeFilter,
+    searchQuery,
+    sortedInstallations,
+    statusFilter,
+  ]);
+
+  const hasActiveFilters =
+    normalizedSearchText(searchQuery).length > 0 ||
+    statusFilter !== ALL_FILTER_VALUE ||
+    runtimeFilter !== ALL_FILTER_VALUE ||
+    connectionTypeFilter !== ALL_FILTER_VALUE;
+
+  function clearFilters() {
+    setSearchQuery("");
+    setStatusFilter(ALL_FILTER_VALUE);
+    setRuntimeFilter(ALL_FILTER_VALUE);
+    setConnectionTypeFilter(ALL_FILTER_VALUE);
+  }
 
   async function removeInstallation(installation: MCPServerInstallationRead) {
     setIsMutating(true);
@@ -257,6 +374,94 @@ export function InstalledListClient({
       </section>
 
       <McpTableCard>
+        {sortedInstallations.length > 0 ? (
+          <div className="border-b border-border bg-card px-4 py-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+              <div className="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_minmax(160px,0.75fr)_minmax(160px,0.75fr)_minmax(190px,0.85fr)]">
+                <label className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Search</span>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      aria-label="Search connections"
+                      autoComplete="off"
+                      className="pl-9"
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Connection, instance, or type"
+                      value={searchQuery}
+                    />
+                  </div>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Runtime</span>
+                  <Select onValueChange={setRuntimeFilter} value={runtimeFilter}>
+                    <SelectTrigger aria-label="Filter by runtime">
+                      <SelectValue placeholder="All runtimes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_FILTER_VALUE}>All runtimes</SelectItem>
+                      {runtimeFilterOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Status</span>
+                  <Select onValueChange={setStatusFilter} value={statusFilter}>
+                    <SelectTrigger aria-label="Filter by status">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_FILTER_VALUE}>All statuses</SelectItem>
+                      {statusFilterOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Connection type
+                  </span>
+                  <Select onValueChange={setConnectionTypeFilter} value={connectionTypeFilter}>
+                    <SelectTrigger aria-label="Filter by connection type">
+                      <SelectValue placeholder="All connection types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_FILTER_VALUE}>All connection types</SelectItem>
+                      {connectionTypeFilterOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 xl:justify-end">
+                <div className="text-sm text-muted-foreground">
+                  {formatResultCount(filteredInstallations.length, sortedInstallations.length)}
+                </div>
+                {hasActiveFilters ? (
+                  <Button onClick={clearFilters} size="sm" type="button" variant="ghost">
+                    <X className="size-4" />
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <Table>
           <TableHeader>
             <TableRow>
@@ -265,7 +470,7 @@ export function InstalledListClient({
               <TableHead className="w-[180px]">Status</TableHead>
               <TableHead className="w-[150px]">Runtime</TableHead>
               <TableHead className="w-[170px]">Version</TableHead>
-              <TableHead className="w-[140px]"></TableHead>
+              <TableHead className="w-[140px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -286,8 +491,30 @@ export function InstalledListClient({
                   </div>
                 </TableCell>
               </TableRow>
+            ) : filteredInstallations.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-44 text-center">
+                  <div className="mx-auto max-w-md">
+                    <div className="text-base font-semibold text-foreground">
+                      No connections match these filters
+                    </div>
+                    <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Adjust the search text or clear filters to see the installed connections.
+                    </div>
+                    <Button
+                      className="mt-4"
+                      onClick={clearFilters}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Clear filters
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : (
-              sortedInstallations.map((installation) => {
+              filteredInstallations.map((installation) => {
                 const iconUrl = serverIconUrlFromIcons(installation.server.icons);
                 const status = connectionStatus(installation);
 
