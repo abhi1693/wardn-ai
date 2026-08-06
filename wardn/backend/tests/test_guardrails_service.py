@@ -1895,6 +1895,9 @@ async def test_complete_agent_tool_approval_checkpoints_before_followup_confirma
         captured["run_status"] = kwargs["status"]
         return args[1]
 
+    async def deliver_completed_chat_provider_reply(*args, **kwargs):
+        captured["delivery"] = kwargs
+
     monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
     monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
     monkeypatch.setattr(agent_service.repository, "get_tool_approval", get_tool_approval)
@@ -1926,6 +1929,11 @@ async def test_complete_agent_tool_approval_checkpoints_before_followup_confirma
         list_active_tool_approvals_for_agent_run,
     )
     monkeypatch.setattr(agent_service.repository, "finish_agent_run", finish_agent_run)
+    monkeypatch.setattr(
+        agent_approvals,
+        "deliver_completed_chat_provider_reply",
+        deliver_completed_chat_provider_reply,
+    )
 
     response = await agent_approvals.complete_agent_tool_approval(
         FakeSession(),
@@ -1935,6 +1943,7 @@ async def test_complete_agent_tool_approval_checkpoints_before_followup_confirma
         agent.id,
         approval.id,
         checkpoint_after_execution=checkpoint,
+        session_factory=fake_session_factory(FakeSession()),
     )
 
     assert approval.status == "completed"
@@ -1944,6 +1953,8 @@ async def test_complete_agent_tool_approval_checkpoints_before_followup_confirma
     )
     assert captured["activity_update"]["status"] == "completed"
     assert captured["run_status"] == "waiting_confirmation"
+    assert captured["delivery"]["conversation_id"] == approval.conversation_id
+    assert captured["delivery"]["agent_run_id"] == approval.agent_run_id
     assert response.status == "completed"
 
 

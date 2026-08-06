@@ -179,6 +179,27 @@ async def list_outbound_events_for_agent_run(
     return list(result.all())
 
 
+async def has_provider_reply_for_agent_run(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        select(ChatProviderEvent.id)
+        .where(
+            ChatProviderEvent.organization_id == organization_id,
+            ChatProviderEvent.workspace_id == workspace_id,
+            ChatProviderEvent.direction == "outbound",
+            ChatProviderEvent.payload["agentRunId"].as_string() == str(agent_run_id),
+            ChatProviderEvent.payload["approvalRequest"].as_boolean().is_distinct_from(True),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def get_thread_connection_for_conversation(
     session: AsyncSession,
     *,

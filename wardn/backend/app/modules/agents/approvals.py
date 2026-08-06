@@ -475,6 +475,39 @@ async def finish_agent_run_after_tool_approval(
     )
 
 
+async def deliver_completed_chat_provider_reply(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+    agent_run_id: uuid.UUID,
+) -> None:
+    if conversation_id is None:
+        return
+    from app.modules.chat_providers import service as chat_provider_service
+
+    try:
+        await chat_provider_service.deliver_conversation_reply_to_provider_thread(
+            session,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            external_event_id_prefix="approval-resume",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to deliver approval resume reply to chat provider.",
+            extra={
+                "organization_id": str(organization_id),
+                "workspace_id": str(workspace_id),
+                "conversation_id": str(conversation_id),
+                "agent_run_id": str(agent_run_id),
+            },
+        )
+
+
 def agent_tool_approval_decision_response(
     approval: AgentToolApproval,
     *,
@@ -727,6 +760,15 @@ async def complete_agent_tool_approval(
                     approval_status=approval.status,
                     approval_error=approval.error,
                 )
+            if approval.status == "completed":
+                async with agent_stream_unit_of_work(session_factory) as delivery_session:
+                    await deliver_completed_chat_provider_reply(
+                        delivery_session,
+                        organization_id=organization_id,
+                        workspace_id=workspace_id,
+                        conversation_id=approval.conversation_id,
+                        agent_run_id=approval.agent_run_id,
+                    )
     return agent_tool_approval_decision_response(
         approval,
         assistant_message=assistant_message,

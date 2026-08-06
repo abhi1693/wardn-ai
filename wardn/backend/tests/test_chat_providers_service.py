@@ -80,6 +80,120 @@ def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProv
     )
 
 
+@pytest.mark.asyncio
+async def test_deliver_conversation_reply_to_provider_thread_sends_latest_assistant(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    conversation_id = uuid4()
+    agent_run_id = uuid4()
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=conversation_id,
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+        last_external_message_id="wa-inbound-1",
+    )
+    sent: dict[str, object] = {}
+
+    async def has_provider_reply_for_agent_run(*args, **kwargs):
+        return False
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        return thread, connection
+
+    async def latest_assistant_message(*args, **kwargs):
+        return ConversationMessage(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            agent_run_id=agent_run_id,
+            role="assistant",
+            content="Redeploy completed.",
+            parts=[{"type": "text", "text": "Redeploy completed."}],
+            sequence=2,
+        )
+
+    async def assistant_message_run_canceled(*args, **kwargs):
+        return False
+
+    async def send_provider_text_message(*args, **kwargs):
+        sent.update(kwargs)
+        return {"id": "wa-outbound-1"}
+
+    monkeypatch.setattr(
+        service.repository,
+        "has_provider_reply_for_agent_run",
+        has_provider_reply_for_agent_run,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
+    monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    await service.deliver_conversation_reply_to_provider_thread(
+        fake_session,
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        external_event_id_prefix="approval-resume",
+    )
+
+    assert sent["external_thread_id"] == thread.external_thread_id
+    assert sent["text"] == "Redeploy completed."
+    assert sent["reply_to_message_id"] == "wa-inbound-1"
+    outbound_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "outbound"
+    )
+    assert outbound_event.status == "sent"
+    assert outbound_event.event_type == "message.text"
+    assert outbound_event.payload["agentRunId"] == str(agent_run_id)
+    assert outbound_event.payload[connection.provider] == {"id": "wa-outbound-1"}
+
+
+@pytest.mark.asyncio
+async def test_deliver_conversation_reply_to_provider_thread_skips_existing_reply(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+
+    async def has_provider_reply_for_agent_run(*args, **kwargs):
+        return True
+
+    async def send_provider_text_message(*args, **kwargs):
+        raise AssertionError("duplicate provider replies must not be sent")
+
+    monkeypatch.setattr(
+        service.repository,
+        "has_provider_reply_for_agent_run",
+        has_provider_reply_for_agent_run,
+    )
+    monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
+
+    await service.deliver_conversation_reply_to_provider_thread(
+        fake_session,
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        conversation_id=uuid4(),
+        agent_run_id=uuid4(),
+        external_event_id_prefix="approval-resume",
+    )
+
+    assert fake_session.added == []
+
+
 def test_qr_payload_from_bridge_data_accepts_sse_json() -> None:
     assert (
         service.qr_payload_from_bridge_data('{"qr":"2@abcd,1234"}')

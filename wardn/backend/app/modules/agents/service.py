@@ -2063,91 +2063,16 @@ async def deliver_provider_rerun_reply(
     conversation_id: uuid.UUID,
     agent_run_id: uuid.UUID,
 ) -> None:
-    thread_connection = await chat_provider_repository.get_thread_connection_for_conversation(
+    from app.modules.chat_providers import service as chat_provider_service
+
+    await chat_provider_service.deliver_conversation_reply_to_provider_thread(
         session,
         organization_id=organization_id,
         workspace_id=workspace_id,
         conversation_id=conversation_id,
+        agent_run_id=agent_run_id,
+        external_event_id_prefix="rerun",
     )
-    if thread_connection is None:
-        return
-    thread, connection = thread_connection
-    if not connection.is_active:
-        return
-    from app.modules.chat_providers import service as chat_provider_service
-
-    assistant_message = await chat_provider_service.latest_assistant_message(
-        session,
-        conversation_id,
-    )
-    if await chat_provider_service.assistant_message_run_canceled(
-        session,
-        connection,
-        assistant_message,
-    ):
-        return
-    reply_text = assistant_message.content.strip() if assistant_message is not None else ""
-    if not reply_text:
-        reply_text = await chat_provider_service.route_pending_approval_request_reply(
-            session,
-            connection,
-            conversation_id=conversation_id,
-            initiating_event_id=thread.last_external_message_id or f"rerun:{agent_run_id}",
-        )
-    elif chat_provider_service.reply_exposes_wardn_approval_url(reply_text):
-        reply_text = (
-            await chat_provider_service.route_pending_approval_request_reply(
-                session,
-                connection,
-                conversation_id=conversation_id,
-                initiating_event_id=thread.last_external_message_id or f"rerun:{agent_run_id}",
-            )
-            or chat_provider_service.PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY
-        )
-    if not reply_text:
-        reply_text = chat_provider_service.PROVIDER_ASSISTANT_EMPTY_REPLY
-    try:
-        outbound_payload = await chat_provider_service.send_provider_text_message(
-            session,
-            connection,
-            external_thread_id=thread.external_thread_id,
-            text=reply_text,
-            reply_to_message_id=thread.last_external_message_id,
-        )
-    except chat_provider_service.ChatProviderDeliveryError as exc:
-        await chat_provider_service.record_provider_text_delivery_failure(
-            session,
-            connection,
-            thread=thread,
-            conversation_id=conversation_id,
-            external_event_id=f"rerun:{agent_run_id}:{thread.id}:failed",
-            text=reply_text,
-            error=str(exc),
-            agent_run_id=agent_run_id,
-        )
-        await session.flush()
-        return
-    outbound_message_id = chat_provider_service.provider_response_message_id(
-        connection,
-        outbound_payload,
-    )
-    session.add(
-        ChatProviderEvent(
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            connection_id=connection.id,
-            thread_id=thread.id,
-            conversation_id=conversation_id,
-            provider=connection.provider,
-            external_event_id=outbound_message_id or f"rerun:{agent_run_id}:{thread.id}",
-            direction="outbound",
-            event_type="message.text",
-            status="sent",
-            payload={connection.provider: outbound_payload, "agentRunId": str(agent_run_id)},
-            processed_at=datetime.now(UTC),
-        )
-    )
-    await session.flush()
 
 
 async def rerun_workspace_agent_run(

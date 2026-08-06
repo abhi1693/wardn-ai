@@ -2143,6 +2143,101 @@ async def assistant_message_run_canceled(
     return agent_run is not None and agent_run.status == "canceled"
 
 
+async def deliver_conversation_reply_to_provider_thread(
+    session: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+    external_event_id_prefix: str,
+) -> None:
+    if await repository.has_provider_reply_for_agent_run(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+    ):
+        return
+    thread_connection = await repository.get_thread_connection_for_conversation(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+    )
+    if thread_connection is None:
+        return
+    thread, connection = thread_connection
+    if not connection.is_active:
+        return
+    assistant_message = await latest_assistant_message(session, conversation_id)
+    if await assistant_message_run_canceled(session, connection, assistant_message):
+        return
+    reply_text = assistant_message.content.strip() if assistant_message is not None else ""
+    initiating_event_id = (
+        thread.last_external_message_id or f"{external_event_id_prefix}:{agent_run_id}"
+    )
+    if not reply_text:
+        reply_text = await route_pending_approval_request_reply(
+            session,
+            connection,
+            conversation_id=conversation_id,
+            initiating_event_id=initiating_event_id,
+        )
+    elif reply_exposes_wardn_approval_url(reply_text):
+        reply_text = (
+            await route_pending_approval_request_reply(
+                session,
+                connection,
+                conversation_id=conversation_id,
+                initiating_event_id=initiating_event_id,
+            )
+            or PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY
+        )
+    if not reply_text:
+        reply_text = PROVIDER_ASSISTANT_EMPTY_REPLY
+    fallback_event_id = f"{external_event_id_prefix}:{agent_run_id}:{thread.id}"
+    try:
+        outbound_payload = await send_provider_text_message(
+            session,
+            connection,
+            external_thread_id=thread.external_thread_id,
+            text=reply_text,
+            reply_to_message_id=thread.last_external_message_id,
+        )
+    except ChatProviderDeliveryError as exc:
+        await record_provider_text_delivery_failure(
+            session,
+            connection,
+            thread=thread,
+            conversation_id=conversation_id,
+            external_event_id=f"{fallback_event_id}:failed",
+            text=reply_text,
+            error=str(exc),
+            agent_run_id=agent_run_id,
+        )
+        await session.flush()
+        return
+    outbound_message_id = provider_response_message_id(connection, outbound_payload)
+    session.add(
+        ChatProviderEvent(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            thread_id=thread.id,
+            conversation_id=conversation_id,
+            provider=connection.provider,
+            external_event_id=outbound_message_id or fallback_event_id,
+            direction="outbound",
+            event_type="message.text",
+            status="sent",
+            payload={connection.provider: outbound_payload, "agentRunId": str(agent_run_id)},
+            processed_at=datetime.now(UTC),
+        )
+    )
+    await session.flush()
+
+
 def approval_reply_text(approval: AgentToolApproval) -> str:
     approval_url = agent_tool_approval_url(
         organization_id=approval.organization_id,
