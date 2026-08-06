@@ -201,8 +201,9 @@ async def list_workspace_members(
         )
         .order_by(
             WorkspaceMembership.role.asc(),
-            User.display_name.asc(),
-            User.email.asc(),
+            func.lower(User.first_name).asc(),
+            func.lower(User.last_name).asc(),
+            func.lower(User.email).asc(),
             WorkspaceMembership.id.asc(),
         )
     )
