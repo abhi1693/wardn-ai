@@ -87,6 +87,180 @@ def make_connection(provider: str = service.PROVIDER_WHATSAPP_LOCAL) -> ChatProv
     )
 
 
+def test_parse_agent_stream_chunk_extracts_progress_events() -> None:
+    events = service.parse_agent_stream_chunk(
+        'data: {"type":"data-tool-activity","data":{"toolName":"Search","status":"running"}}\n\n'
+        'data: {"type":"finish","finishReason":"stop"}\n\n'
+    )
+
+    assert events == [
+        {
+            "type": "data-tool-activity",
+            "data": {"toolName": "Search", "status": "running"},
+        },
+        {"type": "finish", "finishReason": "stop"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_provider_progress_records_whatsapp_reaction(monkeypatch) -> None:
+    fake_session = FakeSession()
+    connection = make_connection()
+    connection.config = {
+        "allow_all_senders": True,
+        "bridge_base_url": "http://bridge.local",
+        "bridge_user_id": "95273632",
+    }
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="15551234567@s.whatsapp.net",
+        external_user_id="15551234567@s.whatsapp.net",
+        external_user_display_name="Asha",
+    )
+    calls: list[dict[str, str]] = []
+
+    async def send_whatsapp_bridge_reaction(*args, **kwargs):
+        calls.append(kwargs)
+        return {"message_id": "wa-reaction-1"}
+
+    monkeypatch.setattr(service, "send_whatsapp_bridge_reaction", send_whatsapp_bridge_reaction)
+
+    notifier = service.ProviderProgressNotifier(
+        connection=connection,
+        thread=thread,
+        inbound_event_id="wa-inbound-1",
+        external_thread_id=thread.external_thread_id,
+        agent_run_id=uuid4(),
+    )
+    await service.send_provider_progress(fake_session, notifier, state="accepted")
+
+    progress_event = next(
+        item
+        for item in fake_session.added
+        if isinstance(item, ChatProviderEvent) and item.direction == "status"
+    )
+
+    assert calls == [
+        {
+            "external_thread_id": "15551234567@s.whatsapp.net",
+            "message_id": "wa-inbound-1",
+            "emoji": "\U0001f440",
+        }
+    ]
+    assert progress_event.event_type == "message.progress"
+    assert progress_event.status == "sent"
+    assert progress_event.payload["providerProgressState"] == "accepted"
+    assert progress_event.payload["agentRunId"] == str(notifier.agent_run_id)
+
+
+@pytest.mark.asyncio
+async def test_send_provider_progress_updates_single_telegram_status_message(monkeypatch) -> None:
+    fake_session = FakeSession()
+    connection = make_connection(service.PROVIDER_TELEGRAM)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="555",
+        external_user_id="987",
+        external_user_display_name="Asha",
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def send_telegram_text_message(*args, **kwargs):
+        calls.append(("send", kwargs))
+        return {"result": {"message_id": 42, "chat": {"id": "555"}}}
+
+    async def send_telegram_edit_message(*args, **kwargs):
+        calls.append(("edit", kwargs))
+        return {"result": {"message_id": 42, "chat": {"id": "555"}}}
+
+    monkeypatch.setattr(service, "send_telegram_text_message", send_telegram_text_message)
+    monkeypatch.setattr(service, "send_telegram_edit_message", send_telegram_edit_message)
+
+    notifier = service.ProviderProgressNotifier(
+        connection=connection,
+        thread=thread,
+        inbound_event_id="update:123",
+        external_thread_id=thread.external_thread_id,
+    )
+    await service.send_provider_progress(fake_session, notifier, state="accepted")
+    await service.send_provider_progress(fake_session, notifier, state="done", terminal=True)
+
+    assert calls == [
+        ("send", {"chat_id": "555", "text": "Working on it."}),
+        (
+            "edit",
+            {
+                "external_message_id": "message:555:42",
+                "text": "Done.",
+            },
+        ),
+    ]
+    assert notifier.status_message_external_id == "message:555:42"
+
+
+@pytest.mark.asyncio
+async def test_send_provider_progress_updates_single_slack_status_message(monkeypatch) -> None:
+    fake_session = FakeSession()
+    connection = make_connection(service.PROVIDER_SLACK)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="T123:C123:1700000000.000100",
+        external_user_id="U123",
+        external_user_display_name="Asha",
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def send_slack_text_message(*args, **kwargs):
+        calls.append(("send", kwargs))
+        return {"ok": True, "channel": "C123", "ts": "1700000000.000200"}
+
+    async def send_slack_update_message(*args, **kwargs):
+        calls.append(("edit", kwargs))
+        return {"ok": True, "channel": "C123", "ts": "1700000000.000200"}
+
+    monkeypatch.setattr(service, "send_slack_text_message", send_slack_text_message)
+    monkeypatch.setattr(service, "send_slack_update_message", send_slack_update_message)
+
+    notifier = service.ProviderProgressNotifier(
+        connection=connection,
+        thread=thread,
+        inbound_event_id="event:T123:C123:1700000000.000100",
+        external_thread_id=thread.external_thread_id,
+    )
+    await service.send_provider_progress(fake_session, notifier, state="accepted")
+    await service.send_provider_progress(fake_session, notifier, state="done", terminal=True)
+
+    assert calls == [
+        (
+            "send",
+            {
+                "external_thread_id": "T123:C123:1700000000.000100",
+                "text": "Working on it.",
+            },
+        ),
+        (
+            "edit",
+            {
+                "external_message_id": "message:C123:1700000000.000200",
+                "text": "Done.",
+            },
+        ),
+    ]
+    assert notifier.status_message_external_id == "message:C123:1700000000.000200"
+
+
 @pytest.mark.asyncio
 async def test_deliver_conversation_reply_to_provider_thread_sends_run_assistant(
     monkeypatch,

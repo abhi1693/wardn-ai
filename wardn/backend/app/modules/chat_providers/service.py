@@ -90,6 +90,7 @@ PROVIDER_APPROVAL_PENDING_UNDELIVERED_REPLY = (
     "No linked approver thread is configured for this provider, "
     "so an approver must review it in Wardn."
 )
+PROVIDER_PROGRESS_THROTTLE_SECONDS = 15.0
 PROVIDER_TYPING_REFRESH_SECONDS = 4.0
 WHATSAPP_BRIDGE_DELIVERY_ATTEMPTS = 5
 WHATSAPP_BRIDGE_DELIVERY_RETRY_BASE_SECONDS = 1.0
@@ -163,6 +164,19 @@ class ProviderTypingTarget:
 class ProviderTypingHandle:
     target: ProviderTypingTarget
     refresh_task: asyncio.Task[None] | None = None
+
+
+@dataclass
+class ProviderProgressNotifier:
+    connection: ChatProviderConnection
+    thread: ChatProviderThread
+    inbound_event_id: str
+    external_thread_id: str
+    agent_run_id: uuid.UUID | None = None
+    status_message_external_id: str = ""
+    last_progress_at: datetime | None = None
+    last_state: str = ""
+    disabled: bool = False
 
 
 def provider_config_model(
@@ -2068,6 +2082,384 @@ async def stop_provider_typing(handle: ProviderTypingHandle | None) -> None:
         )
 
 
+def parse_agent_stream_chunk(chunk: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    data_lines: list[str] = []
+    for line in chunk.splitlines():
+        if line.startswith("data:"):
+            data_lines.append(line.removeprefix("data:").strip())
+            continue
+        if not line.strip() and data_lines:
+            payload = "\n".join(data_lines)
+            data_lines = []
+            try:
+                value = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                events.append(value)
+    if data_lines:
+        try:
+            value = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            return events
+        if isinstance(value, dict):
+            events.append(value)
+    return events
+
+
+def provider_progress_text(
+    state: str,
+    *,
+    tool_name: str = "",
+    status_message: str = "",
+) -> str:
+    if state == "accepted":
+        return "Working on it."
+    if state == "tool":
+        label = tool_name.strip() or "a tool"
+        return f"Working with {label}."
+    if state == "waiting_approval":
+        return "Waiting for workspace approval."
+    if state == "done":
+        return "Done."
+    if state == "failed":
+        return "Something went wrong while processing that request."
+    return status_message.strip() or "Still working."
+
+
+def whatsapp_progress_emoji(state: str) -> str:
+    return {
+        "accepted": "\U0001f440",
+        "thinking": "\u2699\ufe0f",
+        "tool": "\u2699\ufe0f",
+        "waiting_approval": "\u23f8\ufe0f",
+        "done": "\u2705",
+        "failed": "\u26a0\ufe0f",
+    }.get(state, "\u2699\ufe0f")
+
+
+def provider_progress_should_send(
+    notifier: ProviderProgressNotifier,
+    state: str,
+    *,
+    terminal: bool = False,
+) -> bool:
+    if notifier.disabled:
+        return False
+    if terminal or state in {"accepted", "waiting_approval", "failed", "done"}:
+        return True
+    if notifier.last_state == state and notifier.last_progress_at is not None:
+        elapsed = (datetime.now(UTC) - notifier.last_progress_at).total_seconds()
+        return elapsed >= PROVIDER_PROGRESS_THROTTLE_SECONDS
+    if notifier.last_progress_at is None:
+        return True
+    elapsed = (datetime.now(UTC) - notifier.last_progress_at).total_seconds()
+    return elapsed >= PROVIDER_PROGRESS_THROTTLE_SECONDS
+
+
+async def record_provider_progress_event(
+    session: AsyncSession,
+    notifier: ProviderProgressNotifier,
+    *,
+    state: str,
+    status: str,
+    payload: dict[str, Any] | None = None,
+    error: str = "",
+) -> None:
+    provider_message_id = provider_response_message_id(notifier.connection, payload or {})
+    event_id = f"progress:{notifier.inbound_event_id}:{state}:{uuid.uuid4()}"
+    session.add(
+        ChatProviderEvent(
+            organization_id=notifier.connection.organization_id,
+            workspace_id=notifier.connection.workspace_id,
+            connection_id=notifier.connection.id,
+            thread_id=notifier.thread.id,
+            conversation_id=notifier.thread.conversation_id,
+            provider=notifier.connection.provider,
+            external_event_id=event_id,
+            direction="status",
+            event_type="message.progress",
+            status=status,
+            payload={
+                notifier.connection.provider: payload or {},
+                "providerProgressState": state,
+                "inboundEventId": notifier.inbound_event_id,
+                **(
+                    {"providerMessageId": provider_message_id}
+                    if provider_message_id
+                    else {}
+                ),
+                **(
+                    {"agentRunId": str(notifier.agent_run_id)}
+                    if notifier.agent_run_id is not None
+                    else {}
+                ),
+                **(
+                    {"statusMessageExternalId": notifier.status_message_external_id}
+                    if notifier.status_message_external_id
+                    else {}
+                ),
+            },
+            error=error,
+            processed_at=datetime.now(UTC),
+        )
+    )
+    await session.flush()
+
+
+async def send_whatsapp_bridge_reaction(
+    connection: ChatProviderConnection,
+    *,
+    external_thread_id: str,
+    message_id: str,
+    emoji: str,
+) -> dict[str, Any]:
+    target = whatsapp_bridge_target(connection)
+    if target is None:
+        raise ChatProviderDeliveryError("WhatsApp bridge target is not configured")
+    payload = whatsapp_local.bridge_reaction_payload(
+        user_id=whatsapp_bridge_user_value(target.user_id),
+        chat_id=external_thread_id,
+        message_id=message_id,
+        emoji=emoji,
+    )
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.post(
+            whatsapp_bridge_url(target, "/messages/react"),
+            json=payload,
+        )
+    response_payload = response_json(response)
+    if response.status_code >= 400:
+        raise ChatProviderDeliveryError(
+            f"WhatsApp reaction delivery failed with HTTP {response.status_code}"
+        )
+    return response_payload
+
+
+async def send_telegram_edit_message(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    external_message_id: str,
+    text: str,
+) -> dict[str, Any]:
+    _prefix, separator, remainder = external_message_id.partition(":")
+    chat_id, second_separator, message_id = remainder.partition(":")
+    if not separator or not second_separator or not chat_id or not message_id:
+        raise ChatProviderDeliveryError("Telegram status message identifier is invalid")
+    bot_token_secret_handle_id = await connection_secret_handle_id(
+        session,
+        connection,
+        SECRET_BOT_TOKEN,
+        SECRET_ACCESS_TOKEN,
+    )
+    if bot_token_secret_handle_id is None:
+        raise ChatProviderDeliveryError("Telegram access token is not configured")
+    access_token = await resolve_secret(
+        session,
+        connection.organization_id,
+        bot_token_secret_handle_id,
+        workspace_id=connection.workspace_id,
+    )
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            telegram.edit_message_endpoint(access_token.value),
+            json=telegram.edit_message_payload(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+            ),
+        )
+    response_payload = response_json(response)
+    if response.status_code >= 400:
+        raise ChatProviderDeliveryError(
+            f"Telegram status update failed with HTTP {response.status_code}"
+        )
+    return response_payload
+
+
+async def send_slack_update_message(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    *,
+    external_message_id: str,
+    text: str,
+) -> dict[str, Any]:
+    _prefix, separator, remainder = external_message_id.partition(":")
+    channel_id, second_separator, message_ts = remainder.partition(":")
+    if not separator or not second_separator or not channel_id or not message_ts:
+        raise ChatProviderDeliveryError("Slack status message identifier is invalid")
+    bot_token_secret_handle_id = await connection_secret_handle_id(
+        session,
+        connection,
+        SECRET_BOT_TOKEN,
+    )
+    if bot_token_secret_handle_id is None:
+        raise ChatProviderDeliveryError("Slack bot token is not configured")
+    bot_token = await resolve_secret(
+        session,
+        connection.organization_id,
+        bot_token_secret_handle_id,
+        workspace_id=connection.workspace_id,
+    )
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            "https://slack.com/api/chat.update",
+            headers={"Authorization": f"Bearer {bot_token.value}"},
+            json=slack.update_message_payload(
+                channel_id=channel_id,
+                message_ts=message_ts,
+                text=text,
+            ),
+        )
+    response_payload = response_json(response)
+    if response.status_code >= 400 or response_payload.get("ok") is False:
+        error = str(response_payload.get("error") or f"HTTP {response.status_code}")
+        raise ChatProviderDeliveryError(f"Slack status update failed: {error}")
+    return response_payload
+
+
+async def send_provider_progress(
+    session: AsyncSession,
+    notifier: ProviderProgressNotifier,
+    *,
+    state: str,
+    tool_name: str = "",
+    status_message: str = "",
+    terminal: bool = False,
+) -> None:
+    if not provider_progress_should_send(notifier, state, terminal=terminal):
+        return
+    text = provider_progress_text(
+        state,
+        tool_name=tool_name,
+        status_message=status_message,
+    )
+    if (
+        notifier.connection.provider == PROVIDER_WHATSAPP_LOCAL
+        and whatsapp_bridge_target(notifier.connection) is None
+    ):
+        return
+    try:
+        if notifier.connection.provider == PROVIDER_WHATSAPP_LOCAL:
+            payload = await send_whatsapp_bridge_reaction(
+                notifier.connection,
+                external_thread_id=notifier.external_thread_id,
+                message_id=notifier.inbound_event_id,
+                emoji=whatsapp_progress_emoji(state),
+            )
+        elif notifier.connection.provider == PROVIDER_TELEGRAM:
+            if notifier.status_message_external_id:
+                payload = await send_telegram_edit_message(
+                    session,
+                    notifier.connection,
+                    external_message_id=notifier.status_message_external_id,
+                    text=text,
+                )
+            else:
+                payload = await send_telegram_text_message(
+                    session,
+                    notifier.connection,
+                    chat_id=notifier.external_thread_id,
+                    text=text,
+                )
+                notifier.status_message_external_id = provider_response_message_id(
+                    notifier.connection,
+                    payload,
+                )
+        elif notifier.connection.provider == PROVIDER_SLACK:
+            if notifier.status_message_external_id:
+                payload = await send_slack_update_message(
+                    session,
+                    notifier.connection,
+                    external_message_id=notifier.status_message_external_id,
+                    text=text,
+                )
+            else:
+                payload = await send_slack_text_message(
+                    session,
+                    notifier.connection,
+                    external_thread_id=notifier.external_thread_id,
+                    text=text,
+                )
+                notifier.status_message_external_id = provider_response_message_id(
+                    notifier.connection,
+                    payload,
+                )
+        else:
+            return
+    except Exception as exc:
+        await record_provider_progress_event(
+            session,
+            notifier,
+            state=state,
+            status="failed",
+            error=str(exc),
+        )
+        logger.debug(
+            "Failed to send chat provider progress update.",
+            extra={
+                "chat_provider_connection_id": str(notifier.connection.id),
+                "chat_provider": notifier.connection.provider,
+                "provider_progress_state": state,
+            },
+            exc_info=True,
+        )
+        if notifier.connection.provider in {PROVIDER_TELEGRAM, PROVIDER_SLACK}:
+            notifier.disabled = True
+        return
+    notifier.last_progress_at = datetime.now(UTC)
+    notifier.last_state = state
+    await record_provider_progress_event(
+        session,
+        notifier,
+        state=state,
+        status="sent",
+        payload=payload,
+    )
+
+
+async def observe_provider_agent_stream_chunk(
+    session: AsyncSession,
+    notifier: ProviderProgressNotifier,
+    chunk: str,
+) -> None:
+    for event in parse_agent_stream_chunk(chunk):
+        event_type = str(event.get("type") or "").strip()
+        if event_type == "data-tool-activity":
+            data = event.get("data")
+            if not isinstance(data, dict):
+                continue
+            status = str(data.get("status") or "").strip()
+            tool_name = str(data.get("toolName") or "").strip()
+            message = str(data.get("message") or "").strip()
+            if status == "requires_confirmation":
+                await send_provider_progress(
+                    session,
+                    notifier,
+                    state="waiting_approval",
+                    tool_name=tool_name,
+                    status_message=message,
+                )
+            elif status == "running":
+                await send_provider_progress(
+                    session,
+                    notifier,
+                    state="tool" if tool_name else "thinking",
+                    tool_name=tool_name,
+                    status_message=message,
+                )
+        elif event_type == "finish":
+            failed = str(event.get("finishReason") or "") == "error"
+            await send_provider_progress(
+                session,
+                notifier,
+                state="failed" if failed else "done",
+                terminal=True,
+            )
+
+
 async def process_provider_text_message(
     session: AsyncSession,
     connection: ChatProviderConnection,
@@ -2178,11 +2570,18 @@ async def process_provider_text_message(
             conversation_id=conversation_id,
             trigger_type=trigger_type,
         )
+        progress_notifier = ProviderProgressNotifier(
+            connection=connection,
+            thread=thread,
+            inbound_event_id=message.event_id,
+            external_thread_id=message.external_thread_id,
+        )
         typing_handle = await start_provider_typing(
             session,
             connection,
             external_thread_id=message.external_thread_id,
         )
+        await send_provider_progress(session, progress_notifier, state="accepted")
         stream = await agent_service.stream_agent_chat(
             session,
             actor,
@@ -2201,10 +2600,15 @@ async def process_provider_text_message(
             session_factory=session_factory,
             trigger_type=trigger_type,
             previous_agent_run_id=previous_agent_run.id if previous_agent_run is not None else None,
+            on_agent_run_created=lambda agent_run_id: setattr(
+                progress_notifier,
+                "agent_run_id",
+                agent_run_id,
+            ),
         )
         await session.commit()
-        async for _chunk in stream:
-            pass
+        async for chunk in stream:
+            await observe_provider_agent_stream_chunk(session, progress_notifier, chunk)
         await stop_provider_typing(typing_handle)
         typing_handle = None
         assistant_message = await latest_assistant_message(session, conversation_id)

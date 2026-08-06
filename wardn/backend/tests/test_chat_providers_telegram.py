@@ -61,6 +61,24 @@ def test_telegram_text_message_payload_uses_bot_api_shape_and_limit() -> None:
     assert len(telegram.outbound_text_body("x" * 5000)) == telegram.TELEGRAM_TEXT_MAX_CHARS
 
 
+def test_telegram_edit_message_payload_uses_bot_api_shape() -> None:
+    payload = telegram.edit_message_payload(
+        chat_id="555",
+        message_id="42",
+        text="Working on it.",
+    )
+
+    assert payload == {
+        "chat_id": "555",
+        "message_id": "42",
+        "text": "Working on it.",
+        "disable_web_page_preview": True,
+    }
+    assert telegram.edit_message_endpoint("token") == (
+        "https://api.telegram.org/bottoken/editMessageText"
+    )
+
+
 def test_telegram_typing_payload_uses_chat_action_api() -> None:
     assert telegram.send_chat_action_endpoint("token") == (
         "https://api.telegram.org/bottoken/sendChatAction"

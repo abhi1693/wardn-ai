@@ -265,6 +265,16 @@ def text_message_payload(*, channel_id: str, thread_ts: str, text: str) -> dict[
     }
 
 
+def update_message_payload(*, channel_id: str, message_ts: str, text: str) -> dict[str, Any]:
+    return {
+        "channel": channel_id,
+        "ts": message_ts,
+        "text": outbound_text_body(text),
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+
 def outbound_text_body(text: str) -> str:
     value = text.strip()
     if len(value) <= SLACK_TEXT_MAX_CHARS:

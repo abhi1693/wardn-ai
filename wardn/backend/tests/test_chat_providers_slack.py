@@ -158,6 +158,22 @@ def test_slack_text_payload_uses_thread_and_truncates() -> None:
     assert len(slack.outbound_text_body("x" * 5000)) == slack.SLACK_TEXT_MAX_CHARS
 
 
+def test_slack_update_message_payload_uses_chat_update_shape() -> None:
+    payload = slack.update_message_payload(
+        channel_id="C123",
+        message_ts="1700000000.000100",
+        text="Working on it.",
+    )
+
+    assert payload == {
+        "channel": "C123",
+        "ts": "1700000000.000100",
+        "text": "Working on it.",
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+
 def test_slack_external_thread_id_round_trips() -> None:
     thread_id = slack.external_thread_id(
         team_id="T123",

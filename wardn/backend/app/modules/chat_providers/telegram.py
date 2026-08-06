@@ -130,9 +130,22 @@ def send_chat_action_endpoint(bot_token: str) -> str:
     return f"https://api.telegram.org/bot{bot_token}/sendChatAction"
 
 
+def edit_message_endpoint(bot_token: str) -> str:
+    return f"https://api.telegram.org/bot{bot_token}/editMessageText"
+
+
 def text_message_payload(*, chat_id: str, text: str) -> dict[str, Any]:
     return {
         "chat_id": chat_id,
+        "text": outbound_text_body(text),
+        "disable_web_page_preview": True,
+    }
+
+
+def edit_message_payload(*, chat_id: str, message_id: str, text: str) -> dict[str, Any]:
+    return {
+        "chat_id": chat_id,
+        "message_id": message_id,
         "text": outbound_text_body(text),
         "disable_web_page_preview": True,
     }

@@ -193,6 +193,21 @@ def bridge_typing_payload(
     }
 
 
+def bridge_reaction_payload(
+    *,
+    user_id: int | str,
+    chat_id: str,
+    message_id: str,
+    emoji: str,
+) -> dict[str, Any]:
+    return {
+        "user_id": user_id,
+        "chat_jid": chat_id,
+        "message_id": message_id,
+        "emoji": emoji,
+    }
+
+
 def response_message_id(payload: dict[str, Any]) -> str:
     direct = string_field(payload, "messageId", "message_id", "id")
     if direct:
