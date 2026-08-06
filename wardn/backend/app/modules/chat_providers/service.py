@@ -176,6 +176,7 @@ class ProviderProgressNotifier:
     status_message_external_id: str = ""
     last_progress_at: datetime | None = None
     last_state: str = ""
+    paused_for_approval: bool = False
     disabled: bool = False
 
 
@@ -2435,6 +2436,7 @@ async def observe_provider_agent_stream_chunk(
             tool_name = str(data.get("toolName") or "").strip()
             message = str(data.get("message") or "").strip()
             if status == "requires_confirmation":
+                notifier.paused_for_approval = True
                 await send_provider_progress(
                     session,
                     notifier,
@@ -2452,6 +2454,8 @@ async def observe_provider_agent_stream_chunk(
                 )
         elif event_type == "finish":
             failed = str(event.get("finishReason") or "") == "error"
+            if notifier.paused_for_approval and not failed:
+                continue
             await send_provider_progress(
                 session,
                 notifier,

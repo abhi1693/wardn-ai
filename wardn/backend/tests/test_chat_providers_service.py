@@ -262,6 +262,91 @@ async def test_send_provider_progress_updates_single_slack_status_message(monkey
 
 
 @pytest.mark.asyncio
+async def test_provider_progress_preserves_waiting_approval_on_successful_finish(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection(service.PROVIDER_SLACK)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="T123:C123:1700000000.000100",
+        external_user_id="U123",
+        external_user_display_name="Asha",
+    )
+    states: list[str] = []
+
+    async def send_provider_progress(*args, **kwargs):
+        states.append(kwargs["state"])
+
+    monkeypatch.setattr(service, "send_provider_progress", send_provider_progress)
+
+    notifier = service.ProviderProgressNotifier(
+        connection=connection,
+        thread=thread,
+        inbound_event_id="event:T123:C123:1700000000.000100",
+        external_thread_id=thread.external_thread_id,
+    )
+    await service.observe_provider_agent_stream_chunk(
+        fake_session,
+        notifier,
+        (
+            'data: {"type":"data-tool-activity","data":'
+            '{"toolName":"Deploy","status":"requires_confirmation"}}\n\n'
+            'data: {"type":"finish","finishReason":"stop"}\n\n'
+        ),
+    )
+
+    assert notifier.paused_for_approval
+    assert states == ["waiting_approval"]
+
+
+@pytest.mark.asyncio
+async def test_provider_progress_reports_failed_finish_after_waiting_approval(
+    monkeypatch,
+) -> None:
+    fake_session = FakeSession()
+    connection = make_connection(service.PROVIDER_SLACK)
+    thread = ChatProviderThread(
+        id=uuid4(),
+        organization_id=connection.organization_id,
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        conversation_id=uuid4(),
+        external_thread_id="T123:C123:1700000000.000100",
+        external_user_id="U123",
+        external_user_display_name="Asha",
+    )
+    states: list[str] = []
+
+    async def send_provider_progress(*args, **kwargs):
+        states.append(kwargs["state"])
+
+    monkeypatch.setattr(service, "send_provider_progress", send_provider_progress)
+
+    notifier = service.ProviderProgressNotifier(
+        connection=connection,
+        thread=thread,
+        inbound_event_id="event:T123:C123:1700000000.000100",
+        external_thread_id=thread.external_thread_id,
+    )
+    await service.observe_provider_agent_stream_chunk(
+        fake_session,
+        notifier,
+        (
+            'data: {"type":"data-tool-activity","data":'
+            '{"toolName":"Deploy","status":"requires_confirmation"}}\n\n'
+            'data: {"type":"finish","finishReason":"error"}\n\n'
+        ),
+    )
+
+    assert states == ["waiting_approval", "failed"]
+
+
+@pytest.mark.asyncio
 async def test_deliver_conversation_reply_to_provider_thread_sends_run_assistant(
     monkeypatch,
 ) -> None:
