@@ -1621,8 +1621,9 @@ async def test_approve_agent_tool_approval_executes_stored_tool_call(monkeypatch
     monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
     monkeypatch.setattr(agent_service.repository, "finish_agent_run", finish_agent_run)
 
+    session = FakeSession()
     response = await agent_approvals.decide_agent_tool_approval(
-        FakeSession(),
+        session,
         user,
         organization_id,
         workspace_id,
@@ -1684,7 +1685,7 @@ async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) 
         started_at=datetime(2026, 7, 5, tzinfo=UTC),
     )
     captured: dict[str, object] = {}
-    scheduled: list[object] = []
+    scheduled: list[tuple[object, object, object]] = []
 
     async def require_workspace_member(*args, **kwargs):
         return None
@@ -1708,8 +1709,8 @@ async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) 
     async def get_agent_run(*args, **kwargs):
         return agent_run
 
-    def schedule_completion(approval_id):
-        scheduled.append(approval_id)
+    async def schedule_completion(session_arg, approval_arg, user_arg):
+        scheduled.append((session_arg, approval_arg.id, user_arg.id))
 
     monkeypatch.setattr(agent_approvals, "require_workspace_member", require_workspace_member)
     monkeypatch.setattr(agent_service.repository, "get_agent", get_agent)
@@ -1727,8 +1728,9 @@ async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) 
     )
     monkeypatch.setattr(agent_service.repository, "get_agent_run", get_agent_run)
 
+    session = FakeSession()
     response = await agent_approvals.decide_agent_tool_approval(
-        FakeSession(),
+        session,
         user,
         organization_id,
         workspace_id,
@@ -1738,7 +1740,7 @@ async def test_approve_agent_tool_approval_can_schedule_completion(monkeypatch) 
         schedule_completion=schedule_completion,
     )
 
-    assert scheduled == [approval.id]
+    assert scheduled == [(session, approval.id, user.id)]
     assert captured["step_status"] == "running"
     assert captured["activity_update"] == {"status": "running"}
     assert agent_run.status == "running"

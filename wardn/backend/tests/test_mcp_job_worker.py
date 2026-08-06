@@ -341,6 +341,10 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
     async def no_mcp_job(**kwargs):
         return False
 
+    async def no_agent_resume(**kwargs):
+        seen["agent_resume"] = kwargs
+        return False
+
     async def clean_secret(**kwargs):
         seen.update(kwargs)
         return True
@@ -356,6 +360,7 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
         lambda: job_worker.MCPJobHandlers(executors={}, cleanup_executors={}),
     )
     monkeypatch.setattr(job_commands, "run_job_worker_once", no_mcp_job)
+    monkeypatch.setattr(job_commands, "run_agent_run_resume_worker_once", no_agent_resume)
     monkeypatch.setattr(job_commands, "run_scheduled_task_worker_once", no_scheduled_task)
     monkeypatch.setattr(job_commands, "run_cleanup_worker_once", clean_secret)
 
@@ -369,6 +374,13 @@ async def test_run_once_falls_back_to_managed_secret_cleanup(monkeypatch) -> Non
     )
 
     assert result == 0
+    assert seen["agent_resume"] == {
+        "worker_id": "worker-1:agent-resume",
+        "lease_seconds": settings.agent_run_resume_worker_lease_seconds,
+        "heartbeat_seconds": settings.agent_run_resume_worker_heartbeat_seconds,
+        "retry_base_seconds": settings.agent_run_resume_worker_retry_base_seconds,
+        "retry_max_seconds": settings.agent_run_resume_worker_retry_max_seconds,
+    }
     assert seen["worker_id"] == "worker-1:secrets"
     assert seen["lease_seconds"] == settings.secret_cleanup_worker_lease_seconds
 
@@ -416,6 +428,10 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         seen["scheduled_worker"] = kwargs
         await asyncio.Future()
 
+    async def run_agent_resume_worker(**kwargs):
+        seen["agent_resume_worker"] = kwargs
+        await asyncio.Future()
+
     monkeypatch.setattr(job_commands, "stop_runtime_warmup", stop_runtime_warmup)
     monkeypatch.setattr(job_commands, "stop_runtime_reaper", stop_runtime_reaper)
     monkeypatch.setattr(job_commands, "run_job_worker_loop", cancel_worker_loop)
@@ -428,6 +444,11 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         job_commands,
         "run_scheduled_task_worker_loop",
         run_scheduled_worker,
+    )
+    monkeypatch.setattr(
+        job_commands,
+        "run_agent_run_resume_worker_loop",
+        run_agent_resume_worker,
     )
 
     args = SimpleNamespace(
@@ -461,6 +482,14 @@ async def test_continuous_worker_owns_runtime_maintenance(monkeypatch) -> None:
         "heartbeat_seconds": settings.scheduled_task_worker_heartbeat_seconds,
         "retry_base_seconds": settings.scheduled_task_worker_retry_base_seconds,
         "retry_max_seconds": settings.scheduled_task_worker_retry_max_seconds,
+    }
+    assert seen["agent_resume_worker"] == {
+        "worker_id": "worker-1:agent-resume",
+        "poll_interval_seconds": settings.agent_run_resume_worker_poll_interval_seconds,
+        "lease_seconds": settings.agent_run_resume_worker_lease_seconds,
+        "heartbeat_seconds": settings.agent_run_resume_worker_heartbeat_seconds,
+        "retry_base_seconds": settings.agent_run_resume_worker_retry_base_seconds,
+        "retry_max_seconds": settings.agent_run_resume_worker_retry_max_seconds,
     }
     assert seen["warmup_stop"] is warmup_task
     assert seen["reaper_stop"] is reaper_task

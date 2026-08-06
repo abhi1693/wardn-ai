@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     scheduled_task_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
     scheduled_task_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     scheduled_task_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
+    agent_run_resume_worker_enabled: bool = True
+    agent_run_resume_worker_poll_interval_seconds: float = Field(default=2.0, gt=0, le=300)
+    agent_run_resume_worker_lease_seconds: int = Field(default=300, ge=10, le=3600)
+    agent_run_resume_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
+    agent_run_resume_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
+    agent_run_resume_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
     agent_tool_approval_expiry_seconds: int = Field(default=24 * 60 * 60, ge=60, le=2_592_000)
     agent_chat_websocket_response_timeout_seconds: float = Field(
         default=120.0,
@@ -317,8 +323,18 @@ class Settings(BaseSettings):
             )
         if self.mcp_job_worker_heartbeat_seconds >= self.mcp_job_worker_lease_seconds:
             raise ValueError("MCP job worker heartbeat must be shorter than its lease")
+        if (
+            self.agent_run_resume_worker_heartbeat_seconds
+            >= self.agent_run_resume_worker_lease_seconds
+        ):
+            raise ValueError("agent run resume worker heartbeat must be shorter than its lease")
         if self.mcp_job_worker_retry_base_seconds > self.mcp_job_worker_retry_max_seconds:
             raise ValueError("MCP job worker retry base must not exceed its maximum")
+        if (
+            self.agent_run_resume_worker_retry_base_seconds
+            > self.agent_run_resume_worker_retry_max_seconds
+        ):
+            raise ValueError("agent run resume worker retry base must not exceed its maximum")
         if (
             self.secret_cleanup_worker_retry_base_seconds
             > self.secret_cleanup_worker_retry_max_seconds

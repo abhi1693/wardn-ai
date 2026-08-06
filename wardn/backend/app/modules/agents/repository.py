@@ -1,7 +1,7 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, delete, func, or_, select, union_all
+from sqlalchemy import and_, delete, func, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -12,6 +12,7 @@ from app.modules.agents.models import (
     AgentMCPServerAssignment,
     AgentMCPToolAssignment,
     AgentRun,
+    AgentRunResumeJob,
     AgentRunStep,
     AgentToolApproval,
     ConversationMessage,
@@ -570,15 +571,17 @@ async def get_tool_approval(
     workspace_id: uuid.UUID,
     agent_id: uuid.UUID,
     approval_id: uuid.UUID,
+    for_update: bool = False,
 ) -> AgentToolApproval | None:
-    result = await session.execute(
-        select(AgentToolApproval).where(
-            AgentToolApproval.id == approval_id,
-            AgentToolApproval.organization_id == organization_id,
-            AgentToolApproval.workspace_id == workspace_id,
-            AgentToolApproval.agent_id == agent_id,
-        )
+    statement = select(AgentToolApproval).where(
+        AgentToolApproval.id == approval_id,
+        AgentToolApproval.organization_id == organization_id,
+        AgentToolApproval.workspace_id == workspace_id,
+        AgentToolApproval.agent_id == agent_id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
@@ -712,6 +715,244 @@ async def has_completed_tool_approval_for_agent_run(
         statement = statement.where(AgentToolApproval.decided_by_id == decided_by_id)
     result = await session.execute(statement)
     return result.scalar_one_or_none() is not None
+
+
+async def enqueue_agent_run_resume_job(
+    session: AsyncSession,
+    *,
+    approval: AgentToolApproval,
+    user_id: uuid.UUID | None,
+    now: datetime | None = None,
+    max_attempts: int = 3,
+) -> AgentRunResumeJob | None:
+    if approval.agent_run_id is None:
+        return None
+    now = now or datetime.now(UTC)
+    result = await session.execute(
+        select(AgentRunResumeJob)
+        .where(
+            AgentRunResumeJob.approval_id == approval.id,
+            AgentRunResumeJob.status.in_(("queued", "running")),
+        )
+        .with_for_update(skip_locked=True)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+    job = AgentRunResumeJob(
+        organization_id=approval.organization_id,
+        workspace_id=approval.workspace_id,
+        agent_id=approval.agent_id,
+        agent_run_id=approval.agent_run_id,
+        approval_id=approval.id,
+        user_id=user_id,
+        status="queued",
+        available_at=now,
+        started_at=None,
+        finished_at=None,
+        attempt_count=0,
+        max_attempts=max_attempts,
+        worker_id="",
+        lease_expires_at=None,
+        error="",
+        payload={"toolName": approval.tool_name},
+    )
+    session.add(job)
+    await session.flush()
+    await session.refresh(job)
+    return job
+
+
+async def claim_next_agent_run_resume_job(
+    session: AsyncSession,
+    *,
+    worker_id: str,
+    now: datetime,
+    lease_seconds: int,
+) -> AgentRunResumeJob | None:
+    result = await session.execute(
+        select(AgentRunResumeJob)
+        .where(
+            AgentRunResumeJob.status == "queued",
+            AgentRunResumeJob.available_at <= now,
+        )
+        .order_by(
+            AgentRunResumeJob.available_at.asc(),
+            AgentRunResumeJob.created_at.asc(),
+            AgentRunResumeJob.id.asc(),
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        return None
+    job.status = "running"
+    job.worker_id = worker_id
+    job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+    job.attempt_count += 1
+    job.started_at = job.started_at or now
+    job.finished_at = None
+    job.error = ""
+    await session.flush()
+    await session.refresh(job)
+    return job
+
+
+async def heartbeat_agent_run_resume_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    worker_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await session.execute(
+        update(AgentRunResumeJob)
+        .where(
+            AgentRunResumeJob.id == job_id,
+            AgentRunResumeJob.status == "running",
+            AgentRunResumeJob.worker_id == worker_id,
+        )
+        .values(lease_expires_at=lease_expires_at)
+    )
+    return result.rowcount == 1
+
+
+async def get_owned_agent_run_resume_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    worker_id: str,
+) -> AgentRunResumeJob | None:
+    result = await session.execute(
+        select(AgentRunResumeJob)
+        .where(
+            AgentRunResumeJob.id == job_id,
+            AgentRunResumeJob.status == "running",
+            AgentRunResumeJob.worker_id == worker_id,
+        )
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
+async def complete_agent_run_resume_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    worker_id: str,
+    now: datetime,
+) -> bool:
+    job = await get_owned_agent_run_resume_job(session, job_id, worker_id=worker_id)
+    if job is None:
+        return False
+    job.status = "succeeded"
+    job.finished_at = now
+    job.worker_id = ""
+    job.lease_expires_at = None
+    job.error = ""
+    await session.flush()
+    return True
+
+
+async def retry_or_fail_agent_run_resume_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    worker_id: str,
+    now: datetime,
+    retry_at: datetime,
+    error_message: str,
+) -> str | None:
+    job = await get_owned_agent_run_resume_job(session, job_id, worker_id=worker_id)
+    if job is None:
+        return None
+    retryable = job.attempt_count < job.max_attempts
+    job.worker_id = ""
+    job.lease_expires_at = None
+    job.error = error_message
+    if retryable:
+        job.status = "queued"
+        job.available_at = retry_at
+        job.finished_at = None
+    else:
+        job.status = "failed"
+        job.finished_at = now
+    await session.flush()
+    return job.status
+
+
+async def recover_expired_agent_run_resume_jobs(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    limit: int = 100,
+) -> int:
+    result = await session.execute(
+        select(AgentRunResumeJob)
+        .where(
+            AgentRunResumeJob.status == "running",
+            AgentRunResumeJob.lease_expires_at <= now,
+        )
+        .order_by(AgentRunResumeJob.lease_expires_at.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    recovered = 0
+    for job in result.scalars().all():
+        retryable = job.attempt_count < job.max_attempts
+        job.status = "queued" if retryable else "failed"
+        job.available_at = now
+        job.finished_at = None if retryable else now
+        job.worker_id = ""
+        job.lease_expires_at = None
+        job.error = "The agent run resume worker stopped renewing its lease"
+        recovered += 1
+    await session.flush()
+    return recovered
+
+
+async def enqueue_stale_agent_run_resume_jobs(
+    session: AsyncSession,
+    *,
+    now: datetime,
+    stale_before: datetime,
+    limit: int = 50,
+) -> int:
+    active_resume_job_exists = (
+        select(AgentRunResumeJob.id)
+        .where(
+            AgentRunResumeJob.approval_id == AgentToolApproval.id,
+            AgentRunResumeJob.status.in_(("queued", "running")),
+        )
+        .exists()
+    )
+    result = await session.execute(
+        select(AgentToolApproval)
+        .join(AgentRun, AgentRun.id == AgentToolApproval.agent_run_id)
+        .where(
+            AgentRun.status == "running",
+            AgentRun.updated_at <= stale_before,
+            AgentToolApproval.status.in_(("running", "completed")),
+            AgentToolApproval.updated_at <= stale_before,
+            AgentToolApproval.decided_by_id.is_not(None),
+            ~active_resume_job_exists,
+        )
+        .order_by(AgentToolApproval.updated_at.asc(), AgentToolApproval.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    enqueued = 0
+    for approval in result.scalars().all():
+        job = await enqueue_agent_run_resume_job(
+            session,
+            approval=approval,
+            user_id=approval.decided_by_id,
+            now=now,
+        )
+        if job is not None and job.status == "queued":
+            enqueued += 1
+    return enqueued
 
 
 async def finish_agent_run(

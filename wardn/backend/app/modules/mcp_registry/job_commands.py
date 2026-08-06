@@ -11,6 +11,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.cli_utils import exit_with_code
 from app.core.config import Settings, get_settings
+from app.modules.agents.resume_worker import (
+    run_agent_run_resume_worker_loop,
+    run_agent_run_resume_worker_once,
+)
 from app.modules.chat_providers.bridge_worker import run_whatsapp_bridge_event_worker_loop
 from app.modules.mcp_registry.job_handlers import build_job_handlers
 from app.modules.mcp_registry.job_worker import (
@@ -55,6 +59,12 @@ def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float
         < settings.scheduled_task_worker_lease_seconds
     ):
         raise ValueError("scheduled task worker heartbeat must be shorter than its lease")
+    if not (
+        0
+        < settings.agent_run_resume_worker_heartbeat_seconds
+        < settings.agent_run_resume_worker_lease_seconds
+    ):
+        raise ValueError("agent run resume worker heartbeat must be shorter than its lease")
     if settings.mcp_job_worker_retry_base_seconds < 1:
         raise ValueError("MCP job worker retry base must be at least 1 second")
     if settings.mcp_job_worker_retry_max_seconds < settings.mcp_job_worker_retry_base_seconds:
@@ -64,6 +74,13 @@ def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float
         < settings.scheduled_task_worker_retry_base_seconds
     ):
         raise ValueError("scheduled task worker retry maximum must not be shorter than its base")
+    if (
+        settings.agent_run_resume_worker_retry_max_seconds
+        < settings.agent_run_resume_worker_retry_base_seconds
+    ):
+        raise ValueError(
+            "agent run resume worker retry maximum must not be shorter than its base"
+        )
     if (
         settings.environment.strip().casefold() != "local"
         and settings.mcp_job_worker_isolation != "container"
@@ -96,6 +113,17 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
     if args.once:
         worked = await run_job_worker_once(**kwargs)
         if not worked:
+            resume_worked = False
+            if settings.agent_run_resume_worker_enabled:
+                resume_worked = await run_agent_run_resume_worker_once(
+                    worker_id=f"{worker_id}:agent-resume",
+                    lease_seconds=settings.agent_run_resume_worker_lease_seconds,
+                    heartbeat_seconds=settings.agent_run_resume_worker_heartbeat_seconds,
+                    retry_base_seconds=settings.agent_run_resume_worker_retry_base_seconds,
+                    retry_max_seconds=settings.agent_run_resume_worker_retry_max_seconds,
+                )
+            if resume_worked:
+                return 0
             scheduled_worked = False
             if settings.scheduled_task_worker_enabled:
                 scheduled_worked = await run_scheduled_task_worker_once(
@@ -137,6 +165,19 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
             name="chat-provider-events",
         )
     scheduled_task: asyncio.Task[None] | None = None
+    agent_resume_task: asyncio.Task[None] | None = None
+    if settings.agent_run_resume_worker_enabled:
+        agent_resume_task = asyncio.create_task(
+            run_agent_run_resume_worker_loop(
+                worker_id=f"{worker_id}:agent-resume",
+                poll_interval_seconds=settings.agent_run_resume_worker_poll_interval_seconds,
+                lease_seconds=settings.agent_run_resume_worker_lease_seconds,
+                heartbeat_seconds=settings.agent_run_resume_worker_heartbeat_seconds,
+                retry_base_seconds=settings.agent_run_resume_worker_retry_base_seconds,
+                retry_max_seconds=settings.agent_run_resume_worker_retry_max_seconds,
+            ),
+            name="agent-run-resume",
+        )
     if settings.scheduled_task_worker_enabled:
         scheduled_task = asyncio.create_task(
             run_scheduled_task_worker_loop(
@@ -172,6 +213,10 @@ async def run_mcp_jobs_from_args(args: SimpleNamespace) -> int:
             scheduled_task.cancel()
             with suppress(asyncio.CancelledError):
                 await scheduled_task
+        if agent_resume_task is not None:
+            agent_resume_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await agent_resume_task
         await stop_runtime_warmup(warmup_task)
         await stop_runtime_reaper(reaper_task)
     return 0

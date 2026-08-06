@@ -15,13 +15,13 @@ from app.modules.agents.approvals import (
     approval_continuation_prompt as approval_continuation_prompt,
 )
 from app.modules.agents.approvals import (
-    complete_agent_tool_approval_background as complete_agent_tool_approval_background,
-)
-from app.modules.agents.approvals import (
     conversation_message_to_chat_message as conversation_message_to_chat_message,
 )
 from app.modules.agents.approvals import (
     decide_agent_tool_approval as decide_agent_tool_approval,
+)
+from app.modules.agents.approvals import (
+    enqueue_agent_tool_approval_resume as enqueue_agent_tool_approval_resume,
 )
 from app.modules.agents.approvals import (
     generate_approval_continuation_message as generate_approval_continuation_message,
