@@ -1312,10 +1312,13 @@ async def record_unsupported_provider_message(
         external_event_id=message.event_id,
     ):
         return False
+    thread = await record_provider_thread_identity(session, connection, message)
     event = ChatProviderEvent(
         organization_id=connection.organization_id,
         workspace_id=connection.workspace_id,
         connection_id=connection.id,
+        thread_id=thread.id,
+        conversation_id=thread.conversation_id,
         provider=connection.provider,
         external_event_id=message.event_id,
         direction="inbound",
@@ -1327,6 +1330,38 @@ async def record_unsupported_provider_message(
     session.add(event)
     await session.flush()
     return True
+
+
+async def record_provider_thread_identity(
+    session: AsyncSession,
+    connection: ChatProviderConnection,
+    message: ProviderTextMessage | ProviderUnsupportedMessage,
+) -> ChatProviderThread:
+    thread = await repository.get_thread(
+        session,
+        connection_id=connection.id,
+        external_thread_id=message.external_thread_id,
+    )
+    if thread is None:
+        thread = ChatProviderThread(
+            organization_id=connection.organization_id,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            external_thread_id=message.external_thread_id,
+            external_user_id=message.external_user_id,
+            external_user_display_name=message.external_user_display_name,
+            provider_metadata={"provider": connection.provider},
+        )
+        session.add(thread)
+        await session.flush()
+        await session.refresh(thread)
+    else:
+        thread.external_user_id = message.external_user_id
+        if message.external_user_display_name:
+            thread.external_user_display_name = message.external_user_display_name
+    thread.last_external_message_id = message.event_id
+    await session.flush()
+    return thread
 
 
 async def build_provider_typing_target(
@@ -1487,6 +1522,9 @@ async def process_provider_text_message(
     typing_handle: ProviderTypingHandle | None = None
     try:
         if not sender_allowed(connection, message):
+            thread = await record_provider_thread_identity(session, connection, message)
+            event.thread_id = thread.id
+            event.conversation_id = thread.conversation_id
             event.status = "ignored"
             event.error = f"{provider_display_name(connection.provider)} sender is not allowed"
             event.processed_at = datetime.now(UTC)

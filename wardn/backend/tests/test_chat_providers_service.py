@@ -1057,10 +1057,14 @@ async def test_process_provider_text_message_ignores_disallowed_sender(monkeypat
     async def get_event_by_external_id(*args, **kwargs):
         return None
 
+    async def get_thread(*args, **kwargs):
+        return None
+
     async def provider_actor(*args, **kwargs):
         raise AssertionError("disallowed sender must not reach the workspace agent")
 
     monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
+    monkeypatch.setattr(service.repository, "get_thread", get_thread)
     monkeypatch.setattr(service, "provider_actor", provider_actor)
 
     processed = await service.process_provider_text_message(
@@ -1080,11 +1084,18 @@ async def test_process_provider_text_message_ignores_disallowed_sender(monkeypat
         for item in fake_session.added
         if isinstance(item, ChatProviderEvent) and item.external_event_id == "wa-inbound-1"
     )
+    thread = next(item for item in fake_session.added if isinstance(item, ChatProviderThread))
 
     assert processed
     assert fake_session.commits == 0
     assert inbound_event.status == "ignored"
     assert inbound_event.error == "WhatsApp sender is not allowed"
+    assert inbound_event.thread_id == thread.id
+    assert thread.conversation_id is None
+    assert thread.external_thread_id == "15551234567@s.whatsapp.net"
+    assert thread.external_user_id == "15551234567@s.whatsapp.net"
+    assert thread.external_user_display_name == "Asha"
+    assert thread.last_external_message_id == "wa-inbound-1"
 
 
 @pytest.mark.asyncio
