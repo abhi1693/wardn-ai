@@ -2632,6 +2632,19 @@ async def process_provider_text_message(
             await observe_provider_agent_stream_chunk(session, progress_notifier, chunk)
         await stop_provider_typing(typing_handle)
         typing_handle = None
+        if progress_notifier.agent_run_id is not None:
+            await deliver_conversation_reply_to_provider_thread(
+                session,
+                organization_id=connection.organization_id,
+                workspace_id=connection.workspace_id,
+                conversation_id=conversation_id,
+                agent_run_id=progress_notifier.agent_run_id,
+                external_event_id_prefix=f"provider:{message.event_id}",
+            )
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.flush()
+            return True
         assistant_message = await latest_assistant_message(session, conversation_id)
         if await assistant_message_run_canceled(session, connection, assistant_message):
             event.status = "processed"

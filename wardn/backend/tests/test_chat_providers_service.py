@@ -1722,11 +1722,20 @@ async def test_whatsapp_local_webhook_counts_messages_and_skips_duplicates(
 
 
 @pytest.mark.asyncio
-async def test_process_provider_text_message_uses_workspace_agent_and_sends_reply(
+@pytest.mark.parametrize(
+    "provider",
+    [
+        service.PROVIDER_WHATSAPP_LOCAL,
+        service.PROVIDER_TELEGRAM,
+        service.PROVIDER_SLACK,
+    ],
+)
+async def test_process_provider_text_message_uses_workspace_agent_and_sends_run_reply(
     monkeypatch,
+    provider: str,
 ) -> None:
     fake_session = FakeSession()
-    connection = make_connection()
+    connection = make_connection(provider)
     actor = User(id=connection.created_by_id, email="owner@example.com", is_active=True)
     thread = ChatProviderThread(
         id=uuid4(),
@@ -1757,6 +1766,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
         started_at=datetime(2026, 8, 2, 8, 0, tzinfo=UTC),
         error="",
     )
+    expected_trigger_type = service.agent_run_trigger_type(connection.provider)
 
     async def get_event_by_external_id(*args, **kwargs):
         return None
@@ -1767,10 +1777,17 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     async def provider_thread_conversation(*args, **kwargs):
         return thread, conversation_id, agent_id
 
+    async def start_provider_typing(*args, **kwargs):
+        return None
+
+    async def send_provider_progress(*args, **kwargs):
+        return None
+
     async def stream_agent_chat(*args, **kwargs):
         captured_chat.payload = args[4]
         captured_chat.previous_agent_run_id = kwargs["previous_agent_run_id"]
         captured_chat.trigger_type = kwargs["trigger_type"]
+        kwargs["on_agent_run_created"](assistant_agent_run_id)
 
         async def stream():
             captured_chat.committed_before_stream = fake_session.commits == 1
@@ -1781,6 +1798,11 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assistant_agent_run_id = uuid4()
 
     async def latest_assistant_message(*args, **kwargs):
+        raise AssertionError("provider replies should use the created agent run id")
+
+    async def latest_assistant_message_for_run(*args, **kwargs):
+        assert kwargs["conversation_id"] == conversation_id
+        assert kwargs["agent_run_id"] == assistant_agent_run_id
         return ConversationMessage(
             id=uuid4(),
             conversation_id=conversation_id,
@@ -1791,17 +1813,31 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
             sequence=2,
         )
 
+    if connection.provider == service.PROVIDER_TELEGRAM:
+        expected_outbound_event_id = "message:15551234567:101"
+        provider_send_payload = {"result": {"message_id": 101, "chat": {"id": "15551234567"}}}
+    elif connection.provider == service.PROVIDER_SLACK:
+        expected_outbound_event_id = "message:C123:1700000000.000200"
+        provider_send_payload = {"channel": "C123", "ts": "1700000000.000200"}
+    else:
+        expected_outbound_event_id = "wa-reply-1"
+        provider_send_payload = {"messageId": expected_outbound_event_id}
+
     async def send_provider_text_message(*args, **kwargs):
-        return {"messageId": "wa-reply-1"}
+        return provider_send_payload
 
     async def assistant_message_run_canceled(*args, **kwargs):
         return False
+
+    async def get_thread_connection_for_conversation(*args, **kwargs):
+        assert kwargs["conversation_id"] == conversation_id
+        return thread, connection
 
     async def latest_agent_run_for_conversation(*args, **kwargs):
         assert kwargs["organization_id"] == connection.organization_id
         assert kwargs["workspace_id"] == connection.workspace_id
         assert kwargs["conversation_id"] == conversation_id
-        assert kwargs["trigger_type"] == "whatsapp"
+        assert kwargs["trigger_type"] == expected_trigger_type
         return previous_agent_run
 
     monkeypatch.setattr(service.repository, "get_event_by_external_id", get_event_by_external_id)
@@ -1812,8 +1848,20 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     )
     monkeypatch.setattr(service, "provider_actor", provider_actor)
     monkeypatch.setattr(service, "provider_thread_conversation", provider_thread_conversation)
+    monkeypatch.setattr(service, "start_provider_typing", start_provider_typing)
+    monkeypatch.setattr(service, "send_provider_progress", send_provider_progress)
     monkeypatch.setattr(service.agent_service, "stream_agent_chat", stream_agent_chat)
     monkeypatch.setattr(service, "latest_assistant_message", latest_assistant_message)
+    monkeypatch.setattr(
+        service.agent_repository,
+        "latest_assistant_message_for_run",
+        latest_assistant_message_for_run,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_thread_connection_for_conversation",
+        get_thread_connection_for_conversation,
+    )
     monkeypatch.setattr(service, "assistant_message_run_canceled", assistant_message_run_canceled)
     monkeypatch.setattr(service, "send_provider_text_message", send_provider_text_message)
 
@@ -1838,14 +1886,15 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     outbound_event = next(
         item
         for item in fake_session.added
-        if isinstance(item, ChatProviderEvent) and item.external_event_id == "wa-reply-1"
+        if isinstance(item, ChatProviderEvent)
+        and item.external_event_id == expected_outbound_event_id
     )
 
     assert processed
     assert fake_session.commits == 1
     assert captured_chat.committed_before_stream
     assert captured_chat.previous_agent_run_id == previous_agent_run.id
-    assert captured_chat.trigger_type == "whatsapp"
+    assert captured_chat.trigger_type == expected_trigger_type
     assert captured_chat.payload.id == str(conversation_id)
     assert captured_chat.payload.messages[0].parts == [
         {"type": "text", "text": "What changed today?"}
@@ -1854,6 +1903,7 @@ async def test_process_provider_text_message_uses_workspace_agent_and_sends_repl
     assert inbound_event.thread_id == thread.id
     assert outbound_event.status == "sent"
     assert outbound_event.payload["agentRunId"] == str(assistant_agent_run_id)
+    assert outbound_event.payload["providerReplyKind"] == "assistant"
 
 
 @pytest.mark.asyncio
