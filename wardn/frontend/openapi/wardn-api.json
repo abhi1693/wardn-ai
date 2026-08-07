@@ -3912,6 +3912,22 @@
         "title": "LLMProviderCredentialValidationResponse",
         "type": "object"
       },
+      "LLMProviderListResponse": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LLMProviderRead"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "LLMProviderListResponse",
+        "type": "object"
+      },
       "LLMProviderModelListResponse": {
         "properties": {
           "models": {
@@ -3944,6 +3960,65 @@
           "name"
         ],
         "title": "LLMProviderModelRead",
+        "type": "object"
+      },
+      "LLMProviderRead": {
+        "properties": {
+          "authMethod": {
+            "enum": [
+              "api_key",
+              "oauth"
+            ],
+            "title": "Authmethod",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "oauthProvider": {
+            "anyOf": [
+              {
+                "const": "chatgpt",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oauthprovider"
+          },
+          "requiresDeviceFlow": {
+            "default": false,
+            "title": "Requiresdeviceflow",
+            "type": "boolean"
+          },
+          "supportsChat": {
+            "default": true,
+            "title": "Supportschat",
+            "type": "boolean"
+          },
+          "supportsModelListing": {
+            "default": true,
+            "title": "Supportsmodellisting",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "authMethod"
+        ],
+        "title": "LLMProviderRead",
         "type": "object"
       },
       "LLMUsageListResponse": {
@@ -13386,6 +13461,85 @@
         "summary": "Validate Provider Credential Route",
         "tags": [
           "llm-provider-credentials"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/llm/providers": {
+      "get": {
+        "operationId": "llm_providers_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMProviderListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Supported Providers Route",
+        "tags": [
+          "llm-providers"
         ]
       }
     },

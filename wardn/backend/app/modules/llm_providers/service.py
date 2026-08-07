@@ -105,6 +105,9 @@ from app.modules.llm_providers.exceptions import (
 )
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.provider_clients import (
+    ANTHROPIC_PROVIDER as ANTHROPIC_PROVIDER,
+)
+from app.modules.llm_providers.provider_clients import (
     OPENAI_API_KEY_PROVIDER as OPENAI_API_KEY_PROVIDER,
 )
 from app.modules.llm_providers.provider_clients import (
@@ -123,10 +126,19 @@ from app.modules.llm_providers.provider_clients import (
     SUPPORTED_OAUTH_PROVIDERS as SUPPORTED_OAUTH_PROVIDERS,
 )
 from app.modules.llm_providers.provider_clients import (
+    fetch_anthropic_models as fetch_anthropic_models,
+)
+from app.modules.llm_providers.provider_clients import (
     fetch_openai_models as fetch_openai_models,
 )
 from app.modules.llm_providers.provider_clients import (
     openai_chatgpt_models as openai_chatgpt_models,
+)
+from app.modules.llm_providers.provider_clients import (
+    supported_provider_responses as supported_provider_responses,
+)
+from app.modules.llm_providers.provider_clients import (
+    validate_anthropic_api_key as validate_anthropic_api_key,
 )
 from app.modules.llm_providers.provider_clients import (
     validate_auth_settings as validate_auth_settings,
@@ -147,6 +159,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialStatus,
     LLMProviderCredentialUpdate,
     LLMProviderCredentialValidationResponse,
+    LLMProviderListResponse,
     LLMProviderModelListResponse,
 )
 from app.modules.observability import service as observability_service
@@ -757,6 +770,7 @@ async def validate_provider_credential(
     oauth_access_token: str,
     oauth_refresh_token: str,
     oauth_expires_at: datetime | None,
+    base_url: str = "",
 ) -> None:
     validate_auth_settings(
         auth_method=auth_method,
@@ -766,6 +780,10 @@ async def validate_provider_credential(
 
     if provider == OPENAI_API_KEY_PROVIDER and auth_method == "api_key":
         await validate_openai_api_key(secret_value)
+        return
+
+    if provider == ANTHROPIC_PROVIDER and auth_method == "api_key":
+        await validate_anthropic_api_key(secret_value, base_url=base_url)
         return
 
     if (
@@ -852,6 +870,13 @@ async def list_models_for_credential(
         return LLMProviderModelListResponse(
             models=await fetch_openai_models(secrets.api_key)
         )
+    if credential.provider == ANTHROPIC_PROVIDER and credential.auth_method == "api_key":
+        return LLMProviderModelListResponse(
+            models=await fetch_anthropic_models(
+                secrets.api_key,
+                base_url=credential.base_url,
+            )
+        )
     if (
         credential.provider == OPENAI_CHATGPT_PROVIDER
         and credential.auth_method == "oauth"
@@ -913,6 +938,7 @@ async def validate_provider_credential_by_id(
             oauth_access_token=secrets.oauth_access_token,
             oauth_refresh_token=secrets.oauth_refresh_token,
             oauth_expires_at=credential.oauth_expires_at,
+            base_url=credential.base_url,
         )
     except InvalidLLMProviderCredentialAuthError as exc:
         return LLMProviderCredentialValidationResponse(ok=False, message=str(exc))
@@ -1030,6 +1056,15 @@ async def list_provider_credentials(
     )
 
 
+async def list_supported_providers(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+) -> LLMProviderListResponse:
+    await require_organization_member(session, user, organization_id)
+    return LLMProviderListResponse(providers=supported_provider_responses())
+
+
 async def create_provider_credential(
     session: AsyncSession,
     user: User,
@@ -1137,6 +1172,7 @@ async def create_provider_credential(
             oauth_access_token="",
             oauth_refresh_token="",
             oauth_expires_at=payload.oauth_expires_at,
+            base_url=payload.base_url,
         )
         external_ref = llm_secret_path(
             organization_id=organization_id,
@@ -1204,6 +1240,7 @@ async def create_provider_credential(
             oauth_access_token=resolved_secrets.oauth_access_token,
             oauth_refresh_token=resolved_secrets.oauth_refresh_token,
             oauth_expires_at=payload.oauth_expires_at,
+            base_url=payload.base_url,
         )
 
     credential = LLMProviderCredential(
@@ -1365,6 +1402,7 @@ async def update_provider_credential(
         oauth_access_token=resolved_secrets.oauth_access_token,
         oauth_refresh_token=resolved_secrets.oauth_refresh_token,
         oauth_expires_at=credential.oauth_expires_at,
+        base_url=credential.base_url,
     )
 
     try:

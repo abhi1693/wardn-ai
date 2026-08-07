@@ -102,6 +102,8 @@ class Settings(BaseSettings):
         gt=0,
         le=3600,
     )
+    anthropic_api_version: str = Field(default="2023-06-01", min_length=1, max_length=64)
+    anthropic_max_tokens: int = Field(default=4096, ge=1, le=200_000)
     outbound_http_allow_http: bool = False
     outbound_http_allowed_ports: list[int] = [443]
     outbound_http_private_host_allowlist: list[str] = []

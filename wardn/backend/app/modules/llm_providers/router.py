@@ -15,6 +15,7 @@ from app.modules.llm_providers.schemas import (
     LLMProviderCredentialRead,
     LLMProviderCredentialUpdate,
     LLMProviderCredentialValidationResponse,
+    LLMProviderListResponse,
     LLMProviderModelListResponse,
 )
 from app.modules.llm_providers.service import (
@@ -23,6 +24,7 @@ from app.modules.llm_providers.service import (
     delete_provider_credential,
     list_provider_credential_models,
     list_provider_credentials,
+    list_supported_providers,
     start_chatgpt_device_authorization,
     update_provider_credential,
     validate_provider_credential_by_id,
@@ -34,6 +36,28 @@ router = APIRouter(
     prefix="/organizations/{organization_id}/llm/provider-credentials",
     tags=["llm-provider-credentials"],
 )
+
+providers_router = APIRouter(
+    prefix="/organizations/{organization_id}/llm/providers",
+    tags=["llm-providers"],
+)
+
+
+@providers_router.get(
+    "",
+    response_model=LLMProviderListResponse,
+    operation_id="llm_providers_list",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def list_supported_providers_route(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> LLMProviderListResponse:
+    return await list_supported_providers(session, current_user, organization_id)
 
 
 @router.get(

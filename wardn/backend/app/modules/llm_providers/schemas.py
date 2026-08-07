@@ -12,6 +12,21 @@ LLMProviderOAuthProvider = Literal["chatgpt"]
 LLMProviderCredentialStatus = Literal["active", "inactive", "expired"]
 
 
+class LLMProviderRead(APIModel):
+    id: str
+    label: str
+    description: str = ""
+    auth_method: LLMProviderAuthMethod
+    supports_chat: bool = True
+    supports_model_listing: bool = True
+    requires_device_flow: bool = False
+    oauth_provider: LLMProviderOAuthProvider | None = None
+
+
+class LLMProviderListResponse(APIModel):
+    providers: list[LLMProviderRead]
+
+
 class LLMProviderCredentialCreate(APIModel):
     name: str = Field(min_length=1, max_length=100)
     provider: str = Field(min_length=1, max_length=50)

@@ -4,10 +4,12 @@ import platform
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.modules.agents.exceptions import InvalidAgentScopeError
 from app.modules.agents.models import Agent
 from app.modules.agents.schemas import AgentChatMessage
@@ -18,12 +20,17 @@ from app.modules.agents.types import (
 )
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.llm_providers.provider_clients import (
+    ANTHROPIC_API_BASE_URL,
+    normalize_base_url,
+)
 from app.modules.llm_providers.service import credential_supports_model, read_record
 from app.modules.mcp_registry.models import MCPServerToolSchema
 from app.modules.observability import service as observability_service
 from app.modules.users.models import User
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+ANTHROPIC_MESSAGES_PATH = "/v1/messages"
 CHATGPT_CODEX_RESPONSES_WS_URL = "wss://chatgpt.com/backend-api/codex/responses"
 CHATGPT_CODEX_WEBSOCKET_BETA = "responses_websockets=2026-02-06"
 DEFAULT_CODEX_COMPAT_VERSION = "0.144.0"
@@ -86,6 +93,18 @@ def text_from_chat_message(message: AgentChatMessage) -> str:
 
 
 def provider_messages(messages: list[AgentChatMessage]) -> list[dict[str, Any]]:
+    result = []
+    for message in messages:
+        if message.role not in {"user", "assistant"}:
+            continue
+        text = text_from_chat_message(message)
+        if not text:
+            continue
+        result.append({"role": message.role, "content": text})
+    return result
+
+
+def anthropic_messages(messages: list[AgentChatMessage]) -> list[dict[str, Any]]:
     result = []
     for message in messages:
         if message.role not in {"user", "assistant"}:
@@ -288,6 +307,24 @@ def llm_usage_from_response(response: dict[str, Any]) -> observability_service.L
     )
 
 
+def llm_usage_from_anthropic_response(
+    response: dict[str, Any],
+) -> observability_service.LLMTokenUsage:
+    usage = read_record(response.get("usage"))
+    response_model = response.get("model")
+    return observability_service.LLMTokenUsage(
+        input_tokens=int_token_value(usage.get("input_tokens")),
+        output_tokens=int_token_value(usage.get("output_tokens")),
+        total_tokens=(
+            int_token_value(usage.get("input_tokens"))
+            + int_token_value(usage.get("output_tokens"))
+        ),
+        cache_read_input_tokens=int_token_value(usage.get("cache_read_input_tokens")),
+        cache_write_input_tokens=int_token_value(usage.get("cache_creation_input_tokens")),
+        response_model=response_model if isinstance(response_model, str) else "",
+    )
+
+
 def llm_usage_from_completed_event(
     payload: dict[str, Any],
 ) -> observability_service.LLMTokenUsage | None:
@@ -319,6 +356,120 @@ def chatgpt_codex_request_body(
     if previous_response_id:
         body["previous_response_id"] = previous_response_id
     return body
+
+
+def anthropic_messages_url(credential: LLMProviderCredential) -> str:
+    return urljoin(
+        normalize_base_url(credential.base_url, default=ANTHROPIC_API_BASE_URL),
+        ANTHROPIC_MESSAGES_PATH.lstrip("/"),
+    )
+
+
+def anthropic_headers(api_key: str) -> dict[str, str]:
+    return {
+        "x-api-key": api_key,
+        "anthropic-version": get_settings().anthropic_api_version,
+        "content-type": "application/json",
+    }
+
+
+def anthropic_tool_definitions(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    definitions = []
+    for tool in tools:
+        name = tool.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        input_schema = tool.get("parameters")
+        definitions.append(
+            {
+                "name": name,
+                "description": tool.get("description")
+                if isinstance(tool.get("description"), str)
+                else "",
+                "input_schema": input_schema
+                if isinstance(input_schema, dict)
+                else {"type": "object", "properties": {}},
+            }
+        )
+    return definitions
+
+
+def anthropic_request_body(
+    agent: Agent,
+    *,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": agent.model_name,
+        "max_tokens": get_settings().anthropic_max_tokens,
+        "system": instructions or agent.instructions,
+        "messages": messages,
+    }
+    if tools:
+        body["tools"] = anthropic_tool_definitions(tools)
+        body["tool_choice"] = {"type": "auto"}
+    return body
+
+
+def anthropic_text_and_tool_calls(response: dict[str, Any]) -> tuple[str, list[AgentToolCall]]:
+    text_chunks: list[str] = []
+    tool_calls: list[AgentToolCall] = []
+    content = response.get("content")
+    if not isinstance(content, list):
+        return "", []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str) and text:
+                text_chunks.append(text)
+            continue
+        if block.get("type") == "tool_use":
+            name = block.get("name")
+            call_id = block.get("id")
+            if not isinstance(name, str) or not name:
+                continue
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            tool_calls.append(
+                AgentToolCall(
+                    name=name,
+                    call_id=call_id,
+                    arguments=parse_tool_arguments(block.get("input")),
+                )
+            )
+    return "".join(text_chunks), tool_calls
+
+
+async def create_anthropic_message(
+    *,
+    credential: LLMProviderCredential,
+    headers: dict[str, str],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    timeout = httpx.Timeout(AGENT_CHAT_TIMEOUT_SECONDS, connect=30.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            anthropic_messages_url(credential),
+            headers=headers,
+            json=body,
+        )
+    if not response.is_success:
+        detail = response.text.strip()
+        raise AgentChatProviderError(
+            f"LLM provider returned HTTP {response.status_code}: {detail}",
+            status_code=response.status_code,
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise AgentChatProviderError("LLM provider returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise AgentChatProviderError("LLM provider returned invalid response")
+    return payload
 
 
 def sse_payloads(buffer: str) -> tuple[list[dict[str, Any]], str]:

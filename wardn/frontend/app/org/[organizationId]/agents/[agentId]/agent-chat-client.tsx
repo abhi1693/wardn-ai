@@ -161,6 +161,9 @@ function providerLabel(credential: LlmCredentialRead) {
   if (credential.provider === "openai") {
     return "OpenAI";
   }
+  if (credential.provider === "anthropic") {
+    return "Anthropic";
+  }
   return credential.provider;
 }
 

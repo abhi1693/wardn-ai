@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.llm_providers import chatgpt_oauth, service
+from app.modules.llm_providers import chatgpt_oauth, provider_clients, service
 from app.modules.llm_providers.exceptions import (
     DuplicateLLMProviderCredentialError,
     InvalidLLMProviderCredentialAuthError,
@@ -90,6 +90,41 @@ def test_credential_status_distinguishes_expiration_from_enablement() -> None:
     credential.is_active = True
     credential.oauth_expires_at = now + timedelta(seconds=1)
     assert service.credential_status(credential, now=now) == "active"
+
+
+@pytest.mark.asyncio
+async def test_list_supported_providers_includes_anthropic(monkeypatch) -> None:
+    organization_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+
+    response = await service.list_supported_providers(FakeSession(), user, organization_id)
+
+    providers = {provider.id: provider for provider in response.providers}
+    assert providers["anthropic"].label == "Anthropic"
+    assert providers["anthropic"].auth_method == "api_key"
+    assert providers["openai_chatgpt"].requires_device_flow is True
 
 
 class FakeResponse:
@@ -983,6 +1018,112 @@ async def test_list_provider_credential_models_uses_credential_secret(monkeypatc
 
     assert discovered_tokens == ["sk-existing"]
     assert [model.id for model in response.models] == ["gpt-4.1", "gpt-4o-mini"]
+
+
+@pytest.mark.asyncio
+async def test_list_provider_credential_models_supports_anthropic(monkeypatch) -> None:
+    organization_id = uuid4()
+    credential_id = uuid4()
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+    secret_handle_id = uuid4()
+    credential = LLMProviderCredential(
+        id=credential_id,
+        organization_id=organization_id,
+        name="Anthropic",
+        provider="anthropic",
+        visibility="organization",
+        auth_method="api_key",
+        api_key_secret_handle_id=secret_handle_id,
+        base_url="https://anthropic.example",
+        extra_headers={},
+        is_active=True,
+    )
+    organization = Organization(
+        id=organization_id,
+        name="Default",
+        slug="default",
+        status="active",
+    )
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role="member",
+        is_active=True,
+    )
+
+    async def get_organization_by_id(*args, **kwargs):
+        return organization
+
+    async def get_organization_membership(*args, **kwargs):
+        return membership
+
+    async def get_credential(*args, **kwargs):
+        return credential
+
+    calls: list[dict] = []
+
+    async def fetch_anthropic_models(token: str, *, base_url: str = ""):
+        calls.append({"token": token, "base_url": base_url})
+        return [
+            LLMProviderModelRead(id="claude-sonnet-5-20261101", name="Claude Sonnet 5"),
+        ]
+
+    org_repository = service.require_organization_member.__globals__["repository"]
+    monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
+    monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
+    monkeypatch.setattr(service.repository, "get_credential", get_credential)
+    monkeypatch.setattr(service, "fetch_anthropic_models", fetch_anthropic_models)
+    patch_resolved_secrets(monkeypatch, {secret_handle_id: "sk-ant"})
+
+    response = await service.list_provider_credential_models(
+        FakeSession(),
+        user,
+        organization_id,
+        credential_id,
+    )
+
+    assert calls == [{"token": "sk-ant", "base_url": "https://anthropic.example"}]
+    assert [model.id for model in response.models] == ["claude-sonnet-5-20261101"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_anthropic_models_uses_api_key_headers(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return FakeResponse(
+                200,
+                {
+                    "data": [
+                        {
+                            "id": "claude-sonnet-5-20261101",
+                            "display_name": "Claude Sonnet 5",
+                        }
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(provider_clients.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = await service.fetch_anthropic_models("sk-ant", base_url="https://api.example")
+
+    assert response == [
+        LLMProviderModelRead(id="claude-sonnet-5-20261101", name="Claude Sonnet 5")
+    ]
+    assert calls[0]["url"] == "https://api.example/v1/models"
+    assert calls[0]["headers"]["x-api-key"] == "sk-ant"
+    assert calls[0]["headers"]["anthropic-version"] == "2023-06-01"
 
 
 @pytest.mark.asyncio

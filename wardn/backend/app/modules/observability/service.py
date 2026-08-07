@@ -54,6 +54,7 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_TIMEOUT_SECONDS = 10
 OPENROUTER_MAX_MODEL_PAGES = 20
 OPENROUTER_PROVIDER_SLUGS = {
+    "anthropic": "anthropic",
     "openai": "openai",
     "openai_chatgpt": "openai",
 }

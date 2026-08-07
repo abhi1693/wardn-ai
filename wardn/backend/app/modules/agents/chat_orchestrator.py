@@ -42,10 +42,16 @@ from app.modules.agents.provider_clients import (
     CHATGPT_CODEX_RESPONSES_WS_URL,
     CODEX_COMPAT_USER_AGENT,
     OPENAI_RESPONSES_URL,
+    anthropic_headers,
+    anthropic_messages,
+    anthropic_request_body,
+    anthropic_text_and_tool_calls,
     chatgpt_account_id,
     chatgpt_codex_headers,
     chatgpt_codex_messages,
     chatgpt_codex_request_body,
+    create_anthropic_message,
+    llm_usage_from_anthropic_response,
     llm_usage_from_completed_event,
     provider_messages,
     reasoning_request_for_model,
@@ -95,6 +101,7 @@ from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.exceptions import InvalidLLMProviderCredentialAuthError
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.service import (
+    ANTHROPIC_PROVIDER,
     OPENAI_API_KEY_PROVIDER,
     OPENAI_CHATGPT_PROVIDER,
     ResolvedLLMCredentialSecrets,
@@ -515,6 +522,23 @@ async def run_agent_chat(
             yield event
         return
 
+    if credential.provider == ANTHROPIC_PROVIDER and credential.auth_method == "api_key":
+        async for event in stream_anthropic_messages_response_text(
+            agent,
+            credential,
+            session_factory=session_factory,
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            conversation=conversation,
+            agent_run=agent_run,
+            headers=anthropic_headers(credential_secrets.api_key),
+            messages=payload.messages,
+            tools=guardrail_filter,
+        ):
+            yield event
+        return
+
     if (
         credential.provider == OPENAI_CHATGPT_PROVIDER
         and credential.auth_method == "oauth"
@@ -772,6 +796,164 @@ async def stream_openai_responses_response_text(
                     "output": execution.output,
                 }
             )
+
+    yield AgentChatTextEvent(
+        text=(
+            "\n\nStopped after reaching the configured tool call limit "
+            f"({max_tool_rounds})."
+        )
+    )
+
+
+async def stream_anthropic_messages_response_text(
+    agent: Agent,
+    credential: LLMProviderCredential,
+    *,
+    session_factory: AgentSessionFactory | None = None,
+    user: User | None = None,
+    organization_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    conversation: WorkspaceConversation | None = None,
+    agent_run: AgentRun | None = None,
+    headers: dict[str, str],
+    messages: list[AgentChatMessage],
+    tools: AgentRuntimeToolGuardrailFilter | dict[str, AgentRuntimeTool],
+) -> AsyncGenerator[AgentChatStreamEvent, None]:
+    guardrail_filter = agent_guardrail_filter_from_tools(tools)
+    input_messages = anthropic_messages(messages)
+    approved_skill_context = await agent_approved_skill_context(
+        session_factory=session_factory,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        agent=agent,
+    )
+    skill_tools = agent_skill_function_tools(
+        agent.skill_ids or [],
+        approved_skills=approved_skill_context,
+    )
+    function_tools = agent_dynamic_function_tools(
+        guardrail_filter,
+        skill_tools=skill_tools,
+    )
+    runtime_instructions = agent_runtime_instructions(
+        agent,
+        skill_tools=skill_tools,
+        approved_skill_context=approved_skill_context,
+        agent_run=agent_run,
+    )
+    latest_user = latest_user_message(messages)
+    latest_user_text = text_from_chat_message(latest_user) if latest_user else ""
+    max_tool_rounds = await agent_chat_max_tool_rounds(
+        session_factory=session_factory,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+    )
+
+    for _round_index in range(max_tool_rounds):
+        body = anthropic_request_body(
+            agent,
+            messages=input_messages,
+            tools=function_tools,
+            instructions=runtime_instructions,
+        )
+        call_started_at = datetime.now(UTC)
+        call_usage: observability_service.LLMTokenUsage | None = None
+        async with agent_stream_unit_of_work(session_factory) as session:
+            await require_agent_llm_budget_available(
+                session,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+            )
+
+        try:
+            response = await create_anthropic_message(
+                credential=credential,
+                headers=headers,
+                body=body,
+            )
+            call_usage = llm_usage_from_anthropic_response(response)
+            text, tool_calls = anthropic_text_and_tool_calls(response)
+            if text:
+                yield AgentChatTextEvent(text=text)
+        except Exception as exc:
+            async with agent_stream_unit_of_work(session_factory) as session:
+                await record_agent_llm_usage(
+                    session,
+                    credential=credential,
+                    agent=agent,
+                    user=user,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    agent_run=agent_run,
+                    usage=call_usage,
+                    started_at=call_started_at,
+                    finished_at=datetime.now(UTC),
+                    status="failed",
+                    error=str(exc),
+                )
+            raise
+
+        async with agent_stream_unit_of_work(session_factory) as session:
+            await record_agent_llm_usage(
+                session,
+                credential=credential,
+                agent=agent,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                agent_run=agent_run,
+                usage=call_usage,
+                started_at=call_started_at,
+                finished_at=datetime.now(UTC),
+                status="succeeded",
+            )
+
+        if not tool_calls:
+            return
+
+        response_content = response.get("content")
+        input_messages.append(
+            {
+                "role": "assistant",
+                "content": response_content if isinstance(response_content, list) else [],
+            }
+        )
+        tool_result_blocks = []
+        for tool_call in tool_calls:
+            execution: AgentToolExecutionResult | None = None
+            async for event in execute_agent_model_tool_call_stream(
+                guardrail_filter,
+                tool_call,
+                agent=agent,
+                session_factory=session_factory,
+                user=user,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                conversation=conversation,
+                agent_run=agent_run,
+                request_meta={"userMessage": latest_user_text},
+            ):
+                if isinstance(event, AgentToolExecutionResult):
+                    execution = event
+                else:
+                    yield event
+            if execution is None:
+                execution = tool_execution_result(
+                    tool_call.name,
+                    f"Tool {tool_call.name} failed: no tool result was returned",
+                )
+            if execution.status == "requires_confirmation":
+                return
+            tool_result_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_call.call_id,
+                    "content": execution.output,
+                }
+            )
+        input_messages.append({"role": "user", "content": tool_result_blocks})
 
     yield AgentChatTextEvent(
         text=(

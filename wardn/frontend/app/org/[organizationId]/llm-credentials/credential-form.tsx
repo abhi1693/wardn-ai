@@ -45,27 +45,8 @@ import type {
   CredentialPayload,
   CredentialProvider,
   CredentialVisibility,
+  LlmProviderRead,
 } from "./types";
-
-const providerOptions: Array<{
-  value: CredentialProvider;
-  label: string;
-  description: string;
-  authMethod: "api_key" | "oauth";
-}> = [
-  {
-    value: "openai",
-    label: "OpenAI",
-    description: "Use an OpenAI API key for model calls.",
-    authMethod: "api_key",
-  },
-  {
-    value: "openai_chatgpt",
-    label: "OpenAI ChatGPT",
-    description: "Connect a ChatGPT account using OAuth.",
-    authMethod: "oauth",
-  },
-];
 
 const visibilityOptions: Array<{
   value: CredentialVisibility;
@@ -93,11 +74,35 @@ function providerForCredential(credential?: CredentialFormProps["credential"]): 
   if (credential?.provider === "openai_chatgpt" || credential?.authMethod === "oauth") {
     return "openai_chatgpt";
   }
-  return "openai";
+  return credential?.provider ?? "openai";
 }
 
-function authMethodForProvider(provider: CredentialProvider) {
-  return provider === "openai_chatgpt" ? "oauth" : "api_key";
+function fallbackProviderDefinitions(provider?: string): LlmProviderRead[] {
+  return [
+    {
+      id: "openai",
+      label: "OpenAI",
+      description: "Use an OpenAI API key for model calls.",
+      authMethod: "api_key",
+    },
+    {
+      id: "openai_chatgpt",
+      label: "OpenAI ChatGPT",
+      description: "Connect a ChatGPT account using OAuth.",
+      authMethod: "oauth",
+      requiresDeviceFlow: true,
+      oauthProvider: "chatgpt",
+    },
+    ...(provider && provider !== "openai" && provider !== "openai_chatgpt"
+      ? [
+          {
+            id: provider,
+            label: provider,
+            authMethod: "api_key" as const,
+          },
+        ]
+      : []),
+  ];
 }
 
 type ChatgptDeviceFlowTarget =
@@ -120,6 +125,7 @@ type ChatgptDeviceFlow = {
 export function CredentialForm({
   credential,
   organization,
+  providers,
   secretStores,
   workspaces,
 }: CredentialFormProps) {
@@ -148,7 +154,28 @@ export function CredentialForm({
     () => workspaces.filter((workspace) => workspace.status === "active"),
     [workspaces]
   );
-  const isChatgptCredential = provider === "openai_chatgpt";
+  const providerOptions = useMemo<LlmProviderRead[]>(() => {
+    const options = providers.length > 0 ? providers : fallbackProviderDefinitions(provider);
+    if (options.some((option) => option.id === provider)) {
+      return options;
+    }
+    return [
+      ...options,
+      {
+        id: provider,
+        label: provider,
+        authMethod: provider === "openai_chatgpt" ? "oauth" : "api_key",
+      },
+    ];
+  }, [provider, providers]);
+  const selectedProvider =
+    providerOptions.find((option) => option.id === provider) ?? providerOptions[0] ?? null;
+  const selectedAuthMethod =
+    selectedProvider?.authMethod ?? (provider === "openai_chatgpt" ? "oauth" : "api_key");
+  const isApiKeyCredential = selectedAuthMethod === "api_key";
+  const isChatgptCredential =
+    provider === "openai_chatgpt" ||
+    Boolean(selectedProvider?.requiresDeviceFlow && selectedProvider.oauthProvider === "chatgpt");
   const isChatgptConnectorCreate = isChatgptCredential && !isEditing;
   const credentialId = credential?.id ?? "";
   const availableSecretStores = useMemo(() => {
@@ -193,7 +220,7 @@ export function CredentialForm({
     hasCredentialName &&
     !isSubmitting &&
     (visibility !== "workspace" || workspaceId.length > 0) &&
-    (provider === "openai"
+    (isApiKeyCredential
       ? isEditing
         ? true
         : apiKey.trim().length > 0 && effectiveSecretStoreId.length > 0
@@ -307,19 +334,19 @@ export function CredentialForm({
         provider,
         visibility,
         workspaceId: visibility === "workspace" ? workspaceId : null,
-        authMethod: authMethodForProvider(provider),
+        authMethod: selectedAuthMethod,
         baseUrl: "",
         extraHeaders: {},
         ...(isEditing ? { isActive } : {}),
       };
 
-      if (provider === "openai") {
+      if (isApiKeyCredential) {
         if (!isEditing) {
           payload.apiKeySecretStoreId = effectiveSecretStoreId;
           payload.apiKey = apiKey.trim();
         }
       } else if (!isEditing) {
-        payload.oauthProvider = "chatgpt";
+        payload.oauthProvider = selectedProvider?.oauthProvider ?? "chatgpt";
       }
 
       if (credential) {
@@ -390,7 +417,7 @@ export function CredentialForm({
                   value={provider}
                 >
                   {providerOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
+                    <option key={option.id} value={option.id}>
                       {option.label}
                     </option>
                   ))}
@@ -408,7 +435,7 @@ export function CredentialForm({
               </div>
             </div>
 
-            {provider === "openai" ? (
+            {isApiKeyCredential ? (
               isEditing ? null : (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">

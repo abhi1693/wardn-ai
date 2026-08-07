@@ -232,6 +232,7 @@ from app.modules.chat_providers.models import ChatProviderEvent, ChatProviderThr
 from app.modules.limits import service as limits_service
 from app.modules.llm_providers import repository as llm_provider_repository
 from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.llm_providers.service import ANTHROPIC_PROVIDER as ANTHROPIC_PROVIDER
 from app.modules.llm_providers.service import OPENAI_API_KEY_PROVIDER as OPENAI_API_KEY_PROVIDER
 from app.modules.llm_providers.service import OPENAI_CHATGPT_PROVIDER as OPENAI_CHATGPT_PROVIDER
 from app.modules.llm_providers.service import list_models_for_credential, user_can_see_credential

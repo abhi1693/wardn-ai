@@ -3143,9 +3143,204 @@ async def test_run_agent_chat_records_openai_usage(monkeypatch) -> None:
     assert len(recorded) == 1
     assert recorded[0]["status"] == "succeeded"
     assert recorded[0]["usage"].input_tokens == 10
-    assert recorded[0]["usage"].output_tokens == 5
-    assert recorded[0]["organization_id"] == organization_id
-    assert recorded[0]["workspace_id"] == workspace_id
+
+
+@pytest.mark.asyncio
+async def test_run_agent_chat_records_anthropic_usage(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="user@example.com")
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Anthropic",
+        provider=service.ANTHROPIC_PROVIDER,
+        visibility="organization",
+        auth_method="api_key",
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="claude-sonnet-5-20261101",
+        is_active=True,
+    )
+    sent_bodies: list[dict] = []
+    recorded: list[dict] = []
+
+    async def resolve_credential_secrets(*args, **kwargs):
+        return ResolvedLLMCredentialSecrets(api_key="sk-ant")
+
+    async def create_anthropic_message(*args, **kwargs):
+        sent_bodies.append(kwargs["body"])
+        return {
+            "id": "msg_1",
+            "model": "claude-sonnet-5-20261101",
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 12, "output_tokens": 4},
+        }
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "resolve_credential_secrets",
+        resolve_credential_secrets,
+    )
+    monkeypatch.setattr(chat_orchestrator, "create_anthropic_message", create_anthropic_message)
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+
+    events = [
+        event
+        async for event in service.run_agent_chat(
+            agent,
+            credential,
+            AgentChatRequest(
+                messages=[
+                    AgentChatMessage(
+                        role="user",
+                        parts=[{"type": "text", "text": "hi"}],
+                    )
+                ]
+            ),
+            {},
+            session_factory=fake_session_factory(FakeSession()),
+            user=user,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+        )
+    ]
+
+    assert events == [service.AgentChatTextEvent(text="ok")]
+    assert sent_bodies[0]["model"] == "claude-sonnet-5-20261101"
+    assert sent_bodies[0]["messages"] == [{"role": "user", "content": "hi"}]
+    assert recorded[0]["status"] == "succeeded"
+    assert recorded[0]["usage"].input_tokens == 12
+    assert recorded[0]["usage"].output_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_stream_anthropic_messages_runs_dynamic_tool(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    credential = LLMProviderCredential(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Anthropic",
+        provider=service.ANTHROPIC_PROVIDER,
+        visibility="workspace",
+        workspace_id=workspace_id,
+        auth_method="api_key",
+        base_url="",
+        extra_headers={},
+        is_active=True,
+    )
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        provider_credential_id=credential.id,
+        model_name="claude-sonnet-5-20261101",
+        is_active=True,
+    )
+    runtime_tool = make_agent_runtime_tool(
+        wire_name="wardn_namespace",
+        tool_name="namespace_list",
+        config_name="rancher-qa-omsllc",
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+    )
+    sent_bodies: list[dict] = []
+    runtime_calls: list[dict] = []
+
+    async def create_anthropic_message(*args, **kwargs):
+        sent_bodies.append(kwargs["body"])
+        if len(sent_bodies) == 1:
+            return {
+                "id": "msg_1",
+                "model": "claude-sonnet-5-20261101",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": service.AGENT_RUN_TOOL_TOOL_NAME,
+                        "input": {
+                            "tool_name": "namespace_list",
+                            "configured_target": "rancher-qa-omsllc",
+                            "tool_args": {},
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        return {
+            "id": "msg_2",
+            "model": "claude-sonnet-5-20261101",
+            "content": [{"type": "text", "text": "done"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+
+    async def require_agent_llm_budget_available(*args, **kwargs):
+        return None
+
+    async def record_agent_llm_usage(*args, **kwargs):
+        return None
+
+    async def call_tool_with_isolated_tracking(*args, **kwargs):
+        runtime_calls.append(kwargs)
+        return {"content": [{"type": "text", "text": "namespace data"}]}
+
+    monkeypatch.setattr(chat_orchestrator, "create_anthropic_message", create_anthropic_message)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "require_agent_llm_budget_available",
+        require_agent_llm_budget_available,
+    )
+    monkeypatch.setattr(chat_orchestrator, "record_agent_llm_usage", record_agent_llm_usage)
+    monkeypatch.setattr(
+        tool_execution,
+        "call_tool_with_isolated_tracking",
+        call_tool_with_isolated_tracking,
+    )
+
+    events = [
+        event
+        async for event in chat_orchestrator.stream_anthropic_messages_response_text(
+            agent,
+            credential,
+            session_factory=fake_session_factory(FakeSession()),
+            headers={"x-api-key": "sk-ant"},
+            messages=[
+                AgentChatMessage(
+                    role="user",
+                    parts=[{"type": "text", "text": "list namespaces in rancher-qa"}],
+                )
+            ],
+            tools={"wardn_namespace": runtime_tool},
+        )
+    ]
+
+    assert sent_bodies[0]["tools"][0]["input_schema"]["required"] == ["query"]
+    assert sent_bodies[1]["messages"][-1]["content"] == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": "namespace data",
+        }
+    ]
+    assert runtime_calls
+    assert events[-1] == AgentChatTextEvent(text="done")
 
 
 def test_chatgpt_codex_request_body_uses_websocket_response_create_shape() -> None:

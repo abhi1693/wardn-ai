@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/current-user";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 import { CredentialForm } from "../credential-form";
+import { getLlmProviders } from "../data";
 
 type NewLlmCredentialPageProps = {
   params: Promise<{ organizationId: string }>;
@@ -16,9 +17,10 @@ type NewLlmCredentialPageProps = {
 
 export default async function NewLlmCredentialPage({ params }: NewLlmCredentialPageProps) {
   const { organizationId } = await params;
-  const [workspaceContext, secretStores, currentUser] = await Promise.all([
+  const [workspaceContext, secretStores, providers, currentUser] = await Promise.all([
     getWorkspaceContext({ organizationId }),
     getSecretStores(organizationId),
+    getLlmProviders(organizationId),
     getCurrentUser(),
   ]);
   const organization = workspaceContext.selectedOrganization;
@@ -46,6 +48,7 @@ export default async function NewLlmCredentialPage({ params }: NewLlmCredentialP
       <CredentialForm
         currentUser={currentUser}
         organization={organization}
+        providers={providers}
         secretStores={secretStores}
         workspaces={workspaces}
       />

@@ -1,5 +1,6 @@
 import type {
   LLMProviderCredentialRead,
+  LLMProviderRead,
   OrganizationRead,
   SecretStoreRead,
   UserRead,
@@ -7,9 +8,10 @@ import type {
 } from "@/lib/api/generated/model";
 
 export type CredentialAuthMethod = "api_key" | "oauth";
-export type CredentialProvider = "openai" | "openai_chatgpt";
+export type CredentialProvider = string;
 export type CredentialVisibility = "organization" | "workspace" | "user";
 export type CredentialOAuthProvider = "chatgpt";
+export type LlmProviderRead = LLMProviderRead;
 
 export type LlmCredentialRead = LLMProviderCredentialRead & {
   authMethod?: CredentialAuthMethod;
@@ -41,6 +43,7 @@ export type CredentialFormProps = {
   credential?: LlmCredentialRead;
   currentUser: UserRead | null;
   organization: OrganizationRead;
+  providers: LlmProviderRead[];
   secretStores: SecretStoreRead[];
   workspaces: WorkspaceRead[];
 };

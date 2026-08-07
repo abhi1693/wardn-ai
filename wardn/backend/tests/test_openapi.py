@@ -33,6 +33,7 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
         "/api/v1/organizations/{organization_id}/dashboard",
+        "/api/v1/organizations/{organization_id}/llm/providers",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials/{credential_id}",
         (
