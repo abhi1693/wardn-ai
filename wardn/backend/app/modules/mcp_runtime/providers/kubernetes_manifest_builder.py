@@ -106,7 +106,7 @@ RUNTIME_PRIVATE_EGRESS_CIDRS = [
 ]
 RUNTIME_NETWORK_POLICY_CONFIG_KEY = "networkPolicy"
 RUNTIME_NETWORK_POLICY_CUSTOM_EGRESS_LIMIT = 20
-RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 20
+RUNTIME_NETWORK_POLICY_REMOTE_DESTINATION_LIMIT = 64
 KUBERNETES_NETWORK_POLICY_BACKEND_AUTO = "auto"
 KUBERNETES_NETWORK_POLICY_BACKEND_STANDARD = "network_policy"
 KUBERNETES_NETWORK_POLICY_BACKEND_CILIUM = "cilium"
@@ -1161,14 +1161,24 @@ def is_oci_runtime(runtime_config: dict[str, Any]) -> bool:
 
 def npm_package_binary_name(runtime, runtime_config: dict[str, Any]) -> str:
     command_name = Path(runtime.command).name
+    identifier = runtime_package_identifier(runtime_config)
     if command_name not in {"node", "npx"}:
         return command_name
-    for arg in runtime.args:
+    if command_name == "npx" and identifier:
+        return identifier.rsplit("/", 1)[-1]
+
+    launcher_args = (
+        strip_npm_launcher_args(list(runtime.args), identifier)
+        if command_name == "npx"
+        else runtime.args
+    )
+    for arg in launcher_args:
+        if str(arg).startswith("-"):
+            continue
         arg_name = Path(str(arg)).name
         if arg_name and arg_name not in {"node", "npx"}:
             return arg_name
-    identifier = runtime_package_identifier(runtime_config)
-    return identifier.rsplit("/", 1)[-1]
+    return identifier.rsplit("/", 1)[-1] if identifier else command_name
 
 def npm_package_volume_required(runtime_config: dict[str, Any]) -> bool:
     return registry_type(runtime_config) == "npm" and bool(
@@ -1277,11 +1287,20 @@ def runtime_file_volume(
 
 def strip_npm_launcher_args(args: list[str], identifier: str) -> list[str]:
     remaining = list(args)
-    if remaining and remaining[0] in {"--offline", "--yes", "-y"}:
+    while remaining and remaining[0] in {"--offline", "--yes", "-y"}:
         remaining = remaining[1:]
-    if remaining and remaining[0] == identifier:
+    if remaining and npm_package_arg_matches_identifier(remaining[0], identifier):
         remaining = remaining[1:]
     return remaining
+
+
+def npm_package_arg_matches_identifier(arg: str, identifier: str) -> bool:
+    if not identifier:
+        return False
+    package_arg = str(arg or "").strip()
+    if package_arg == identifier:
+        return True
+    return package_arg.startswith(f"{identifier}@")
 
 def transport_process_command(transport: Any) -> tuple[str, list[str]]:
     if not isinstance(transport, dict):

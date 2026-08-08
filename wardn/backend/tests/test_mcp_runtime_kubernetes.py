@@ -2169,6 +2169,63 @@ def test_kubernetes_runtime_manifest_installs_npm_package_in_init_container(
     assert init_container.resources.limits == {"cpu": "1", "memory": "1Gi"}
 
 
+def test_kubernetes_runtime_manifest_uses_npm_package_binary_after_npx_flags(
+    tmp_path,
+) -> None:
+    workspace_id = uuid.uuid4()
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.digitalocean-labs/mcp-digitalocean",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "npm",
+            "command": "npx",
+            "args": ["--offline", "@digitalocean/mcp", "--services", "apps"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "@digitalocean/mcp", "version": "1.0.67"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+        },
+    )
+    installation.id = uuid.uuid4()
+    runtime_session = MCPRuntimeSession(
+        workspace_id=workspace_id,
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider=RUNTIME_PROVIDER_KUBERNETES,
+        runtime_kind=RUNTIME_KIND_PACKAGE,
+        config_fingerprint="runtime-fingerprint",
+        status="idle",
+        pod_name="",
+        namespace="",
+        endpoint_url="",
+        failure_count=0,
+        last_error="",
+    )
+    runtime_session.id = uuid.uuid4()
+
+    manifest = build_runtime_manifests(
+        installation,
+        runtime_session,
+        settings=FakeSettings(),
+        client_module=FakeKubernetesClient,
+    )
+
+    assert supergateway_stdio_arg(manifest) == (
+        "/opt/wardn/npm-package/node_modules/.bin/mcp --services apps"
+    )
+    assert manifest.pod.spec.init_containers[0].args == [
+        (
+            "npm install --omit=dev --no-audit --no-fund --prefix "
+            "/opt/wardn/npm-package @digitalocean/mcp@1.0.67"
+        )
+    ]
+
+
 def test_kubernetes_runtime_manifest_runs_npm_streamable_http_package_directly(
     tmp_path,
     monkeypatch,
@@ -3161,6 +3218,53 @@ def test_kubernetes_runtime_network_policy_splits_remote_and_dependency_egress(
     assert {destination["host"] for destination in policy_config["remoteDestinations"]} == {
         "pypi.org",
         "files.pythonhosted.org",
+    }
+
+
+def test_kubernetes_runtime_network_policy_accepts_many_remote_destinations(
+    tmp_path,
+) -> None:
+    workspace_id = uuid.uuid4()
+    remote_destinations = [
+        {
+            "label": f"service-{index}",
+            "host": f"service-{index}.mcp.digitalocean.com",
+            "port": 443,
+            "cidrs": [f"203.0.113.{index + 1}/32"],
+        }
+        for index in range(21)
+    ]
+    installation = MCPServerInstallation(
+        workspace_id=workspace_id,
+        server_name="io.github.digitalocean-labs/mcp-digitalocean",
+        installed_version="1.0.0",
+        status="enabled",
+        install_type="npm",
+        install_path=str(tmp_path),
+        runtime_config={
+            "kind": RUNTIME_KIND_PACKAGE,
+            "registryType": "npm",
+            "command": "npx",
+            "args": ["--offline", "@digitalocean/mcp", "--services", "apps"],
+            "cwd": str(tmp_path),
+            "package": {"identifier": "@digitalocean/mcp", "version": "1.0.67"},
+            "transport": {"type": RUNTIME_TRANSPORT_STDIO},
+            "networkPolicy": {
+                "mode": "intent",
+                "allowRemoteMcpEgress": True,
+                "allowRuntimeDependencyEgress": False,
+                "denyOtherEgress": True,
+                "remoteDestinations": remote_destinations,
+            },
+        },
+    )
+    installation.id = uuid.uuid4()
+
+    policy_config = network_policy_config(installation, settings=FakeSettings())
+
+    assert len(policy_config["remoteDestinations"]) == 21
+    assert {destination["host"] for destination in policy_config["remoteDestinations"]} == {
+        destination["host"] for destination in remote_destinations
     }
 
 
