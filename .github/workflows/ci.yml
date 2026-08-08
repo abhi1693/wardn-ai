@@ -96,3 +96,33 @@ jobs:
 
       - name: Build frontend
         run: npm run web:build
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci --prefix docs
+
+      - name: Sync OpenAPI docs artifact
+        run: npm run docs:sync:openapi
+
+      - name: Check OpenAPI docs artifact is current
+        run: git diff --exit-code -- docs/site/latest/modules/ROOT/attachments/openapi/wardn-api.json
+
+      - name: Audit docs dependencies
+        run: npm --prefix docs audit --audit-level=high
+
+      - name: Build docs
+        run: npm run docs:build

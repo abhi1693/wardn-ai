@@ -1,0 +1,38 @@
+* xref:index.adoc[]
+
+* Getting Started
+** xref:getting-started/overview.adoc[]
+** xref:getting-started/quickstart.adoc[]
+** xref:getting-started/local-development.adoc[]
+** xref:getting-started/deployment-model.adoc[]
+
+* How-to Guides
+** xref:how-to-guides/connect-llm-provider.adoc[]
+** xref:how-to-guides/install-mcp-server.adoc[]
+** xref:how-to-guides/create-workspace-agent.adoc[]
+** xref:how-to-guides/approve-tool-use.adoc[]
+** xref:how-to-guides/schedule-agent-task.adoc[]
+** xref:how-to-guides/connect-chat-provider.adoc[]
+
+* Concepts
+** xref:concepts/organizations-and-workspaces.adoc[]
+** xref:concepts/mcp-catalog-and-registry.adoc[]
+** xref:concepts/mcp-gateway.adoc[]
+** xref:concepts/mcp-runtime.adoc[]
+** xref:concepts/agents-and-skills.adoc[]
+** xref:concepts/guardrails-and-approvals.adoc[]
+** xref:concepts/secrets-and-llm-providers.adoc[]
+** xref:concepts/observability-and-usage.adoc[]
+
+* Operations
+** xref:operations/configuration.adoc[]
+** xref:operations/workers.adoc[]
+** xref:operations/security.adoc[]
+** xref:operations/release-and-versioning.adoc[]
+
+* Reference
+** xref:reference/api.adoc[]
+** xref:reference/commands.adoc[]
+** xref:reference/environment-variables.adoc[]
+** xref:reference/documentation-authoring.adoc[]
+

@@ -1,0 +1,12 @@
+name: wardn-ai
+title: Wardn AI
+version: latest
+display_version: latest
+start_page: ROOT:index.adoc
+nav:
+- modules/ROOT/nav.adoc
+asciidoc:
+  attributes:
+    current-version: latest
+    api-prefix: /api/v1
+

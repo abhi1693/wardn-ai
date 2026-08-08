@@ -1,0 +1,26 @@
+= Approve Tool Use
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Review and decide tool approval requests created by Wardn guardrails.
+
+Guardrails can require human approval before a tool call executes.
+
+[#_when_approvals_happen]
+== When approvals happen
+
+An approval is created when a guardrail policy evaluates a tool request and returns an approval requirement. The approval is tied to the stored tool call and its arguments.
+
+[#_review_request]
+== Review a request
+
+. Open the workspace.
+. Go to pending approvals or the relevant agent run.
+. Review the tool name, server, arguments, requester, and context.
+. Approve or deny the request.
+. Add a reason when the decision needs audit context.
+
+[#_after_decision]
+== After a decision
+
+Approved requests can resume the blocked agent run. Denied requests stop the tool call and preserve the decision in the audit trail.
+

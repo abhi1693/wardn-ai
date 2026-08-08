@@ -1,0 +1,53 @@
+= Commands
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Common Wardn development, backend, worker, frontend, and docs commands.
+
+[cols="1,2", options="header"]
+|===
+| Task
+| Command
+
+| Backend lint
+| `npm run backend:lint`
+
+| Backend tests
+| `npm run backend:test`
+
+| Backend typecheck
+| `npm run backend:typecheck`
+
+| Apply migrations
+| `cd wardn/backend && uv run alembic upgrade head`
+
+| Run backend
+| `cd wardn/backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`
+
+| Create superuser
+| `cd wardn/backend && uv run python -m app.manage createsuperuser`
+
+| Run worker
+| `cd wardn/backend && uv run python -m app.manage runmcpjobs`
+
+| Generate API client
+| `npm run web:api:generate`
+
+| Frontend dev
+| `npm run web:dev`
+
+| Frontend lint
+| `npm run web:lint`
+
+| Frontend build
+| `npm run web:build`
+
+| Sync docs OpenAPI artifact
+| `npm run docs:sync:openapi`
+
+| Build docs
+| `npm run docs:build`
+
+| Preview docs
+| `npm run docs:preview`
+|===
+

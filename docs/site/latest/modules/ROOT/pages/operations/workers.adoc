@@ -1,0 +1,40 @@
+= Workers
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Operate Wardn background workers for MCP jobs, scheduled tasks, agent resumption, chat provider events, and secret cleanup.
+
+The API does not start background workers in-process.
+
+[#_run_worker]
+== Run the worker command
+
+[source,bash]
+----
+cd wardn/backend
+uv run python -m app.manage runmcpjobs
+----
+
+Use `--once` for a bounded local worker iteration:
+
+[source,bash]
+----
+uv run python -m app.manage runmcpjobs --once
+----
+
+[#_responsibilities]
+== Responsibilities
+
+The worker command processes durable MCP operation jobs and coordinates related loops when enabled:
+
+* MCP installation and synchronization jobs
+* MCP runtime warmup and cleanup
+* Scheduled task runs
+* Agent run resumption after approval decisions
+* Chat provider events
+* Managed-secret cleanup
+
+[#_leases]
+== Leases
+
+Workers use leases and heartbeats so work can recover when a worker exits unexpectedly. Configure lease and retry durations through `WARDN_` settings.
+

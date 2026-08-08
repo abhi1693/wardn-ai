@@ -1,0 +1,27 @@
+= Observability and Usage
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Learn what Wardn records for runtime health, agent runs, LLM usage, and tool activity.
+
+Wardn is designed to make AI automation operable.
+
+[#_workspace_observability]
+== Workspace observability
+
+Workspace views show agent runs, tool calls, approvals, runtime sessions, runtime events, scheduled task runs, and failures that need attention.
+
+[#_organization_observability]
+== Organization observability
+
+Organization views summarize workspace health, catalog state, usage, model pricing, and limits.
+
+[#_usage]
+== Usage
+
+Usage records help teams understand model activity and costs. Pricing configuration lets organizations map model usage to expected cost.
+
+[#_debugging]
+== Debugging
+
+Start with the agent run or operation job, then inspect related runtime sessions, tool call records, approval records, and worker logs.
+

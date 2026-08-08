@@ -1,0 +1,30 @@
+= Agents and Skills
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Learn how Wardn workspace agents use models, skills, MCP tools, conversations, and run traces.
+
+Agents are workspace assistants that use configured model credentials and approved MCP tools.
+
+[#_agent_inputs]
+== Agent inputs
+
+An agent run can include:
+
+* User messages
+* Agent instructions
+* Skill context
+* Conversation history
+* Available MCP tools
+* Guardrail decisions
+* Approval results
+
+[#_skills]
+== Skills
+
+Skills provide reusable instructions or capabilities that can be approved for a workspace and assigned to agents.
+
+[#_runs]
+== Runs
+
+Each agent run records execution state, model interaction, tool calls, approvals, failures, and output. Use run details when debugging behavior or reviewing sensitive actions.
+

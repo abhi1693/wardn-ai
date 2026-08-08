@@ -1,0 +1,39 @@
+= Configuration
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Configure Wardn runtime settings through WARDN-prefixed environment variables.
+
+Wardn backend settings use the `WARDN_` prefix.
+
+[#_local_file]
+== Local file
+
+Start with:
+
+[source,bash]
+----
+cp wardn/backend/.env.example wardn/backend/.env
+----
+
+Do not commit `.env` files with real secrets.
+
+[#_minimum_settings]
+== Minimum settings
+
+Configure at least:
+
+* `WARDN_DATABASE_URL`
+* `WARDN_SESSION_SECRET`
+* `WARDN_API_TOKEN_SECRET`
+* `WARDN_CORS_ORIGINS`
+* `WARDN_FRONTEND_BASE_URL`
+* `WARDN_AUTH_MODE`
+* Worker settings
+* Runtime provider settings
+* Secret backend profiles
+
+[#_production_settings]
+== Production settings
+
+Production deployments should use strong secrets, explicit origins, non-local runtime providers, managed secret profiles, and network egress policy that matches Wardn's outbound request controls.
+

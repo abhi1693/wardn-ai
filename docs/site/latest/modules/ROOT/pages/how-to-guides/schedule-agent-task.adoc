@@ -1,0 +1,29 @@
+= Schedule an Agent Task
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Create recurring or one-off agent runs with the same tools, policies, and traces as chat.
+
+Scheduled tasks let a workspace run agents without a user starting each conversation manually.
+
+[#_create_task]
+== Create a task
+
+. Open the workspace.
+. Go to Scheduled Tasks.
+. Create a task.
+. Select the agent or assistant behavior.
+. Enter the prompt or task instructions.
+. Configure a one-off or recurring schedule.
+. Choose an output route.
+. Save and preview upcoming runs.
+
+[#_test_delivery]
+== Test delivery
+
+Use the route test action before enabling a production schedule. Confirm that built-in chat output or a connected chat provider receives the expected message.
+
+[#_monitor_runs]
+== Monitor runs
+
+Review scheduled task runs from the workspace. Each run includes scheduling state, agent execution state, delivery state, and error details.
+

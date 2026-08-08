@@ -1,0 +1,29 @@
+= Connect an LLM Provider
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Add model provider credentials so workspace agents can generate responses.
+
+LLM provider credentials are organization-scoped and can be selected by workspace agents.
+
+[#_before_you_begin]
+== Before you begin
+
+* Create an organization.
+* Configure a secret backend if provider credentials should be stored externally.
+* Know which provider and model family the workspace should use.
+
+[#_add_credentials]
+== Add credentials
+
+. Open the organization.
+. Go to LLM provider credentials.
+. Select a supported provider.
+. Enter the credential details.
+. Save and validate the credential.
+. Review available models for the credential.
+
+[#_use_with_agents]
+== Use with agents
+
+After a credential exists, assign a model to the workspace assistant or to a specific workspace agent. Keep provider credentials separate from MCP credentials; provider credentials authorize model calls, while MCP credentials authorize tool calls.
+

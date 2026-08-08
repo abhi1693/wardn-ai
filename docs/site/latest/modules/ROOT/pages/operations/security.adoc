@@ -1,0 +1,30 @@
+= Security
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Security boundaries for credentials, sessions, MCP runtime isolation, outbound requests, and documentation.
+
+[#_credentials]
+== Credentials
+
+Never commit service tokens, provider credentials, MCP credentials, local database dumps, or `.env` files with real secrets. Treat MCP credentials as sensitive even when they are used only for validation.
+
+[#_sessions_and_tokens]
+== Sessions and tokens
+
+Use strong `WARDN_SESSION_SECRET` and `WARDN_API_TOKEN_SECRET` values outside local development. Scope API tokens to the organizations and workspaces they need.
+
+[#_runtime]
+== Runtime
+
+Containerized MCP work should run with a dedicated service identity, explicit CPU and memory limits, a read-only root filesystem, and only required writable volumes.
+
+[#_outbound_policy]
+== Outbound policy
+
+Public HTTPS on port 443 is allowed by default for guarded outbound HTTP flows. Internal destinations, nonstandard ports, and plain HTTP require explicit operator configuration.
+
+[#_docs]
+== Public docs
+
+Product documentation is intended to be public. Do not place private research notes, credentials, internal hostnames, or environment-specific runbooks in this docs tree unless they are safe to publish.
+

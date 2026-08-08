@@ -1,0 +1,27 @@
+= Connect a Chat Provider
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Connect Slack, Telegram, or WhatsApp routes for agent conversations and scheduled task output.
+
+Chat provider connections let users interact with workspace agents outside the Wardn UI and let scheduled tasks deliver output to external channels.
+
+[#_supported_connections]
+== Supported connections
+
+Wardn has modules for Slack, Telegram, and WhatsApp provider connections. Provider setup requirements vary by provider and deployment environment.
+
+[#_create_connection]
+== Create a connection
+
+. Open the workspace.
+. Go to Chat Providers.
+. Create a provider connection.
+. Enter provider credentials or pairing configuration.
+. Complete pairing when the provider requires it.
+. Save and verify connection status.
+
+[#_webhooks]
+== Webhooks
+
+External providers deliver inbound events to backend webhook routes under `{api-prefix}/chat-providers`. Keep webhook secrets and verification tokens out of committed source.
+

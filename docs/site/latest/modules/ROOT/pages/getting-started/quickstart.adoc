@@ -1,0 +1,104 @@
+= Quickstart
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Start Wardn AI locally with the backend API, frontend, database migrations, and job worker.
+
+This quickstart starts a local Wardn development environment.
+
+[#_requirements]
+== Requirements
+
+* Python 3.12
+* Node.js and npm
+* PostgreSQL
+* uv
+* Package runtimes required by the MCP servers you install
+
+[#_configure_backend]
+== Configure the backend
+
+[source,bash]
+----
+cp wardn/backend/.env.example wardn/backend/.env
+----
+
+Update `WARDN_DATABASE_URL`, `WARDN_SESSION_SECRET`, `WARDN_API_TOKEN_SECRET`, and `WARDN_CORS_ORIGINS` for your local environment.
+
+[#_install_and_migrate]
+== Install dependencies and migrate
+
+[source,bash]
+----
+cd wardn/backend
+uv sync --extra dev
+uv run alembic upgrade head
+----
+
+[#_create_superuser]
+== Create a local superuser
+
+[source,bash]
+----
+cd wardn/backend
+uv run python -m app.manage createsuperuser
+----
+
+[#_run_backend]
+== Run the backend
+
+[source,bash]
+----
+cd wardn/backend
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+----
+
+Useful endpoints:
+
+* `GET {api-prefix}/health/live`
+* `GET {api-prefix}/health/ready`
+* `GET {api-prefix}/openapi.json`
+* `POST {api-prefix}/mcp/gateway`
+
+[#_run_worker]
+== Run the worker
+
+Run the durable MCP job worker in a separate terminal:
+
+[source,bash]
+----
+cd wardn/backend
+uv run python -m app.manage runmcpjobs
+----
+
+This command also owns related background loops when enabled by configuration, including scheduled task processing, agent run resumption, chat provider events, and managed-secret cleanup.
+
+[#_run_frontend]
+== Run the frontend
+
+[source,bash]
+----
+npm install
+npm run web:dev
+----
+
+For local browser-to-API calls on separate ports, set:
+
+[source,bash]
+----
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+----
+
+Also include the frontend origin in `WARDN_CORS_ORIGINS`.
+
+[#_first_workspace]
+== First workspace flow
+
+. Sign in with the superuser.
+. Create an organization.
+. Create a workspace.
+. Add or sync an MCP server into the catalog.
+. Install the server into the workspace.
+. Connect an LLM provider credential.
+. Create an agent and bind approved tools.
+. Chat with the agent and review the run trace.
+

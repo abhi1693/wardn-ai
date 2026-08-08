@@ -1,0 +1,32 @@
+= Organizations and Workspaces
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Understand Wardn organization and workspace boundaries.
+
+Organizations are the top-level administrative boundary in Wardn. Workspaces sit inside organizations and contain the agents, MCP installations, guardrails, runtime sessions, scheduled tasks, and chat provider connections that belong to a team or operating context.
+
+[#_organization_scope]
+== Organization scope
+
+Organization-scoped resources include:
+
+* Users and membership
+* MCP catalog entries and catalog sources
+* Secret backends
+* LLM provider credentials
+* API tokens
+* Usage limits and pricing configuration
+
+[#_workspace_scope]
+== Workspace scope
+
+Workspace-scoped resources include:
+
+* Installed MCP servers
+* Agent definitions and conversations
+* Agent runs and approval requests
+* Guardrail settings and policies
+* Runtime sessions and events
+* Scheduled tasks
+* Chat provider connections
+

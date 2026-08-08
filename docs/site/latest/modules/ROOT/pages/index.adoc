@@ -1,0 +1,40 @@
+= What is {product-name}?
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Wardn AI is a control plane for governed AI tool access through MCP servers, workspace agents, guardrails, approvals, and runtime observability.
+:sidebar_label: What is Wardn AI?
+
+{product-name} is a control plane for governed AI tool access.
+
+It gives teams one place to approve Model Context Protocol (MCP) servers, connect secrets and model providers, run assistants, and review every tool call, approval, cost, and runtime issue. Agents can still use the MCP ecosystem, but trust, credentials, policy, and auditability stay in Wardn instead of being spread across local config files and one-off bots.
+
+[#_who_uses_wardn]
+== Who uses Wardn
+
+Platform teams use Wardn to curate trusted MCP servers, configure runtime boundaries, manage secrets, and define operating policy.
+
+Workspace owners use Wardn to install approved tools, connect model credentials, create agents, and decide when tool use needs human approval.
+
+Operators use Wardn to review runtime sessions, tool failures, scheduled runs, usage, and approval history.
+
+[#_core_workflow]
+== Core workflow
+
+. Create an organization and one or more workspaces.
+. Curate MCP servers in the organization catalog.
+. Install MCP servers into a workspace and validate their tools.
+. Store credentials through the configured secret backend.
+. Connect LLM provider credentials.
+. Create agents and bind the servers or individual tools they can use.
+. Add access rules, limits, and approval routes for sensitive actions.
+. Run agents through chat, scheduled tasks, or connected chat providers.
+. Review traces, tool calls, approvals, failures, and usage.
+
+[#_where_to_start]
+== Where to start
+
+* xref:getting-started/overview.adoc[] explains the product areas.
+* xref:getting-started/quickstart.adoc[] gets a local instance running.
+* xref:concepts/mcp-catalog-and-registry.adoc[] explains the catalog and installation model.
+* xref:reference/api.adoc[] links to the generated OpenAPI document.
+

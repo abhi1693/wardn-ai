@@ -1,0 +1,43 @@
+= Deployment Model
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Understand the production workload model for Wardn AI.
+
+Wardn is deployed as separate workloads that share the same database and configuration boundary.
+
+[#_required_workloads]
+== Required workloads
+
+API service:: Serves the FastAPI API, session-backed application calls, OAuth routes, health checks, and MCP gateway JSON-RPC.
+Frontend service:: Serves the Next.js application.
+MCP job worker:: Processes durable MCP installation and synchronization jobs, runtime warmup, expiration, and retention maintenance.
+Database:: Stores users, organizations, workspaces, catalog state, installations, agent runs, approvals, runtime sessions, usage, and secret handles.
+
+[#_background_loops]
+== Background loops
+
+The worker command also starts related loops when enabled:
+
+* Scheduled task processing
+* Agent run resume processing after approvals
+* Chat provider event processing
+* Managed-secret cleanup
+
+Deploy these responsibilities as separate containers or isolated workloads when operational scale requires it.
+
+[#_ingress]
+== Ingress
+
+Route these paths to the backend:
+
+* `{api-prefix}`
+* `{api-prefix}/oauth`
+* `/.well-known`
+
+Serve the frontend from the same browser origin when possible. Same-origin routing keeps session cookies available to browser and server-rendered requests without an application-level proxy.
+
+[#_runtime_isolation]
+== MCP runtime isolation
+
+Local process runtimes are intended for development. In non-local environments, configure the runtime provider for Kubernetes or a remote runtime and run workers with a dedicated service identity, explicit CPU and memory limits, a read-only root filesystem, and tightly scoped writable volumes.
+

@@ -13,6 +13,10 @@
   },
   "scripts": {
     "api:openapi": "cd wardn/backend && uv run --extra dev python -m app.openapi --output ../frontend/openapi/wardn-api.json",
+    "docs:build": "npm --prefix docs run build",
+    "docs:clean": "npm --prefix docs run clean",
+    "docs:preview": "npm --prefix docs run preview",
+    "docs:sync:openapi": "npm --prefix docs run sync:openapi",
     "web:api:generate": "npm run api:openapi && npm --workspace wardn/frontend run api:generate",
     "web:dev": "npm --workspace wardn/frontend run dev",
     "web:build": "npm --workspace wardn/frontend run build",

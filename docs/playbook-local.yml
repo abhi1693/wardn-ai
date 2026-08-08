@@ -1,0 +1,32 @@
+site:
+  title: Wardn AI Documentation
+  url: http://127.0.0.1:8081
+  start_page: latest@wardn-ai:ROOT:index.adoc
+  robots: disallow
+content:
+  sources:
+  - url: ..
+    branches: HEAD
+    start_paths: [docs/site/*]
+urls:
+  html_extension_style: drop
+  latest_version_segment: ''
+ui:
+  bundle:
+    url: https://gitlab.com/antora/antora-ui-default/-/jobs/artifacts/master/raw/build/ui-bundle.zip?job=bundle-stable
+    snapshot: true
+  supplemental_files: ./supplemental-ui
+asciidoc:
+  attributes:
+    product-name: Wardn AI
+    api-prefix: /api/v1
+    page-pagination: ''
+    tabs-sync-option: ''
+  extensions:
+  - '@asciidoctor/tabs'
+antora:
+  extensions:
+  - require: '@antora/lunr-extension'
+    index_latest_only: true
+output:
+  dir: build/site

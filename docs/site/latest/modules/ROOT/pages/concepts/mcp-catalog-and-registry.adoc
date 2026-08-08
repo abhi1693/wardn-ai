@@ -1,0 +1,29 @@
+= MCP Catalog and Registry
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Learn how Wardn separates trusted MCP catalog metadata from workspace server installations.
+
+Wardn separates MCP metadata curation from workspace installation.
+
+[#_catalog]
+== Catalog
+
+The organization catalog contains trusted MCP servers, versions, metadata, source records, and default version decisions. Catalog metadata can be created manually or synchronized from a trusted source.
+
+[#_workspace_registry]
+== Workspace registry
+
+The workspace registry contains installed server configurations. An installation points to a catalog server and version, then stores workspace-specific configuration, secret handles, job state, and discovered tools.
+
+[#_validation]
+== Validation
+
+Endpoint validation confirms that a configured server initializes and exposes tools.
+
+Tool validation confirms that the configured credentials can execute a particular tool with particular arguments.
+
+[#_jobs]
+== Operation jobs
+
+Installation and synchronization run through durable operation jobs. Jobs keep progress, retries, failures, cleanup state, and events in the database so operators can inspect what happened.
+

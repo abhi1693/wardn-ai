@@ -1,0 +1,49 @@
+= Documentation Authoring
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: How to add and maintain Wardn Antora documentation pages.
+
+Wardn docs use Antora and AsciiDoc.
+
+[#_add_page]
+== Add a page
+
+. Create an `.adoc` file under `docs/site/latest/modules/ROOT/pages/`.
+. Add a title and page attributes.
+. Add explicit anchors before major sections.
+. Add the page to `docs/site/latest/modules/ROOT/nav.adoc`.
+. Run `npm run docs:build`.
+
+[#_page_header]
+== Page header
+
+[source,asciidoc]
+----
+= Page Title
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: One sentence that explains the page.
+----
+
+[#_links]
+== Links
+
+Use Antora xrefs for internal documentation links:
+
+[source,asciidoc]
+----
+xref:concepts/mcp-gateway.adoc[]
+----
+
+Use attachment xrefs for downloadable files:
+
+[source,asciidoc]
+----
+xref:attachment$openapi/wardn-api.json[wardn-api.json]
+----
+
+[#_moving_pages]
+== Moving pages
+
+Prefer stable page paths. When a page path changes, update `nav.adoc`, search for incoming xrefs, and add redirects in the publishing layer.
+

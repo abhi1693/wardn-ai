@@ -1,0 +1,20 @@
+{
+  "name": "@wardn-ai/docs",
+  "private": true,
+  "scripts": {
+    "build": "antora --stacktrace --log-format=pretty --log-level=info playbook-local.yml",
+    "clean": "rm -rf build tmp",
+    "preview": "http-server build/site -c-1 -p 8081",
+    "sync:openapi": "mkdir -p site/latest/modules/ROOT/attachments/openapi && cp ../wardn/frontend/openapi/wardn-api.json site/latest/modules/ROOT/attachments/openapi/wardn-api.json",
+    "validate": "npm run build"
+  },
+  "devDependencies": {
+    "@antora/lunr-extension": "1.0.0-alpha.8",
+    "@asciidoctor/tabs": "1.0.0-beta.6",
+    "antora": "3.1.9",
+    "http-server": "14.1.1"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1"
+  }
+}

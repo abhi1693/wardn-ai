@@ -1,0 +1,32 @@
+= Release and Versioning
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Version the Wardn docs with the product and prepare for public static publishing.
+
+Wardn docs are initialized with a `latest` Antora component version. When Wardn begins publishing stable product releases, create version directories alongside `latest`.
+
+[#_version_layout]
+== Version layout
+
+[source,text]
+----
+docs/site/latest/
+docs/site/v0.1/
+docs/site/v0.2/
+----
+
+Each version directory owns an `antora.yml`, navigation file, pages, and attachments.
+
+[#_release_flow]
+== Release flow
+
+. Update the docs for product changes in the same pull request when practical.
+. Run `npm run docs:sync:openapi` when API schemas change.
+. Run `npm run docs:build`.
+. Publish `docs/build/site` to the public docs host.
+
+[#_redirects]
+== Redirects
+
+Antora does not automatically create redirects for renamed pages. Prefer stable page paths. When a page must move, add redirect handling in the publishing layer.
+

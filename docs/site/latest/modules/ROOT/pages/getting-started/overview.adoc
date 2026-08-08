@@ -1,0 +1,32 @@
+= Overview
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Learn how Wardn AI organizes governed AI tool access across organizations, workspaces, MCP servers, agents, policies, and runtime visibility.
+
+Wardn is organized around a small set of product areas that work together.
+
+[#_trusted_mcp_catalog]
+== Trusted MCP catalog
+
+The organization MCP catalog is where platform teams curate MCP server metadata and versions. A server in the catalog is not automatically available to agents. It becomes usable only after it is installed into a workspace and validated with the credentials for that workspace.
+
+[#_workspace_agents]
+== Workspace agents
+
+Workspace agents use configured LLM provider credentials and the MCP servers assigned to them. Agents can work through chat, scheduled tasks, skills, and connected chat providers while keeping tool access inside Wardn's policy and audit path.
+
+[#_guardrails_and_approvals]
+== Guardrails and approvals
+
+Guardrails evaluate tool requests before execution. A policy can allow, deny, or require a human approval. Approval records are tied to the stored tool call and arguments so the decision applies to the exact action under review.
+
+[#_runtime_and_observability]
+== Runtime and observability
+
+The runtime layer starts, stops, redeploys, and observes MCP server sessions. Dashboards and trace views show runtime sessions, tool failures, LLM usage, model pricing, scheduled runs, and approval state.
+
+[#_enterprise_controls]
+== Enterprise controls
+
+Wardn supports organization and workspace boundaries, local or OIDC authentication, API tokens, usage limits, managed secrets, operator-managed OpenBao profiles, and chat provider connections.
+

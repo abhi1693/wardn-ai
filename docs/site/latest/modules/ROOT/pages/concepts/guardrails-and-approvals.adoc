@@ -1,0 +1,27 @@
+= Guardrails and Approvals
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Understand policy evaluation, approval routing, and review records.
+
+Guardrails define how Wardn evaluates tool use before execution.
+
+[#_settings]
+== Settings
+
+Workspace guardrail settings control whether policies are active and how the workspace handles sensitive tool access.
+
+[#_policies]
+== Policies
+
+Policies match tool requests and decide whether to allow, deny, or require approval. Starter policies can create a baseline set for new workspaces.
+
+[#_simulation]
+== Simulation
+
+Policy simulation lets administrators test how a request would be evaluated before enabling policy changes.
+
+[#_auditability]
+== Auditability
+
+Approval decisions are recorded with the tool call, arguments, requester, reviewer, decision, and timing. This makes review specific to the action being approved.
+

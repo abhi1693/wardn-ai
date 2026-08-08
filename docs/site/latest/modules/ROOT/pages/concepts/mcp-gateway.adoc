@@ -1,0 +1,23 @@
+= MCP Gateway
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Learn how Wardn exposes governed MCP tool access through a JSON-RPC gateway.
+
+The MCP gateway is the governed path for discovering and invoking MCP tools.
+
+[#_entrypoints]
+== Entrypoints
+
+Wardn exposes a general gateway at `{api-prefix}/mcp/gateway` and a workspace-scoped gateway at `{api-prefix}/organizations/:organization_id/workspaces/:workspace_id/mcp/gateway`.
+
+The gateway supports MCP JSON-RPC methods such as initialize, ping, tools/list, and tool calls.
+
+[#_authorization]
+== Authorization
+
+The general gateway uses bearer API tokens. The workspace gateway uses the authenticated web user. In both cases, Wardn builds an effective scope before listing or invoking tools.
+
+[#_policy_path]
+== Policy path
+
+Tool calls pass through Wardn policy and approval logic before execution. When a policy requires approval, the requested tool call is stored and can resume only after an authorized reviewer approves it.

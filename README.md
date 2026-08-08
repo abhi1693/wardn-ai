@@ -11,6 +11,21 @@ spread across local config files and one-off bots.
 [Product Areas](#product-areas) | [Typical Workflow](#typical-workflow) |
 [Local Development](#local-development) | [Production Notes](#production-notes)
 
+## Documentation
+
+Wardn's public documentation source lives in `docs/`. It uses Antora and AsciiDoc
+to build a static, versioned docs site.
+
+```bash
+cd docs
+npm ci
+npm run build
+npm run preview
+```
+
+The root package also exposes `npm run docs:build`, `npm run docs:preview`, and
+`npm run docs:sync:openapi`.
+
 ## What Wardn Is For
 
 AI agents become useful when they can act across company systems: source control,

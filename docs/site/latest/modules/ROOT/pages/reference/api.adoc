@@ -1,0 +1,39 @@
+= API Reference
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Download the generated Wardn OpenAPI specification and use it with API tooling.
+
+Wardn's API is described by a generated OpenAPI document from the FastAPI backend.
+
+[#_download_openapi]
+== Download OpenAPI
+
+The docs build includes a copy of the generated OpenAPI artifact:
+
+* xref:attachment$openapi/wardn-api.json[wardn-api.json]
+
+Refresh it after regenerating the API client:
+
+[source,bash]
+----
+npm run web:api:generate
+npm run docs:sync:openapi
+----
+
+[#_live_endpoint]
+== Live endpoint
+
+A running backend also serves:
+
+* `GET {api-prefix}/openapi.json`
+
+[#_client_generation]
+== Client generation
+
+The frontend client is generated from the same schema with Orval:
+
+[source,bash]
+----
+npm run web:api:generate
+----
+

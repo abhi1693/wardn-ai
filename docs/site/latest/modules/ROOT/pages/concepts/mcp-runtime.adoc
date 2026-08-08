@@ -1,0 +1,27 @@
+= MCP Runtime
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Understand MCP runtime sessions, providers, events, and production isolation.
+
+The MCP runtime layer starts and manages installed MCP servers so tools can be discovered and invoked reliably.
+
+[#_runtime_providers]
+== Runtime providers
+
+Wardn supports local development execution and Kubernetes-oriented runtime execution. Production deployments should avoid local process runtimes and use an isolated provider.
+
+[#_sessions]
+== Sessions
+
+Runtime sessions represent running server processes or runtime-backed gateway instances. Wardn tracks status, health, events, startup failures, and stale invocations.
+
+[#_controls]
+== Controls
+
+Workspace administrators can start, stop, restart, and redeploy runtime state for installations through the runtime API and UI.
+
+[#_retention]
+== Retention
+
+Runtime events and invocation records are retained according to `WARDN_MCP_RUNTIME_EVENT_RETENTION_DAYS` and `WARDN_MCP_RUNTIME_INVOCATION_RETENTION_DAYS`.
+

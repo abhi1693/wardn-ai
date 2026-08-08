@@ -1,0 +1,62 @@
+= Environment Variables
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Important Wardn environment variables for local development and production operation.
+
+This page lists the main settings groups. See `wardn/backend/.env.example` and `wardn/backend/app/core/config.py` for the authoritative list.
+
+[#_core]
+== Core
+
+* `WARDN_ENVIRONMENT`
+* `WARDN_LOG_LEVEL`
+* `WARDN_TELEMETRY`
+* `WARDN_DATABASE_URL`
+* `WARDN_CORS_ORIGINS`
+* `WARDN_FRONTEND_BASE_URL`
+
+[#_auth]
+== Authentication
+
+* `WARDN_AUTH_MODE`
+* `WARDN_SESSION_COOKIE_NAME`
+* `WARDN_SESSION_SECRET`
+* `WARDN_API_TOKEN_SECRET`
+* `WARDN_OIDC_ISSUER_URL`
+* `WARDN_OIDC_CLIENT_ID`
+* `WARDN_OIDC_CLIENT_SECRET`
+* `WARDN_OIDC_ALLOWED_EMAIL_DOMAINS`
+
+[#_secrets]
+== Secrets
+
+* `WARDN_OPENBAO_AUTH_FILE_ROOT`
+* `WARDN_OPENBAO_AUTH_PROFILES_JSON`
+* `WARDN_SECRET_CLEANUP_WORKER_POLL_INTERVAL_SECONDS`
+* `WARDN_SECRET_CLEANUP_WORKER_LEASE_SECONDS`
+
+[#_outbound_http]
+== Outbound HTTP
+
+* `WARDN_OUTBOUND_HTTP_ALLOW_HTTP`
+* `WARDN_OUTBOUND_HTTP_ALLOWED_PORTS`
+* `WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST`
+
+[#_mcp]
+== MCP
+
+* `WARDN_MCP_INSTALL_ROOT`
+* `WARDN_MCP_JOB_WORKER_ISOLATION`
+* `WARDN_MCP_JOB_WORKER_POLL_INTERVAL_SECONDS`
+* `WARDN_MCP_RUNTIME_PROVIDER`
+* `WARDN_MCP_RUNTIME_NAMESPACE`
+* `WARDN_MCP_RUNTIME_KUBERNETES_*`
+
+[#_scheduled_tasks_and_chat]
+== Scheduled tasks and chat providers
+
+* `WARDN_SCHEDULED_TASK_WORKER_ENABLED`
+* `WARDN_SCHEDULED_TASK_WORKER_POLL_INTERVAL_SECONDS`
+* `WARDN_CHAT_PROVIDER_EVENT_WORKER_ENABLED`
+* `WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL`
+

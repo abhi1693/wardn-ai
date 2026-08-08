@@ -1,0 +1,31 @@
+= Create a Workspace Agent
+:revdate: 2026-08-09
+:page-revdate: {revdate}
+:description: Create an agent and bind approved MCP tools inside a workspace.
+
+Workspace agents combine model credentials, instructions, skills, and approved MCP tool access.
+
+[#_prepare_workspace]
+== Prepare the workspace
+
+. Connect an LLM provider credential.
+. Install and validate at least one MCP server.
+. Decide whether the agent can use whole servers or only specific tools.
+. Configure guardrails for sensitive operations.
+
+[#_create_agent]
+== Create the agent
+
+. Open the workspace.
+. Go to Agents.
+. Create or quick-start an agent.
+. Select the model or provider credential.
+. Add instructions for the agent's role.
+. Bind approved servers or individual tools.
+. Save the agent.
+
+[#_test_agent]
+== Test the agent
+
+Use workspace chat to ask the agent to perform a low-risk task. Inspect the run trace to confirm the expected model, tools, arguments, approval behavior, and final response.
+
