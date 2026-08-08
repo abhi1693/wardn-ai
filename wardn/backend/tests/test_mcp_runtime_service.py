@@ -390,6 +390,67 @@ async def test_start_installation_runtime_warms_installed_server(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_get_installation_runtime_state_ignores_stale_remote_session(
+    monkeypatch,
+) -> None:
+    installation, _ = installed_server()
+    installation.install_type = "npm"
+    installation.runtime_config = {"kind": "package"}
+    stale_runtime_session = MCPRuntimeSession(
+        installation_id=installation.id,
+        server_name=installation.server_name,
+        server_version=installation.installed_version,
+        runtime_provider="remote",
+        runtime_kind="remote",
+        config_fingerprint="old-remote-fingerprint",
+        status="stopped",
+        pod_name="",
+        namespace="wardn-runtimes",
+        endpoint_url="https://apps.mcp.digitalocean.com/mcp",
+        failure_count=0,
+        last_error="",
+    )
+    stale_runtime_session.id = uuid.uuid4()
+    session = FakeSession()
+
+    async def get_installation_by_id(seen_session, installation_id, workspace_id=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert workspace_id is None
+        return installation
+
+    async def list_runtime_sessions_for_installation(seen_session, installation_id, limit=None):
+        assert seen_session is session
+        assert installation_id == installation.id
+        assert limit == 1
+        return [stale_runtime_session]
+
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "get_installation_by_id",
+        get_installation_by_id,
+    )
+    monkeypatch.setattr(
+        repository,
+        "list_runtime_sessions_for_installation",
+        list_runtime_sessions_for_installation,
+    )
+
+    response = await service.get_installation_runtime_state(
+        session,
+        installation.id,
+        manager=FakeRuntimeManager(),
+    )
+
+    assert response.runtime_session is None
+    assert response.active is False
+    assert response.can_start is True
+    assert response.can_stop is False
+    assert response.can_restart is False
+    assert response.can_redeploy is True
+
+
+@pytest.mark.asyncio
 async def test_stop_installation_runtime_stops_active_session(monkeypatch) -> None:
     installation, _ = installed_server()
     runtime_session = MCPRuntimeSession(

@@ -1908,7 +1908,11 @@ async def test_install_server_version_rejects_raw_secrets_without_backend(monkey
 
 
 @pytest.mark.asyncio
-async def test_install_server_version_validates_kubernetes_package_runtime(monkeypatch) -> None:
+@pytest.mark.parametrize("runtime_install_type", ["package", "npm"])
+async def test_install_server_version_validates_kubernetes_package_runtime(
+    monkeypatch,
+    runtime_install_type: str,
+) -> None:
     server = server_version("1.0.0", is_latest=True)
     server.packages = [
         {
@@ -1942,7 +1946,7 @@ async def test_install_server_version_validates_kubernetes_package_runtime(monke
 
     def install_runtime(_server, **kwargs):
         return MCPRuntimeInstall(
-            install_type="package",
+            install_type=runtime_install_type,
             install_path="/tmp/wardn/mcp/weather/1.0.0",
             runtime_config={"kind": "package"},
             secret_config={},

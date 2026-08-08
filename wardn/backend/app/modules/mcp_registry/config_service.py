@@ -28,7 +28,12 @@ from app.modules.mcp_registry.schemas import (
     MCPServerInstallRequest,
 )
 from app.modules.mcp_registry.tool_service import refresh_tool_schemas_for_installation
-from app.modules.mcp_runtime.manager import RUNTIME_PROVIDER_KUBERNETES, get_runtime_manager
+from app.modules.mcp_runtime.manager import (
+    RUNTIME_KIND_PACKAGE,
+    RUNTIME_PROVIDER_KUBERNETES,
+    get_runtime_manager,
+    runtime_kind,
+)
 from app.modules.secrets import repository as secrets_repository
 from app.modules.secrets.exceptions import SecretsError
 from app.modules.secrets.schemas import SecretHandleCreate, SecretPurpose
@@ -495,7 +500,7 @@ async def validate_package_runtime_install(
     installation: MCPServerInstallation,
     server: MCPServerVersion,
 ) -> None:
-    if installation.install_type != "package":
+    if runtime_kind(installation) != RUNTIME_KIND_PACKAGE:
         return
     manager = get_runtime_manager()
     try:

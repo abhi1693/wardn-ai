@@ -78,6 +78,12 @@ function caughtMessage(caught: unknown, fallback: string) {
   return caught instanceof Error && caught.message ? caught.message : fallback;
 }
 
+function installationRuntimeKind(installation: MCPServerInstallationRead) {
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  const configuredKind = typeof runtimeConfig.kind === "string" ? runtimeConfig.kind : "";
+  return (configuredKind || installation.installType || "").trim().toLowerCase();
+}
+
 function runtimeStatusLabel(status: string | undefined) {
   if (!status) {
     return "Not started";
@@ -599,7 +605,7 @@ export function ValidateInstallClient({
   const [runtimeAction, setRuntimeAction] = useState<RuntimeAction | null>(null);
   const [lastRuntimeRefreshAt, setLastRuntimeRefreshAt] = useState<Date | null>(null);
   const [lastToolsRefreshAt, setLastToolsRefreshAt] = useState<Date | null>(null);
-  const isRemoteInstallation = installation.installType === "remote";
+  const isRemoteInstallation = installationRuntimeKind(installation) === "remote";
 
   const selectedTool = useMemo(
     () => tools.find((tool) => tool.toolName === selectedToolName) ?? null,
@@ -886,10 +892,7 @@ export function ValidateInstallClient({
 
   const runtimeStatus = runtimeSession?.status;
   const runtimeHealth = runtimeState?.health ?? null;
-  const isRemoteRuntime =
-    isRemoteInstallation ||
-    runtimeSession?.runtimeKind === "remote" ||
-    runtimeHealth?.runtimeKind === "remote";
+  const isRemoteRuntime = isRemoteInstallation;
   const rawRuntimeDisplayStatus = runtimeHealth?.status || runtimeStatus;
   const toolsResponding = tools.length > 0 && !toolsError;
   const runtimeDisplayStatus =

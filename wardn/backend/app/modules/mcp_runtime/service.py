@@ -23,7 +23,7 @@ from app.modules.mcp_runtime.manager import (
     get_runtime_manager,
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession, MCPToolInvocation
-from app.modules.mcp_runtime.provider import RuntimeHealth
+from app.modules.mcp_runtime.provider import RuntimeHealth, runtime_kind
 from app.modules.mcp_runtime.schemas import (
     MCPRuntimeEventListResponse,
     MCPRuntimeEventRead,
@@ -1413,6 +1413,20 @@ async def latest_runtime_session_for_installation(
     return sessions[0] if sessions else None
 
 
+def runtime_session_matches_installation(
+    runtime_session: MCPRuntimeSession,
+    installation: MCPServerInstallation,
+    *,
+    manager: MCPRuntimeManager,
+) -> bool:
+    if runtime_session.runtime_kind != runtime_kind(installation):
+        return False
+    try:
+        return runtime_session.config_fingerprint == manager.runtime_fingerprint(installation)
+    except Exception:
+        return True
+
+
 async def get_installation_runtime_state(
     session: AsyncSession,
     installation_id: UUID,
@@ -1421,12 +1435,18 @@ async def get_installation_runtime_state(
     manager: MCPRuntimeManager | None = None,
 ) -> MCPRuntimeInstallationControlResponse:
     manager = manager or get_runtime_manager()
-    await get_runtime_installation_or_404(
+    installation = await get_runtime_installation_or_404(
         session,
         installation_id,
         workspace_id=workspace_id,
     )
     runtime_session = await latest_runtime_session_for_installation(session, installation_id)
+    if runtime_session is not None and not runtime_session_matches_installation(
+        runtime_session,
+        installation,
+        manager=manager,
+    ):
+        runtime_session = None
     health: RuntimeHealth | None = None
     if runtime_session is not None:
         await session.commit()
