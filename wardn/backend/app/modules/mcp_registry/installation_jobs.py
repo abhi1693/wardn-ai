@@ -135,6 +135,8 @@ async def enqueue_server_installation(
     config_values = service.merged_install_config_values(
         installation,
         payload.config_values,
+        server=server,
+        install_target=payload.install_target,
     )
     runtime_provider_name = service.install_target_runtime_provider_name(
         server,

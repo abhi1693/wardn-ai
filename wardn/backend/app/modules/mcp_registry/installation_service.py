@@ -676,7 +676,12 @@ async def install_server_version(
         payload.config_name,
         workspace_id,
     )
-    config_values = merged_install_config_values(installation, payload.config_values)
+    config_values = merged_install_config_values(
+        installation,
+        payload.config_values,
+        server=server,
+        install_target=payload.install_target,
+    )
     network_policy_config = merged_install_network_policy_config(
         installation,
         payload.network_policy,

@@ -354,9 +354,20 @@ export function InstallFormClient({
 
   function installPayloadValues(): MCPServerInstallRequestConfigValues {
     const payload: MCPServerInstallRequestConfigValues = {};
-    for (const [key, value] of Object.entries(installValues)) {
+    for (const field of selectedFields) {
+      const value = installValues[field.name];
       if (installValueConfigured(value)) {
-        payload[key] = value;
+        payload[field.name] = value;
+        continue;
+      }
+      if (
+        typeof value === "string" &&
+        !field.secret &&
+        field.format !== "file" &&
+        field.defaultValue.trim().length > 0 &&
+        value.trim().length === 0
+      ) {
+        payload[field.name] = "";
       }
     }
     for (const header of customHeaders) {

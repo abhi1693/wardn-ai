@@ -1246,6 +1246,55 @@ def test_install_server_runtime_uses_latest_for_npm_placeholder_version(
     assert seen["package_json"]["dependencies"] == {"kubernetes-mcp-server": "latest"}
 
 
+def test_install_server_runtime_preserves_empty_npm_package_argument(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    server = server_version(
+        packages=[
+            {
+                "registryType": "npm",
+                "identifier": "@digitalocean/mcp",
+                "version": "1.0.67",
+                "transport": {"type": "stdio"},
+                "packageArguments": [
+                    {
+                        "name": "services",
+                        "flag": "--services",
+                        "default": "apps",
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.npm.run_install_command",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.modules.mcp_registry.installers.npm.npm_package_bin",
+        lambda install_path, identifier: None,
+    )
+
+    install = install_server_runtime(
+        server,
+        config_values={"services": ""},
+        install_target="package",
+        install_root=tmp_path,
+    )
+
+    assert install.runtime_config["args"] == ["--offline", "@digitalocean/mcp"]
+    assert install.runtime_config["package"]["packageArguments"] == [
+        {
+            "name": "services",
+            "flag": "--services",
+            "default": "apps",
+            "configured": True,
+        }
+    ]
+    assert install.secret_config["packageArguments"] == {"services": ""}
+
+
 def test_install_server_runtime_runs_npm_streamable_http_start_script(
     tmp_path,
     monkeypatch,

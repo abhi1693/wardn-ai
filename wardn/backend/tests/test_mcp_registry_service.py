@@ -1179,6 +1179,65 @@ async def test_install_server_version_preserves_existing_config_values(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_install_server_version_preserves_explicit_empty_package_argument(
+    monkeypatch,
+) -> None:
+    installation = MCPServerInstallation(
+        server_name="io.github.example/weather",
+        workspace_id=WORKSPACE_ID,
+        config_name="default",
+        installed_version="1.0.0",
+        status="enabled",
+        secret_references={"packageArguments": {"services": "apps"}},
+    )
+    seen = {}
+
+    async def get_server_version(*args, **kwargs):
+        server = server_version("1.0.0", is_latest=True)
+        server.packages = [
+            {
+                "registryType": "npm",
+                "identifier": "@digitalocean/mcp",
+                "version": "1.0.67",
+                "transport": {"type": "stdio"},
+                "packageArguments": [
+                    {
+                        "name": "services",
+                        "flag": "--services",
+                        "default": "apps",
+                    },
+                ],
+            }
+        ]
+        return server
+
+    async def get_installation(*args, **kwargs):
+        return installation
+
+    def install_runtime(server, **kwargs):
+        seen["config_values"] = kwargs["config_values"]
+        return runtime_install()
+
+    monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
+    monkeypatch.setattr(service.repository, "get_installation", get_installation)
+    monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    patch_runtime_provider(monkeypatch, "kubernetes")
+
+    await service.install_server_version(
+        FakeSession(),
+        "io.github.example/weather",
+        MCPServerInstallRequest(
+            version="latest",
+            installTarget="package",
+            configValues={"services": ""},
+        ),
+        workspace_id=WORKSPACE_ID,
+    )
+
+    assert seen["config_values"]["services"] == ""
+
+
+@pytest.mark.asyncio
 async def test_install_server_version_passes_network_policy_config(monkeypatch) -> None:
     installation = MCPServerInstallation(
         server_name="io.github.example/weather",

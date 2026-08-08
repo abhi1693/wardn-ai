@@ -607,9 +607,58 @@ def public_configured_values(
 def merged_install_config_values(
     existing: MCPServerInstallation | None,
     new_values: ConfigValues,
+    *,
+    server: MCPServerVersion | None = None,
+    install_target: str | None = None,
 ) -> ConfigValues:
     merged = install_config_values_from_secret_references(
         existing.secret_references if existing else None
     )
-    merged.update({key: value for key, value in new_values.items() if config_value_present(value)})
+    merged.update(
+        {
+            key: value
+            for key, value in new_values.items()
+            if config_value_present(value)
+            or explicit_empty_config_value_allowed(
+                server,
+                install_target,
+                new_values,
+                key,
+                value,
+            )
+        }
+    )
     return merged
+
+
+def explicit_empty_config_value_allowed(
+    server: MCPServerVersion | None,
+    install_target: str | None,
+    config_values: ConfigValues,
+    key: str,
+    value,
+) -> bool:
+    if server is None or not isinstance(value, str) or value:
+        return False
+    kind, index = parse_install_target_value(server, install_target, config_values)
+    definitions = []
+    if kind == "remote":
+        remote = (server.remotes or [])[index] if index < len(server.remotes or []) else {}
+        headers = remote.get("headers") if isinstance(remote, dict) else None
+        definitions = headers if isinstance(headers, list) else []
+    else:
+        package = (server.packages or [])[index] if index < len(server.packages or []) else {}
+        if isinstance(package, dict):
+            environment = package.get("environmentVariables")
+            package_arguments = package.get("packageArguments")
+            if isinstance(environment, list):
+                definitions.extend(environment)
+            if isinstance(package_arguments, list):
+                definitions.extend(package_arguments)
+    for definition in definitions:
+        if not isinstance(definition, dict):
+            continue
+        if str(definition.get("name") or "") != key:
+            continue
+        return not definition.get("isSecret") and not file_config_definition(definition)
+    return False

@@ -195,8 +195,9 @@ def configured_package_arguments(
         if not isinstance(name, str) or not name:
             continue
 
-        raw_value = config_values.get(name)
-        if raw_value is None:
+        if name in config_values:
+            raw_value = config_values[name]
+        else:
             raw_value = str(definition.get("default") or "")
         raw_value = config_value_text(raw_value)
 
@@ -301,6 +302,23 @@ def file_config_value(value: Any) -> bool:
     return config_value_mapping(value).get("type") == "file"
 
 
+def package_argument_configured(
+    definition: dict[str, Any],
+    config_values: ConfigValues,
+) -> bool:
+    name = definition.get("name")
+    if not isinstance(name, str) or not name or name not in config_values:
+        return False
+    value = config_values.get(name)
+    if config_value_present(value):
+        return True
+    return (
+        isinstance(value, str)
+        and not definition.get("isSecret")
+        and not file_config_definition(definition)
+    )
+
+
 def config_file_name(name: str) -> str:
     return safe_path_component(name).replace(".", "_")
 
@@ -401,9 +419,7 @@ def public_package_config(
         public_package["packageArguments"] = [
             {
                 **argument,
-                "configured": config_value_present(
-                    config_values.get(str(argument.get("name") or ""))
-                ),
+                "configured": package_argument_configured(argument, config_values),
             }
             if argument.get("name")
             else argument
@@ -422,6 +438,24 @@ def public_package_config(
         ]
     return public_package
 
+
+def configured_package_argument_values(
+    definitions: list[dict[str, Any]],
+    config_values: ConfigValues,
+    *,
+    file_paths: dict[str, str] | None = None,
+) -> dict[str, str]:
+    file_paths = file_paths or {}
+    values: dict[str, str] = {}
+    for definition in definitions:
+        name = definition.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        if package_argument_configured(definition, config_values):
+            values[name] = file_paths.get(name) or config_value_text(config_values[name])
+    return values
+
+
 def package_secret_config(
     env_vars: list[dict[str, Any]],
     package_args: list[dict[str, Any]],
@@ -432,7 +466,11 @@ def package_secret_config(
 ) -> dict[str, dict[str, str]]:
     secret_config = {}
     configured_env = configured_values(env_vars, config_values, file_paths=file_paths)
-    configured_args = configured_values(package_args, config_values, file_paths=file_paths)
+    configured_args = configured_package_argument_values(
+        package_args,
+        config_values,
+        file_paths=file_paths,
+    )
     custom_headers = custom_header_values(config_values)
     if configured_env:
         secret_config["environment"] = configured_env
