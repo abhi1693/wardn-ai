@@ -1,12 +1,30 @@
-= What is {product-name}?
+= {product-name}
 :revdate: 2026-08-09
 :page-revdate: {revdate}
 :description: Wardn AI is a control plane for governed AI tool access through MCP servers, workspace agents, guardrails, approvals, and runtime observability.
 :sidebar_label: What is Wardn AI?
+:page-role: docs-home
 
-{product-name} is a control plane for governed AI tool access.
+[.wardn-hero]
+--
+[.wardn-eyebrow]
+Public docs for governed AI tool access
 
-It gives teams one place to approve Model Context Protocol (MCP) servers, connect secrets and model providers, run assistants, and review every tool call, approval, cost, and runtime issue. Agents can still use the MCP ecosystem, but trust, credentials, policy, and auditability stay in Wardn instead of being spread across local config files and one-off bots.
+{product-name} gives teams one place to approve Model Context Protocol (MCP) servers, connect secrets and model providers, run assistants, and review every tool call, approval, cost, and runtime issue. Agents can still use the MCP ecosystem, but trust, credentials, policy, and auditability stay in Wardn instead of being spread across local config files and one-off bots.
+
+[.wardn-actions]
+xref:getting-started/quickstart.adoc[Quickstart] xref:reference/api.adoc[API Reference]
+--
+
+[.wardn-card-grid]
+* xref:concepts/mcp-catalog-and-registry.adoc[Trusted MCP catalog] +
+Curate approved servers and versions before teams install them into workspaces.
+* xref:concepts/agents-and-skills.adoc[Workspace agents] +
+Run assistants with scoped tools, reusable skills, chat history, and run traces.
+* xref:concepts/guardrails-and-approvals.adoc[Guardrails and approvals] +
+Require review for sensitive tool calls and tie decisions to exact arguments.
+* xref:concepts/observability-and-usage.adoc[Runtime observability] +
+Inspect runtime sessions, failures, approvals, usage, and scheduled runs.
 
 [#_who_uses_wardn]
 == Who uses Wardn
@@ -37,4 +55,3 @@ Operators use Wardn to review runtime sessions, tool failures, scheduled runs, u
 * xref:getting-started/quickstart.adoc[] gets a local instance running.
 * xref:concepts/mcp-catalog-and-registry.adoc[] explains the catalog and installation model.
 * xref:reference/api.adoc[] links to the generated OpenAPI document.
-
