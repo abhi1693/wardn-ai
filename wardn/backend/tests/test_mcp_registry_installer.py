@@ -377,7 +377,7 @@ def test_install_server_runtime_uses_prompted_remote_config(tmp_path, monkeypatc
     assert install.runtime_config["transport"]["headers"][0]["configured"] is True
 
 
-def test_install_server_runtime_adds_bearer_scheme_to_bare_authorization(
+def test_install_server_runtime_preserves_bare_authorization(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -414,8 +414,8 @@ def test_install_server_runtime_adds_bearer_scheme_to_bare_authorization(
         install_root=tmp_path,
     )
 
-    assert install.secret_config == {"headers": {"Authorization": "Bearer wardn_hub_key.secret"}}
-    assert seen_headers == [{"Authorization": "Bearer wardn_hub_key.secret"}]
+    assert install.secret_config == {"headers": {"Authorization": "wardn_hub_key.secret"}}
+    assert seen_headers == [{"Authorization": "wardn_hub_key.secret"}]
 
 
 def test_install_server_runtime_preserves_explicit_authorization_scheme(
@@ -526,7 +526,7 @@ def test_install_server_runtime_uses_custom_remote_header(tmp_path, monkeypatch)
     assert install.runtime_config["transport"]["headers"][0]["custom"] is True
 
 
-def test_install_server_runtime_adds_bearer_scheme_to_custom_authorization(
+def test_install_server_runtime_preserves_bare_custom_authorization(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -551,8 +551,8 @@ def test_install_server_runtime_adds_bearer_scheme_to_custom_authorization(
         install_root=tmp_path,
     )
 
-    assert install.secret_config == {"headers": {"Authorization": "Bearer wardn_hub_key.secret"}}
-    assert seen_headers == [{"Authorization": "Bearer wardn_hub_key.secret"}]
+    assert install.secret_config == {"headers": {"Authorization": "wardn_hub_key.secret"}}
+    assert seen_headers == [{"Authorization": "wardn_hub_key.secret"}]
 
 
 def test_install_server_runtime_fails_when_remote_verification_fails(

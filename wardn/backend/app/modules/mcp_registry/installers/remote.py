@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,6 @@ PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     {PROTOCOL_VERSION, "2025-03-26", "2024-11-05", "2024-10-07"}
 )
-AUTHORIZATION_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*\s+\S")
 
 def parse_mcp_response_body(body: str) -> dict[str, Any]:
     body = body.strip()
@@ -184,17 +182,9 @@ def configured_remote_header_values(
         **configured_values(headers, config_values),
     }
     return {
-        name: normalized_remote_header_value(name, value)
+        name: value.strip()
         for name, value in values.items()
     }
-
-def normalized_remote_header_value(name: str, value: str) -> str:
-    header_value = value.strip()
-    if name.casefold() != "authorization" or not header_value:
-        return header_value
-    if AUTHORIZATION_SCHEME_PATTERN.match(header_value):
-        return header_value
-    return f"Bearer {header_value}"
 
 def build_remote_install(
     server: MCPServerVersion,
