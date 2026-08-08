@@ -45,7 +45,7 @@ function maybeAddStructuredContent(message) {
     }
 
     const text = item.text.trim();
-    if (!text.startsWith("{")) {
+    if (!text.startsWith("{") && !text.startsWith("[")) {
       return message;
     }
 
@@ -56,7 +56,7 @@ function maybeAddStructuredContent(message) {
       return message;
     }
 
-    if (!structuredItem || typeof structuredItem !== "object" || Array.isArray(structuredItem)) {
+    if (!structuredItem || typeof structuredItem !== "object") {
       return message;
     }
 

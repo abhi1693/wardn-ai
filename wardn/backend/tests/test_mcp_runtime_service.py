@@ -267,6 +267,36 @@ def test_tool_result_with_structured_content_parses_missing_json_text_content() 
     }
 
 
+def test_tool_result_with_structured_content_parses_json_array_text_content() -> None:
+    regions = [
+        {
+            "slug": "nyc1",
+            "name": "New York 1",
+            "sizes": ["s-1vcpu-512mb-10gb", "s-1vcpu-1gb"],
+            "available": True,
+            "features": ["backups", "ipv6", "metadata"],
+        },
+        {
+            "slug": "sfo1",
+            "name": "San Francisco 1",
+            "features": ["backups", "ipv6", "metadata"],
+        },
+    ]
+    result = service.tool_result_with_structured_content(
+        {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(regions, indent=2),
+                }
+            ],
+            "isError": False,
+        }
+    )
+
+    assert result["structuredContent"] == regions
+
+
 def test_tool_result_with_structured_content_parses_multiple_json_text_items() -> None:
     result = service.tool_result_with_structured_content(
         {
