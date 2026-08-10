@@ -63,7 +63,8 @@ describe("catalog source management", () => {
       "placeholder",
       "Leave blank to keep current token"
     );
-    cy.findByLabelText("Name").clear().type("Wardn Hub Production");
+    cy.findByLabelText("Name").clear();
+    cy.findByLabelText("Name").type("Wardn Hub Production");
     cy.findByRole("button", { name: "Save" }).click();
     cy.location("pathname").should("equal", `/org/${organizationId}/catalog`);
     cy.findByRole("article", { name: "Wardn Hub Production catalog source" }).should(
