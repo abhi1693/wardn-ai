@@ -61,7 +61,7 @@
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^7.0.0",
     "globals": "16.4.0",
-    "orval": "^8.23.0",
+    "orval": "^8.24.0",
     "shadcn": "^4.11.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.6.0",
