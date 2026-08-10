@@ -13,24 +13,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import {
   llmProviderCredentialsChatgptDeviceComplete,
   llmProviderCredentialsChatgptDeviceStart,
@@ -509,7 +509,7 @@ export function CredentialForm({
                         />
                       )}
                     </div>
-                    <div className="space-y-3 rounded-md border border-[var(--outline-variant)] bg-white p-4">
+                    <div className="space-y-3 rounded-md border border-[var(--outline-variant)] bg-card p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -579,7 +579,7 @@ export function CredentialForm({
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-sm font-medium">Reconnect ChatGPT</div>
-                          <span className="inline-flex items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-white px-2 py-1 text-xs font-medium text-[var(--on-surface-variant)]">
+                          <span className="inline-flex items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-card px-2 py-1 text-xs font-medium text-[var(--on-surface-variant)]">
                             <PlugZap className="h-3.5 w-3.5" />
                             Device code
                           </span>
@@ -616,7 +616,7 @@ export function CredentialForm({
                     </div>
                     {chatgptDeviceFlow ? (
                       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                        <div className="rounded-md border border-[var(--outline-variant)] bg-white px-4 py-3">
+                        <div className="rounded-md border border-[var(--outline-variant)] bg-card px-4 py-3">
                           <div className="font-mono text-2xl font-semibold tracking-normal text-[var(--on-surface)]">
                             {chatgptDeviceFlow.userCode}
                           </div>
@@ -647,7 +647,7 @@ export function CredentialForm({
                 {visibilityOptions.map((option) => (
                   <label
                     className={cn(
-                      "flex min-h-28 cursor-pointer flex-col justify-between rounded-lg border bg-white p-4 transition-colors",
+                      "flex min-h-28 cursor-pointer flex-col justify-between rounded-lg border bg-card p-4 transition-colors",
                       visibility === option.value
                         ? "border-primary ring-2 ring-primary/15"
                         : "border-[var(--outline-variant)] hover:border-primary/40"

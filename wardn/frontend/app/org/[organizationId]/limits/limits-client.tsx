@@ -4,21 +4,21 @@ import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/atoms/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 import type {
   OrganizationRead,
   ResourceLimitRead,

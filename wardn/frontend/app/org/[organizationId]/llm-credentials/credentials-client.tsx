@@ -4,16 +4,15 @@ import { KeyRound, Loader2, Pencil, PlugZap, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/atoms/card";
 import {
   Table,
   TableBody,
@@ -21,7 +20,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { EmptyState } from "@/components/molecules/empty-state";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
 import { llmProviderCredentialsDelete } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 
@@ -80,22 +81,12 @@ export function CredentialsClient({
 }: CredentialsClientProps) {
   const [credentials, setCredentials] = useState(initialCredentials);
   const [deletingCredentialId, setDeletingCredentialId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   async function deleteCredential(credential: LlmCredentialRead) {
-    if (!window.confirm(`Delete ${credential.name}?`)) {
-      return;
-    }
-
     setDeletingCredentialId(credential.id);
-    setError(null);
     try {
       await llmProviderCredentialsDelete(organization.id, credential.id);
       setCredentials((current) => current.filter((entry) => entry.id !== credential.id));
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Credential could not be deleted."
-      );
     } finally {
       setDeletingCredentialId(null);
     }
@@ -110,10 +101,6 @@ export function CredentialsClient({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {error ? (
-          <AsyncFeedback variant="error">{error}</AsyncFeedback>
-        ) : null}
-
         {credentials.length > 0 ? (
           <Table>
             <TableHeader>
@@ -160,20 +147,27 @@ export function CredentialsClient({
                             <Pencil className="size-4" />
                           </Link>
                         </Button>
-                        <Button
-                          aria-label={`Delete ${credential.name}`}
-                          disabled={deletingCredentialId === credential.id}
-                          onClick={() => deleteCredential(credential)}
-                          size="icon"
-                          type="button"
-                          variant="outline"
+                        <ConfirmActionDialog
+                          actionLabel="Delete credential"
+                          description={`Agents using ${credential.name} will no longer be able to call this provider.`}
+                          onConfirm={() => deleteCredential(credential)}
+                          title={`Delete ${credential.name}?`}
+                          variant="destructive"
                         >
-                          {deletingCredentialId === credential.id ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="size-4" />
-                          )}
-                        </Button>
+                          <Button
+                            aria-label={`Delete ${credential.name}`}
+                            disabled={deletingCredentialId === credential.id}
+                            size="icon"
+                            type="button"
+                            variant="outline"
+                          >
+                            {deletingCredentialId === credential.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-4" />
+                            )}
+                          </Button>
+                        </ConfirmActionDialog>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -182,21 +176,19 @@ export function CredentialsClient({
             </TableBody>
           </Table>
         ) : (
-          <div className="rounded-lg border border-dashed border-[var(--outline-variant)] p-8 text-center">
-            <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-lg bg-[var(--surface-container)] text-primary">
-              <PlugZap className="size-5" />
-            </div>
-            <h3 className="text-base font-semibold">No LLM credentials</h3>
-            <p className="mt-1 text-sm text-[var(--on-surface-variant)]">
-              Create an API key or OAuth credential before assigning agents to a model.
-            </p>
-            <Button asChild className="mt-4" size="sm">
-              <Link href={`/org/${organization.id}/llm-credentials/new`}>
-                <KeyRound className="size-4" />
-                New credential
-              </Link>
-            </Button>
-          </div>
+          <EmptyState
+            action={
+              <Button asChild size="sm">
+                <Link href={`/org/${organization.id}/llm-credentials/new`}>
+                  <KeyRound className="size-4" />
+                  New credential
+                </Link>
+              </Button>
+            }
+            description="Create an API key or OAuth credential before assigning agents to a model."
+            icon={PlugZap}
+            title="No LLM credentials"
+          />
         )}
       </CardContent>
     </Card>

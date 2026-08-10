@@ -1,8 +1,8 @@
 import Link from "next/link";
 
-import { BrandMark } from "@/app/components/brand-mark";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { BrandMark } from "@/components/atoms/brand-mark";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/atoms/card";
 
 export default function NotFound() {
   return (

@@ -7,7 +7,6 @@ import {
   Package,
   Pencil,
   Plus,
-  Search,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,10 +20,8 @@ import {
   runtimeDisplayName,
   serverIconUrlFromIcons,
 } from "@/app/mcp/mcp-list-ui";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Table,
   TableBody,
@@ -32,7 +29,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { SearchField } from "@/components/molecules/search-field";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type {
   MCPRegistryListMetadata,
   MCPRegistryServerResponse,
@@ -42,7 +42,6 @@ import {
   organizationMcpRegistryDeleteServerVersion,
   organizationMcpRegistryListServers,
 } from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
-import { workspaceMcpRegistryListInstalledServers } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 
 const PAGE_SIZE = 50;
 
@@ -122,10 +121,8 @@ export function CatalogListClient({
   initialMetadata,
   initialServers,
   organizationId,
-  workspaceId,
 }: CatalogListClientProps) {
-  const [installations, setInstallations] =
-    useState<MCPServerInstallationRead[]>(initialInstallations);
+  const installations = initialInstallations;
   const [servers, setServers] = useState<MCPRegistryServerResponse[]>(initialServers);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -136,6 +133,7 @@ export function CatalogListClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const hasInitializedSearch = useRef(false);
   const searchRequestId = useRef(0);
 
@@ -168,20 +166,16 @@ export function CatalogListClient({
     setError("");
     setNotice("");
     try {
-      const [serversData, installationsData] = await Promise.all([
-        organizationMcpRegistryListServers(organizationId, {
-          limit: PAGE_SIZE,
-          version: "latest",
-          ...(query.trim() ? { search: query.trim() } : {}),
-          ...(cursor ? { cursor } : {}),
-        }),
-        workspaceMcpRegistryListInstalledServers(organizationId, workspaceId),
-      ]);
+      const serversData = await organizationMcpRegistryListServers(organizationId, {
+        limit: PAGE_SIZE,
+        version: "latest",
+        ...(query.trim() ? { search: query.trim() } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
       if (searchRequestId.current !== requestId) {
         return;
       }
       setServers(serversData.servers);
-      setInstallations(installationsData.installations);
       setAppliedSearch(query);
       setCurrentCursor(cursor);
       setNextCursor(serversData.metadata.nextCursor ?? "");
@@ -196,7 +190,7 @@ export function CatalogListClient({
         setIsLoading(false);
       }
     }
-  }, [organizationId, workspaceId]);
+  }, [organizationId]);
 
   async function loadNextPage() {
     if (!nextCursor) {
@@ -227,12 +221,8 @@ export function CatalogListClient({
       return;
     }
 
-    const timeout = window.setTimeout(() => {
-      void loadServers({ query: search, cursor: "", previous: [] });
-    }, 250);
-
-    return () => window.clearTimeout(timeout);
-  }, [loadServers, search]);
+    void loadServers({ query: debouncedSearch, cursor: "", previous: [] });
+  }, [debouncedSearch, loadServers]);
 
   async function deleteServerVersion(serverName: string, version: string) {
     setIsMutating(true);
@@ -299,27 +289,17 @@ export function CatalogListClient({
   return (
     <div>
       <div className="mb-4 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
-        <div className="flex flex-col gap-4">
-          <Label className="text-muted-foreground" htmlFor="registry-search">
-            Search
-          </Label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              id="registry-search"
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                }
-              }}
-              placeholder="Name, title, or description"
-              type="search"
-              value={search}
-            />
-          </div>
-        </div>
+        <SearchField
+          id="registry-search"
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+            }
+          }}
+          placeholder="Name, title, or description"
+          value={search}
+        />
       </div>
 
       <FeedbackMessages error={error} notice={notice} />
@@ -428,17 +408,24 @@ export function CatalogListClient({
                               <Pencil className="size-4" />
                             </Link>
                           </Button>
-                          <Button
-                            aria-label={`Delete ${entry.server.name}`}
-                            disabled={isMutating}
-                            onClick={() => deleteServerVersion(entry.server.name, entry.server.version)}
-                            size="icon"
-                            title="Delete server"
-                            type="button"
-                            variant="ghost"
+                          <ConfirmActionDialog
+                            actionLabel="Delete version"
+                            description="This catalog version will no longer be available for new connections."
+                            onConfirm={() => deleteServerVersion(entry.server.name, entry.server.version)}
+                            title={`Delete ${entry.server.name} ${entry.server.version}?`}
+                            variant="destructive"
                           >
-                            <Trash2 className="size-4" />
-                          </Button>
+                            <Button
+                              aria-label={`Delete ${entry.server.name}`}
+                              disabled={isMutating}
+                              size="icon"
+                              title="Delete server"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </ConfirmActionDialog>
                         </div>
                       </TableCell>
                     </TableRow>

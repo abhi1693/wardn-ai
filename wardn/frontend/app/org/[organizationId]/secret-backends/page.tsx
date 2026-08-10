@@ -2,11 +2,11 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { getSecretStores } from "@/app/organizations/data";
 import { SecretBackendsClient } from "@/app/organizations/secret-backends-client";
 import { newSecretBackendPath } from "@/app/organizations/secret-backends-paths";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/atoms/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 type SecretBackendsPageProps = {

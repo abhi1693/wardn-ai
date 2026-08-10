@@ -4,16 +4,16 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import { organizationMcpRegistrySetDefaultServerVersion } from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
 
 type ServerVersionOption = {

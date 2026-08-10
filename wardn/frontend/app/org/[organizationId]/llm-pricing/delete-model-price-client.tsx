@@ -5,15 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/atoms/card";
 import { organizationObservabilityDeleteLlmModelPrice } from "@/lib/api/generated/organization-observability/organization-observability";
 
 import { displayUsdPerMillion, modelPriceLabel } from "./price-display";

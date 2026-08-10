@@ -2,22 +2,22 @@ import { BarChart3, ListFilter, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { getCurrentUser } from "@/lib/current-user";
 import {
   type UsageSummaryResponse,
   UsageSummaryView,
-} from "@/app/components/usage-summary-view";
+} from "@/components/organisms/usage-summary-view";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Button } from "@/components/atoms/button";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 

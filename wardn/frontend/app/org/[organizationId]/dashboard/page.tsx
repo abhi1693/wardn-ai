@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { OrganizationDashboard } from "@/components/organisms/organization-dashboard";
 import type { OrganizationDashboardResponse } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";

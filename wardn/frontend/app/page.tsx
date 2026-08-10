@@ -1,9 +1,9 @@
 import { Boxes, Plus, Settings } from "lucide-react";
 import Link from "next/link";
 
-import { AppShell } from "@/app/components/app-shell";
-import { OpenWorkspaceButton } from "@/app/components/open-workspace-button";
-import { Button } from "@/components/ui/button";
+import { AppShell } from "@/components/templates/app-shell";
+import { OpenWorkspaceButton } from "@/components/molecules/open-workspace-button";
+import { Button } from "@/components/atoms/button";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
 export default async function Dashboard() {

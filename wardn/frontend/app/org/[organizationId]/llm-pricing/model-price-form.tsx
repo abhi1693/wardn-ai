@@ -5,17 +5,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import { llmProviderCredentialsListModels } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 import {
   organizationObservabilityCreateLlmModelPrice,

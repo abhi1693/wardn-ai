@@ -4,17 +4,17 @@ import { Check, Copy, KeyRound, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import type {
   OrganizationRead,
   UserAPITokenCreate,

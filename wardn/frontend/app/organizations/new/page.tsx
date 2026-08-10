@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 
 import { getWorkspaceContext } from "../data";
 import { OrganizationForm } from "../organization-form";

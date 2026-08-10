@@ -1,10 +1,10 @@
 import { Plus } from "lucide-react";
 import Link from "next/link";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { CatalogSourcesClient } from "@/app/catalog/catalog-sources-client";
 import type { MCPCatalogSourceListResponse } from "@/app/catalog/catalog-source-types";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/atoms/button";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 

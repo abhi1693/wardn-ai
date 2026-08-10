@@ -2,10 +2,10 @@ import { Plus, Settings } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AppShell } from "@/components/templates/app-shell";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import {
   Table,
   TableBody,
@@ -13,7 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 
 import { getWorkspaceContext } from "../data";
 

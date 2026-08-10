@@ -1,8 +1,8 @@
 import { Plus } from "lucide-react";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent } from "@/components/atoms/card";
 import { getOrganizationOptions } from "@/lib/workspace-context";
 
 import { OrganizationSelectClient } from "./organization-select-client";
@@ -12,7 +12,7 @@ export default async function OrganizationSelectionPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      <header className="flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-8 max-md:px-4">
+      <header className="flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-8">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex size-8 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
             W
@@ -30,7 +30,7 @@ export default async function OrganizationSelectionPage() {
         </Button>
       </header>
 
-      <section className="mx-auto w-full max-w-[1440px] px-8 py-7 max-md:px-4">
+      <section className="mx-auto w-full max-w-[1440px] px-8 py-7">
         <header className="mb-6">
           <p className="text-xs font-semibold uppercase leading-4 tracking-[0.08em] text-muted-foreground">
             Organization

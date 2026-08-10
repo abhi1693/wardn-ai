@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { CatalogSourceForm } from "@/app/catalog/catalog-source-form";
 import { getSecretStores } from "@/app/organizations/data";
 import { getWorkspaceContext } from "@/lib/workspace-context";

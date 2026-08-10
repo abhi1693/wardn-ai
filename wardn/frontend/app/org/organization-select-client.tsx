@@ -3,9 +3,9 @@
 import { ArrowRight, Building2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import type { OrganizationRead } from "@/lib/api/generated/model";
 import { clearSelectionCookie, setSelectionCookie } from "@/lib/selection-cookies";
 import {

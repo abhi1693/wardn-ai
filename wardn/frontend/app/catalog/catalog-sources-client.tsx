@@ -17,11 +17,11 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Card, CardContent, CardHeader } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
 import type { MCPOperationJobRead } from "@/lib/api/generated/model";
 import {
   organizationMcpCatalogDeleteSource,
@@ -246,6 +246,7 @@ export function CatalogSourcesClient({
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
             {sourceSummaryItems.map((item) => (
               <span
+                aria-label={`${item.value} ${item.label}`}
                 className="inline-flex h-6 items-center gap-1 rounded-sm border border-border bg-muted/60 px-2"
                 key={item.label}
               >
@@ -317,8 +318,10 @@ export function CatalogSourcesClient({
             const isBusy = busyId === source.id;
             return (
               <Card
+                aria-label={`${source.name} catalog source`}
                 className="flex min-h-[248px] flex-col overflow-hidden transition-colors hover:border-ring/40 hover:bg-muted/20"
                 key={source.id}
+                role="article"
               >
                 <CardHeader className="border-b-0 pb-0">
                   <div className="flex min-w-0 items-start justify-between gap-3">

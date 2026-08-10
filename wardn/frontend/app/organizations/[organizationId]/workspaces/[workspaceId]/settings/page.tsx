@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 
 import { getWorkspaceContext } from "../../../../data";
 import { WorkspaceForm } from "../../../../workspace-form";

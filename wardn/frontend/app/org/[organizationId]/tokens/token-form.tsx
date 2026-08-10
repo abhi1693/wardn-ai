@@ -1,8 +1,8 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/atoms/badge";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import type { WorkspaceRead } from "@/lib/api/generated/model";
 import { cn } from "@/lib/utils";
 
@@ -97,7 +97,7 @@ export function TokenFields({
           {scopeOptions.map((option) => (
             <label
               className={cn(
-                "flex min-h-28 cursor-pointer flex-col justify-between rounded-lg border bg-white p-4 transition-colors",
+                "flex min-h-28 cursor-pointer flex-col justify-between rounded-lg border bg-card p-4 transition-colors",
                 scopeMode === option.value
                   ? "border-primary ring-2 ring-primary/15"
                   : "border-[var(--outline-variant)] hover:border-primary/40"
@@ -133,7 +133,7 @@ export function TokenFields({
           <div className="grid gap-2 sm:grid-cols-2">
             {activeWorkspaces.map((workspace) => (
               <label
-                className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-[var(--outline-variant)] bg-white px-3 text-sm"
+                className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-[var(--outline-variant)] bg-card px-3 text-sm"
                 key={workspace.id}
               >
                 <input

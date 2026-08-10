@@ -4,14 +4,14 @@ import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/atoms/card";
 import {
   Table,
   TableBody,
@@ -19,7 +19,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 
 import { displayUsdPerMillion } from "./price-display";
 import type { LLMModelPriceRead } from "./types";

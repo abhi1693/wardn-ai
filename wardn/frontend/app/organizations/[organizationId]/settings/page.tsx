@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { Save } from "lucide-react";
 
-import { AppShell } from "@/app/components/app-shell";
-import { Button } from "@/components/ui/button";
+import { AppShell } from "@/components/templates/app-shell";
+import { Button } from "@/components/atoms/button";
 
 import { getWorkspaceContext } from "../../data";
 import { OrganizationForm } from "../../organization-form";

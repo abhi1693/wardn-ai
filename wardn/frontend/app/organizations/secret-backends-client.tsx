@@ -4,16 +4,16 @@ import { CheckCircle2, Loader2, Pencil, ShieldCheck, Trash2 } from "lucide-react
 import Link from "next/link";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/atoms/card";
 import {
   Table,
   TableBody,
@@ -21,7 +21,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 import type { SecretStoreRead } from "@/lib/api/generated/model";
 import { secretStoresValidate } from "@/lib/api/generated/secrets/secrets";
 
