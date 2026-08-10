@@ -1,5 +1,8 @@
 # Wardn AI
 
+[![CI](https://github.com/abhi1693/wardn-ai/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/abhi1693/wardn-ai/actions/workflows/ci.yml)
+[![Container Images](https://github.com/abhi1693/wardn-ai/actions/workflows/container.yml/badge.svg?branch=master)](https://github.com/abhi1693/wardn-ai/actions/workflows/container.yml)
+
 Wardn AI is a control plane for governed AI tool access.
 
 It gives teams one place to approve Model Context Protocol (MCP) servers, connect
@@ -210,7 +213,16 @@ nonstandard ports, and plain HTTP require explicit operator configuration.
 | Generate API client | `npm run web:api:generate` |
 | Frontend lint | `npm run web:lint` |
 | Frontend build | `npm run web:build` |
+| Frontend component tests | `npm run web:test:components` |
 | Frontend end-to-end tests | `npm run web:e2e` |
+| Full frontend browser suite | `npm run web:test` |
+| Documentation build | `npm run docs:build` |
+
+Pull requests validate GitHub Actions syntax, backend linting, typing, unit and
+PostgreSQL integration tests, generated API artifacts, frontend linting and builds,
+Cypress component and end-to-end tests, documentation, dependency changes, and all
+production Dockerfiles. Pushes to `master` run the application test suite and
+publish revision-tagged container images through the separate image workflow.
 
 Regenerate the OpenAPI schema and Orval client whenever backend request or response
 schemas change:

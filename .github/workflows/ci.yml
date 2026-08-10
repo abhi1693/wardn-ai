@@ -6,14 +6,43 @@ on:
       - master
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  workflow-validation:
+    name: Workflow validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --show-error --silent \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check
+          tar --extract --gzip --file "$archive" actionlint
+          sudo install actionlint /usr/local/bin/actionlint
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       WARDN_TEST_DATABASE_URL: postgresql+asyncpg://wardn:wardn@localhost:5432/wardn_test
 
@@ -34,10 +63,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -59,21 +88,22 @@ jobs:
         run: npm run backend:test:integration
 
   frontend:
-    name: Frontend
+    name: Frontend static validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -97,16 +127,59 @@ jobs:
       - name: Build frontend
         run: npm run web:build
 
-  docs:
-    name: Docs
+  frontend-components:
+    name: Frontend component tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run Cypress component tests
+        run: npm run web:test:components
+
+  frontend-e2e:
+    name: Frontend end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run Cypress end-to-end tests
+        run: npm run web:e2e
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -126,3 +199,54 @@ jobs:
 
       - name: Build docs
         run: npm run docs:build
+
+  container-validation:
+    name: Container / ${{ matrix.name }}
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: wardn/backend
+            dockerfile: wardn/backend/Dockerfile
+            target: ""
+          - name: worker
+            context: wardn/backend
+            dockerfile: wardn/backend/Dockerfile
+            target: worker
+          - name: frontend
+            context: .
+            dockerfile: wardn/frontend/Dockerfile
+            target: ""
+          - name: mcp-runtime
+            context: wardn/mcp-runtime
+            dockerfile: wardn/mcp-runtime/Dockerfile
+            target: ""
+          - name: whatsapp-bridge
+            context: .
+            dockerfile: wardn/whatsapp-bridge/Dockerfile
+            target: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build container image
+        env:
+          BUILD_CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          IMAGE_NAME: ${{ matrix.name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          args=(
+            --build-arg "APP_VERSION=0.0.0+ci"
+            --file "$DOCKERFILE"
+            --tag "wardn-ci:${IMAGE_NAME}"
+          )
+          if [[ -n "$TARGET" ]]; then
+            args+=(--target "$TARGET")
+          fi
+          docker build "${args[@]}" "$BUILD_CONTEXT"

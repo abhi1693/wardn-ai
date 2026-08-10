@@ -5,6 +5,7 @@ const mockBackendPort = Number(process.env.WARDN_CYPRESS_BACKEND_PORT ?? 4200);
 
 export default defineConfig({
   allowCypressEnv: false,
+  responseTimeout: 60_000,
   screenshotsFolder: "cypress/screenshots",
   video: false,
   viewportHeight: 900,
