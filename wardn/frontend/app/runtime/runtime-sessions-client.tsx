@@ -14,6 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { FeedbackMessages, McpTableCard } from "@/app/mcp/mcp-list-ui";
 import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
+import { DeferredRender } from "@/components/molecules/deferred-render";
 import {
   Table,
   TableBody,
@@ -566,8 +567,9 @@ export function RuntimeSessionsClient({
                               ) : null}
 
                               {filteredEvents.map((event) => (
-                                <div
+                                <DeferredRender
                                   className="grid gap-2 rounded-md border bg-card px-3 py-2 md:grid-cols-[220px_minmax(0,1fr)]"
+                                  estimatedHeight={88}
                                   key={event.id}
                                 >
                                   <div>
@@ -590,7 +592,7 @@ export function RuntimeSessionsClient({
                                       </pre>
                                     ) : null}
                                   </div>
-                                </div>
+                                </DeferredRender>
                               ))}
                             </div>
                           )}

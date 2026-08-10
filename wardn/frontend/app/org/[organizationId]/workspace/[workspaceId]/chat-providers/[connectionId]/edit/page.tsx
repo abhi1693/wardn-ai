@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/templates/app-shell";
-import { ChatProviderFormClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/provider-form-client";
+import { ChatProviderFormLoader } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/_components/chat-provider-form-loader";
 import type {
   ChatProviderConnectionListResponse,
   SecretStoreListResponse,
@@ -58,7 +58,7 @@ export default async function EditChatProviderPage({ params }: EditChatProviderP
       title="Edit Chat Provider"
       workspaceContext={workspaceContext}
     >
-      <ChatProviderFormClient
+      <ChatProviderFormLoader
         basePath={basePath}
         connection={connection}
         defaultWhatsappBridgeBaseUrl={

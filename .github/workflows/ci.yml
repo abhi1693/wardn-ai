@@ -124,8 +124,8 @@ jobs:
       - name: Lint frontend
         run: npm run web:lint
 
-      - name: Build frontend
-        run: npm run web:build
+      - name: Build frontend and validate bundle budgets
+        run: npm --workspace wardn/frontend run bundle:validate
 
   frontend-components:
     name: Frontend component tests

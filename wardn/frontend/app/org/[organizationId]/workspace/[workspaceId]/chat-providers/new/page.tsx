@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/templates/app-shell";
-import { ChatProviderFormClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/provider-form-client";
+import { ChatProviderFormLoader } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/_components/chat-provider-form-loader";
 import type {
   ChatProviderConnectionListResponse,
   SecretStoreListResponse,
@@ -57,7 +57,7 @@ export default async function NewChatProviderPage({ params }: NewChatProviderPag
       title="New Chat Provider"
       workspaceContext={workspaceContext}
     >
-      <ChatProviderFormClient
+      <ChatProviderFormLoader
         basePath={basePath}
         defaultWhatsappBridgeBaseUrl={
           process.env.WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL?.trim() ?? ""

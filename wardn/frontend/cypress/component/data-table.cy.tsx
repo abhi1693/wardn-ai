@@ -112,4 +112,22 @@ describe("DataTable", () => {
     cy.findByRole("columnheader", { name: "Owner" }).should("not.exist");
     cy.location("search").should("contain", "ops-hidden=owner");
   });
+
+  it("bounds rendered rows for large client datasets", () => {
+    const largeDataset = Array.from({ length: 1_000 }, (_, index) => ({
+      id: String(index),
+      name: `Operation ${index + 1}`,
+      owner: `Owner ${index + 1}`,
+      status: "succeeded" as const,
+    }));
+    cy.mount(
+      <div className="w-[960px] p-6">
+        <DataTable columns={columns} data={largeDataset} pageSize={20} />
+      </div>
+    );
+
+    cy.findByText("1,000 records").should("be.visible");
+    cy.findByText("Page 1 of 50").should("be.visible");
+    cy.get("tbody tr").should("have.length", 20);
+  });
 });

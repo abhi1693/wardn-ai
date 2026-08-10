@@ -1,4 +1,5 @@
 import { ApiError, readApiResponseBody } from "./errors";
+import { reportFrontendMetric } from "../frontend-telemetry";
 
 export { ApiError, apiErrorMessage } from "./errors";
 
@@ -68,8 +69,32 @@ function redirectBrowserOnUnauthorized(response: Response) {
   window.location.assign(`/login?reauth=1&next=${encodeURIComponent(next)}`);
 }
 
+function apiTimingStart() {
+  return typeof window === "undefined" ? null : performance.now();
+}
+
+function reportApiTiming(
+  path: string,
+  method: string | undefined,
+  startedAt: number | null,
+  status: number
+) {
+  if (startedAt === null) {
+    return;
+  }
+  reportFrontendMetric({
+    detail: { method: method?.toUpperCase() ?? "GET", status },
+    kind: "api",
+    name: "request",
+    path,
+    value: Math.max(0, performance.now() - startedAt),
+  });
+}
+
 export async function apiRawFetch(path: string, options: ApiRequestOptions = {}) {
   const { timeoutMs = defaultTimeoutMs, ...init } = options;
+  const startedAt = apiTimingStart();
+  let status = 0;
   try {
     const response = await fetch(apiUrl(path), {
       cache: "no-store",
@@ -77,10 +102,13 @@ export async function apiRawFetch(path: string, options: ApiRequestOptions = {})
       ...init,
       signal: requestSignal(init.signal, timeoutMs),
     });
+    status = response.status;
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
     throw fetchTransportError(cause);
+  } finally {
+    reportApiTiming(path, init.method, startedAt, status);
   }
 }
 
@@ -108,14 +136,21 @@ export async function apiStreamFetch(input: RequestInfo | URL, init?: RequestIni
       : input instanceof URL
         ? apiUrl(input.toString())
         : input;
+  const metricPath =
+    typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const startedAt = apiTimingStart();
+  let status = 0;
   try {
     const response = await fetch(inputUrl, {
       credentials: "include",
       ...init,
     });
+    status = response.status;
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
     throw fetchTransportError(cause);
+  } finally {
+    reportApiTiming(metricPath, init?.method, startedAt, status);
   }
 }

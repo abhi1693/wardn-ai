@@ -1,0 +1,14 @@
+{
+  "/org/[organizationId]/workspace/[workspaceId]/chat/[conversationId]": 1500000,
+  "/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks": 1325000,
+  "/org/[organizationId]/workspace/[workspaceId]/agent-runs": 1025000,
+  "/org/[organizationId]/usage": 1000000,
+  "/org/[organizationId]/llm-credentials": 1000000,
+  "/org/[organizationId]/workspace/[workspaceId]/chat-providers": 950000,
+  "/org/[organizationId]/workspace/[workspaceId]/chat-providers/[connectionId]/edit": 925000,
+  "/org/[organizationId]/workspace/[workspaceId]/chat-providers/new": 925000,
+  "/org/[organizationId]/workspace/[workspaceId]/install/[installationId]/validate": 950000,
+  "/org/[organizationId]/workspace/[workspaceId]/runtime": 935000,
+  "/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/[taskId]/edit": 925000,
+  "/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/new": 925000
+}

@@ -34,6 +34,7 @@ import {
 
 import { Badge } from "@/components/atoms/badge";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { DeferredRender } from "@/components/molecules/deferred-render";
 import { Button } from "@/components/atoms/button";
 import {
   Dialog,
@@ -996,10 +997,10 @@ export function AgentChatClient({
                 ? `${workspaceBasePath}/agent-runs/${agentRunId}`
                 : undefined;
               return (
-                <article
-                  className={cn("group flex", isUser ? "justify-end" : "justify-start")}
-                  key={message.id}
-                >
+                <DeferredRender asChild estimatedHeight={140} key={message.id}>
+                  <article
+                    className={cn("group flex", isUser ? "justify-end" : "justify-start")}
+                  >
                   <div
                     className={cn(
                       "flex max-w-[min(100%,820px)] gap-3",
@@ -1045,7 +1046,8 @@ export function AgentChatClient({
                       </div>
                     </div>
                   </div>
-                </article>
+                  </article>
+                </DeferredRender>
               );
             })
           )}

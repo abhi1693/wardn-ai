@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/atoms/badge";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { DeferredRender } from "@/components/molecules/deferred-render";
 import { Button } from "@/components/atoms/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
@@ -1276,25 +1277,26 @@ export function ValidateInstallClient({
             ) : (
               <div className="divide-y divide-border">
                 {filteredTools.map((tool) => (
-                  <button
-                    className={
-                      tool.toolName === selectedToolName
-                        ? "block w-full border-l-4 border-primary bg-muted px-4 py-3 text-left"
-                        : "block w-full border-l-4 border-transparent px-4 py-3 text-left transition-colors hover:bg-muted/60"
-                    }
-                    key={tool.toolName}
-                    onClick={() => selectTool(tool)}
-                    type="button"
-                  >
-                    <span className="block truncate text-sm font-semibold leading-5 text-foreground">
-                      {tool.title || tool.toolName}
-                    </span>
-                    {tool.description ? (
-                      <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {tool.description}
+                  <DeferredRender asChild estimatedHeight={76} key={tool.toolName}>
+                    <button
+                      className={
+                        tool.toolName === selectedToolName
+                          ? "block w-full border-l-4 border-primary bg-muted px-4 py-3 text-left"
+                          : "block w-full border-l-4 border-transparent px-4 py-3 text-left transition-colors hover:bg-muted/60"
+                      }
+                      onClick={() => selectTool(tool)}
+                      type="button"
+                    >
+                      <span className="block truncate text-sm font-semibold leading-5 text-foreground">
+                        {tool.title || tool.toolName}
                       </span>
-                    ) : null}
-                  </button>
+                      {tool.description ? (
+                        <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {tool.description}
+                        </span>
+                      ) : null}
+                    </button>
+                  </DeferredRender>
                 ))}
               </div>
             )}

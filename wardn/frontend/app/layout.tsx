@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { Toaster } from "@/components/atoms/sonner";
 import { TooltipProvider } from "@/components/atoms/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { FrontendTelemetry } from "@/components/providers/frontend-telemetry";
 
 const appTitle = "Wardn AI";
 const appDescription = "MCP operations for home-lab workspaces.";
@@ -81,6 +82,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           enableSystem
         >
           <TooltipProvider delayDuration={300}>
+            <FrontendTelemetry />
             {children}
             <Toaster closeButton position="bottom-right" richColors />
           </TooltipProvider>
