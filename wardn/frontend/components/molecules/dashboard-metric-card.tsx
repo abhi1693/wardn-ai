@@ -3,19 +3,19 @@ import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent } from "@/components/atoms/card";
 import { cn } from "@/lib/utils";
 
 type DashboardMetricTone = "danger" | "info" | "neutral" | "success" | "warning";
 
 const toneClassNames: Record<DashboardMetricTone, string> = {
-  danger: "bg-red-50 text-red-700",
-  info: "bg-sky-50 text-sky-700",
+  danger: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
+  info: "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
   neutral: "bg-muted text-muted-foreground",
-  success: "bg-emerald-50 text-emerald-700",
-  warning: "bg-amber-50 text-amber-700",
+  success: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  warning: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
 };
 
 type DashboardMetricCardProps = {

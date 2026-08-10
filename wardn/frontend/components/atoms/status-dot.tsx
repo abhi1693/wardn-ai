@@ -5,7 +5,7 @@ type StatusDotTone = "danger" | "info" | "neutral" | "success" | "warning";
 const toneClassNames: Record<StatusDotTone, string> = {
   danger: "bg-red-500 shadow-[0_0_0_3px_rgb(239_68_68/0.12)]",
   info: "bg-sky-500 shadow-[0_0_0_3px_rgb(14_165_233/0.12)]",
-  neutral: "bg-slate-400 shadow-[0_0_0_3px_rgb(148_163_184/0.14)]",
+  neutral: "bg-muted-foreground shadow-[0_0_0_3px_var(--border)]",
   success: "bg-emerald-500 shadow-[0_0_0_3px_rgb(16_185_129/0.12)]",
   warning: "bg-amber-500 shadow-[0_0_0_3px_rgb(245_158_11/0.14)]",
 };

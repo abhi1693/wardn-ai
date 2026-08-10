@@ -11,7 +11,7 @@ type SignalBarSegment = {
 const segmentToneClassNames: Record<SignalBarTone, string> = {
   danger: "bg-red-500",
   info: "bg-sky-500",
-  neutral: "bg-slate-300",
+  neutral: "bg-muted-foreground/40",
   success: "bg-emerald-500",
   warning: "bg-amber-500",
 };

@@ -14,10 +14,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
 import { formatUserDate } from "@/lib/date-time";
 import { setSelectionCookie } from "@/lib/selection-cookies";
@@ -79,11 +79,19 @@ function workspaceTone(workspace: WorkspaceRead) {
   if (workspace.status !== "active") {
     return "neutral" as const;
   }
-  return workspace.guardrailDefaultDeny ? ("success" as const) : ("warning" as const);
+  return "success" as const;
 }
 
 function statusLabel(workspace: WorkspaceRead) {
   return workspace.status === "active" ? "Active" : "Archived";
+}
+
+function roleLabel(role: string) {
+  return role
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function OrganizationWorkspacesList({
@@ -202,8 +210,10 @@ export function OrganizationWorkspacesList({
             const tone = workspaceTone(workspace);
             return (
               <Card
+                aria-label={`${workspace.name} workspace`}
                 className="flex min-h-[248px] flex-col overflow-hidden transition-colors hover:border-ring/40 hover:bg-muted/20"
                 key={workspace.id}
+                role="article"
               >
                 <CardHeader className="border-b-0 pb-0">
                   <div className="flex min-w-0 items-start justify-between gap-3">
@@ -218,16 +228,18 @@ export function OrganizationWorkspacesList({
                         <Badge variant={workspace.status === "active" ? "success" : "secondary"}>
                           {statusLabel(workspace)}
                         </Badge>
-                        <Badge variant="outline">{workspace.currentUserRole}</Badge>
+                        <Badge variant="outline">{roleLabel(workspace.currentUserRole)}</Badge>
                       </div>
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardContent className="flex flex-1 flex-col p-4 pt-3">
-                  <p className="min-h-10 text-sm leading-5 text-muted-foreground">
-                    {workspace.description || workspace.slug}
-                  </p>
+                  {workspace.description ? (
+                    <p className="min-h-10 text-sm leading-5 text-muted-foreground">
+                      {workspace.description}
+                    </p>
+                  ) : null}
 
                   <div className="mt-4 grid gap-3 border-y border-border/80 py-3">
                     <div className="flex min-w-0 items-center gap-3 text-sm">

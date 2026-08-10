@@ -24,7 +24,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   Pie,
@@ -33,15 +32,15 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from "recharts";
+} from "@/components/atoms/charts";
 
 import { StatusDot } from "@/components/atoms/status-dot";
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { DashboardPanel } from "@/components/molecules/dashboard-panel";
 import { HealthRow } from "@/components/molecules/health-row";
 import { SignalBar } from "@/components/molecules/signal-bar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Table,
   TableBody,
@@ -49,7 +48,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 import type {
   OrganizationDashboardResponse,
   OrganizationDashboardToolRow,
@@ -357,8 +356,9 @@ function WorkspaceDemandChart({ rows }: { rows: OrganizationDashboardWorkspaceRo
 }
 
 function RuntimeMixChart({ dashboard }: { dashboard: OrganizationDashboardResponse }) {
-  const data = dashboard.runtimeMix.map((row) => ({
+  const data = dashboard.runtimeMix.map((row, index) => ({
     ...row,
+    fill: chartColors[index % chartColors.length],
     name: row.label,
     value: row.total,
   }));
@@ -382,11 +382,7 @@ function RuntimeMixChart({ dashboard }: { dashboard: OrganizationDashboardRespon
                   nameKey="name"
                   outerRadius={88}
                   paddingAngle={2}
-                >
-                  {data.map((entry, index) => (
-                    <Cell fill={chartColors[index % chartColors.length]} key={entry.runtime} />
-                  ))}
-                </Pie>
+                />
               </PieChart>
             </ResponsiveContainer>
           </div>

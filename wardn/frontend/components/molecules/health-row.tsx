@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/atoms/badge";
 import { cn } from "@/lib/utils";
 
 type HealthRowTone = "danger" | "info" | "neutral" | "success" | "warning";

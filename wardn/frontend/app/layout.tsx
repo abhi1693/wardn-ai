@@ -4,6 +4,8 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import type { ReactNode } from "react";
 
+import { ThemeProvider } from "@/components/providers/theme-provider";
+
 const appTitle = "Wardn AI";
 const appDescription = "MCP operations for home-lab workspaces.";
 const iconVersion = "brand-20260729";
@@ -57,16 +59,28 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f172a",
+  themeColor: [
+    { color: "#f6f7f9", media: "(prefers-color-scheme: light)" },
+    { color: "#0b0f14", media: "(prefers-color-scheme: dark)" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <Script src="/wardn-config.js" strategy="beforeInteractive" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          disableTransitionOnChange
+          enableSystem
+        >
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
