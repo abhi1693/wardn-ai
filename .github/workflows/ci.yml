@@ -75,6 +75,13 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Audit backend dependencies
+        working-directory: wardn/backend
+        run: |
+          uv export --frozen --no-dev --no-emit-project \
+            --output-file /tmp/wardn-requirements.txt >/dev/null
+          uvx pip-audit --requirement /tmp/wardn-requirements.txt
+
       - name: Lint backend
         run: npm run backend:lint
 
@@ -114,6 +121,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=moderate
 
       - name: Generate OpenAPI client
         run: npm run web:api:generate
@@ -195,7 +205,7 @@ jobs:
         run: git diff --exit-code -- docs/site/latest/modules/ROOT/attachments/openapi/wardn-api.json
 
       - name: Audit docs dependencies
-        run: npm --prefix docs audit --audit-level=high
+        run: npm --prefix docs audit --audit-level=moderate
 
       - name: Build docs
         run: npm run docs:build
