@@ -179,7 +179,7 @@ describe("catalog source management", () => {
   it("shows retryable API failures instead of an empty catalog", () => {
     resetCatalog(undefined, { catalogStatus: 503 });
     openAuthenticated(`/org/${organizationId}/catalog`);
-    cy.findByRole("heading", { name: "This page could not be loaded" }).should("be.visible");
+    cy.findByRole("heading", { name: "Organization unavailable" }).should("be.visible");
     cy.findByRole("button", { name: "Try again" }).should("be.visible");
     cy.findByText("No catalog sources").should("not.exist");
   });

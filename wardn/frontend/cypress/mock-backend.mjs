@@ -276,6 +276,7 @@ function initialState(overrides = {}) {
     catalogStatus: overrides.catalogStatus ?? 200,
     jobs: new Map(),
     organizationsStatus: overrides.organizationsStatus ?? 200,
+    organizationsDelayMs: overrides.organizationsDelayMs ?? 0,
     packageRuntimeProvider: overrides.packageRuntimeProvider ?? "local",
     quickStartDelayMs: overrides.quickStartDelayMs ?? 0,
     requests: [],
@@ -699,6 +700,9 @@ async function handle(request) {
     }
   }
   if (request.method === "GET" && url.pathname === "/api/v1/organizations") {
+    if (state.organizationsDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, state.organizationsDelayMs));
+    }
     if (state.organizationsStatus !== 200) {
       return json({ detail: "organization request failed" }, state.organizationsStatus);
     }
