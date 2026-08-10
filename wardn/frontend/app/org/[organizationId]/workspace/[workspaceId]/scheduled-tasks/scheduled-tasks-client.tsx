@@ -29,7 +29,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { taskFormIssues as collectTaskFormIssues } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/_lib/task-form-schema";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import {
+  focusFormIssue,
+  FormErrorSummary,
+  type FormIssue,
+} from "@/components/molecules/form-error-summary";
 import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
@@ -44,6 +50,8 @@ import {
 } from "@/components/atoms/select";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { MetricStrip } from "@/components/organisms/metric-strip";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import type {
   ChatProviderConnectionRead,
   WorkspaceScheduledTaskCreate,
@@ -978,7 +986,12 @@ export function ScheduledTaskFormClient({
     () => form.schedules[0]?.key ?? null
   );
   const [isAddingSchedule, setIsAddingSchedule] = useState(false);
+  const [submissionIssues, setSubmissionIssues] = useState<FormIssue[]>([]);
   const isTestingRoutes = Object.values(routeTests).some((test) => test.status === "testing");
+  const currentFormSnapshot = JSON.stringify(form);
+  const [initialFormSnapshot, setInitialFormSnapshot] = useState(currentFormSnapshot);
+  const isDirty = currentFormSnapshot !== initialFormSnapshot;
+  const confirmNavigation = useUnsavedChanges(isDirty && !isSaving);
 
   function routeForKey(key: string) {
     if (key !== "chat" && !providerOptions.some((option) => option.key === key)) {
@@ -1158,16 +1171,6 @@ export function ScheduledTaskFormClient({
   }
 
   const maxAttemptsInput = Number(form.maxAttempts || 0);
-  const canSave = Boolean(
-    form.name.trim() &&
-      form.instructions.trim() &&
-      form.selectedRoutes.length > 0 &&
-      Number.isInteger(maxAttemptsInput) &&
-      maxAttemptsInput >= 1 &&
-      maxAttemptsInput <= 10 &&
-      form.schedules.every((schedule) => scheduleDraftIsValid(schedule))
-  );
-
   async function previewSchedules() {
     setIsPreviewing(true);
     setFeedback(null);
@@ -1189,6 +1192,34 @@ export function ScheduledTaskFormClient({
 
   async function submitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+    const issues = collectTaskFormIssues({
+      instructions: form.instructions,
+      invalidScheduleCount: form.schedules.filter(
+        (schedule) => !scheduleDraftIsValid(schedule)
+      ).length,
+      maxAttempts: form.maxAttempts,
+      name: form.name,
+      selectedRoutes: form.selectedRoutes,
+    });
+    setSubmissionIssues(issues);
+    if (issues.length > 0) {
+      const firstFieldId = issues[0]?.fieldId;
+      if (
+        firstFieldId === "scheduled-task-name" ||
+        firstFieldId === "scheduled-task-instructions"
+      ) {
+        setActiveSection("instructions");
+      } else if (firstFieldId === "scheduled-task-schedule-section") {
+        setActiveSection("schedule");
+      } else if (firstFieldId === "scheduled-task-output-section") {
+        setActiveSection("outputs");
+      }
+      window.setTimeout(() => focusFormIssue(issues[0]), 0);
+      return;
+    }
     setIsSaving(true);
     setFeedback(null);
     const aggregateScheduleType: ScheduleType =
@@ -1235,6 +1266,7 @@ export function ScheduledTaskFormClient({
         await workspaceScheduledTasksCreate(organizationId, workspaceId, payload);
         setFeedback({ variant: "success", text: "Scheduled task created." });
       }
+      setInitialFormSnapshot(currentFormSnapshot);
       router.push(scheduledTasksHref);
       router.refresh();
     } catch (error) {
@@ -1327,11 +1359,14 @@ export function ScheduledTaskFormClient({
     <form
       className="text-foreground"
       id="scheduled-task-form"
+      noValidate
       onSubmit={submitTask}
     >
       <div className="sticky top-0 z-20 -mx-2 border-b border-border bg-card/95 px-2 py-2 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
+        <StickyFormActions
+          className="static min-h-0 border-0 bg-transparent px-0 py-0 backdrop-blur-none"
+          context={
+            <div className="flex min-w-0 items-center gap-2">
             <Button
               asChild
               className="size-8 border-transparent"
@@ -1339,7 +1374,14 @@ export function ScheduledTaskFormClient({
               title="Back to scheduled tasks"
               variant="ghost"
             >
-              <Link href={scheduledTasksHref}>
+              <Link
+                href={scheduledTasksHref}
+                onClick={(event) => {
+                  if (!confirmNavigation()) {
+                    event.preventDefault();
+                  }
+                }}
+              >
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
@@ -1363,10 +1405,20 @@ export function ScheduledTaskFormClient({
                 {sectionSummaries.schedule} · {sectionSummaries.outputs}
               </span>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+            </div>
+          }
+        >
             <Button asChild size="sm" type="button" variant="ghost">
-              <Link href={scheduledTasksHref}>Cancel</Link>
+              <Link
+                href={scheduledTasksHref}
+                onClick={(event) => {
+                  if (!confirmNavigation()) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                Cancel
+              </Link>
             </Button>
             <Button
               disabled={isTestingRoutes || configuredTestRouteKeys.length === 0}
@@ -1384,7 +1436,7 @@ export function ScheduledTaskFormClient({
             </Button>
             <Button
               className="bg-primary text-primary-foreground hover:bg-primary/90"
-              disabled={isReviewSection ? !canSave || isSaving : isSaving}
+              disabled={isSaving}
               onClick={
                 isReviewSection
                   ? undefined
@@ -1404,8 +1456,7 @@ export function ScheduledTaskFormClient({
               )}
               {isReviewSection ? (editingTask ? "Save" : "Create") : "Next"}
             </Button>
-          </div>
-        </div>
+        </StickyFormActions>
         <nav className="mt-2 flex h-8 gap-5 overflow-x-auto border-t border-border pt-2 text-xs">
           {editorSections.map((section) => {
             const active = activeSection === section.id;
@@ -1418,6 +1469,13 @@ export function ScheduledTaskFormClient({
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 )}
                 aria-current={active ? "step" : undefined}
+                id={
+                  section.id === "schedule"
+                    ? "scheduled-task-schedule-section"
+                    : section.id === "outputs"
+                      ? "scheduled-task-output-section"
+                      : undefined
+                }
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 type="button"
@@ -1432,6 +1490,7 @@ export function ScheduledTaskFormClient({
       {feedback ? (
         <AsyncFeedback variant={feedback.variant}>{feedback.text}</AsyncFeedback>
       ) : null}
+      <FormErrorSummary className="mt-4" issues={submissionIssues} />
 
       <div className="pt-4">
         <main className={cn("min-w-0 space-y-4", focusedMainWidth)}>

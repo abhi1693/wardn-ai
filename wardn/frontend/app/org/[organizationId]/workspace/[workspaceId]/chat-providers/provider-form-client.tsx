@@ -19,8 +19,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+import { providerFormIssues } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/_lib/provider-form-schema";
 import { StatusDot } from "@/components/atoms/status-dot";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import {
+  focusFormIssue,
+  FormErrorSummary,
+  type FormIssue,
+} from "@/components/molecules/form-error-summary";
+import { FormField } from "@/components/molecules/form-field";
 import { Badge } from "@/components/atoms/badge";
 import { QRCode } from "@/components/atoms/qr-code";
 import { Button } from "@/components/atoms/button";
@@ -34,6 +41,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/atoms/select";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
@@ -99,10 +108,6 @@ function randomSecret() {
 
 function defaultBridgeUserId() {
   return Date.now().toString().slice(-8);
-}
-
-function isSlackTeamId(value: string) {
-  return /^T[A-Z0-9]+$/.test(value.trim());
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -568,6 +573,7 @@ export function ChatProviderFormClient({
   const [isPairingBusy, setIsPairingBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [validationIssues, setValidationIssues] = useState<FormIssue[]>([]);
 
   const knownIdentities = useMemo(
     () => connection?.knownIdentities ?? [],
@@ -595,6 +601,26 @@ export function ChatProviderFormClient({
         !threadId.trim() || (provider === "slack" && !isSlackDmConversation(threadId))
     )
     .map(([userId]) => userId);
+  const currentFormSnapshot = JSON.stringify({
+    allowAllSenders,
+    allowedChatIds,
+    allowedSenderIds,
+    approvalThreadsByUserId,
+    botToken,
+    bridgeBaseUrl,
+    bridgeUserId,
+    isActive,
+    name,
+    provider,
+    secretStoreId,
+    slackAppId,
+    slackAppToken,
+    slackBotUserId,
+    webhookSecret,
+  });
+  const [initialFormSnapshot, setInitialFormSnapshot] = useState(currentFormSnapshot);
+  const isDirty = currentFormSnapshot !== initialFormSnapshot;
+  const confirmNavigation = useUnsavedChanges(isDirty && !isSaving);
 
   const selectedApprovalThreadIds = useMemo(
     () =>
@@ -790,8 +816,25 @@ export function ChatProviderFormClient({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) {
+      return;
+    }
     const normalizedName = name.trim();
-    if (!normalizedName || isSaving || missingApprovalLinks.length > 0) {
+    const issues = providerFormIssues({
+      botToken,
+      bridgeBaseUrl,
+      bridgeUserId,
+      missingApprovalLinks: missingApprovalLinks.length,
+      mode,
+      name,
+      provider,
+      secretStoreId,
+      slackAppToken,
+      webhookSecret,
+    });
+    setValidationIssues(issues);
+    if (issues.length > 0) {
+      focusFormIssue(issues[0]);
       return;
     }
     setIsSaving(true);
@@ -834,6 +877,7 @@ export function ChatProviderFormClient({
         isActive,
         name: normalizedName,
       });
+      setInitialFormSnapshot(currentFormSnapshot);
       setNotice("Provider connection updated.");
       router.refresh();
     } catch (caught) {
@@ -843,41 +887,49 @@ export function ChatProviderFormClient({
     }
   }
 
-  const canSave =
-    name.trim().length > 0 &&
-    missingApprovalLinks.length === 0 &&
-    (mode === "edit" ||
-      (secretStoreId.length > 0 &&
-        (provider === "slack" || webhookSecret.trim().length > 0) &&
-        (provider !== "telegram" || botToken.trim().length > 0) &&
-        (provider !== "slack" ||
-          (botToken.trim().length > 0 &&
-            slackAppToken.trim().length > 0 &&
-            isSlackTeamId(bridgeUserId))) &&
-        (provider !== "whatsapp_local" || bridgeBaseUrl.trim().length > 0)));
+  const issueFor = (fieldId: string) =>
+    validationIssues.find((issue) => issue.fieldId === fieldId)?.message;
 
   return (
-    <form className="space-y-4" onSubmit={submit}>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-3">
-        <Button asChild size="sm" type="button" variant="ghost">
-          <Link href={basePath}>
-            <ArrowLeft className="size-4" />
-            Back
+    <form className="space-y-4" noValidate onSubmit={submit}>
+      <StickyFormActions
+        context={
+          <Button asChild size="sm" type="button" variant="ghost">
+            <Link
+              href={basePath}
+              onClick={(event) => {
+                if (!confirmNavigation()) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              <ArrowLeft className="size-4" />
+              Back
+            </Link>
+          </Button>
+        }
+      >
+        <Button asChild type="button" variant="outline">
+          <Link
+            href={basePath}
+            onClick={(event) => {
+              if (!confirmNavigation()) {
+                event.preventDefault();
+              }
+            }}
+          >
+            Cancel
           </Link>
         </Button>
-        <div className="flex items-center gap-2">
-          <Button asChild type="button" variant="outline">
-            <Link href={basePath}>Cancel</Link>
-          </Button>
-          <Button disabled={!canSave || isSaving} type="submit">
-            {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-            {mode === "create" ? "Create provider" : "Save changes"}
-          </Button>
-        </div>
-      </div>
+        <Button disabled={isSaving} type="submit">
+          {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          {mode === "create" ? "Create provider" : "Save changes"}
+        </Button>
+      </StickyFormActions>
 
       <div className="grid gap-4 px-6 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
+          <FormErrorSummary issues={validationIssues} />
           {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
           {notice ? (
             <AsyncFeedback className="flex items-center gap-2" variant="success">
@@ -928,16 +980,24 @@ export function ChatProviderFormClient({
               ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="chat-provider-name">Name</Label>
+                <FormField
+                  error={issueFor("chat-provider-name")}
+                  htmlFor="chat-provider-name"
+                  label="Name"
+                  required
+                >
                   <Input
                     id="chat-provider-name"
                     maxLength={100}
-                    onChange={(event) => setName(event.target.value)}
-                    required
+                    onChange={(event) => {
+                      setName(event.target.value);
+                      setValidationIssues((current) =>
+                        current.filter((issue) => issue.fieldId !== "chat-provider-name")
+                      );
+                    }}
                     value={name}
                   />
-                </div>
+                </FormField>
                 {mode === "edit" ? (
                   <label className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm sm:mt-7">
                     <input

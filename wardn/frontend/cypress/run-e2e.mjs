@@ -6,6 +6,7 @@ const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 const sessionCookieName =
   process.env.WARDN_CYPRESS_SESSION_COOKIE_NAME ?? "wardn_cypress_session";
+const selectedSpec = process.env.WARDN_CYPRESS_SPEC?.trim() ?? "";
 const services = [];
 
 function run(command, args, env = process.env) {
@@ -89,7 +90,11 @@ async function main() {
   });
   await waitFor(`${frontendUrl}/login`);
 
-  await run("npm", ["exec", "--", "cypress", "run", "--e2e", "--browser", "electron"], {
+  const cypressArgs = ["exec", "--", "cypress", "run", "--e2e", "--browser", "electron"];
+  if (selectedSpec) {
+    cypressArgs.push("--spec", selectedSpec);
+  }
+  await run("npm", cypressArgs, {
     ...process.env,
     WARDN_CYPRESS_BACKEND_PORT: String(backendPort),
     WARDN_CYPRESS_FRONTEND_PORT: String(frontendPort),

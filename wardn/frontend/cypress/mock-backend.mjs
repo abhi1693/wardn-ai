@@ -121,6 +121,37 @@ const secretStore = {
   updatedAt: now,
 };
 
+const defaultChatProvider = {
+  config: {
+    allowAllSenders: true,
+    allowedChatIds: [],
+    allowedSenderIds: [],
+    approvalRoutes: [],
+  },
+  createdAt: now,
+  createdById: "user-1",
+  displayName: "Operations Telegram",
+  externalId: "telegram-operations",
+  id: "provider-1",
+  isActive: true,
+  knownIdentities: [],
+  name: "Operations Telegram",
+  organizationId: organization.id,
+  provider: "telegram",
+  secretHandleIds: {},
+  updatedAt: now,
+  workspaceId: workspace.id,
+};
+
+const workspaceMembers = [
+  {
+    displayName: "Workspace Owner",
+    email: "owner@example.com",
+    role: "owner",
+    userId: "user-1",
+  },
+];
+
 const registrySchema = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json";
 
 const googleSearchConsoleServer = {
@@ -274,6 +305,9 @@ function initialState(overrides = {}) {
     authMode: overrides.authMode ?? "local",
     catalogJobPollsBeforeSuccess: overrides.catalogJobPollsBeforeSuccess ?? 2,
     catalogStatus: overrides.catalogStatus ?? 200,
+    chatProviderConnections: overrides.chatProviderConnections ?? [{ ...defaultChatProvider }],
+    chatProviderSaveDelayMs: overrides.chatProviderSaveDelayMs ?? 0,
+    chatProviderSaveStatus: overrides.chatProviderSaveStatus ?? 200,
     jobs: new Map(),
     organizationsStatus: overrides.organizationsStatus ?? 200,
     organizationsDelayMs: overrides.organizationsDelayMs ?? 0,
@@ -287,6 +321,8 @@ function initialState(overrides = {}) {
     },
     installations: overrides.installations ?? [],
     skillLibrary: overrides.skillLibrary ?? [],
+    scheduledTasks: overrides.scheduledTasks ?? [],
+    scheduledTaskSaveStatus: overrides.scheduledTaskSaveStatus ?? 200,
     sources: overrides.sources ?? [{ ...defaultSource }],
     tokens: [],
   };
@@ -737,6 +773,86 @@ async function handle(request) {
     url.pathname === `/api/v1/organizations/${organization.id}/secrets/stores`
   ) {
     return json({ stores: [secretStore] });
+  }
+
+  const chatProvidersPath =
+    `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/chat-providers`;
+  if (request.method === "GET" && url.pathname === chatProvidersPath) {
+    return json({ connections: state.chatProviderConnections, workspaceMembers });
+  }
+  if (request.method === "POST" && url.pathname === chatProvidersPath) {
+    if (state.chatProviderSaveDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, state.chatProviderSaveDelayMs));
+    }
+    if (state.chatProviderSaveStatus !== 200) {
+      return json({ detail: "provider connection could not be saved" }, state.chatProviderSaveStatus);
+    }
+    const connection = {
+      ...defaultChatProvider,
+      config: body.config ?? {},
+      displayName: body.displayName,
+      externalId: body.externalId,
+      id: randomUUID(),
+      name: body.name,
+      provider: body.provider,
+    };
+    state.chatProviderConnections.push(connection);
+    return json(connection, 201);
+  }
+  const chatProviderMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/org-1\/workspaces\/workspace-1\/chat-providers\/([^/]+)$/
+  );
+  if (request.method === "PATCH" && chatProviderMatch?.[1]) {
+    const index = state.chatProviderConnections.findIndex(
+      (connection) => connection.id === chatProviderMatch[1]
+    );
+    if (index < 0) {
+      return json({ detail: "provider connection not found" }, 404);
+    }
+    if (state.chatProviderSaveStatus !== 200) {
+      return json({ detail: "provider connection could not be saved" }, state.chatProviderSaveStatus);
+    }
+    state.chatProviderConnections[index] = {
+      ...state.chatProviderConnections[index],
+      ...body,
+      updatedAt: now,
+    };
+    return json(state.chatProviderConnections[index]);
+  }
+  const pairingMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/org-1\/workspaces\/workspace-1\/chat-providers\/([^/]+)\/pairing(?:\/(?:refresh|reset))?$/
+  );
+  if ((request.method === "GET" || request.method === "POST") && pairingMatch?.[1]) {
+    return json({ message: "Ready to pair.", qrPayload: null, status: "not_connected" });
+  }
+
+  const scheduledTasksPath =
+    `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/scheduled-tasks`;
+  if (request.method === "GET" && url.pathname === `${scheduledTasksPath}/runs`) {
+    return json({ runs: [] });
+  }
+  if (request.method === "GET" && url.pathname === scheduledTasksPath) {
+    return json({ tasks: state.scheduledTasks });
+  }
+  if (request.method === "POST" && url.pathname === scheduledTasksPath) {
+    if (state.scheduledTaskSaveStatus !== 200) {
+      return json({ detail: "scheduled task could not be saved" }, state.scheduledTaskSaveStatus);
+    }
+    const task = {
+        ...body,
+        agentId: "agent-1",
+        createdAt: now,
+        id: randomUUID(),
+        lastError: "",
+        lastStatus: "idle",
+        monitoringStatus: "idle",
+        nextRunPreview: [],
+        organizationId: organization.id,
+        updatedAt: now,
+        workspaceId: workspace.id,
+      };
+    state.scheduledTasks.push(task);
+    return json(task, 201);
   }
 
   if (
