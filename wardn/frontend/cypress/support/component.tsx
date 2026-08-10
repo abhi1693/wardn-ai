@@ -4,8 +4,11 @@ import "@testing-library/cypress/add-commands";
 import { mount } from "cypress/react";
 
 import "../../app/globals.css";
+import { TooltipProvider } from "@/components/atoms/tooltip";
 
-Cypress.Commands.add("mount", mount);
+Cypress.Commands.add("mount", (component, options) =>
+  mount(<TooltipProvider delayDuration={0}>{component}</TooltipProvider>, options)
+);
 
 beforeEach(() => {
   cy.document().then((document) => {

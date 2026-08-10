@@ -4,6 +4,8 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import type { ReactNode } from "react";
 
+import { Toaster } from "@/components/atoms/sonner";
+import { TooltipProvider } from "@/components/atoms/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 
 const appTitle = "Wardn AI";
@@ -78,7 +80,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           disableTransitionOnChange
           enableSystem
         >
-          {children}
+          <TooltipProvider delayDuration={300}>
+            {children}
+            <Toaster closeButton position="bottom-right" richColors />
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

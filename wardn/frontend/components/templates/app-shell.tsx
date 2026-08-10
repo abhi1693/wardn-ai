@@ -28,6 +28,7 @@ import { BrandMark } from "@/components/atoms/brand-mark";
 import { LogoutButton } from "@/components/molecules/logout-button";
 import { ThemeSwitcher } from "@/components/molecules/theme-switcher";
 import { WorkspaceSelector } from "@/components/molecules/workspace-selector";
+import { AppShellCommandMenu } from "@/components/organisms/desktop-command-menu";
 import { cn } from "@/lib/utils";
 import type { WorkspaceContext } from "@/lib/workspace-types";
 
@@ -331,6 +332,13 @@ export function AppShell({
       active: item.activeKey === active || item.activeKeys?.includes(active),
     })),
   }));
+  const commandDestinations = primaryNavSections.flatMap((section) =>
+    section.items.map((item) => ({
+      group: section.label,
+      href: item.href,
+      label: item.label,
+    }))
+  );
   const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
   const showBreadcrumbParent = breadcrumbLabel !== title;
   const contextSwitchHref =
@@ -431,6 +439,7 @@ export function AppShell({
               </h1>
             </div>
             <div className="flex items-center gap-2">
+              <AppShellCommandMenu destinations={commandDestinations} />
               {actions}
               <ThemeSwitcher />
               <LogoutButton iconOnly />

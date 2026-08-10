@@ -6,6 +6,11 @@ import { useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import type { buttonVariants } from "@/components/atoms/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/atoms/tooltip";
 import { authLogout } from "@/lib/api/generated/auth/auth";
 import type { VariantProps } from "class-variance-authority";
 
@@ -25,7 +30,7 @@ export function LogoutButton({ className, iconOnly = false, variant }: LogoutBut
     router.refresh();
   }
 
-  return (
+  const button = (
     <Button
       aria-label="Sign out"
       disabled={isSubmitting}
@@ -38,5 +43,16 @@ export function LogoutButton({ className, iconOnly = false, variant }: LogoutBut
       <LogOut className="size-4" />
       {iconOnly ? null : isSubmitting ? "Signing out" : "Sign out"}
     </Button>
+  );
+
+  if (!iconOnly) {
+    return button;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="bottom">Sign out</TooltipContent>
+    </Tooltip>
   );
 }
