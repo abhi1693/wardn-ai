@@ -1,31 +1,13 @@
-import {
-  ArrowRight,
-  Clock,
-  ListTree,
-  MessageSquare,
-  Wrench,
-} from "lucide-react";
-import Link from "next/link";
+import { Clock, ListTree, Wrench } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/templates/app-shell";
-import { DateTimeText } from "@/components/atoms/date-time-text";
-import { Badge } from "@/components/atoms/badge";
-import { Button } from "@/components/atoms/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/atoms/table";
 import type { AgentRunListResponse, AgentRunRead } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
 
-import { AgentRunActions } from "./agent-run-actions";
+import { AgentRunsTable } from "./agent-runs-table";
 
 type AgentRunsPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string }>;
@@ -43,44 +25,8 @@ async function getAgentRuns(
   return payload.runs;
 }
 
-function statusVariant(status: string) {
-  if (status === "succeeded" || status === "completed") {
-    return "success" as const;
-  }
-  if (status === "failed" || status === "blocked") {
-    return "destructive" as const;
-  }
-  if (status === "running" || status === "submitted") {
-    return "secondary" as const;
-  }
-  return "outline" as const;
-}
-
 function metricValue(value?: number | null) {
   return new Intl.NumberFormat("en-US").format(value ?? 0);
-}
-
-function triggerLabel(triggerType: string) {
-  const labels: Record<string, string> = {
-    chat: "Chat",
-    scheduled: "Scheduled",
-    telegram: "Telegram",
-    whatsapp: "WhatsApp",
-    whatsapp_local: "WhatsApp",
-  };
-  return labels[triggerType] ?? triggerType;
-}
-
-function runHref(organizationId: string, workspaceId: string, runId: string) {
-  return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-    workspaceId
-  )}/agent-runs/${encodeURIComponent(runId)}`;
-}
-
-function chatHref(organizationId: string, workspaceId: string, conversationId: string) {
-  return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-    workspaceId
-  )}/chat/${encodeURIComponent(conversationId)}`;
 }
 
 export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
@@ -163,97 +109,11 @@ export default async function AgentRunsPage({ params }: AgentRunsPageProps) {
           <CardTitle>Recent Runs</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Started</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Trigger</TableHead>
-                <TableHead>Tools</TableHead>
-                <TableHead>Tokens</TableHead>
-                <TableHead className="w-48 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.length > 0 ? (
-                runs.map((run) => (
-                  <TableRow key={run.id}>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <DateTimeText
-                          className="font-medium"
-                          fallback="Not finished"
-                          value={run.startedAt}
-                        />
-                        <div className="max-w-56 truncate font-mono text-xs text-muted-foreground">
-                          {run.id}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-                    </TableCell>
-                    <TableCell>{triggerLabel(run.triggerType)}</TableCell>
-                    <TableCell>{metricValue(run.toolCalls)}</TableCell>
-                    <TableCell>{metricValue(run.totalTokens)}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        <AgentRunActions
-                          canCancel={run.canCancel}
-                          canRerun={run.canRerun}
-                          organizationId={organization.id}
-                          runId={run.id}
-                          variant="icon"
-                          workspaceId={workspace.id}
-                        />
-                        {run.conversationId ? (
-                          <Button asChild size="icon" title="Open chat" variant="outline">
-                            <Link
-                              aria-label="Open chat"
-                              href={chatHref(organization.id, workspace.id, run.conversationId)}
-                            >
-                              <MessageSquare className="size-4" />
-                            </Link>
-                          </Button>
-                        ) : null}
-                        <Button asChild size="icon" title="Open run" variant="outline">
-                          <Link
-                            aria-label="Open run"
-                            href={runHref(organization.id, workspace.id, run.id)}
-                          >
-                            <ArrowRight className="size-4" />
-                          </Link>
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell className="h-40 text-center" colSpan={6}>
-                    <div className="mx-auto max-w-md">
-                      <div className="text-base font-semibold text-foreground">
-                        No runs recorded
-                      </div>
-                      <div className="mt-1 text-sm leading-6 text-muted-foreground">
-                        Start a chat to create the first trace. Runs will show model output, tool
-                        calls, policy decisions, and runtime errors here.
-                      </div>
-                      <Button asChild className="mt-4" size="sm">
-                        <Link
-                          href={`/org/${encodeURIComponent(
-                            organization.id
-                          )}/workspace/${encodeURIComponent(workspace.id)}/chat`}
-                        >
-                          Open chat
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <AgentRunsTable
+            organizationId={organization.id}
+            runs={runs}
+            workspaceId={workspace.id}
+          />
         </CardContent>
       </Card>
     </AppShell>

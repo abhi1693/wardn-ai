@@ -13,16 +13,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/atoms/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/atoms/table";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { DataTableColumnHeader } from "@/components/molecules/data-table-column-header";
 import { EmptyState } from "@/components/molecules/empty-state";
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from "@/components/organisms/data-table";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
 import { llmProviderCredentialsDelete } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 
@@ -92,6 +89,80 @@ export function CredentialsClient({
     }
   }
 
+  const columns: DataTableColumnDef<LlmCredentialRead>[] = [
+    {
+      accessorKey: "name",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+      cell: ({ row }) => <div className="min-w-48 font-medium">{row.original.name}</div>,
+    },
+    {
+      accessorKey: "provider",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Provider" />,
+      cell: ({ row }) => (
+        <Badge variant={row.original.authMethod === "oauth" ? "secondary" : "outline"}>
+          {providerLabel(row.original)}
+        </Badge>
+      ),
+    },
+    {
+      id: "scope",
+      accessorFn: (credential) => scopeLabel(credential, workspaces),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Scope" />,
+    },
+    {
+      accessorKey: "status",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+      cell: ({ row }) => {
+        const status = statusPresentation(row.original);
+        return <Badge variant={status.variant}>{status.label}</Badge>;
+      },
+    },
+    {
+      id: "actions",
+      enableHiding: false,
+      enableSorting: false,
+      header: () => <div className="text-right">Actions</div>,
+      cell: ({ row }) => {
+        const credential = row.original;
+        return (
+          <div className="flex justify-end gap-2">
+            <Button
+              asChild
+              aria-label={`Edit ${credential.name}`}
+              size="icon"
+              variant="outline"
+            >
+              <Link href={`/org/${organization.id}/llm-credentials/${credential.id}/edit`}>
+                <Pencil className="size-4" />
+              </Link>
+            </Button>
+            <ConfirmActionDialog
+              actionLabel="Delete credential"
+              description={`Agents using ${credential.name} will no longer be able to call this provider.`}
+              onConfirm={() => deleteCredential(credential)}
+              title={`Delete ${credential.name}?`}
+              variant="destructive"
+            >
+              <Button
+                aria-label={`Delete ${credential.name}`}
+                disabled={deletingCredentialId === credential.id}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                {deletingCredentialId === credential.id ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+              </Button>
+            </ConfirmActionDialog>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <Card>
       <CardHeader>
@@ -102,79 +173,34 @@ export function CredentialsClient({
       </CardHeader>
       <CardContent className="space-y-4">
         {credentials.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Scope</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-28 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {credentials.map((credential) => {
-                const status = statusPresentation(credential);
-                return (
-                  <TableRow key={credential.id}>
-                    <TableCell>
-                      <div className="min-w-48">
-                        <div className="font-medium">{credential.name}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={credential.authMethod === "oauth" ? "secondary" : "outline"}
-                      >
-                        {providerLabel(credential)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{scopeLabel(credential, workspaces)}</TableCell>
-                    <TableCell>
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          asChild
-                          aria-label={`Edit ${credential.name}`}
-                          size="icon"
-                          variant="outline"
-                        >
-                          <Link
-                            href={`/org/${organization.id}/llm-credentials/${credential.id}/edit`}
-                          >
-                            <Pencil className="size-4" />
-                          </Link>
-                        </Button>
-                        <ConfirmActionDialog
-                          actionLabel="Delete credential"
-                          description={`Agents using ${credential.name} will no longer be able to call this provider.`}
-                          onConfirm={() => deleteCredential(credential)}
-                          title={`Delete ${credential.name}?`}
-                          variant="destructive"
-                        >
-                          <Button
-                            aria-label={`Delete ${credential.name}`}
-                            disabled={deletingCredentialId === credential.id}
-                            size="icon"
-                            type="button"
-                            variant="outline"
-                          >
-                            {deletingCredentialId === credential.id ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-4" />
-                            )}
-                          </Button>
-                        </ConfirmActionDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <DataTable
+            columns={columns}
+            data={credentials}
+            filters={[
+              {
+                columnId: "provider",
+                label: "Provider",
+                options: [
+                  { label: "OpenAI", value: "openai" },
+                  { label: "OpenAI ChatGPT", value: "openai_chatgpt" },
+                  { label: "Anthropic", value: "anthropic" },
+                ],
+              },
+              {
+                columnId: "status",
+                label: "Status",
+                options: [
+                  { label: "Active", value: "active" },
+                  { label: "Inactive", value: "inactive" },
+                  { label: "Expired", value: "expired" },
+                ],
+              },
+            ]}
+            getRowId={(credential) => credential.id}
+            pageSize={15}
+            search={{ columnId: "name", placeholder: "Search credentials" }}
+            urlSyncKey="credentials"
+          />
         ) : (
           <EmptyState
             action={

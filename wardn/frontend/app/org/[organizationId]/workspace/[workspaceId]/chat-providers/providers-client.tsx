@@ -33,8 +33,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/atoms/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/atoms/select";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { SearchField } from "@/components/molecules/search-field";
+import { useUrlState } from "@/hooks/use-url-state";
 import { useVisibilityPolling } from "@/hooks/use-visibility-polling";
 import type {
   ChatProviderConnectionRead,
@@ -478,7 +486,9 @@ export function ChatProvidersClient({
     Record<string, ChatProviderConnectionRead>
   >({});
   const [deletedConnectionIds, setDeletedConnectionIds] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlState("providers-query");
+  const [providerFilter, setProviderFilter] = useUrlState("providers-type", "all");
+  const [statusFilter, setStatusFilter] = useUrlState("providers-status", "all");
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairingConnection, setPairingConnection] = useState<ChatProviderConnectionRead | null>(
     null
@@ -535,7 +545,14 @@ export function ChatProvidersClient({
           option.shortLabel.toLowerCase().includes(query) ||
           bridgeBaseUrl.toLowerCase().includes(query) ||
           bridgeUserId.toLowerCase().includes(query);
-        return matchesQuery;
+        const matchesProvider = providerFilter === "all" || connection.provider === providerFilter;
+        const needsSetup = connectionNeedsSetup(connection, pairingStatuses[connection.id]);
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "setup" && needsSetup) ||
+          (statusFilter === "active" && connection.isActive && !needsSetup) ||
+          (statusFilter === "paused" && !connection.isActive);
+        return matchesQuery && matchesProvider && matchesStatus;
       })
       .sort((first, second) => {
         const firstNeeds = connectionNeedsSetup(first, pairingStatuses[first.id]);
@@ -548,7 +565,7 @@ export function ChatProvidersClient({
         }
         return first.name.localeCompare(second.name);
       });
-  }, [localConnections, pairingStatuses, search]);
+  }, [localConnections, pairingStatuses, providerFilter, search, statusFilter]);
 
   useEffect(() => {
     let ignore = false;
@@ -744,15 +761,39 @@ export function ChatProvidersClient({
             ))}
           </div>
         </div>
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <SearchField
             aria-label="Search providers"
-            className="min-w-0 sm:w-[320px]"
+            className="min-w-0 sm:w-[260px]"
             label={null}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search providers"
             value={search}
           />
+          <Select onValueChange={setProviderFilter} value={providerFilter}>
+            <SelectTrigger aria-label="Filter providers by type" className="w-[150px]">
+              <SelectValue placeholder="All providers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All providers</SelectItem>
+              {providerOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.shortLabel}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select onValueChange={setStatusFilter} value={statusFilter}>
+            <SelectTrigger aria-label="Filter providers by status" className="w-[140px]">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="setup">Needs setup</SelectItem>
+              <SelectItem value="paused">Paused</SelectItem>
+            </SelectContent>
+          </Select>
           <Button asChild>
             <Link href={`${chatProvidersBasePath}/new`}>
               <Plus className="size-4" />

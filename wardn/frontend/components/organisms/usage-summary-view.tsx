@@ -23,14 +23,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/atoms/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/atoms/table";
+import { DataTableColumnHeader } from "@/components/molecules/data-table-column-header";
+import { DataTable, type DataTableColumnDef } from "@/components/organisms/data-table";
 import type {
   UsageSummaryBreakdownRow,
   UsageSummaryResponse as GeneratedUsageSummaryResponse,
@@ -355,49 +349,61 @@ function BreakdownTable({
   description: string;
   rows: UsageSummaryBreakdownRow[];
 }) {
+  const columns: DataTableColumnDef<UsageSummaryBreakdownRow>[] = [
+    {
+      accessorKey: "label",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+      cell: ({ row }) => (
+        <div className="max-w-[320px] truncate font-medium">{row.original.label}</div>
+      ),
+    },
+    {
+      accessorKey: "requests",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Requests" />,
+      cell: ({ row }) => (
+        <div className="text-right tabular-nums">{formatInteger(row.original.requests)}</div>
+      ),
+    },
+    {
+      accessorKey: "totalTokens",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Tokens" />,
+      cell: ({ row }) => (
+        <div className="text-right tabular-nums">{formatInteger(row.original.totalTokens)}</div>
+      ),
+    },
+    {
+      accessorKey: "costUsd",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Cost" />,
+      cell: ({ row }) => (
+        <div className="text-right tabular-nums">{formatCurrency(row.original.costUsd)}</div>
+      ),
+    },
+    {
+      accessorKey: "toolCalls",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Tool calls" />,
+      cell: ({ row }) => (
+        <div className="text-right tabular-nums">{formatInteger(row.original.toolCalls)}</div>
+      ),
+    },
+  ];
+  const urlSyncKey = `usage-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
-        {rows.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-muted-foreground">No usage recorded.</div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead className="text-right">Requests</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">Tool calls</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="max-w-[320px] truncate font-medium">
-                    {row.label}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatInteger(row.requests)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatInteger(row.totalTokens)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(row.costUsd)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatInteger(row.toolCalls)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+      <CardContent>
+        <DataTable
+          columns={columns}
+          data={rows}
+          emptyState="No usage recorded."
+          getRowId={(row) => row.id}
+          pageSize={10}
+          search={{ columnId: "label", placeholder: `Search ${title.toLowerCase()}` }}
+          urlSyncKey={urlSyncKey}
+        />
       </CardContent>
     </Card>
   );

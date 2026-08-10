@@ -65,9 +65,11 @@ import {
   SelectValue,
 } from "@/components/atoms/select";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { SearchField } from "@/components/molecules/search-field";
 import { MetricStrip } from "@/components/organisms/metric-strip";
 import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useUrlState } from "@/hooks/use-url-state";
 import type {
   ChatProviderConnectionRead,
   WorkspaceScheduledTaskCreate,
@@ -2642,6 +2644,8 @@ export function ScheduledTasksClient({
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [busyDeliveryId, setBusyDeliveryId] = useState<string | null>(null);
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
+  const [taskQuery, setTaskQuery] = useUrlState("tasks-query");
+  const [taskStatus, setTaskStatus] = useUrlState("tasks-status", "all");
   const [feedback, setFeedback] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
@@ -2672,6 +2676,31 @@ export function ScheduledTasksClient({
       waiting: runRows.filter((run) => run.status === "waiting_confirmation").length,
     };
   }, [nowMs, runRows, taskRows]);
+
+  const filteredTaskRows = useMemo(() => {
+    const query = taskQuery.trim().toLowerCase();
+    return taskRows.filter((task) => {
+      if (taskStatus === "active" && !task.isActive) {
+        return false;
+      }
+      if (taskStatus === "paused" && task.isActive) {
+        return false;
+      }
+      if (
+        taskStatus === "failed" &&
+        !["failed", "delivery_failed"].includes(task.lastStatus)
+      ) {
+        return false;
+      }
+      return (
+        !query ||
+        [task.name, task.instructions, scheduleLabel(task)]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      );
+    });
+  }, [taskQuery, taskRows, taskStatus]);
 
   async function toggleTask(task: WorkspaceScheduledTaskRead) {
     setBusyTaskId(task.id);
@@ -2816,19 +2845,40 @@ export function ScheduledTasksClient({
         ]}
       />
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Tasks</h2>
           <div className="text-sm text-muted-foreground">
             Workspace assistant schedules and delivery routes.
           </div>
         </div>
-        <Button asChild>
-          <Link href={newTaskHref}>
-            <Plus className="size-4" />
-            New task
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <SearchField
+            aria-label="Search scheduled tasks"
+            className="w-[300px]"
+            label={null}
+            onChange={(event) => setTaskQuery(event.target.value)}
+            placeholder="Search tasks"
+            value={taskQuery}
+          />
+          <Select onValueChange={setTaskStatus} value={taskStatus}>
+            <SelectTrigger aria-label="Filter tasks by status" className="w-[160px]">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="paused">Paused</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button asChild>
+            <Link href={newTaskHref}>
+              <Plus className="size-4" />
+              New task
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {feedback ? (
@@ -2837,7 +2887,7 @@ export function ScheduledTasksClient({
 
       {taskRows.length > 0 ? (
         <section className="grid gap-3 xl:grid-cols-2">
-          {taskRows.map((task) => {
+          {filteredTaskRows.map((task) => {
             const outputs = taskOutputLabels(task, providerOptions);
             const busy = busyTaskId === task.id;
             const notificationCount = enabledNotificationRuleCount(task);
@@ -3005,6 +3055,28 @@ export function ScheduledTasksClient({
               </Card>
             );
           })}
+          {filteredTaskRows.length === 0 ? (
+            <Card className="xl:col-span-2">
+              <CardContent className="flex min-h-44 flex-col items-center justify-center text-center">
+                <div className="text-base font-semibold">No tasks match these filters</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  Adjust the search or status filter to restore task results.
+                </div>
+                <Button
+                  className="mt-4"
+                  onClick={() => {
+                    setTaskQuery("");
+                    setTaskStatus("all");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Clear filters
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
         </section>
       ) : (
         <Card>

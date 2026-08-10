@@ -143,6 +143,32 @@ const defaultChatProvider = {
   workspaceId: workspace.id,
 };
 
+function agentRun(index) {
+  const id = `run-${String(index).padStart(2, "0")}`;
+  const status = index % 3 === 0 ? "failed" : index % 2 === 0 ? "running" : "succeeded";
+  return {
+    agentId: "agent-1",
+    canCancel: status === "running",
+    canRerun: status === "failed",
+    conversationId: `conversation-${index}`,
+    costUsd: "0.0100",
+    createdAt: now,
+    error: status === "failed" ? "Runtime failed." : "",
+    finishedAt: status === "running" ? null : now,
+    id,
+    inputTokens: index * 100,
+    organizationId: organization.id,
+    outputTokens: index * 20,
+    startedAt: `2026-06-${String(Math.max(1, 30 - index)).padStart(2, "0")}T00:00:00.000Z`,
+    status,
+    toolCalls: index,
+    totalTokens: index * 120,
+    triggerType: index % 2 === 0 ? "scheduled" : "chat",
+    updatedAt: now,
+    workspaceId: workspace.id,
+  };
+}
+
 const workspaceMembers = [
   {
     displayName: "Workspace Owner",
@@ -303,6 +329,7 @@ let state = initialState();
 function initialState(overrides = {}) {
   return {
     authMode: overrides.authMode ?? "local",
+    agentRuns: overrides.agentRuns ?? [agentRun(1), agentRun(2), agentRun(3)],
     catalogJobPollsBeforeSuccess: overrides.catalogJobPollsBeforeSuccess ?? 2,
     catalogStatus: overrides.catalogStatus ?? 200,
     chatProviderConnections: overrides.chatProviderConnections ?? [{ ...defaultChatProvider }],
@@ -773,6 +800,14 @@ async function handle(request) {
     url.pathname === `/api/v1/organizations/${organization.id}/secrets/stores`
   ) {
     return json({ stores: [secretStore] });
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname ===
+      `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/agent-runs`
+  ) {
+    return json({ runs: state.agentRuns });
   }
 
   const chatProvidersPath =

@@ -36,6 +36,7 @@ import {
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { SearchField } from "@/components/molecules/search-field";
 import { MetricStrip } from "@/components/organisms/metric-strip";
+import { useUrlState } from "@/hooks/use-url-state";
 import type { MCPServerInstallationRead } from "@/lib/api/generated/model";
 import { workspaceMcpRegistryUninstallServerConfig } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 
@@ -216,10 +217,19 @@ export function InstalledListClient({
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState(ALL_FILTER_VALUE);
-  const [runtimeFilter, setRuntimeFilter] = useState(ALL_FILTER_VALUE);
-  const [connectionTypeFilter, setConnectionTypeFilter] = useState(ALL_FILTER_VALUE);
+  const [searchQuery, setSearchQuery] = useUrlState("connections-query");
+  const [statusFilter, setStatusFilter] = useUrlState(
+    "connections-status",
+    ALL_FILTER_VALUE
+  );
+  const [runtimeFilter, setRuntimeFilter] = useUrlState(
+    "connections-runtime",
+    ALL_FILTER_VALUE
+  );
+  const [connectionTypeFilter, setConnectionTypeFilter] = useUrlState(
+    "connections-type",
+    ALL_FILTER_VALUE
+  );
 
   const sortedInstallations = useMemo(
     () =>

@@ -1,5 +1,7 @@
 const organizationId = "org-1";
 const workspaceId = "workspace-1";
+
+export {};
 const providerBasePath =
   `/org/${organizationId}/workspace/${workspaceId}/chat-providers`;
 const scheduledTasksBasePath =
