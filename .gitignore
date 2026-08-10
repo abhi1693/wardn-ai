@@ -55,6 +55,8 @@ pnpm-debug.log*
 # Cypress artifacts
 wardn/frontend/cypress/downloads/
 wardn/frontend/cypress/screenshots/
+wardn/frontend/cypress/snapshots/actual/
+wardn/frontend/cypress/snapshots/diff/
 wardn/frontend/cypress/videos/
 
 # Package manager caches

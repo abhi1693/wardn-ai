@@ -65,7 +65,7 @@ export function DesktopCommandMenu({ destinations, onNavigate }: DesktopCommandM
       >
         <Search className="size-3.5" />
         <span className="text-sm">Search</span>
-        <kbd className="ml-auto rounded border border-border bg-muted px-1.5 py-0.5 font-sans text-[10px] leading-none text-muted-foreground">
+        <kbd className="ml-auto rounded border border-border bg-muted px-1.5 py-0.5 font-sans text-[10px] leading-none text-foreground">
           Ctrl K
         </kbd>
       </Button>

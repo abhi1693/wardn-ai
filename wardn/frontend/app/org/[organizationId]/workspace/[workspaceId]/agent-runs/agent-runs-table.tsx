@@ -109,7 +109,7 @@ export function AgentRunsTable({ organizationId, runs, workspaceId }: AgentRunsT
       id: "actions",
       enableHiding: false,
       enableSorting: false,
-      header: () => <div className="text-right">Actions</div>,
+      header: () => <div className="text-right text-foreground">Actions</div>,
       cell: ({ row }) => {
         const run = row.original;
         return (

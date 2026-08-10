@@ -143,6 +143,56 @@ const defaultChatProvider = {
   workspaceId: workspace.id,
 };
 
+const defaultRuntimeSession = {
+  expiresAt: "2026-06-30T03:00:00.000Z",
+  failureCount: 0,
+  id: "runtime-session-1",
+  installationId: "installation-1",
+  lastError: "",
+  lastUsedAt: now,
+  namespace: "wardn-runtime",
+  organizationId: organization.id,
+  podName: "mcp-google-search-console",
+  readyAt: now,
+  runtimeKind: "package",
+  runtimeProvider: "kubernetes",
+  serverName: "Google Search Console",
+  serverVersion: "1.0.0",
+  startedAt: now,
+  status: "running",
+  stoppedAt: null,
+  workspaceId: workspace.id,
+};
+
+const defaultAgentApproval = {
+  actionReview: {
+    matchingPolicy: { message: "Review production reads.", mode: "require_approval", policyName: "Production tools" },
+    targetConnection: { configurationName: "default", serverName: "Google Search Console" },
+    targetEnvironment: { configuredTarget: "production", provider: "kubernetes" },
+    tool: { name: "namespace_list", title: "List namespaces" },
+  },
+  agentId: "agent-1",
+  agentRunId: "run-01",
+  approvalUrl: "/approvals/approval-1",
+  arguments: { cluster: "production" },
+  conversationId: "conversation-1",
+  createdAt: now,
+  decidedById: null,
+  error: "",
+  expiresAt: "2026-06-30T01:00:00.000Z",
+  id: "approval-1",
+  installationId: "installation-1",
+  organizationId: organization.id,
+  requestedById: "user-1",
+  result: "",
+  status: "pending",
+  toolCallId: "tool-call-1",
+  toolName: "namespace_list",
+  toolSchemaId: "tool-schema-1",
+  updatedAt: now,
+  workspaceId: workspace.id,
+};
+
 function agentRun(index) {
   const id = `run-${String(index).padStart(2, "0")}`;
   const status = index % 3 === 0 ? "failed" : index % 2 === 0 ? "running" : "succeeded";
@@ -330,6 +380,7 @@ function initialState(overrides = {}) {
   return {
     authMode: overrides.authMode ?? "local",
     agentRuns: overrides.agentRuns ?? [agentRun(1), agentRun(2), agentRun(3)],
+    agentApproval: overrides.agentApproval ?? { ...defaultAgentApproval },
     catalogJobPollsBeforeSuccess: overrides.catalogJobPollsBeforeSuccess ?? 2,
     catalogStatus: overrides.catalogStatus ?? 200,
     chatProviderConnections: overrides.chatProviderConnections ?? [{ ...defaultChatProvider }],
@@ -347,6 +398,13 @@ function initialState(overrides = {}) {
       remotes: overrides.serverRemotes ?? googleSearchConsoleServer.remotes,
     },
     installations: overrides.installations ?? [],
+    guardrailPolicies: overrides.guardrailPolicies ?? [],
+    guardrailSettings: overrides.guardrailSettings ?? {
+      defaultDeny: false,
+      workspaceId: workspace.id,
+    },
+    llmCredentials: overrides.llmCredentials ?? [],
+    runtimeSessions: overrides.runtimeSessions ?? [{ ...defaultRuntimeSession }],
     skillLibrary: overrides.skillLibrary ?? [],
     scheduledTasks: overrides.scheduledTasks ?? [],
     scheduledTaskSaveStatus: overrides.scheduledTaskSaveStatus ?? 200,
@@ -706,9 +764,24 @@ async function handle(request) {
     request.method === "GET" &&
     url.pathname === `/api/v1/organizations/${organization.id}/llm/provider-credentials`
   ) {
-    return json({ credentials: [] });
+    return json({ credentials: state.llmCredentials });
+  }
+  const llmCredentialMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/org-1\/llm\/provider-credentials\/([^/]+)$/
+  );
+  if (request.method === "DELETE" && llmCredentialMatch?.[1]) {
+    state.llmCredentials = state.llmCredentials.filter(
+      (credential) => credential.id !== llmCredentialMatch[1]
+    );
+    return empty();
   }
   const workspaceChatPath = `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/agents`;
+  if (request.method === "GET" && url.pathname === workspaceChatPath) {
+    return json({ agents: [chatAgent] });
+  }
+  if (request.method === "GET" && url.pathname === `${workspaceChatPath}/available-tools`) {
+    return json({ tools: [] });
+  }
   if (request.method === "POST" && url.pathname === `${workspaceChatPath}/quick-start`) {
     if (state.quickStartDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, state.quickStartDelayMs));
@@ -725,19 +798,30 @@ async function handle(request) {
     /^\/api\/v1\/organizations\/([^/]+)\/workspaces\/([^/]+)\/agents\/([^/]+)\/tool-approvals\/([^/]+)$/
   );
   if (
-    request.method === "POST" &&
+    (request.method === "GET" || request.method === "POST") &&
     agentApprovalMatch?.[1] === organization.id &&
     agentApprovalMatch[2] === workspace.id
   ) {
+    if (request.method === "GET") {
+      return json(state.agentApproval);
+    }
     const denied = body.decision === "deny";
-    return json({
+    const decision = {
       approvalId: agentApprovalMatch[4],
       assistantMessage: null,
       error: denied ? "Denied by user." : "",
       result: denied ? "" : "namespace/default",
       status: denied ? "denied" : "completed",
       toolName: "namespace_list",
-    });
+    };
+    state.agentApproval = {
+      ...state.agentApproval,
+      error: decision.error,
+      result: decision.result,
+      status: decision.status,
+      updatedAt: now,
+    };
+    return json(decision);
   }
   if (url.pathname === "/api/v1/auth/api-tokens") {
     if (request.method === "GET") {
@@ -888,6 +972,93 @@ async function handle(request) {
       };
     state.scheduledTasks.push(task);
     return json(task, 201);
+  }
+
+  const guardrailsPath =
+    `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/guardrails`;
+  if (request.method === "GET" && url.pathname === `${guardrailsPath}/policies`) {
+    return json({ policies: state.guardrailPolicies });
+  }
+  if (request.method === "GET" && url.pathname === `${guardrailsPath}/settings`) {
+    return json(state.guardrailSettings);
+  }
+  if (request.method === "PATCH" && url.pathname === `${guardrailsPath}/settings`) {
+    state.guardrailSettings = { ...state.guardrailSettings, defaultDeny: body.defaultDeny };
+    return json(state.guardrailSettings);
+  }
+
+  const runtimePath =
+    `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/mcp/runtime`;
+  if (request.method === "GET" && url.pathname === `${runtimePath}/sessions`) {
+    return json({ sessions: state.runtimeSessions });
+  }
+  if (request.method === "GET" && url.pathname === `${runtimePath}/summary`) {
+    const activeSessions = state.runtimeSessions.filter((session) =>
+      ["pending", "starting", "running", "idle"].includes(session.status)
+    ).length;
+    return json({
+      activeSessions,
+      expiredSessions: 0,
+      failedSessions: 0,
+      idleSessions: 0,
+      recentServerErrors: [],
+      sessionStatusCounts: Object.fromEntries(
+        state.runtimeSessions.map((session) => [session.status, 1])
+      ),
+      staleActiveSessions: 0,
+      stoppedSessions: state.runtimeSessions.filter((session) => session.status === "stopped").length,
+      toolCalls: {
+        failed: 0,
+        recentFailed: 0,
+        recentFailureRate: 0,
+        recentTotal: 3,
+        running: 0,
+        succeeded: 3,
+        total: 3,
+      },
+      totalSessions: state.runtimeSessions.length,
+    });
+  }
+  const runtimeSessionMatch = url.pathname.match(
+    /^\/api\/v1\/organizations\/org-1\/workspaces\/workspace-1\/mcp\/runtime\/sessions\/([^/]+)(?:\/(health|events|stop))?$/
+  );
+  if (runtimeSessionMatch?.[1]) {
+    const session = state.runtimeSessions.find((item) => item.id === runtimeSessionMatch[1]);
+    if (!session) {
+      return json({ detail: "runtime session not found" }, 404);
+    }
+    if (request.method === "GET" && runtimeSessionMatch[2] === "health") {
+      return json({
+        healthy: true,
+        message: "Runtime process is ready.",
+        ready: true,
+        runtimeKind: session.runtimeKind,
+        runtimeProvider: session.runtimeProvider,
+        runtimeSessionId: session.id,
+        status: "ready",
+      });
+    }
+    if (request.method === "GET" && runtimeSessionMatch[2] === "events") {
+      return json({
+        events: [
+          {
+            createdAt: now,
+            eventType: "tool_call_succeeded",
+            id: "runtime-event-1",
+            message: "Tool call completed.",
+            metadata: { toolName: "namespace_list" },
+            runtimeSessionId: session.id,
+          },
+        ],
+      });
+    }
+    if (request.method === "POST" && runtimeSessionMatch[2] === "stop") {
+      const stopped = { ...session, status: "stopped", stoppedAt: now };
+      state.runtimeSessions = state.runtimeSessions.map((item) =>
+        item.id === stopped.id ? stopped : item
+      );
+      return json(stopped);
+    }
   }
 
   if (

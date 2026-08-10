@@ -1,6 +1,14 @@
 /* eslint-disable @typescript-eslint/no-namespace -- Cypress extends its global command interface. */
 import type {} from "@testing-library/cypress";
 import "@testing-library/cypress/add-commands";
+import "cypress-axe";
+import { addCompareSnapshotCommand } from "cypress-visual-regression/dist/command";
+
+addCompareSnapshotCommand({
+  capture: "viewport",
+  errorThreshold: 0.01,
+  pixelmatchOptions: { threshold: 0.1 },
+});
 
 Cypress.on("uncaught:exception", (error) => {
   // Cypress instruments the document before Next hydrates its root element in production mode.
