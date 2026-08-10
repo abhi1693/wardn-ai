@@ -3,7 +3,12 @@ import nextTypescript from "eslint-config-next/typescript";
 
 const config = [
   {
-    ignores: ["lib/api/generated/**", "playwright-report/**", "test-results/**"],
+    ignores: [
+      "cypress/downloads/**",
+      "cypress/screenshots/**",
+      "cypress/videos/**",
+      "lib/api/generated/**",
+    ],
   },
   ...nextVitals,
   ...nextTypescript,

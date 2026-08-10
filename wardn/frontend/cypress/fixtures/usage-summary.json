@@ -1,0 +1,97 @@
+{
+  "window": {
+    "startDate": "2026-06-01",
+    "endDate": "2026-06-30",
+    "timezone": "UTC",
+    "breakdownLimit": 25
+  },
+  "summary": {
+    "requests": 18,
+    "succeeded": 16,
+    "failed": 2,
+    "running": 1,
+    "inputTokens": 1800,
+    "outputTokens": 720,
+    "totalTokens": 2520,
+    "costUsd": "0.1842",
+    "toolCalls": 11
+  },
+  "byUser": [
+    {
+      "id": "user-1",
+      "label": "owner@example.com",
+      "requests": 18,
+      "inputTokens": 1800,
+      "outputTokens": 720,
+      "totalTokens": 2520,
+      "costUsd": "0.1842",
+      "toolCalls": 11
+    }
+  ],
+  "byWorkspace": [
+    {
+      "id": "workspace-1",
+      "label": "Platform",
+      "requests": 18,
+      "inputTokens": 1800,
+      "outputTokens": 720,
+      "totalTokens": 2520,
+      "costUsd": "0.1842",
+      "toolCalls": 11
+    }
+  ],
+  "byAgent": [
+    {
+      "id": "agent-1",
+      "label": "Support agent",
+      "requests": 12,
+      "inputTokens": 1200,
+      "outputTokens": 480,
+      "totalTokens": 1680,
+      "costUsd": "0.1200",
+      "toolCalls": 7
+    },
+    {
+      "id": "agent-2",
+      "label": "Operations agent",
+      "requests": 6,
+      "inputTokens": 600,
+      "outputTokens": 240,
+      "totalTokens": 840,
+      "costUsd": "0.0642",
+      "toolCalls": 4
+    }
+  ],
+  "byModel": [
+    {
+      "id": "openai:gpt-4.1-mini",
+      "label": "gpt-4.1-mini",
+      "requests": 18,
+      "inputTokens": 1800,
+      "outputTokens": 720,
+      "totalTokens": 2520,
+      "costUsd": "0.1842",
+      "toolCalls": 11
+    }
+  ],
+  "daily": [
+    {
+      "date": "2026-06-29",
+      "requests": 8,
+      "inputTokens": 800,
+      "outputTokens": 320,
+      "totalTokens": 1120,
+      "costUsd": "0.0800",
+      "toolCalls": 5
+    },
+    {
+      "date": "2026-06-30",
+      "requests": 10,
+      "inputTokens": 1000,
+      "outputTokens": 400,
+      "totalTokens": 1400,
+      "costUsd": "0.1042",
+      "toolCalls": 6
+    }
+  ]
+}

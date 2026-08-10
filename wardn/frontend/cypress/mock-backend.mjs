@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
-const port = Number(process.env.WARDN_E2E_BACKEND_PORT ?? 4100);
-const frontendPort = Number(process.env.WARDN_E2E_FRONTEND_PORT ?? 3100);
+const port = Number(process.env.WARDN_CYPRESS_BACKEND_PORT ?? 4200);
+const frontendPort = Number(process.env.WARDN_CYPRESS_FRONTEND_PORT ?? 3200);
 const frontendOrigin = `http://127.0.0.1:${frontendPort}`;
 const sessionCookieName = process.env.WARDN_SESSION_COOKIE_NAME ?? "wardn_session";
 const now = "2026-06-30T00:00:00.000Z";
@@ -50,6 +50,41 @@ const workspaceAgent = {
   failuresLast7d: 0,
   recentRunId: null,
   lastUsedAt: null,
+};
+
+const chatAgent = {
+  id: "agent-1",
+  organizationId: organization.id,
+  workspaceId: workspace.id,
+  name: "Workspace Assistant",
+  description: "Workspace assistant",
+  instructions: "Help with workspace operations.",
+  modelName: "gpt-4.1-mini",
+  providerCredentialId: null,
+  scope: "workspace",
+  isActive: true,
+  serverCount: 0,
+  toolCount: 0,
+  skillIds: [],
+  createdAt: now,
+  updatedAt: now,
+};
+
+const chatConversation = {
+  id: "conversation-1",
+  organizationId: organization.id,
+  workspaceId: workspace.id,
+  agentId: chatAgent.id,
+  title: "Workspace chat",
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+};
+
+const chatConversationResponse = {
+  agent: chatAgent,
+  conversation: chatConversation,
+  messages: [],
 };
 
 const hubSkillResult = {
@@ -242,6 +277,7 @@ function initialState(overrides = {}) {
     jobs: new Map(),
     organizationsStatus: overrides.organizationsStatus ?? 200,
     packageRuntimeProvider: overrides.packageRuntimeProvider ?? "local",
+    quickStartDelayMs: overrides.quickStartDelayMs ?? 0,
     requests: [],
     server: overrides.server ?? {
       ...googleSearchConsoleServer,
@@ -523,8 +559,8 @@ function approvedSkillFromBody(body) {
     auditSummary: "No known threat patterns.",
     contentHash: "hash-123",
     status: "active",
-    assignedAgentIds: [],
-    assignedAgentNames: [],
+    assignedAgentIds: [workspaceAgent.id],
+    assignedAgentNames: [workspaceAgent.name],
     lastUsedAt: null,
     usageCountLast7d: 0,
     approvedById: "user-1",
@@ -601,6 +637,25 @@ async function handle(request) {
   }
   if (request.method === "GET" && url.pathname === "/api/v1/auth/me") {
     return json({ id: "user-1", email: "owner@example.com", isSuperuser: true });
+  }
+  if (
+    request.method === "GET" &&
+    url.pathname === `/api/v1/organizations/${organization.id}/llm/provider-credentials`
+  ) {
+    return json({ credentials: [] });
+  }
+  const workspaceChatPath = `/api/v1/organizations/${organization.id}/workspaces/${workspace.id}/agents`;
+  if (request.method === "POST" && url.pathname === `${workspaceChatPath}/quick-start`) {
+    if (state.quickStartDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, state.quickStartDelayMs));
+    }
+    return json(chatConversationResponse);
+  }
+  if (
+    request.method === "GET" &&
+    url.pathname === `${workspaceChatPath}/conversations/${chatConversation.id}`
+  ) {
+    return json(chatConversationResponse);
   }
   const agentApprovalMatch = url.pathname.match(
     /^\/api\/v1\/organizations\/([^/]+)\/workspaces\/([^/]+)\/agents\/([^/]+)\/tool-approvals\/([^/]+)$/
