@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
-import { Badge } from "@/components/ui/badge";
+import { AppShell } from "@/components/templates/app-shell";
+import { Badge } from "@/components/atoms/badge";
 import type {
   MCPRuntimeSessionListResponse,
   MCPRuntimeSummaryResponse,

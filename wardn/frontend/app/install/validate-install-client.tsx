@@ -23,12 +23,12 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/atoms/badge";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/atoms/select";
 import type {
   MCPRuntimeInstallationControlResponse,
   MCPServerInstallationRead,

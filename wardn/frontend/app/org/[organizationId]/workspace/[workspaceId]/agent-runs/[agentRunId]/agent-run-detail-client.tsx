@@ -19,8 +19,8 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/atoms/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { apiErrorMessage, apiRequest } from "@/lib/api/client";
 import type {
   AgentRunDeliveryRecipientRead,

@@ -15,19 +15,20 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { type FormEvent, type ReactNode, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
+import { EmptyState } from "@/components/molecules/empty-state";
 import {
   Table,
   TableBody,
@@ -35,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 import type {
   AgentSkillActivityRead,
   AgentSkillCatalogResponse,
@@ -88,26 +89,6 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
   return `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
     workspaceId
   )}/agent-runs/${encodeURIComponent(runId)}`;
-}
-
-function EmptyState({
-  action,
-  children,
-  title,
-}: {
-  action?: ReactNode;
-  children: ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="rounded-md border border-dashed border-border bg-muted/20 px-4 py-10 text-center">
-      <div className="text-sm font-semibold">{title}</div>
-      <div className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        {children}
-      </div>
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
-  );
 }
 
 function SkillBadge({
@@ -278,7 +259,7 @@ export function SkillsClient({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Sparkles className="size-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold tracking-normal">Skill Marketplace</h2>
+              <h2 className="text-base font-semibold tracking-normal">Workspace skills</h2>
               <Badge variant={library.length > 0 ? "success" : "secondary"}>
                 {formatCount(library.length)} approved
               </Badge>
@@ -288,35 +269,40 @@ export function SkillsClient({
               agents actually used it from run evidence.
             </p>
           </div>
-          <div className="grid min-w-72 grid-cols-3 gap-2 text-sm">
-            <div className="rounded-md border border-border px-3 py-2">
+          <div className="flex min-w-72 items-stretch divide-x divide-border overflow-hidden rounded-md border border-border text-sm">
+            <div className="min-w-24 flex-1 px-3 py-2">
               <div className="text-xs text-muted-foreground">Library</div>
               <div className="font-semibold">{formatCount(library.length)}</div>
             </div>
-            <div className="rounded-md border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Covered Agents</div>
+            <div className="min-w-24 flex-1 px-3 py-2">
+              <div className="text-xs text-muted-foreground">Agents</div>
               <div className="font-semibold">{formatCount(agents.length)}</div>
             </div>
-            <div className="rounded-md border border-border px-3 py-2">
+            <div className="min-w-24 flex-1 px-3 py-2">
               <div className="text-xs text-muted-foreground">Runs</div>
               <div className="font-semibold">{formatCount(usage.skillRunsLast7d)}</div>
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-1 border-b border-border/80 bg-muted/30 px-3 py-2">
+        <div
+          aria-label="Skill views"
+          className="flex flex-wrap gap-1 border-b border-border/80 bg-muted/30 px-3 py-2"
+          role="tablist"
+        >
           {tabs.map((tab) => {
             const selected = activeTab === tab.id;
             return (
               <button
-                aria-pressed={selected}
+                aria-selected={selected}
                 className={cn(
                   "inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm transition-colors",
                   selected
-                    ? "border-neutral-900 bg-neutral-900 font-medium text-white shadow-[var(--shadow-card)]"
+                    ? "border-primary bg-primary font-medium text-primary-foreground shadow-[var(--shadow-card)]"
                     : "border-transparent text-muted-foreground hover:bg-card/70 hover:text-foreground"
                 )}
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                role="tab"
                 type="button"
               >
                 {tab.label}
@@ -324,7 +310,7 @@ export function SkillsClient({
                   className={cn(
                     "rounded-sm border px-1.5 py-0.5 text-[11px] leading-none",
                     selected
-                      ? "border-white/20 bg-white/15 text-white"
+                      ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground"
                       : "border-border bg-muted text-muted-foreground"
                   )}
                 >
@@ -374,7 +360,8 @@ export function SkillsClient({
                 </Button>
               </form>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Suggestions</span>
                 {previewShortcuts.slice(0, 6).map((shortcut) => (
                   <Button
                     key={shortcut.id}
@@ -389,14 +376,17 @@ export function SkillsClient({
               </div>
 
               {!hasSearched ? (
-                <EmptyState title="Start with a domain or workflow">
-                  Use terms like Kubernetes ops, GitHub review, SEO, or incident response. The
-                  results are Hub records that can become workspace-approved guidance.
-                </EmptyState>
+                <EmptyState
+                  description="Use terms like Kubernetes ops, GitHub review, SEO, or incident response. The results are Hub records that can become workspace-approved guidance."
+                  icon={Sparkles}
+                  title="Start with a domain or workflow"
+                />
               ) : results.length === 0 ? (
-                <EmptyState title="No matching skills">
-                  Try broader terms. Hub search works best with one to three generic catalog words.
-                </EmptyState>
+                <EmptyState
+                  description="Try broader terms. Hub search works best with one to three generic catalog words."
+                  icon={Search}
+                  title="No matching skills"
+                />
               ) : (
                 <div className="grid gap-3">
                   {results.map((result) => {
@@ -454,22 +444,20 @@ export function SkillsClient({
 
           <Card>
             <CardHeader>
-              <CardTitle>Approval Model</CardTitle>
-              <CardDescription>What changes when a skill is approved.</CardDescription>
+              <CardTitle>After approval</CardTitle>
+              <CardDescription>How approved guidance becomes available.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="rounded-md border border-border p-3">
+            <CardContent className="divide-y divide-border p-0 text-sm">
+              <div className="px-4 py-3">
                 <div className="flex items-center gap-2 font-medium">
                   <ShieldCheck className="size-4 text-muted-foreground" />
-                  Workspace trust
+                  Trusted guidance
                 </div>
                 <p className="mt-1 leading-6 text-muted-foreground">
-                  Approved skills are the preferred library for this workspace. They keep audit,
-                  hash, and source metadata so the agent can choose trusted guidance before
-                  temporary Hub fallback.
+                  Audit, source, and content hash stay attached to the workspace copy.
                 </p>
               </div>
-              <div className="rounded-md border border-border p-3">
+              <div className="px-4 py-3">
                 <div className="flex items-center gap-2 font-medium">
                   <CheckCircle2 className="size-4 text-muted-foreground" />
                   Immediate availability
@@ -479,10 +467,10 @@ export function SkillsClient({
                   workspace agents. There is no separate binding step.
                 </p>
               </div>
-              <div className="rounded-md border border-border p-3">
+              <div className="px-4 py-3">
                 <div className="flex items-center gap-2 font-medium">
                   <History className="size-4 text-muted-foreground" />
-                  Run evidence
+                  Visible in runs
                 </div>
                 <p className="mt-1 leading-6 text-muted-foreground">
                   Usage shows whether a run searched approved guidance or fell back to temporary Hub
@@ -512,10 +500,10 @@ export function SkillsClient({
                     <ArrowRight className="size-4" />
                   </Button>
                 }
+                description="Use Discover to search Wardn Hub and approve the first skill into this workspace."
+                icon={BookOpenCheck}
                 title="No approved skills yet"
-              >
-                Use Discover to search Wardn Hub and approve the first skill into this workspace.
-              </EmptyState>
+              />
             ) : (
               <div className="grid gap-4">
                 {library.map((skill) => (

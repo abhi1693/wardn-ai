@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { CancelScheduledTaskRunButton } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/runs/[runId]/cancel-scheduled-task-run-button";
-import { DateTimeText } from "@/components/date-time-text";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTimeText } from "@/components/atoms/date-time-text";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import type {
   WorkspaceScheduledTaskRead,
   WorkspaceScheduledTaskRunRead,

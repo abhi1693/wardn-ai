@@ -11,7 +11,6 @@ import {
   Clock3,
   Eye,
   MessageSquare,
-  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -30,19 +29,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { MetricStrip } from "@/components/organisms/metric-strip";
 import type {
   ChatProviderConnectionRead,
   WorkspaceScheduledTaskCreate,
@@ -847,8 +848,8 @@ function choiceButtonClass(active: boolean) {
   return cn(
     "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors",
     active
-      ? "border-teal-600 bg-teal-50 text-teal-900 shadow-[inset_0_0_0_1px_rgb(13_148_136/0.12)]"
-      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+      ? "border-ring bg-accent text-accent-foreground ring-1 ring-ring/20"
+      : "border-border bg-card text-muted-foreground hover:border-input hover:bg-muted/40"
   );
 }
 
@@ -856,22 +857,22 @@ function frequencyButtonClass(active: boolean) {
   return cn(
     "inline-flex h-7 items-center justify-center rounded px-2.5 text-xs font-medium transition-colors",
     active
-      ? "bg-white text-teal-950 shadow-sm ring-1 ring-slate-200"
-      : "text-slate-500 hover:bg-white/70 hover:text-slate-900"
+      ? "bg-card text-accent-foreground shadow-sm ring-1 ring-border"
+      : "text-muted-foreground hover:bg-card/70 hover:text-foreground"
   );
 }
 
 function sectionPanelClass(extra?: string) {
-  return cn("rounded-md border border-slate-200 bg-white", extra);
+  return cn("rounded-md border border-border bg-card", extra);
 }
 
 function sectionHeaderClass(extra?: string) {
-  return cn("border-b border-slate-200 px-4 py-3", extra);
+  return cn("border-b border-border px-4 py-3", extra);
 }
 
 function fieldTextAreaClass(extra?: string) {
   return cn(
-    "w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60",
+    "w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60",
     extra
   );
 }
@@ -1324,11 +1325,11 @@ export function ScheduledTaskFormClient({
 
   return (
     <form
-      className="text-slate-950"
+      className="text-foreground"
       id="scheduled-task-form"
       onSubmit={submitTask}
     >
-      <div className="sticky top-0 z-20 -mx-2 border-b border-slate-200 bg-white/95 px-2 py-2 backdrop-blur">
+      <div className="sticky top-0 z-20 -mx-2 border-b border-border bg-card/95 px-2 py-2 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <Button
@@ -1342,11 +1343,11 @@ export function ScheduledTaskFormClient({
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-600">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span
                 className={cn(
                   "size-2 rounded-full",
-                  form.isActive ? "bg-emerald-500" : "bg-slate-300"
+                  form.isActive ? "bg-emerald-500" : "bg-muted-foreground/40"
                 )}
               />
               {validationIssues.length ? (
@@ -1354,7 +1355,7 @@ export function ScheduledTaskFormClient({
                   {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
                 </Badge>
               ) : (
-                <Badge className="border-teal-200 bg-teal-50 text-teal-800" variant="outline">
+                <Badge className="border-ring/30 bg-accent text-accent-foreground" variant="outline">
                   Ready
                 </Badge>
               )}
@@ -1382,7 +1383,7 @@ export function ScheduledTaskFormClient({
               Test all routes
             </Button>
             <Button
-              className="bg-teal-700 text-white hover:bg-teal-800"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
               disabled={isReviewSection ? !canSave || isSaving : isSaving}
               onClick={
                 isReviewSection
@@ -1405,7 +1406,7 @@ export function ScheduledTaskFormClient({
             </Button>
           </div>
         </div>
-        <nav className="mt-2 flex h-8 gap-5 overflow-x-auto border-t border-slate-200 pt-2 text-xs">
+        <nav className="mt-2 flex h-8 gap-5 overflow-x-auto border-t border-border pt-2 text-xs">
           {editorSections.map((section) => {
             const active = activeSection === section.id;
             return (
@@ -1413,8 +1414,8 @@ export function ScheduledTaskFormClient({
                 className={cn(
                   "flex shrink-0 items-center border-b-2 px-0.5 pb-1 transition-colors",
                   active
-                    ? "border-teal-600 text-slate-950"
-                    : "border-transparent text-slate-500 hover:text-slate-900"
+                    ? "border-ring text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
                 )}
                 aria-current={active ? "step" : undefined}
                 key={section.id}
@@ -1440,8 +1441,8 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Instructions</h2>
-                <div className="mt-0.5 text-xs text-slate-500">
+                <h2 className="text-sm font-semibold text-foreground">Instructions</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   Task identity, run behavior, and assistant prompt.
                 </div>
               </div>
@@ -1450,7 +1451,7 @@ export function ScheduledTaskFormClient({
                   "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-sm font-medium",
                   form.isActive
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 bg-slate-100 text-slate-600"
+                    : "border-border bg-muted text-muted-foreground"
                 )}
                 id="scheduled-task-active"
                 onClick={() => setForm({ ...form, isActive: !form.isActive })}
@@ -1465,7 +1466,7 @@ export function ScheduledTaskFormClient({
                 <div className="space-y-2">
                   <Label htmlFor="scheduled-task-name">Task name</Label>
                   <Input
-                    className="bg-white"
+                    className="bg-card"
                     id="scheduled-task-name"
                     maxLength={120}
                     onChange={(event) => setForm({ ...form, name: event.target.value })}
@@ -1478,7 +1479,7 @@ export function ScheduledTaskFormClient({
                   <div className="space-y-2">
                     <Label htmlFor="scheduled-task-max-attempts">Attempts</Label>
                     <Input
-                      className="bg-white"
+                      className="bg-card"
                       id="scheduled-task-max-attempts"
                       max={10}
                       min={1}
@@ -1495,7 +1496,7 @@ export function ScheduledTaskFormClient({
                       }
                       value={form.conversationPolicy}
                     >
-                      <SelectTrigger className="bg-white" id="scheduled-task-conversation-policy">
+                      <SelectTrigger className="bg-card" id="scheduled-task-conversation-policy">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1527,10 +1528,10 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex items-start justify-between gap-3")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Schedule Configuration</h2>
-                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.schedule}</div>
+                <h2 className="text-sm font-semibold text-foreground">Schedule Configuration</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">{sectionSummaries.schedule}</div>
               </div>
-              <Badge className="border-slate-200 bg-white text-slate-600" variant="outline">
+              <Badge className="border-border bg-card text-muted-foreground" variant="outline">
                 {form.schedules.length === 0 ? "Manual" : `${form.schedules.length} active`}
               </Badge>
             </div>
@@ -1545,8 +1546,8 @@ export function ScheduledTaskFormClient({
                         className={cn(
                           "grid min-w-48 shrink-0 gap-0.5 rounded-md border px-3 py-2 text-left text-xs transition-colors",
                           active
-                            ? "border-teal-300 bg-teal-50 text-teal-950"
-                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                            ? "border-ring/30 bg-accent text-accent-foreground"
+                            : "border-border bg-card text-muted-foreground hover:border-input"
                         )}
                         key={schedule.key}
                         onClick={() => setActiveScheduleKey(schedule.key)}
@@ -1555,7 +1556,7 @@ export function ScheduledTaskFormClient({
                         <span className="truncate font-medium">
                           {scheduleDisplayName(schedule, index)}
                         </span>
-                        <span className="truncate text-slate-500">
+                        <span className="truncate text-muted-foreground">
                           {scheduleDraftSummary(schedule)}
                         </span>
                       </button>
@@ -1565,7 +1566,7 @@ export function ScheduledTaskFormClient({
               ) : null}
 
               {form.schedules.length === 0 ? (
-                <div className="flex min-h-24 items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-sm text-slate-600">
+                <div className="flex min-h-24 items-center gap-3 rounded-md border border-dashed border-input bg-muted/40 px-4 text-sm text-muted-foreground">
                   <Play className="size-4" />
                   <span>Manual run only</span>
                 </div>
@@ -1573,19 +1574,19 @@ export function ScheduledTaskFormClient({
 
               {activeSchedule ? (
                 <div
-                  className="overflow-hidden rounded-md border border-slate-200 bg-white"
+                  className="overflow-hidden rounded-md border border-border bg-card"
                   key={activeSchedule.key}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3 bg-muted/40 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <Label
-                        className="text-[11px] font-semibold uppercase text-slate-500"
+                        className="text-[11px] font-semibold uppercase text-muted-foreground"
                         htmlFor={`schedule-name-${activeSchedule.key}`}
                       >
                         Schedule condition
                       </Label>
                       <Input
-                        className="mt-1 h-8 max-w-sm border-slate-200 bg-white text-sm font-medium"
+                        className="mt-1 h-8 max-w-sm border-border bg-card text-sm font-medium"
                         id={`schedule-name-${activeSchedule.key}`}
                         maxLength={120}
                         onChange={(event) =>
@@ -1601,7 +1602,7 @@ export function ScheduledTaskFormClient({
                           "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium",
                           activeSchedule.isActive
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-white text-slate-500"
+                            : "border-border bg-card text-muted-foreground"
                         )}
                         onClick={() =>
                           updateSchedule(activeSchedule.key, { isActive: !activeSchedule.isActive })
@@ -1611,7 +1612,7 @@ export function ScheduledTaskFormClient({
                         {activeSchedule.isActive ? "On" : "Off"}
                       </button>
                       <Button
-                        className="border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                        className="border-transparent text-muted-foreground hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                         onClick={() => removeSchedule(activeSchedule.key)}
                         size="icon"
                         title="Remove schedule"
@@ -1623,10 +1624,10 @@ export function ScheduledTaskFormClient({
                     </div>
                   </div>
 
-                  <div className="grid gap-4 border-t border-slate-200 p-4">
+                  <div className="grid gap-4 border-t border-border p-4">
                     <div className="grid gap-2">
                       <Label>Frequency</Label>
-                      <div className="inline-flex w-fit max-w-full flex-wrap gap-1 rounded-md bg-slate-100 p-1">
+                      <div className="inline-flex w-fit max-w-full flex-wrap gap-1 rounded-md bg-muted p-1">
                         {schedulePresets.map((preset) => (
                           <button
                             className={frequencyButtonClass(
@@ -1655,7 +1656,7 @@ export function ScheduledTaskFormClient({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+                    <div className="flex items-center gap-2 rounded-md border border-ring/30 bg-accent px-3 py-2 text-sm text-accent-foreground">
                       <CalendarClock className="size-4 shrink-0" />
                       <span className="min-w-0 truncate">{scheduleDraftSummary(activeSchedule)}</span>
                     </div>
@@ -1666,7 +1667,7 @@ export function ScheduledTaskFormClient({
                           Every minutes
                         </Label>
                         <Input
-                          className="max-w-48 bg-white"
+                          className="max-w-48 bg-card"
                           id={`schedule-interval-${activeSchedule.key}`}
                           max={10080}
                           min={1}
@@ -1687,7 +1688,7 @@ export function ScheduledTaskFormClient({
                           Cron expression
                         </Label>
                         <Input
-                          className="font-mono bg-white"
+                          className="font-mono bg-card"
                           id={`schedule-cron-${activeSchedule.key}`}
                           onChange={(event) =>
                             updateSchedule(activeSchedule.key, {
@@ -1707,7 +1708,7 @@ export function ScheduledTaskFormClient({
                         <div className="flex flex-wrap items-center gap-2">
                           {activeSchedule.times.map((timeValue) => (
                             <button
-                              className="inline-flex h-8 items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-2.5 text-xs font-medium text-teal-900"
+                              className="inline-flex h-8 items-center gap-2 rounded-md border border-ring/30 bg-accent px-2.5 text-xs font-medium text-accent-foreground"
                               key={timeValue}
                               onClick={() => removeRunTime(activeSchedule, timeValue)}
                               type="button"
@@ -1717,7 +1718,7 @@ export function ScheduledTaskFormClient({
                             </button>
                           ))}
                           <Input
-                            className="h-8 w-28 bg-white text-xs"
+                            className="h-8 w-28 bg-card text-xs"
                             onChange={(event) =>
                               updateSchedule(activeSchedule.key, { timeInput: event.target.value })
                             }
@@ -1765,7 +1766,7 @@ export function ScheduledTaskFormClient({
                         <div className="flex flex-wrap gap-1.5">
                           {["Mon", "Tue", "Wed", "Thu", "Fri"].map((weekday) => (
                             <span
-                              className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-600"
+                              className="inline-flex h-8 items-center rounded-md border border-border bg-muted/40 px-2.5 text-xs font-medium text-muted-foreground"
                               key={weekday}
                             >
                               {weekday}
@@ -1803,7 +1804,7 @@ export function ScheduledTaskFormClient({
                           value={activeSchedule.timezone}
                         >
                           <SelectTrigger
-                            className="bg-white"
+                            className="bg-card"
                             id={`schedule-timezone-${activeSchedule.key}`}
                           >
                             <SelectValue />
@@ -1826,7 +1827,7 @@ export function ScheduledTaskFormClient({
                         <div className="space-y-2">
                           <Label htmlFor={`schedule-start-${activeSchedule.key}`}>Start</Label>
                           <Input
-                            className="bg-white"
+                            className="bg-card"
                             id={`schedule-start-${activeSchedule.key}`}
                             onChange={(event) =>
                               updateSchedule(activeSchedule.key, { startsAt: event.target.value })
@@ -1838,7 +1839,7 @@ export function ScheduledTaskFormClient({
                         <div className="space-y-2">
                           <Label htmlFor={`schedule-end-${activeSchedule.key}`}>End</Label>
                           <Input
-                            className="bg-white"
+                            className="bg-card"
                             id={`schedule-end-${activeSchedule.key}`}
                             onChange={(event) =>
                               updateSchedule(activeSchedule.key, { endsAt: event.target.value })
@@ -1854,11 +1855,11 @@ export function ScheduledTaskFormClient({
               ) : null}
 
               <details
-                className="group rounded-md border border-dashed border-slate-300 bg-white"
+                className="group rounded-md border border-dashed border-input bg-card"
                 onToggle={(event) => setIsAddingSchedule(event.currentTarget.open)}
                 open={isAddingSchedule}
               >
-                <summary className="flex cursor-pointer list-none items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 group-open:border-b group-open:border-slate-200">
+                <summary className="flex cursor-pointer list-none items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 group-open:border-b group-open:border-border">
                   <Plus className="size-4" />
                   Add schedule condition
                 </summary>
@@ -1895,13 +1896,13 @@ export function ScheduledTaskFormClient({
               </details>
               </div>
               <div className="grid gap-4 self-start">
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-md border border-border bg-muted/40 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase text-slate-500">
+                    <div className="text-xs font-semibold uppercase text-muted-foreground">
                       Next 5 runs
                     </div>
                     <Button
-                      className="h-8 bg-white"
+                      className="h-8 bg-card"
                       disabled={isPreviewing || !canPreview}
                       onClick={previewSchedules}
                       size="sm"
@@ -1920,7 +1921,7 @@ export function ScheduledTaskFormClient({
                     <div className="mt-3 grid gap-1 text-sm">
                       {previewRuns.map((run) => (
                         <div
-                          className="rounded-md bg-white px-2 py-1.5 text-slate-700"
+                          className="rounded-md bg-card px-2 py-1.5 text-foreground"
                           key={run}
                         >
                           {formatDate(run)}
@@ -1928,34 +1929,34 @@ export function ScheduledTaskFormClient({
                       ))}
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                    <div className="mt-3 rounded-md border border-dashed border-input bg-card px-3 py-3 text-sm text-muted-foreground">
                       No upcoming runs.
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Delivery</div>
+                <div className="rounded-md border border-border bg-card p-3">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Delivery</div>
                   <div className="mt-3 grid gap-3 text-sm">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <div className="text-xs text-slate-500">Attempts</div>
-                        <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
+                        <div className="text-xs text-muted-foreground">Attempts</div>
+                        <div className="mt-1 font-medium text-foreground">{form.maxAttempts}</div>
                       </div>
                       <div>
-                        <div className="text-xs text-slate-500">Chat history</div>
-                        <div className="mt-1 font-medium text-slate-900">
+                        <div className="text-xs text-muted-foreground">Chat history</div>
+                        <div className="mt-1 font-medium text-foreground">
                           {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
                         </div>
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500">Outputs</div>
+                      <div className="text-xs text-muted-foreground">Outputs</div>
                       {selectedOutputLabels.length > 0 ? (
                         <div className="mt-1 grid gap-1">
                           {selectedOutputLabels.map((label) => (
                             <div
-                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                              className="min-w-0 truncate rounded-md bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
                               key={label}
                               title={label}
                             >
@@ -1964,7 +1965,7 @@ export function ScheduledTaskFormClient({
                           ))}
                         </div>
                       ) : (
-                        <div className="mt-1 text-sm text-slate-500">None selected</div>
+                        <div className="mt-1 text-sm text-muted-foreground">None selected</div>
                       )}
                     </div>
                   </div>
@@ -1979,8 +1980,8 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Outputs</h2>
-                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.outputs}</div>
+                <h2 className="text-sm font-semibold text-foreground">Outputs</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">{sectionSummaries.outputs}</div>
               </div>
               <Button
                 disabled={isTestingRoutes || form.selectedRoutes.length === 0}
@@ -1998,16 +1999,16 @@ export function ScheduledTaskFormClient({
               </Button>
             </div>
             <div className="grid gap-2 p-4">
-              <div className="flex min-h-12 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+              <div className="flex min-h-12 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
                 <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                   <input
                     checked={form.selectedRoutes.includes("chat")}
-                    className="size-4 accent-teal-700"
+                    className="size-4 accent-[var(--ring)]"
                     onChange={() => toggleRoute("chat")}
                     type="checkbox"
                   />
-                  <MessageSquare className="size-4 text-slate-500" />
-                  <span className="font-medium text-slate-800">Built-in chat</span>
+                  <MessageSquare className="size-4 text-muted-foreground" />
+                  <span className="font-medium text-foreground">Built-in chat</span>
                 </label>
                 {form.selectedRoutes.includes("chat") ? routeTestBadge("chat") : null}
                 {form.selectedRoutes.includes("chat") ? (
@@ -2029,22 +2030,22 @@ export function ScheduledTaskFormClient({
               </div>
               {providerOptions.map((option) => (
                 <div
-                  className="flex min-h-14 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="flex min-h-14 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm"
                   key={option.key}
                 >
                   <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                     <input
                       checked={form.selectedRoutes.includes(option.key)}
-                      className="size-4 accent-teal-700"
+                      className="size-4 accent-[var(--ring)]"
                       onChange={() => toggleRoute(option.key)}
                       type="checkbox"
                     />
-                    <Webhook className="size-4 text-slate-500" />
+                    <Webhook className="size-4 text-muted-foreground" />
                     <span className="min-w-0">
-                      <span className="block truncate font-medium text-slate-800">
+                      <span className="block truncate font-medium text-foreground">
                         {option.label}
                       </span>
-                      <span className="block truncate text-xs text-slate-500">{option.source}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{option.source}</span>
                     </span>
                   </label>
                   {form.selectedRoutes.includes(option.key) ? routeTestBadge(option.key) : null}
@@ -2067,7 +2068,7 @@ export function ScheduledTaskFormClient({
                 </div>
               ))}
               {providerOptions.length === 0 ? (
-                <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-600">
+                <div className="rounded-md border border-dashed border-input bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
                   Connect a provider and receive a message before selecting an external route.
                 </div>
               ) : null}
@@ -2091,8 +2092,8 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Notifications</h2>
-                <div className="mt-0.5 text-xs text-slate-500">
+                <h2 className="text-sm font-semibold text-foreground">Notifications</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   {activeNotificationCount} enabled rule{activeNotificationCount === 1 ? "" : "s"} ·{" "}
                   {form.notificationRoutes.length} alert route
                   {form.notificationRoutes.length === 1 ? "" : "s"} ·{" "}
@@ -2116,22 +2117,22 @@ export function ScheduledTaskFormClient({
               </Button>
             </div>
             <div className="grid gap-4 p-4">
-              <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-3">
+              <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm md:grid-cols-3">
                 <div>
-                  <div className="font-medium text-slate-900">Outputs</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                  <div className="font-medium text-foreground">Outputs</div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Final assistant results. Configure these on the Outputs step.
                   </p>
                 </div>
                 <div>
-                  <div className="font-medium text-slate-900">Notification routes</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                  <div className="font-medium text-foreground">Notification routes</div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Event alerts for failures, empty runs, delivery problems, and changes.
                   </p>
                 </div>
                 <div>
-                  <div className="font-medium text-slate-900">Approval routes</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                  <div className="font-medium text-foreground">Approval routes</div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     Human approval prompts when a tool call needs a decision.
                   </p>
                 </div>
@@ -2143,8 +2144,8 @@ export function ScheduledTaskFormClient({
                     className={cn(
                       "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors",
                       form.notificationRules[option.key]
-                        ? "border-teal-200 bg-teal-50 text-teal-900"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        ? "border-ring/30 bg-accent text-accent-foreground"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                     )}
                     key={option.key}
                     onClick={() => toggleNotificationRule(option.key)}
@@ -2159,45 +2160,45 @@ export function ScheduledTaskFormClient({
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-md border border-slate-200 bg-white">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                <div className="rounded-md border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
                     <div>
-                      <div className="text-sm font-medium text-slate-900">
+                      <div className="text-sm font-medium text-foreground">
                         Notification routes
                       </div>
-                      <div className="mt-0.5 text-xs text-slate-500">
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         Event alerts, not final task output
                       </div>
                     </div>
                     <Badge variant="secondary">{form.notificationRoutes.length}</Badge>
                   </div>
                   <div className="grid gap-2 p-3">
-                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
                       <input
                         checked={form.notificationRoutes.includes("chat")}
-                        className="size-4 accent-teal-700"
+                        className="size-4 accent-[var(--ring)]"
                         onChange={() => toggleNotificationRoute("chat")}
                         type="checkbox"
                       />
-                      <MessageSquare className="size-4 text-slate-500" />
+                      <MessageSquare className="size-4 text-muted-foreground" />
                       <span>Built-in chat</span>
                       {form.notificationRoutes.includes("chat") ? routeTestBadge("chat") : null}
                     </label>
                     {providerOptions.map((option) => (
                       <label
-                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm"
+                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
                         key={option.key}
                       >
                         <input
                           checked={form.notificationRoutes.includes(option.key)}
-                          className="size-4 accent-teal-700"
+                          className="size-4 accent-[var(--ring)]"
                           onChange={() => toggleNotificationRoute(option.key)}
                           type="checkbox"
                         />
-                        <Webhook className="size-4 text-slate-500" />
+                        <Webhook className="size-4 text-muted-foreground" />
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{option.label}</span>
-                          <span className="block truncate text-xs text-slate-500">
+                          <span className="block truncate text-xs text-muted-foreground">
                             {option.source}
                           </span>
                         </span>
@@ -2209,43 +2210,43 @@ export function ScheduledTaskFormClient({
                   </div>
                 </div>
 
-                <div className="rounded-md border border-slate-200 bg-white">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                <div className="rounded-md border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
                     <div>
-                      <div className="text-sm font-medium text-slate-900">Approval routes</div>
-                      <div className="mt-0.5 text-xs text-slate-500">
+                      <div className="text-sm font-medium text-foreground">Approval routes</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         Tool-call approval prompts
                       </div>
                     </div>
                     <Badge variant="secondary">{form.approvalRoutes.length}</Badge>
                   </div>
                   <div className="grid gap-2 p-3">
-                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
                       <input
                         checked={form.approvalRoutes.includes("chat")}
-                        className="size-4 accent-teal-700"
+                        className="size-4 accent-[var(--ring)]"
                         onChange={() => toggleApprovalRoute("chat")}
                         type="checkbox"
                       />
-                      <MessageSquare className="size-4 text-slate-500" />
+                      <MessageSquare className="size-4 text-muted-foreground" />
                       <span>Built-in chat</span>
                       {form.approvalRoutes.includes("chat") ? routeTestBadge("chat") : null}
                     </label>
                     {providerOptions.map((option) => (
                       <label
-                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm"
+                        className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm"
                         key={option.key}
                       >
                         <input
                           checked={form.approvalRoutes.includes(option.key)}
-                          className="size-4 accent-teal-700"
+                          className="size-4 accent-[var(--ring)]"
                           onChange={() => toggleApprovalRoute(option.key)}
                           type="checkbox"
                         />
-                        <ShieldCheck className="size-4 text-slate-500" />
+                        <ShieldCheck className="size-4 text-muted-foreground" />
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{option.label}</span>
-                          <span className="block truncate text-xs text-slate-500">
+                          <span className="block truncate text-xs text-muted-foreground">
                             {option.source}
                           </span>
                         </span>
@@ -2268,48 +2269,48 @@ export function ScheduledTaskFormClient({
                 </div>
               ) : null}
 
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs font-semibold uppercase text-slate-500">
+              <div className="rounded-md border border-border bg-muted/40 p-3">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">
                   How notifications work
                 </div>
-                <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-3 grid gap-3 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-3">
                   <div>
-                    <div className="font-medium text-slate-900">Failure</div>
+                    <div className="font-medium text-foreground">Failure</div>
                     <p className="mt-1">
                       Sends a notification when the assistant run fails before producing a usable
                       result.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Waiting approval</div>
+                    <div className="font-medium text-foreground">Waiting approval</div>
                     <p className="mt-1">
                       Sends approval requests to the approval route when a tool call needs a human
                       decision.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">No output</div>
+                    <div className="font-medium text-foreground">No output</div>
                     <p className="mt-1">
                       Sends a notification when the run completes but has nothing meaningful to
                       deliver.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Delivery failure</div>
+                    <div className="font-medium text-foreground">Delivery failure</div>
                     <p className="mt-1">
                       Sends a notification when the assistant succeeds but one or more selected
                       destinations fail.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Meaningful update</div>
+                    <div className="font-medium text-foreground">Meaningful update</div>
                     <p className="mt-1">
                       Sends a notification only when monitoring finds a meaningful change from the
                       saved baseline.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Routes</div>
+                    <div className="font-medium text-foreground">Routes</div>
                     <p className="mt-1">
                       Notification routes receive status updates. Approval routes receive pending
                       approval prompts.
@@ -2326,8 +2327,8 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Monitoring</h2>
-                <div className="mt-0.5 text-xs text-slate-500">
+                <h2 className="text-sm font-semibold text-foreground">Monitoring</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   {sectionSummaries.monitoring}
                 </div>
               </div>
@@ -2383,10 +2384,10 @@ export function ScheduledTaskFormClient({
                       className={cn(
                         "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors disabled:cursor-not-allowed",
                         item.disabled
-                          ? "border-slate-200 bg-slate-50 text-slate-400"
+                          ? "border-border bg-muted/40 text-muted-foreground"
                           : item.active
-                            ? "border-teal-200 bg-teal-50 text-teal-900"
-                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            ? "border-ring/30 bg-accent text-accent-foreground"
+                            : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                       )}
                       disabled={item.disabled}
                       key={item.label}
@@ -2402,13 +2403,13 @@ export function ScheduledTaskFormClient({
 
               {form.monitoringConfig.enabled ? (
                 <div className="grid gap-4 lg:grid-cols-[1fr_240px]">
-                  <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
+                  <div className="grid gap-3 rounded-md border border-border bg-card p-3 md:grid-cols-4">
                     <button
                       className={cn(
                         "flex min-h-10 items-center justify-between gap-2 rounded-md border px-3 text-left text-sm",
                         form.monitoringConfig.stopAfterFirstChange
-                          ? "border-teal-200 bg-teal-50 text-teal-900"
-                          : "border-slate-200 bg-white text-slate-600"
+                          ? "border-ring/30 bg-accent text-accent-foreground"
+                          : "border-border bg-card text-muted-foreground"
                       )}
                       onClick={() =>
                         updateMonitoringConfig({
@@ -2423,7 +2424,7 @@ export function ScheduledTaskFormClient({
                     <div className="space-y-2">
                       <Label htmlFor="monitoring-stop-change-count">Change count</Label>
                       <Input
-                        className="bg-white"
+                        className="bg-card"
                         id="monitoring-stop-change-count"
                         min={1}
                         onChange={(event) =>
@@ -2439,7 +2440,7 @@ export function ScheduledTaskFormClient({
                     <div className="space-y-2">
                       <Label htmlFor="monitoring-stop-run-count">Run count</Label>
                       <Input
-                        className="bg-white"
+                        className="bg-card"
                         id="monitoring-stop-run-count"
                         min={1}
                         onChange={(event) =>
@@ -2453,7 +2454,7 @@ export function ScheduledTaskFormClient({
                     <div className="space-y-2">
                       <Label htmlFor="monitoring-stop-unchanged-count">Unchanged count</Label>
                       <Input
-                        className="bg-white"
+                        className="bg-card"
                         id="monitoring-stop-unchanged-count"
                         min={1}
                         onChange={(event) =>
@@ -2469,23 +2470,23 @@ export function ScheduledTaskFormClient({
                   </div>
 
                   {editingTask ? (
-                    <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-3">
+                    <div className="grid gap-3 rounded-md border border-border bg-card p-3">
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
-                          <div className="text-xs text-slate-500">State</div>
+                          <div className="text-xs text-muted-foreground">State</div>
                           <div className="mt-1 font-medium">{taskMonitoringLabel(editingTask)}</div>
                         </div>
                         <div>
-                          <div className="text-xs text-slate-500">Changes</div>
+                          <div className="text-xs text-muted-foreground">Changes</div>
                           <div className="mt-1 font-medium">
                             {metricValue(monitoringChangeCount(editingTask))}
                           </div>
                         </div>
                       </div>
-                      <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                      <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-border bg-card px-3 text-sm">
                         <input
                           checked={form.resetMonitoringState}
-                          className="size-4 accent-teal-700"
+                          className="size-4 accent-[var(--ring)]"
                           onChange={() =>
                             setForm({
                               ...form,
@@ -2494,7 +2495,7 @@ export function ScheduledTaskFormClient({
                           }
                           type="checkbox"
                         />
-                        <RefreshCw className="size-4 text-slate-500" />
+                        <RefreshCw className="size-4 text-muted-foreground" />
                         <span>Reset baseline</span>
                       </label>
                     </div>
@@ -2502,48 +2503,48 @@ export function ScheduledTaskFormClient({
                 </div>
               ) : null}
 
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs font-semibold uppercase text-slate-500">
+              <div className="rounded-md border border-border bg-muted/40 p-3">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">
                   How monitoring works
                 </div>
-                <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-3 grid gap-3 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-3">
                   <div>
-                    <div className="font-medium text-slate-900">Watch mode</div>
+                    <div className="font-medium text-foreground">Watch mode</div>
                     <p className="mt-1">
                       Compares each run against the saved baseline and records whether something
                       meaningful changed.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Notify on change</div>
+                    <div className="font-medium text-foreground">Notify on change</div>
                     <p className="mt-1">
                       Uses the notification route when a change is detected. No-change runs stay
                       quiet.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Deliver on change</div>
+                    <div className="font-medium text-foreground">Deliver on change</div>
                     <p className="mt-1">
                       Sends output destinations only when the result changed, instead of delivering
                       every run.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Baseline first run</div>
+                    <div className="font-medium text-foreground">Baseline first run</div>
                     <p className="mt-1">
                       Treats the first run as the starting snapshot, then compares later runs
                       against it.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Stop conditions</div>
+                    <div className="font-medium text-foreground">Stop conditions</div>
                     <p className="mt-1">
                       Pauses the task after a selected number of changes, total runs, unchanged
                       runs, or the first change.
                     </p>
                   </div>
                   <div>
-                    <div className="font-medium text-slate-900">Reset baseline</div>
+                    <div className="font-medium text-foreground">Reset baseline</div>
                     <p className="mt-1">
                       Clears the stored comparison state so the next run can establish a fresh
                       baseline.
@@ -2559,11 +2560,11 @@ export function ScheduledTaskFormClient({
           >
             <div className={sectionHeaderClass("flex flex-wrap items-center justify-between gap-2")}>
               <div>
-                <h2 className="text-sm font-semibold text-slate-950">Review</h2>
-                <div className="mt-0.5 text-xs text-slate-500">{sectionSummaries.review}</div>
+                <h2 className="text-sm font-semibold text-foreground">Review</h2>
+                <div className="mt-0.5 text-xs text-muted-foreground">{sectionSummaries.review}</div>
               </div>
               <Button
-                className="h-8 bg-white"
+                className="h-8 bg-card"
                 disabled={isPreviewing || !canPreview}
                 onClick={previewSchedules}
                 size="sm"
@@ -2580,28 +2581,28 @@ export function ScheduledTaskFormClient({
             </div>
             <div className="grid gap-4 p-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_320px]">
               <div className="grid gap-4">
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Summary</div>
+                <div className="rounded-md border border-border bg-card p-3">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Summary</div>
                   <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                     <div>
-                      <div className="text-xs text-slate-500">Schedules</div>
-                      <div className="mt-1 font-medium text-slate-900">
+                      <div className="text-xs text-muted-foreground">Schedules</div>
+                      <div className="mt-1 font-medium text-foreground">
                         {sectionSummaries.schedule}
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500">Attempts</div>
-                      <div className="mt-1 font-medium text-slate-900">{form.maxAttempts}</div>
+                      <div className="text-xs text-muted-foreground">Attempts</div>
+                      <div className="mt-1 font-medium text-foreground">{form.maxAttempts}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500">Chat history</div>
-                      <div className="mt-1 font-medium text-slate-900">
+                      <div className="text-xs text-muted-foreground">Chat history</div>
+                      <div className="mt-1 font-medium text-foreground">
                         {form.conversationPolicy === "reuse" ? "Reuse" : "New each run"}
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-500">Monitoring</div>
-                      <div className="mt-1 font-medium text-slate-900">
+                      <div className="text-xs text-muted-foreground">Monitoring</div>
+                      <div className="mt-1 font-medium text-foreground">
                         {form.monitoringConfig.enabled ? "On" : "Off"}
                       </div>
                     </div>
@@ -2616,7 +2617,7 @@ export function ScheduledTaskFormClient({
                     <div className="mt-3 grid gap-2">
                       {validationIssues.map((issue) => (
                         <div
-                          className="rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-amber-900"
+                          className="rounded-md border border-amber-200 bg-card px-3 py-2 text-sm text-amber-900"
                           key={issue}
                         >
                           {issue}
@@ -2626,16 +2627,16 @@ export function ScheduledTaskFormClient({
                   </div>
                 ) : null}
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Routing</div>
-                  <div className="mt-3 grid gap-3 text-xs text-slate-600 sm:grid-cols-2">
+                <div className="rounded-md border border-border bg-card p-3">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Routing</div>
+                  <div className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
                     <div>
-                      <div className="mb-1 text-slate-500">Notifications</div>
+                      <div className="mb-1 text-muted-foreground">Notifications</div>
                       <div className="grid gap-1">
                         {selectedNotificationLabels.length ? (
                           selectedNotificationLabels.map((label) => (
                             <div
-                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1"
+                              className="min-w-0 truncate rounded-md bg-muted/40 px-2 py-1"
                               key={label}
                               title={label}
                             >
@@ -2648,12 +2649,12 @@ export function ScheduledTaskFormClient({
                       </div>
                     </div>
                     <div>
-                      <div className="mb-1 text-slate-500">Approvals</div>
+                      <div className="mb-1 text-muted-foreground">Approvals</div>
                       <div className="grid gap-1">
                         {selectedApprovalLabels.length ? (
                           selectedApprovalLabels.map((label) => (
                             <div
-                              className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1"
+                              className="min-w-0 truncate rounded-md bg-muted/40 px-2 py-1"
                               key={label}
                               title={label}
                             >
@@ -2670,13 +2671,13 @@ export function ScheduledTaskFormClient({
               </div>
 
               <div className="grid gap-4 self-start">
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Next 5 runs</div>
+                <div className="rounded-md border border-border bg-muted/40 p-3">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Next 5 runs</div>
                   {previewRuns.length > 0 ? (
                     <div className="mt-3 grid gap-1 text-sm">
                       {previewRuns.map((run) => (
                         <div
-                          className="rounded-md bg-white px-2 py-1.5 text-slate-700"
+                          className="rounded-md bg-card px-2 py-1.5 text-foreground"
                           key={run}
                         >
                           {formatDate(run)}
@@ -2684,19 +2685,19 @@ export function ScheduledTaskFormClient({
                       ))}
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                    <div className="mt-3 rounded-md border border-dashed border-input bg-card px-3 py-3 text-sm text-muted-foreground">
                       No upcoming runs.
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-md border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Outputs</div>
+                <div className="rounded-md border border-border bg-card p-3">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Outputs</div>
                   {selectedOutputLabels.length > 0 ? (
                     <div className="mt-3 grid gap-1.5">
                       {selectedOutputLabels.map((label) => (
                         <div
-                          className="min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                          className="min-w-0 truncate rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
                           key={label}
                           title={label}
                         >
@@ -2705,7 +2706,7 @@ export function ScheduledTaskFormClient({
                       ))}
                     </div>
                   ) : (
-                    <div className="mt-3 text-sm text-slate-500">None selected</div>
+                    <div className="mt-3 text-sm text-muted-foreground">None selected</div>
                   )}
                 </div>
               </div>
@@ -2725,7 +2726,6 @@ export function ScheduledTasksClient({
   tasks,
   workspaceId,
 }: ScheduledTasksClientProps) {
-  const router = useRouter();
   const providerOptions = useMemo(() => providerRouteOptions(connections), [connections]);
   const [nowMs] = useState(() => Date.now());
   const [taskRows, setTaskRows] = useState(tasks);
@@ -2774,7 +2774,6 @@ export function ScheduledTasksClient({
       setTaskRows((current) =>
         current.map((row) => (row.id === updated.id ? updated : row))
       );
-      router.refresh();
     } catch (error) {
       setFeedback({
         variant: "error",
@@ -2799,7 +2798,6 @@ export function ScheduledTasksClient({
         )
       );
       setFeedback({ variant: "success", text: "Scheduled task queued." });
-      router.refresh();
     } catch (error) {
       setFeedback({
         variant: "error",
@@ -2841,7 +2839,6 @@ export function ScheduledTasksClient({
         )
       );
       setFeedback({ variant: "success", text: "Delivery retried." });
-      router.refresh();
     } catch (error) {
       setFeedback({
         variant: "error",
@@ -2853,10 +2850,6 @@ export function ScheduledTasksClient({
   }
 
   async function cancelRun(run: WorkspaceScheduledTaskRunRead) {
-    const task = taskRows.find((row) => row.id === run.taskId);
-    if (!window.confirm(`Cancel ${task?.name ?? "this scheduled run"}?`)) {
-      return;
-    }
     setBusyRunId(run.id);
     setFeedback(null);
     try {
@@ -2875,7 +2868,6 @@ export function ScheduledTasksClient({
         )
       );
       setFeedback({ variant: "success", text: "Scheduled run canceled." });
-      router.refresh();
     } catch (error) {
       setFeedback({
         variant: "error",
@@ -2887,15 +2879,11 @@ export function ScheduledTasksClient({
   }
 
   async function deleteTask(task: WorkspaceScheduledTaskRead) {
-    if (!window.confirm(`Delete ${task.name}?`)) {
-      return;
-    }
     setBusyTaskId(task.id);
     setFeedback(null);
     try {
       await workspaceScheduledTasksDelete(organizationId, workspaceId, task.id);
       setTaskRows((current) => current.filter((row) => row.id !== task.id));
-      router.refresh();
     } catch (error) {
       setFeedback({
         variant: "error",
@@ -2908,53 +2896,16 @@ export function ScheduledTasksClient({
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-5">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">Active</div>
-              <CalendarClock className="size-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.active)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">Monitoring</div>
-              <Eye className="size-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.monitoring)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">Due in 24h</div>
-              <Clock3 className="size-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.dueSoon)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">Waiting approval</div>
-              <ShieldCheck className="size-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.waiting)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">Failed</div>
-              <MoreHorizontal className="size-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold">{metricValue(stats.failed)}</div>
-          </CardContent>
-        </Card>
-      </section>
+      <MetricStrip
+        className="md:grid-cols-5"
+        items={[
+          { icon: CalendarClock, label: "Active", value: metricValue(stats.active) },
+          { icon: Eye, label: "Monitoring", value: metricValue(stats.monitoring) },
+          { icon: Clock3, label: "Due in 24h", value: metricValue(stats.dueSoon) },
+          { icon: ShieldCheck, label: "Waiting approval", value: metricValue(stats.waiting) },
+          { icon: X, label: "Failed", value: metricValue(stats.failed) },
+        ]}
+      />
 
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -3036,15 +2987,23 @@ export function ScheduledTasksClient({
                       >
                         {task.isActive ? <Pause className="size-4" /> : <Play className="size-4" />}
                       </Button>
-                      <Button
-                        disabled={busy}
-                        onClick={() => deleteTask(task)}
-                        size="icon"
-                        title="Delete"
-                        variant="outline"
+                      <ConfirmActionDialog
+                        actionLabel="Delete task"
+                        description="Its schedule and monitoring state will be removed. Existing run history is retained."
+                        onConfirm={() => deleteTask(task)}
+                        title={`Delete ${task.name}?`}
+                        variant="destructive"
                       >
-                        <Trash2 className="size-4" />
-                      </Button>
+                        <Button
+                          aria-label={`Delete ${task.name}`}
+                          disabled={busy}
+                          size="icon"
+                          title="Delete"
+                          variant="outline"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </ConfirmActionDialog>
                     </div>
                   </div>
                 </CardHeader>
@@ -3170,7 +3129,7 @@ export function ScheduledTasksClient({
               const runDetailHref = scheduledTaskRunHref(organizationId, workspaceId, run.id);
               const runRowClassName = cn(
                 "relative grid gap-3 rounded-md border border-border px-3 py-2 text-sm md:grid-cols-[minmax(0,1fr)_150px_150px_130px_230px]",
-                "transition-colors hover:border-teal-300 hover:bg-teal-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                "transition-colors hover:border-ring/30 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               );
               const rowContent = (
                 <>
@@ -3208,21 +3167,28 @@ export function ScheduledTasksClient({
                       <Clock3 className="size-4" />
                     </span>
                     {canCancelRun(run) ? (
-                      <Button
-                        className="pointer-events-auto"
-                        disabled={busyRunId === run.id}
-                        onClick={() => cancelRun(run)}
-                        size="sm"
-                        title="Cancel scheduled run"
-                        variant="outline"
+                      <ConfirmActionDialog
+                        actionLabel="Cancel run"
+                        description="The current execution will stop. Existing output and delivery records are retained."
+                        onConfirm={() => cancelRun(run)}
+                        title={`Cancel ${taskRows.find((task) => task.id === run.taskId)?.name ?? "this scheduled run"}?`}
+                        variant="destructive"
                       >
-                        {busyRunId === run.id ? (
-                          <RefreshCw className="size-4 animate-spin" />
-                        ) : (
-                          <X className="size-4" />
-                        )}
-                        Cancel run
-                      </Button>
+                        <Button
+                          className="pointer-events-auto"
+                          disabled={busyRunId === run.id}
+                          size="sm"
+                          title="Cancel scheduled run"
+                          variant="outline"
+                        >
+                          {busyRunId === run.id ? (
+                            <RefreshCw className="size-4 animate-spin" />
+                          ) : (
+                            <X className="size-4" />
+                          )}
+                          Cancel run
+                        </Button>
+                      </ConfirmActionDialog>
                     ) : null}
                   </div>
                 </>

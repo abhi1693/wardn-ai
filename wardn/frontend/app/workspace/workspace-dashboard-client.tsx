@@ -23,7 +23,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Line,
   Pie,
   PieChart,
@@ -31,14 +30,14 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from "recharts";
+} from "@/components/atoms/charts";
 
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { DashboardPanel } from "@/components/molecules/dashboard-panel";
 import { HealthRow } from "@/components/molecules/health-row";
 import { SignalBar } from "@/components/molecules/signal-bar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import type {
   AgentRead,
   MCPRuntimeSummaryResponse,
@@ -492,17 +491,17 @@ function ConnectionMixPanel({
                 <Pie
                   cx="50%"
                   cy="50%"
-                  data={runtimeRows.map((row) => ({ name: row.label, value: row.total }))}
+                  data={runtimeRows.map((row, index) => ({
+                    fill: chartColors[index % chartColors.length],
+                    name: row.label,
+                    value: row.total,
+                  }))}
                   dataKey="value"
                   innerRadius={48}
                   nameKey="name"
                   outerRadius={76}
                   paddingAngle={2}
-                >
-                  {runtimeRows.map((row, index) => (
-                    <Cell fill={chartColors[index % chartColors.length]} key={row.label} />
-                  ))}
-                </Pie>
+                />
               </PieChart>
             </ResponsiveContainer>
           </div>

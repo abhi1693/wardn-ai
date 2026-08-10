@@ -2,10 +2,10 @@ import { Settings } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { AgentChatClient } from "@/app/org/[organizationId]/agents/[agentId]/agent-chat-client";
 import { getLlmCredentials } from "@/app/org/[organizationId]/llm-credentials/data";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/atoms/button";
 import type { AgentConversationResponse } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";
@@ -59,10 +59,9 @@ export default async function WorkspaceConversationChatPage({
           </Link>
         </Button>
       }
-      contentClassName="h-screen min-h-0 max-w-none px-0 pb-0 pt-16 max-lg:h-auto max-lg:pt-0 max-md:px-0 max-md:pb-0"
+      contentClassName="h-screen min-h-0 max-w-none px-0 pb-0 pt-14"
       contentInnerClassName="h-full space-y-0"
       eyebrow="Workspace"
-      sectionClassName="max-lg:min-h-0"
       title="Chat"
       workspaceContext={workspaceContext}
     >

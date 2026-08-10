@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { ScheduledTaskFormClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/scheduled-tasks-client";
 import type { ChatProviderConnectionListResponse } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
@@ -35,7 +35,7 @@ export default async function NewScheduledTaskPage({ params }: NewScheduledTaskP
   return (
     <AppShell
       active="workspace-scheduled-tasks"
-      contentClassName="mx-0 max-w-none px-6 max-md:px-4"
+      contentClassName="mx-0 max-w-none px-6"
       contentInnerClassName="space-y-0"
       eyebrow="Workspace"
       title="New Scheduled Task"

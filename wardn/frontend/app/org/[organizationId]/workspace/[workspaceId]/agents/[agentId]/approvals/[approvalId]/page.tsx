@@ -2,8 +2,8 @@ import { ArrowLeft, ListTree, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
-import { Button } from "@/components/ui/button";
+import { AppShell } from "@/components/templates/app-shell";
+import { Button } from "@/components/atoms/button";
 import type { AgentToolApprovalRead } from "@/lib/api/generated/model";
 import { backendJson } from "@/lib/api/server";
 import { getWorkspaceContext } from "@/lib/workspace-context";

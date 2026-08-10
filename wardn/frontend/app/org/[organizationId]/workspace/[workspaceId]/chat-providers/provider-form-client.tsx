@@ -17,23 +17,23 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Badge } from "@/components/atoms/badge";
+import { QRCode } from "@/components/atoms/qr-code";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
@@ -858,7 +858,7 @@ export function ChatProviderFormClient({
 
   return (
     <form className="space-y-4" onSubmit={submit}>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-3 max-md:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-3">
         <Button asChild size="sm" type="button" variant="ghost">
           <Link href={basePath}>
             <ArrowLeft className="size-4" />
@@ -876,7 +876,7 @@ export function ChatProviderFormClient({
         </div>
       </div>
 
-      <div className="grid gap-4 px-6 pb-6 max-md:px-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-4 px-6 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
           {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
           {notice ? (
@@ -1094,7 +1094,7 @@ export function ChatProviderFormClient({
               <CardContent className="grid gap-4 p-4 md:grid-cols-[220px_minmax(0,1fr)]">
                 <div className="flex min-h-[220px] items-center justify-center rounded-md border border-border bg-muted/30 p-4">
                   {pairingStatus?.qrPayload ? (
-                    <QRCodeSVG
+                    <QRCode
                       className="rounded-sm bg-white p-2"
                       level="M"
                       size={184}

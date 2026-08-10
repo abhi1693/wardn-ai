@@ -6,7 +6,6 @@ import {
   Edit2,
   KeyRound,
   Play,
-  Search,
   ShieldOff,
   Trash2,
   X,
@@ -23,10 +22,9 @@ import {
   runtimeDisplayName,
   serverIconUrlFromIcons,
 } from "@/app/mcp/mcp-list-ui";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/atoms/select";
 import {
   Table,
   TableBody,
@@ -34,7 +32,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { SearchField } from "@/components/molecules/search-field";
+import { MetricStrip } from "@/components/organisms/metric-strip";
 import type { MCPServerInstallationRead } from "@/lib/api/generated/model";
 import { workspaceMcpRegistryUninstallServerConfig } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 
@@ -350,48 +351,28 @@ export function InstalledListClient({
     <div className="space-y-4">
       <FeedbackMessages error={error} notice={notice} />
 
-      <section className="grid gap-3 md:grid-cols-4">
-        {connectionStatuses.map((status) => {
-          const Icon = status.icon;
-          return (
-            <div
-              className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
-              key={status.label}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">{status.label}</div>
-                  <div className="mt-1 text-xs leading-4 text-muted-foreground">
-                    {status.description}
-                  </div>
-                </div>
-                <Icon className="size-4 text-muted-foreground" />
-              </div>
-              <div className="mt-3 text-2xl font-semibold">{statusCounts[status.label]}</div>
-            </div>
-          );
-        })}
-      </section>
+      <MetricStrip
+        className="md:grid-cols-4"
+        items={connectionStatuses.map((status) => ({
+          detail: status.description,
+          icon: status.icon,
+          label: status.label,
+          value: statusCounts[status.label],
+        }))}
+      />
 
       <McpTableCard>
         {sortedInstallations.length > 0 ? (
           <div className="border-b border-border bg-card px-4 py-3">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
               <div className="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_minmax(160px,0.75fr)_minmax(160px,0.75fr)_minmax(190px,0.85fr)]">
-                <label className="space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">Search</span>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      aria-label="Search connections"
-                      autoComplete="off"
-                      className="pl-9"
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Connection, instance, or type"
-                      value={searchQuery}
-                    />
-                  </div>
-                </label>
+                <SearchField
+                  aria-label="Search connections"
+                  id="connection-search"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Connection, instance, or type"
+                  value={searchQuery}
+                />
 
                 <label className="space-y-1">
                   <span className="text-xs font-medium text-muted-foreground">Runtime</span>
@@ -572,17 +553,24 @@ export function InstalledListClient({
                         >
                           <Play className="size-4" />
                         </InstallationActionLink>
-                        <Button
-                          disabled={isMutating}
-                          onClick={() => removeInstallation(installation)}
-                          aria-label={`Delete ${installation.configName}`}
-                          size="icon"
-                          title="Delete connection"
-                          type="button"
-                          variant="outline"
+                        <ConfirmActionDialog
+                          actionLabel="Remove connection"
+                          description="Agents will immediately lose access to its tools and runtime configuration."
+                          onConfirm={() => removeInstallation(installation)}
+                          title={`Remove ${installation.configName}?`}
+                          variant="destructive"
                         >
-                          <Trash2 className="size-4" />
-                        </Button>
+                          <Button
+                            aria-label={`Delete ${installation.configName}`}
+                            disabled={isMutating}
+                            size="icon"
+                            title="Delete connection"
+                            type="button"
+                            variant="outline"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </ConfirmActionDialog>
                       </div>
                     </TableCell>
                   </TableRow>

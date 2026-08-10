@@ -15,24 +15,24 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Button } from "@/components/atoms/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/card";
+import { Label } from "@/components/atoms/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import {
   Table,
   TableBody,
@@ -40,7 +40,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import type {
   GuardrailPolicyRead,
   GuardrailPolicySimulationResponse,
@@ -303,10 +304,6 @@ export function GuardrailsClient({
   }
 
   async function deletePolicy(record: GuardrailPolicyRecord) {
-    if (!window.confirm(`Delete ${record.policy.name}?`)) {
-      return;
-    }
-
     setDeletingPolicyId(record.policy.id);
     setError(null);
     setNotice(null);
@@ -314,12 +311,6 @@ export function GuardrailsClient({
       await workspaceGuardrailPoliciesDelete(organizationId, workspaceId, record.policy.id);
       setPolicies((current) =>
         current.filter((entry) => entry.policy.id !== record.policy.id)
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Access rule could not be deleted."
       );
     } finally {
       setDeletingPolicyId(null);
@@ -685,7 +676,7 @@ export function GuardrailsClient({
                   <TableCell>
                     <div
                       aria-label={`Policy mode: ${modeLabel(record.policy.mode)}`}
-                      className="flex w-fit items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-white p-1"
+                      className="flex w-fit items-center gap-1 rounded-md border border-[var(--outline-variant)] bg-card p-1"
                     >
                       {modeActions.map((action) => {
                         const Icon = action.icon;
@@ -738,20 +729,27 @@ export function GuardrailsClient({
                           <Pencil className="size-4" />
                         </Link>
                       </Button>
-                      <Button
-                        aria-label={`Delete ${record.policy.name}`}
-                        disabled={deletingPolicyId === record.policy.id}
-                        onClick={() => deletePolicy(record)}
-                        size="icon"
-                        type="button"
-                        variant="outline"
+                      <ConfirmActionDialog
+                        actionLabel="Delete rule"
+                        description="This rule will stop protecting matching tool calls immediately."
+                        onConfirm={() => deletePolicy(record)}
+                        title={`Delete ${record.policy.name}?`}
+                        variant="destructive"
                       >
-                        {deletingPolicyId === record.policy.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-4" />
-                        )}
-                      </Button>
+                        <Button
+                          aria-label={`Delete ${record.policy.name}`}
+                          disabled={deletingPolicyId === record.policy.id}
+                          size="icon"
+                          type="button"
+                          variant="outline"
+                        >
+                          {deletingPolicyId === record.policy.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                        </Button>
+                      </ConfirmActionDialog>
                     </div>
                   </TableCell>
                 </TableRow>

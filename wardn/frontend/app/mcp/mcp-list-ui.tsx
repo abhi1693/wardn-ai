@@ -2,9 +2,9 @@ import { Package, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/atoms/badge";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Card, CardContent } from "@/components/atoms/card";
 import { cn } from "@/lib/utils";
 
 export function runtimeDisplayName(value: string) {
@@ -30,21 +30,21 @@ export function runtimeDisplayName(value: string) {
 export function runtimeBadgeClass(value: string) {
   const normalized = value.trim().toLowerCase();
   if (normalized.includes("http") || normalized.includes("sse")) {
-    return "border-sky-200 bg-sky-50 text-sky-700";
+    return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300";
   }
   if (normalized === "uvx" || normalized.includes("pypi")) {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300";
   }
   if (normalized === "npm") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
+    return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300";
   }
   if (normalized === "oci") {
-    return "border-violet-200 bg-violet-50 text-violet-700";
+    return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300";
   }
   if (normalized.includes("remote")) {
-    return "border-cyan-200 bg-cyan-50 text-cyan-700";
+    return "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-300";
   }
-  return "border-slate-200 bg-slate-100 text-slate-700";
+  return "border-border bg-muted text-muted-foreground";
 }
 
 export function serverIconUrlFromIcons(icons: unknown[] | undefined) {

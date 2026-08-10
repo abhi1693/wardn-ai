@@ -4,7 +4,8 @@ import { RefreshCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/atoms/button";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { workspaceScheduledTasksCancelRun } from "@/lib/api/generated/workspace-scheduled-tasks/workspace-scheduled-tasks";
 
 type CancelScheduledTaskRunButtonProps = {
@@ -31,25 +32,28 @@ export function CancelScheduledTaskRunButton({
   }
 
   async function cancelRun() {
-    if (!window.confirm("Cancel this scheduled run?")) {
-      return;
-    }
     setIsCanceling(true);
     try {
       await workspaceScheduledTasksCancelRun(organizationId, workspaceId, taskId, runId);
       setIsCanceled(true);
       router.refresh();
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not cancel scheduled run.");
     } finally {
       setIsCanceling(false);
     }
   }
 
   return (
-    <Button disabled={isCanceling} onClick={cancelRun} size="sm" variant="outline">
-      {isCanceling ? <RefreshCw className="size-4 animate-spin" /> : <X className="size-4" />}
-      Cancel run
-    </Button>
+    <ConfirmActionDialog
+      actionLabel="Cancel run"
+      description="The current execution will stop. Existing output and delivery records are retained."
+      onConfirm={cancelRun}
+      title="Cancel this scheduled run?"
+      variant="destructive"
+    >
+      <Button disabled={isCanceling} size="sm" variant="outline">
+        {isCanceling ? <RefreshCw className="size-4 animate-spin" /> : <X className="size-4" />}
+        Cancel run
+      </Button>
+    </ConfirmActionDialog>
   );
 }

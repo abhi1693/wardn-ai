@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { getSecretStores } from "@/app/organizations/data";
 import type {
   MCPRegistryServerListResponse,

@@ -18,15 +18,14 @@ import {
   Webhook,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Badge } from "@/components/atoms/badge";
+import { QRCode } from "@/components/atoms/qr-code";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader } from "@/components/atoms/card";
 import {
   Dialog,
   DialogContent,
@@ -34,16 +33,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/components/atoms/dialog";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
+import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
+import { SearchField } from "@/components/molecules/search-field";
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
@@ -1320,7 +1321,7 @@ function PairingDialog({
         <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
           <div className="flex min-h-[220px] items-center justify-center rounded-md border border-border bg-muted/30 p-4">
             {qrPayload ? (
-              <QRCodeSVG
+              <QRCode
                 className="rounded-sm bg-white p-2"
                 level="M"
                 size={184}
@@ -1442,7 +1443,6 @@ export function ChatProvidersClient({
   organizationId,
   workspaceId,
 }: ChatProvidersClientProps) {
-  const router = useRouter();
   const [connectionOverrides, setConnectionOverrides] = useState<
     Record<string, ChatProviderConnectionRead>
   >({});
@@ -1664,7 +1664,6 @@ export function ChatProvidersClient({
         }
       );
       replaceConnection(updated);
-      router.refresh();
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Provider connection could not be updated."
@@ -1692,7 +1691,6 @@ export function ChatProvidersClient({
         delete next[connection.id];
         return next;
       });
-      router.refresh();
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Provider connection could not be deleted."
@@ -1736,16 +1734,14 @@ export function ChatProvidersClient({
           </div>
         </div>
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 sm:w-[320px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search providers"
-              type="search"
-              value={search}
-            />
-          </div>
+          <SearchField
+            aria-label="Search providers"
+            className="min-w-0 sm:w-[320px]"
+            label={null}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search providers"
+            value={search}
+          />
           <Button asChild>
             <Link href={`${chatProvidersBasePath}/new`}>
               <Plus className="size-4" />
@@ -1941,16 +1937,23 @@ export function ChatProvidersClient({
                         <Play className="size-4" />
                       )}
                     </Button>
-                    <Button
-                      aria-label={`Delete ${connection.name}`}
-                      disabled={isBusy}
-                      onClick={() => deleteConnection(connection)}
-                      size="icon"
-                      type="button"
-                      variant="outline"
+                    <ConfirmActionDialog
+                      actionLabel="Delete provider"
+                      description="Incoming messages and scheduled deliveries through this connection will stop immediately."
+                      onConfirm={() => deleteConnection(connection)}
+                      title={`Delete ${connection.name}?`}
+                      variant="destructive"
                     >
-                      <Trash2 className="size-4" />
-                    </Button>
+                      <Button
+                        aria-label={`Delete ${connection.name}`}
+                        disabled={isBusy}
+                        size="icon"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </ConfirmActionDialog>
                   </div>
                 </CardContent>
               </Card>

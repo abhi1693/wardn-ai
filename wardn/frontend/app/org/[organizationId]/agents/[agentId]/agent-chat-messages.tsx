@@ -1,11 +1,11 @@
+"use client";
+
 import type { UIMessage } from "ai";
 import {
   Bot,
   Brain,
-  Check,
   CheckCircle2,
   CircleAlert,
-  Copy,
   ListTree,
   Loader2,
   ShieldOff,
@@ -13,14 +13,11 @@ import {
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
-import { type ComponentPropsWithoutRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import dynamic from "next/dynamic";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import type { ConversationMessageRead } from "@/lib/api/generated/model";
-import { cn } from "@/lib/utils";
 
 import type { LlmCredentialRead } from "../../llm-credentials/types";
 
@@ -129,144 +126,13 @@ export function uiMessages(messages: ConversationMessageRead[] = []): UIMessage[
     }));
 }
 
-export function markdownText(children: ComponentPropsWithoutRef<"code">["children"]) {
-  return Array.isArray(children) ? children.join("") : String(children ?? "");
-}
-
-export function MarkdownCode({
-  children,
-  className,
-  ...props
-}: ComponentPropsWithoutRef<"code"> & { node?: unknown }) {
-  const [copied, setCopied] = useState(false);
-  const rawCode = markdownText(children).replace(/\n$/, "");
-  const language = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
-  const isBlock = Boolean(language) || rawCode.includes("\n");
-
-  if (!isBlock) {
-    return (
-      <code
-        className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container)] px-1.5 py-0.5 font-mono text-[0.88em]"
-        {...props}
-      >
-        {children}
-      </code>
-    );
+export const MessageMarkdown = dynamic(
+  () => import("./agent-message-markdown").then((module) => module.AgentMessageMarkdown),
+  {
+    loading: () => <div className="h-5 w-2/3 animate-pulse rounded bg-muted" />,
+    ssr: false,
   }
-
-  async function copyCode() {
-    await navigator.clipboard.writeText(rawCode);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
-
-  return (
-    <div className="my-3 overflow-hidden rounded-md border border-[var(--outline-variant)] bg-slate-950 text-slate-50">
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <span className="font-mono text-xs text-slate-300">{language || "code"}</span>
-        <Button
-          className="h-7 border-white/15 bg-white/5 px-2 text-xs text-slate-100 hover:bg-white/10"
-          onClick={copyCode}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <pre className="overflow-x-auto p-3 text-sm leading-6">
-        <code className={className} {...props}>
-          {rawCode}
-        </code>
-      </pre>
-    </div>
-  );
-}
-
-export function markdownComponents(role: MessageRole): Components {
-  const isUser = role === "user";
-  const subtleText = isUser ? "text-primary-foreground/80" : "text-[var(--on-surface-variant)]";
-  return {
-    p({ children }) {
-      return <p className="mb-3 last:mb-0">{children}</p>;
-    },
-    a({ children, href }) {
-      return (
-        <a
-          className={cn(
-            "font-medium underline underline-offset-4",
-            isUser ? "text-primary-foreground" : "text-primary"
-          )}
-          href={href}
-          rel="noreferrer"
-          target="_blank"
-        >
-          {children}
-        </a>
-      );
-    },
-    code: MarkdownCode,
-    pre({ children }) {
-      return <>{children}</>;
-    },
-    ul({ children }) {
-      return <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>;
-    },
-    ol({ children }) {
-      return <ol className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>;
-    },
-    li({ children }) {
-      return <li className="pl-1">{children}</li>;
-    },
-    blockquote({ children }) {
-      return (
-        <blockquote
-          className={cn(
-            "my-3 border-l-2 pl-3",
-            isUser ? "border-primary-foreground/40" : "border-[var(--outline)]",
-            subtleText
-          )}
-        >
-          {children}
-        </blockquote>
-      );
-    },
-    h1({ children }) {
-      return <h1 className="mb-3 text-lg font-semibold">{children}</h1>;
-    },
-    h2({ children }) {
-      return <h2 className="mb-2 text-base font-semibold">{children}</h2>;
-    },
-    h3({ children }) {
-      return <h3 className="mb-2 text-sm font-semibold">{children}</h3>;
-    },
-    table({ children }) {
-      return (
-        <div className="my-3 overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">{children}</table>
-        </div>
-      );
-    },
-    th({ children }) {
-      return <th className="border border-[var(--outline-variant)] px-2 py-1">{children}</th>;
-    },
-    td({ children }) {
-      return <td className="border border-[var(--outline-variant)] px-2 py-1">{children}</td>;
-    },
-    hr() {
-      return <hr className="my-4 border-[var(--outline-variant)]" />;
-    },
-  };
-}
-
-export function MessageMarkdown({ role, text }: { role: MessageRole; text: string }) {
-  return (
-    <ReactMarkdown components={markdownComponents(role)} remarkPlugins={[remarkGfm]}>
-      {text}
-    </ReactMarkdown>
-  );
-}
+);
 
 export function ReasoningSummary({ summaries }: { summaries: ReasoningSummaryPart[] }) {
   const text = summaries

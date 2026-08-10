@@ -32,9 +32,9 @@ import {
   useState,
 } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Button } from "@/components/atoms/button";
 import {
   Dialog,
   DialogContent,
@@ -42,14 +42,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
+} from "@/components/atoms/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/atoms/select";
 import type {
   AgentRead,
   ConversationMessageRead,
@@ -903,7 +903,7 @@ export function AgentChatClient({
             <span>{messageCount} {pluralize(messageCount, "message")}</span>
           </div>
         ) : null}
-        <Button asChild className="max-md:hidden" size="sm" variant="outline">
+        <Button asChild size="sm" variant="outline">
           <Link href={runsPath}>
             <ListTree className="size-4" />
             Runs

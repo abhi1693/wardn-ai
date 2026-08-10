@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { ScheduledTaskFormClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/scheduled-tasks-client";
 import type {
   ChatProviderConnectionListResponse,
@@ -53,7 +53,7 @@ export default async function EditScheduledTaskPage({ params }: EditScheduledTas
   return (
     <AppShell
       active="workspace-scheduled-tasks"
-      contentClassName="mx-0 max-w-none px-6 max-md:px-4"
+      contentClassName="mx-0 max-w-none px-6"
       contentInnerClassName="space-y-0"
       eyebrow="Workspace"
       title="Edit Scheduled Task"

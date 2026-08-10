@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { ScheduledTasksClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/scheduled-tasks/scheduled-tasks-client";
 import type {
   ChatProviderConnectionListResponse,

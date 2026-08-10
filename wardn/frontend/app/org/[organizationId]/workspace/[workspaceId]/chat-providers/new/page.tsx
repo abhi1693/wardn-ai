@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { AppShell } from "@/app/components/app-shell";
+import { AppShell } from "@/components/templates/app-shell";
 import { ChatProviderFormClient } from "@/app/org/[organizationId]/workspace/[workspaceId]/chat-providers/provider-form-client";
 import type {
   ChatProviderConnectionListResponse,

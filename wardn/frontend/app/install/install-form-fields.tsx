@@ -1,8 +1,8 @@
-import { ExternalLink, FileUp } from "lucide-react";
+import { ArrowRight, ExternalLink, FileUp } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/atoms/select";
 import type { MCPRegistryServerResponse } from "@/lib/api/generated/model";
 
 import {
@@ -32,26 +32,31 @@ export function ServerPickerCard({
   const hubHref = hubServerHref(entry);
 
   return (
-    <div className="flex min-h-48 w-full flex-col overflow-hidden rounded-md border bg-white text-left transition-colors hover:border-primary/50 hover:shadow-sm focus-within:ring-2 focus-within:ring-ring">
+    <div className="group flex min-h-48 w-full flex-col overflow-hidden rounded-md border bg-card text-left transition-colors hover:border-ring/50 hover:shadow-sm focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
       <button
+        aria-label={`Select ${entry.server.title || entry.server.name}`}
         className="flex flex-1 flex-col p-4 text-left focus-visible:outline-none"
         onClick={onSelect}
         type="button"
       >
         <div className="flex items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+          <div className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+            <span aria-hidden="true">
+              {(entry.server.title || entry.server.name).slice(0, 1).toUpperCase()}
+            </span>
             {iconUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 alt=""
-                className="size-full object-contain"
+                className="absolute inset-0 size-full object-contain"
                 loading="lazy"
+                onError={(event) => {
+                  event.currentTarget.style.display = "none";
+                }}
                 referrerPolicy="no-referrer"
                 src={iconUrl}
               />
-            ) : (
-              (entry.server.title || entry.server.name).slice(0, 1).toUpperCase()
-            )}
+            ) : null}
           </div>
           <div className="min-w-0 flex-1">
             <div className="break-words text-sm font-semibold leading-5 text-foreground">
@@ -73,18 +78,29 @@ export function ServerPickerCard({
           </div>
         )}
 
-        <div className="mt-auto pt-4">
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-muted-foreground">Quality score</span>
-            <span className="font-semibold text-foreground">
-              {score === null ? "Pending" : `${score}/100`}
-            </span>
-          </div>
-          <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className={`h-full rounded-full ${qualityScoreTone(score)}`}
-              style={{ width: `${qualityScorePercent(score)}%` }}
-            />
+        <div className="mt-auto pt-4 text-xs">
+          {score === null ? (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Review status</span>
+              <span className="font-medium text-foreground">Pending</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Quality score</span>
+                <span className="font-semibold text-foreground">{score}/100</span>
+              </div>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full rounded-full ${qualityScoreTone(score)}`}
+                  style={{ width: `${qualityScorePercent(score)}%` }}
+                />
+              </div>
+            </>
+          )}
+          <div className="mt-3 flex items-center gap-1.5 font-medium text-foreground group-hover:text-accent-foreground">
+            Select connection
+            <ArrowRight className="size-3.5" />
           </div>
         </div>
       </button>

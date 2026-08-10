@@ -12,8 +12,8 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { FeedbackMessages, McpTableCard } from "@/app/mcp/mcp-list-ui";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
 import {
   Table,
   TableBody,
@@ -21,7 +21,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@/components/atoms/table";
 import type {
   MCPRuntimeEventRead,
   MCPRuntimeSessionHealthResponse,

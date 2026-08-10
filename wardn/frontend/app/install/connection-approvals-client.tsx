@@ -4,9 +4,9 @@ import { CheckCircle2, CircleAlert, Loader2, ShieldOff } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/atoms/badge";
+import { Button } from "@/components/atoms/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import type { MCPGatewayToolApprovalRead } from "@/lib/api/generated/model";
 import { workspaceMcpGatewayDecideToolApproval } from "@/lib/api/generated/workspace-mcp-gateway/workspace-mcp-gateway";
 import { formatUserDateTime } from "@/lib/date-time";

@@ -15,12 +15,12 @@ import { useRouter } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { AsyncFeedback } from "@/components/ui/async-feedback";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/atoms/button";
+import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/atoms/select";
 import type {
   MCPRegistryServerResponse,
   MCPOperationJobRead,
@@ -504,8 +504,13 @@ export function InstallFormClient({
 
       {!selectedServer ? (
         <section className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="install-server-search">Connection</Label>
+          <div className="grid gap-1.5">
+            <div>
+              <Label htmlFor="install-server-search">Choose a connection</Label>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Select a supported MCP server, then configure its runtime and credentials.
+              </p>
+            </div>
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -529,7 +534,7 @@ export function InstallFormClient({
               aria-atomic="true"
               aria-busy={isSearching}
               aria-live="polite"
-              className="rounded-md border bg-white px-3 py-10 text-center text-sm text-muted-foreground"
+              className="rounded-md border bg-card px-3 py-10 text-center text-sm text-muted-foreground"
               role="status"
             >
               {isSearching ? "Loading supported connections" : hasSearched ? "No connections found" : "No supported connections are registered yet"}
@@ -591,7 +596,7 @@ export function InstallFormClient({
           <Card>
             <CardHeader><CardTitle>Connection Source</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-start justify-between gap-3 rounded-md bg-muted/50 p-3">
                 <div className="min-w-0">
                   <div className="font-medium">{selectedServer.server.title || selectedServer.server.name}</div>
                   {selectedServerHubHref ? (
@@ -949,12 +954,21 @@ export function InstallFormClient({
         </>
       ) : null}
 
-      <div className="flex justify-end gap-2">
-        <Button disabled={isMutating} onClick={() => router.push(basePath)} type="button" variant="outline">Cancel</Button>
-        <Button disabled={isMutating || !selectedServer} type="submit">
-          <Download className="size-4" />
-          {isMutating ? "Saving" : isEdit ? "Save" : "Add"}
+      <div className={selectedServer ? "flex justify-end gap-2 border-t pt-4" : "flex justify-end"}>
+        <Button
+          disabled={isMutating}
+          onClick={() => router.push(basePath)}
+          type="button"
+          variant="outline"
+        >
+          Cancel
         </Button>
+        {selectedServer ? (
+          <Button disabled={isMutating} type="submit">
+            <Download className="size-4" />
+            {isMutating ? "Saving" : isEdit ? "Save" : "Add"}
+          </Button>
+        ) : null}
       </div>
     </form>
   );
