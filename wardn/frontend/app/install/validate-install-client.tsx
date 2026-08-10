@@ -48,6 +48,7 @@ import {
 } from "@/lib/api/generated/workspace-mcp-registry/workspace-mcp-registry";
 import { responseErrorMessage } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
+import { useVisibilityPolling } from "@/hooks/use-visibility-polling";
 
 type ToolInputProperty = {
   name: string;
@@ -70,6 +71,7 @@ type ArgumentFieldError = {
 type RefreshOptions = {
   reportError?: boolean;
   showLoading?: boolean;
+  signal?: AbortSignal;
 };
 
 const mcpToolDiscoveryTimeoutMs = 120_000;
@@ -515,7 +517,8 @@ function validateRequiredArguments(
 async function loadToolsFromGateway(
   installation: MCPServerInstallationRead,
   organizationId: string,
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<MCPServerToolRead[]> {
   const tools: MCPServerToolRead[] = [];
   let cursor = "";
@@ -545,6 +548,7 @@ async function loadToolsFromGateway(
           },
         }),
         cache: "no-store",
+        signal,
         timeoutMs: mcpToolDiscoveryTimeoutMs,
       }
     );
@@ -635,11 +639,12 @@ export function ValidateInstallClient({
   }
 
   const fetchRuntimeState = useCallback(
-    () =>
+    (signal?: AbortSignal) =>
       workspaceMcpRuntimeGetInstallationState(
         organizationId,
         workspaceId,
-        installation.id
+        installation.id,
+        { signal }
       ),
     [installation.id, organizationId, workspaceId]
   );
@@ -658,13 +663,13 @@ export function ValidateInstallClient({
     setResult(null);
   }, []);
 
-  const fetchTools = useCallback(async () => {
+  const fetchTools = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await workspaceMcpRegistryListInstalledServerTools(
         organizationId,
         workspaceId,
         installation.id,
-        { timeoutMs: mcpToolDiscoveryTimeoutMs }
+        { signal, timeoutMs: mcpToolDiscoveryTimeoutMs }
       );
       const sortedTools = [...data.tools].sort((left, right) =>
         left.toolName.localeCompare(right.toolName)
@@ -676,7 +681,8 @@ export function ValidateInstallClient({
           const fallbackTools = await loadToolsFromGateway(
             installation,
             organizationId,
-            workspaceId
+            workspaceId,
+            signal
           );
           const sortedFallbackTools = fallbackTools.sort((left, right) =>
             left.toolName.localeCompare(right.toolName)
@@ -691,12 +697,12 @@ export function ValidateInstallClient({
   }, [installation, organizationId, workspaceId]);
 
   const loadRuntimeState = useCallback(async (options: RefreshOptions = {}) => {
-    const { reportError = true, showLoading = true } = options;
+    const { reportError = true, showLoading = true, signal } = options;
     if (showLoading) {
       setIsLoadingRuntime(true);
     }
     try {
-      const data = await fetchRuntimeState();
+      const data = await fetchRuntimeState(signal);
       setRuntimeState(data);
       setRuntimeError("");
       setLastRuntimeRefreshAt(new Date());
@@ -712,12 +718,12 @@ export function ValidateInstallClient({
   }, [fetchRuntimeState]);
 
   const loadTools = useCallback(async (options: RefreshOptions = {}) => {
-    const { reportError = true, showLoading = true } = options;
+    const { reportError = true, showLoading = true, signal } = options;
     if (showLoading) {
       setIsLoadingTools(true);
     }
     try {
-      applyLoadedTools(await fetchTools());
+      applyLoadedTools(await fetchTools(signal));
       setToolsError("");
       setLastToolsRefreshAt(new Date());
       return true;
@@ -1003,38 +1009,35 @@ export function ValidateInstallClient({
     ? "outline"
     : runtimeStatusBadgeVariant(runtimeDisplayStatus);
 
-  useEffect(() => {
-    const shouldPollRuntime =
-      !isRemoteRuntime &&
-      (runtimeAction !== null ||
-        runtimeStillBooting(rawRuntimeDisplayStatus) ||
-        Boolean(runtimeError && !toolsResponding));
-    const shouldPollTools =
-      !toolsResponding &&
-      !isLoadingTools &&
-      (runtimeStillBooting(rawRuntimeDisplayStatus) || !rawRuntimeDisplayStatus);
-    if (!shouldPollRuntime && !shouldPollTools) {
-      return;
-    }
-    const intervalId = window.setInterval(() => {
-      if (shouldPollRuntime) {
-        void loadRuntimeState({ reportError: false, showLoading: false });
+  const shouldPollRuntime =
+    !isRemoteRuntime &&
+    (runtimeAction !== null ||
+      runtimeStillBooting(rawRuntimeDisplayStatus) ||
+      Boolean(runtimeError && !toolsResponding));
+  const shouldPollTools =
+    !toolsResponding &&
+    !isLoadingTools &&
+    (runtimeStillBooting(rawRuntimeDisplayStatus) || !rawRuntimeDisplayStatus);
+
+  useVisibilityPolling({
+    enabled: shouldPollRuntime || shouldPollTools,
+    immediate: false,
+    intervalMs: 5_000,
+    maxIntervalMs: 40_000,
+    poll: async (signal) => {
+      const results = await Promise.all([
+        shouldPollRuntime
+          ? loadRuntimeState({ reportError: false, showLoading: false, signal })
+          : true,
+        shouldPollTools
+          ? loadTools({ reportError: false, showLoading: false, signal })
+          : true,
+      ]);
+      if (results.some((result) => !result)) {
+        throw new Error("Connection status refresh failed.");
       }
-      if (shouldPollTools) {
-        void loadTools({ reportError: false, showLoading: false });
-      }
-    }, 5_000);
-    return () => window.clearInterval(intervalId);
-  }, [
-    isLoadingTools,
-    isRemoteRuntime,
-    loadRuntimeState,
-    loadTools,
-    rawRuntimeDisplayStatus,
-    runtimeAction,
-    runtimeError,
-    toolsResponding,
-  ]);
+    },
+  });
 
   return (
     <div className="space-y-5">

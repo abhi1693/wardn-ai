@@ -43,6 +43,7 @@ import {
 } from "@/components/atoms/select";
 import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useVisibilityPolling } from "@/hooks/use-visibility-polling";
 import type {
   ChatProviderConnectionCreate,
   ChatProviderConnectionRead,
@@ -769,50 +770,29 @@ export function ChatProviderFormClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection?.id]);
 
-  useEffect(() => {
-    if (
-      !connection ||
-      connection.provider !== "whatsapp_local" ||
-      !pairingStatus?.qrPayload ||
-      pairingStatus.status === "connected"
-    ) {
-      return;
-    }
-    const activeConnection = connection;
-    let ignore = false;
-    async function pollPairingStatus() {
-      try {
-        const status = await workspaceChatProvidersPairingStatus(
-          organizationId,
-          workspaceId,
-          activeConnection.id,
-          { timeoutMs: 15_000 }
-        );
-        if (!ignore) {
-          setPairingStatus((current) =>
-            mergePairingStatus(current, status, { preserveQr: true })
-          );
-        }
-      } catch {
-        // Keep polling; transient bridge/API errors should not dismiss the QR.
+  useVisibilityPolling({
+    enabled: Boolean(
+      connection?.provider === "whatsapp_local" &&
+        pairingStatus?.qrPayload &&
+        pairingStatus.status !== "connected"
+    ),
+    intervalMs: 3_000,
+    maxIntervalMs: 24_000,
+    poll: async (signal) => {
+      if (!connection) {
+        return;
       }
-    }
-
-    void pollPairingStatus();
-    const intervalId = window.setInterval(() => {
-      void pollPairingStatus();
-    }, 3_000);
-    return () => {
-      ignore = true;
-      window.clearInterval(intervalId);
-    };
-  }, [
-    connection,
-    organizationId,
-    pairingStatus?.qrPayload,
-    pairingStatus?.status,
-    workspaceId,
-  ]);
+      const status = await workspaceChatProvidersPairingStatus(
+        organizationId,
+        workspaceId,
+        connection.id,
+        { signal, timeoutMs: 15_000 }
+      );
+      setPairingStatus((current) =>
+        mergePairingStatus(current, status, { preserveQr: true })
+      );
+    },
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
