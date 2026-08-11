@@ -45,7 +45,6 @@ import type {
   MCPRuntimeInstallationControlResponse,
   MCPServerInstallationListResponse,
   MCPServerInstallationRead,
-  MCPServerInstallationToolsResponse,
 } from "@/lib/api/generated/model";
 import { ConnectionApprovalsClient } from "./connection-approvals-client";
 
@@ -79,7 +78,11 @@ type OptionalResult<T> = {
   error: string;
 };
 
-async function optionalBackendJson<T>(path: string, fallback: string): Promise<OptionalResult<T>> {
+async function optionalBackendJson<T>(
+  path: string,
+  fallback: string,
+  timeoutMs = 5_000
+): Promise<OptionalResult<T>> {
   try {
     const cookieHeader = await backendCookieHeader();
     const headers = new Headers();
@@ -89,7 +92,7 @@ async function optionalBackendJson<T>(path: string, fallback: string): Promise<O
     const response = await fetch(backendPath(path), {
       cache: "no-store",
       headers,
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await readApiResponseBody(response);
     if (!response.ok) {
@@ -132,35 +135,13 @@ async function getAccessRules(organizationId: string, workspaceId: string) {
 }
 
 async function getConnectionTools(
-  organizationId: string,
-  workspaceId: string,
   installationId: string,
   availableTools: Awaited<ReturnType<typeof getAvailableTools>>,
 ) {
-  const installedTools = await optionalBackendJson<MCPServerInstallationToolsResponse>(
-    `/api/v1/organizations/${encodeURIComponent(
-      organizationId
-    )}/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/mcp/registry/installed-server-configs/${encodeURIComponent(installationId)}/tools`,
-    "Connection tools could not be loaded."
-  );
   const availableForConnection = availableTools.filter(
     (tool) => tool.installationId === installationId
   );
-  const availableByToolName = new Map(
-    availableForConnection.map((tool) => [tool.toolName, tool])
-  );
-
-  const tools: ConnectionTool[] =
-    installedTools.data?.tools.map((tool) => ({
-      annotations: tool.annotations ?? {},
-      description: tool.description,
-      title: tool.title || tool.toolName,
-      toolName: tool.toolName,
-      toolSchemaId: availableByToolName.get(tool.toolName)?.toolSchemaId,
-    })) ??
-    availableForConnection.map((tool) => ({
+  const tools: ConnectionTool[] = availableForConnection.map((tool) => ({
       annotations: tool.annotations ?? {},
       description: tool.description,
       title: tool.title || tool.toolName,
@@ -169,7 +150,7 @@ async function getConnectionTools(
     }));
 
   return {
-    error: installedTools.error,
+    error: "",
     tools: tools.sort((left, right) => left.toolName.localeCompare(right.toolName)),
   };
 }
@@ -502,7 +483,8 @@ export async function ConnectionDetailView({
       )}/workspaces/${encodeURIComponent(workspace.id)}/mcp/runtime/installations/${encodeURIComponent(
         installation.id
       )}`,
-      "Runtime health could not be loaded."
+      "Runtime health could not be loaded.",
+      2_500
     ),
     optionalBackendJson<MCPGatewayToolApprovalListResponse>(
       `/api/v1/organizations/${encodeURIComponent(
@@ -512,12 +494,11 @@ export async function ConnectionDetailView({
       )}/mcp/gateway/tool-approvals?installationId=${encodeURIComponent(
         installation.id
       )}&status=pending&limit=25`,
-      "Gateway approvals could not be loaded."
+      "Gateway approvals could not be loaded.",
+      2_500
     ),
   ]);
   const { tools, error: toolsError } = await getConnectionTools(
-    organization.id,
-    workspace.id,
     installation.id,
     availableTools
   );
