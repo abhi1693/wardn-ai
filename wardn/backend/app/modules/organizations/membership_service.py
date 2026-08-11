@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -50,6 +51,8 @@ from app.modules.users import repository as users_repository
 from app.modules.users.models import User
 from app.modules.users.schemas import UserCreate
 from app.modules.users.service import create_user, normalize_email
+
+logger = logging.getLogger(__name__)
 
 
 def generate_invitation_token() -> str:
@@ -644,6 +647,16 @@ async def _accept_invitation(
     user: User,
 ) -> InvitationAcceptanceRead:
     if normalize_email(user.email) != normalize_email(invitation.email):
+        logger.warning(
+            "Membership invitation email mismatch.",
+            extra={
+                "invitation_id": str(invitation.id),
+                "organization_id": str(organization.id),
+                "workspace_id": str(workspace.id) if workspace else None,
+                "scope_type": invitation.scope_type,
+                "user_id": str(user.id),
+            },
+        )
         raise InvitationEmailMismatchError(
             "sign in with the email address that received this invitation"
         )
@@ -705,6 +718,17 @@ async def _accept_invitation(
     invitation.accepted_by_id = user.id
     invitation.accepted_at = now
     await session.flush()
+    logger.info(
+        "Accepted membership invitation.",
+        extra={
+            "invitation_id": str(invitation.id),
+            "organization_id": str(organization.id),
+            "workspace_id": str(workspace.id) if workspace else None,
+            "scope_type": invitation.scope_type,
+            "user_id": str(user.id),
+            "role": invitation.role,
+        },
+    )
     return InvitationAcceptanceRead(
         organization_id=organization.id,
         organization_name=organization.name,

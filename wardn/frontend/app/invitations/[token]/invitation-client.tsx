@@ -4,7 +4,7 @@ import { CheckCircle2, Loader2, LogIn, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { Button } from "@/components/atoms/button";
@@ -49,6 +49,7 @@ export function InvitationClient({ token }: InvitationClientProps) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoAcceptAttempted = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -73,7 +74,11 @@ export function InvitationClient({ token }: InvitationClientProps) {
     };
   }, [token]);
 
-  async function accept() {
+  const signedIn = Boolean(preview?.currentUserEmail);
+  const emailMatches =
+    preview?.currentUserEmail?.toLocaleLowerCase() === preview?.email.toLocaleLowerCase();
+
+  const accept = useCallback(async () => {
     setSubmitting(true);
     setError(null);
     try {
@@ -84,7 +89,15 @@ export function InvitationClient({ token }: InvitationClientProps) {
       setError(caught instanceof Error ? caught.message : "Invitation could not be accepted.");
       setSubmitting(false);
     }
-  }
+  }, [router, token]);
+
+  useEffect(() => {
+    if (loading || !signedIn || !emailMatches || autoAcceptAttempted.current) {
+      return;
+    }
+    autoAcceptAttempted.current = true;
+    void accept();
+  }, [accept, emailMatches, loading, signedIn]);
 
   async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -116,9 +129,6 @@ export function InvitationClient({ token }: InvitationClientProps) {
     window.location.assign(`/api/auth/oidc/login?redirectTo=${encodeURIComponent(redirectTo)}`);
   }
 
-  const signedIn = Boolean(preview?.currentUserEmail);
-  const emailMatches =
-    preview?.currentUserEmail?.toLocaleLowerCase() === preview?.email.toLocaleLowerCase();
   const loginPath = `/login?reauth=1&next=${encodeURIComponent(
     `/invitations/${encodeURIComponent(token)}`
   )}`;
