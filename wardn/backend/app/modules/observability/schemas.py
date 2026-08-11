@@ -186,6 +186,7 @@ class OrganizationDashboardSummary(APIModel):
     active_workspaces: int
     members: int
     active_members: int
+    pending_invitations: int
     requests: int
     request_success_rate: float
     failed_requests: int
@@ -197,10 +198,14 @@ class OrganizationDashboardSummary(APIModel):
     average_tool_duration_ms: int | None = None
     agents: int
     active_agents: int
+    pending_tool_approvals: int
+    failed_scheduled_tasks: int
+    stalled_agent_runs: int
     tools: int
     installed_servers: int
     enabled_servers: int
     servers_needing_attention: int
+    installations_needing_credentials: int
     server_updates: int
     runtime_sessions: int
     active_runtime_sessions: int
@@ -284,6 +289,7 @@ class OrganizationDashboardAttentionItem(APIModel):
     label: str
     detail: str
     severity: str
+    href: str = ""
 
 
 class OrganizationDashboardResponse(APIModel):

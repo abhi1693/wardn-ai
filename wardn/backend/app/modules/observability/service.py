@@ -53,6 +53,7 @@ USAGE_SUMMARY_MAX_DAYS = 366
 USAGE_SUMMARY_DEFAULT_BREAKDOWN_LIMIT = 25
 USAGE_SUMMARY_MAX_BREAKDOWN_LIMIT = 100
 DASHBOARD_CATALOG_STALE_AFTER = timedelta(hours=24)
+DASHBOARD_AGENT_RUN_STALLED_AFTER = timedelta(hours=1)
 DASHBOARD_DEFAULT_LIMIT = 8
 DASHBOARD_MAX_LIMIT = 100
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -860,6 +861,9 @@ def dashboard_health_score(
     score -= min(15, inactive_workspaces * 4)
     if int_row_value(control, "active_provider_credentials") == 0:
         score -= 18
+    score -= min(10, int_row_value(control, "pending_tool_approvals") * 2)
+    score -= min(14, int_row_value(control, "failed_scheduled_tasks") * 5)
+    score -= min(16, int_row_value(control, "stalled_agent_runs") * 8)
     score -= min(20, int_row_value(control, "servers_needing_attention") * 5)
     score -= min(15, int_row_value(control, "runtime_sessions_needing_attention") * 5)
     score -= min(
@@ -877,8 +881,17 @@ def dashboard_health_score(
     return max(min(score, 100), 0)
 
 
+def organization_path(organization_id: UUID, suffix: str) -> str:
+    return f"/org/{organization_id}{suffix}"
+
+
+def organization_members_path(organization_id: UUID) -> str:
+    return f"/organizations/{organization_id}/members"
+
+
 def dashboard_attention_items(
     *,
+    organization_id: UUID,
     control: dict[str, Any],
     usage: UsageSummaryResponse,
     tool_failed: int,
@@ -886,22 +899,72 @@ def dashboard_attention_items(
 ) -> list[OrganizationDashboardAttentionItem]:
     items: list[OrganizationDashboardAttentionItem] = []
 
-    def add(key: str, label: str, detail: str, severity: str) -> None:
+    def add(key: str, label: str, detail: str, severity: str, href: str) -> None:
         items.append(
             OrganizationDashboardAttentionItem(
                 key=key,
                 label=label,
                 detail=detail,
                 severity=severity,
+                href=href,
             )
         )
 
+    pending_invitations = int_row_value(control, "pending_invitations")
+    if pending_invitations:
+        add(
+            "pending-invitations",
+            f"{pending_invitations} pending {pluralize(pending_invitations, 'invitation')}",
+            "Invited users have not completed access yet.",
+            "info",
+            organization_members_path(organization_id),
+        )
+    pending_tool_approvals = int_row_value(control, "pending_tool_approvals")
+    if pending_tool_approvals:
+        approval_label = pluralize(pending_tool_approvals, "approval")
+        add(
+            "pending-tool-approvals",
+            f"{pending_tool_approvals} pending tool {approval_label}",
+            "Agent or gateway tool calls are waiting for a reviewer before they can continue.",
+            "danger",
+            organization_path(organization_id, "/workspaces"),
+        )
+    failed_scheduled_tasks = int_row_value(control, "failed_scheduled_tasks")
+    if failed_scheduled_tasks:
+        task_label = pluralize(failed_scheduled_tasks, "task")
+        add(
+            "scheduled-tasks",
+            f"{failed_scheduled_tasks} failed scheduled {task_label}",
+            "Active scheduled tasks have a failed latest run or delivery failure.",
+            "danger",
+            organization_path(organization_id, "/workspaces"),
+        )
+    stalled_agent_runs = int_row_value(control, "stalled_agent_runs")
+    if stalled_agent_runs:
+        add(
+            "stalled-agent-runs",
+            f"{stalled_agent_runs} stalled agent {pluralize(stalled_agent_runs, 'run')}",
+            "Running agent runs have stopped updating and may need cancellation or retry.",
+            "danger",
+            organization_path(organization_id, "/workspaces"),
+        )
     if int_row_value(control, "active_provider_credentials") == 0:
         add(
             "provider-credentials",
             "No active model provider",
             "Agents cannot run reliably until at least one credential is active.",
             "danger",
+            organization_path(organization_id, "/llm-credentials"),
+        )
+    installations_needing_credentials = int_row_value(control, "installations_needing_credentials")
+    if installations_needing_credentials:
+        connection_label = pluralize(installations_needing_credentials, "connection")
+        add(
+            "mcp-credentials",
+            f"{installations_needing_credentials} MCP {connection_label} need credentials",
+            "Install errors point to missing or rejected secrets, tokens, or API keys.",
+            "danger",
+            organization_path(organization_id, "/workspaces"),
         )
     servers_needing_attention = int_row_value(control, "servers_needing_attention")
     if servers_needing_attention:
@@ -911,6 +974,7 @@ def dashboard_attention_items(
             f"{servers_needing_attention} MCP {server_label} need review",
             "Disabled installs or install errors are reducing tool availability.",
             "danger",
+            organization_path(organization_id, "/workspaces"),
         )
     runtime_attention = int_row_value(control, "runtime_sessions_needing_attention")
     if runtime_attention:
@@ -919,6 +983,7 @@ def dashboard_attention_items(
             f"{runtime_attention} runtime {pluralize(runtime_attention, 'session')} need review",
             "Runtime failures can make installed servers appear available but fail at call time.",
             "warning",
+            organization_path(organization_id, "/workspaces"),
         )
     if usage.summary.failed:
         add(
@@ -926,6 +991,7 @@ def dashboard_attention_items(
             f"{usage.summary.failed} failed model {pluralize(usage.summary.failed, 'request')}",
             "Review recent runs for provider errors, model limits, or invalid payloads.",
             "warning",
+            organization_path(organization_id, "/usage"),
         )
     if tool_failed:
         add(
@@ -933,6 +999,7 @@ def dashboard_attention_items(
             f"{tool_failed} failed MCP tool {pluralize(tool_failed, 'call')}",
             "Tool errors are visible in observability and can point to schema or auth issues.",
             "warning",
+            organization_path(organization_id, "/usage"),
         )
     catalog_errors = int_row_value(control, "catalog_errors")
     if catalog_errors:
@@ -941,6 +1008,7 @@ def dashboard_attention_items(
             f"{catalog_errors} catalog {pluralize(catalog_errors, 'source')} reporting errors",
             "Catalog errors can hide new versions and server metadata.",
             "warning",
+            organization_path(organization_id, "/catalog"),
         )
     stale_catalog_sources = int_row_value(control, "stale_catalog_sources")
     if stale_catalog_sources:
@@ -949,6 +1017,7 @@ def dashboard_attention_items(
             f"{stale_catalog_sources} catalog {pluralize(stale_catalog_sources, 'source')} stale",
             "Enabled sources have not synced successfully in the expected window.",
             "info",
+            organization_path(organization_id, "/catalog"),
         )
     server_updates = int_row_value(control, "server_updates")
     if server_updates:
@@ -957,6 +1026,7 @@ def dashboard_attention_items(
             f"{server_updates} server {pluralize(server_updates, 'update')} available",
             "Updates may include schema, auth, or runtime fixes.",
             "info",
+            organization_path(organization_id, "/catalog"),
         )
     if budget_percent is not None and budget_percent >= 80:
         add(
@@ -964,6 +1034,7 @@ def dashboard_attention_items(
             "Monthly budget pressure",
             f"Projected usage is at {budget_percent:.1f}% of the configured monthly budget.",
             "danger" if budget_percent >= 100 else "warning",
+            organization_path(organization_id, "/usage"),
         )
     if int_row_value(control, "workspaces") == 0:
         add(
@@ -971,6 +1042,7 @@ def dashboard_attention_items(
             "No workspaces configured",
             "Create a workspace before installing MCP servers or agents.",
             "info",
+            organization_path(organization_id, "/workspaces"),
         )
     has_workspaces = int_row_value(control, "workspaces") > 0
     if int_row_value(control, "installed_servers") == 0 and has_workspaces:
@@ -979,8 +1051,9 @@ def dashboard_attention_items(
             "No MCP servers installed",
             "The organization has workspaces but no connected tool servers yet.",
             "info",
+            organization_path(organization_id, "/catalog"),
         )
-    return items[:8]
+    return items
 
 
 def format_duration_text(value: int | None) -> str:
@@ -1364,12 +1437,16 @@ async def organization_dashboard(
         breakdown_limit=breakdown_limit,
     )
     window = resolve_usage_summary_window(start_date=start_date, end_date=end_date)
-    catalog_stale_before = datetime.now(UTC) - DASHBOARD_CATALOG_STALE_AFTER
+    now = datetime.now(UTC)
+    catalog_stale_before = now - DASHBOARD_CATALOG_STALE_AFTER
+    stalled_agent_run_before = now - DASHBOARD_AGENT_RUN_STALLED_AFTER
     control, tool_totals, workspace_rows, runtime_rows, provider_rows, tool_rows = (
         await repository.organization_dashboard_control_counts(
             session,
             organization_id=organization_id,
+            now=now,
             catalog_stale_before=catalog_stale_before,
+            stalled_agent_run_before=stalled_agent_run_before,
         ),
         await repository.organization_dashboard_tool_usage_totals(
             session,
@@ -1431,6 +1508,7 @@ async def organization_dashboard(
             activeWorkspaces=int_row_value(control, "active_workspaces"),
             members=int_row_value(control, "members"),
             activeMembers=int_row_value(control, "active_members"),
+            pendingInvitations=int_row_value(control, "pending_invitations"),
             requests=usage.summary.requests,
             requestSuccessRate=success_rate(usage.summary.succeeded, completed_requests),
             failedRequests=usage.summary.failed,
@@ -1444,10 +1522,17 @@ async def organization_dashboard(
             ),
             agents=int_row_value(control, "agents"),
             activeAgents=int_row_value(control, "active_agents"),
+            pendingToolApprovals=int_row_value(control, "pending_tool_approvals"),
+            failedScheduledTasks=int_row_value(control, "failed_scheduled_tasks"),
+            stalledAgentRuns=int_row_value(control, "stalled_agent_runs"),
             tools=int_row_value(control, "tools"),
             installedServers=int_row_value(control, "installed_servers"),
             enabledServers=int_row_value(control, "enabled_servers"),
             serversNeedingAttention=int_row_value(control, "servers_needing_attention"),
+            installationsNeedingCredentials=int_row_value(
+                control,
+                "installations_needing_credentials",
+            ),
             serverUpdates=int_row_value(control, "server_updates"),
             runtimeSessions=int_row_value(control, "runtime_sessions"),
             activeRuntimeSessions=int_row_value(control, "active_runtime_sessions"),
@@ -1481,6 +1566,7 @@ async def organization_dashboard(
         ),
         providers=[dashboard_provider_row(row) for row in provider_rows],
         attention=dashboard_attention_items(
+            organization_id=organization_id,
             control=control,
             usage=usage,
             tool_failed=tool_failed,

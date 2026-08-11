@@ -571,6 +571,13 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
         )}`
       : "No monthly budget configured";
   const attentionCount = dashboard.attention.length;
+  const pendingActionCount =
+    summary.pendingInvitations +
+    summary.pendingToolApprovals +
+    summary.failedScheduledTasks +
+    summary.runtimeSessionsNeedingAttention +
+    summary.installationsNeedingCredentials +
+    summary.stalledAgentRuns;
 
   return (
     <div className="space-y-5">
@@ -645,10 +652,8 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
                   <div className="mt-1 text-muted-foreground">Tools</div>
                 </div>
                 <div className="px-2 py-2">
-                  <div className="text-lg font-semibold">
-                    {formatCount(summary.serversNeedingAttention)}
-                  </div>
-                  <div className="mt-1 text-muted-foreground">Review</div>
+                  <div className="text-lg font-semibold">{formatCount(pendingActionCount)}</div>
+                  <div className="mt-1 text-muted-foreground">Actions</div>
                 </div>
               </div>
             </div>
@@ -713,12 +718,15 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
           <ToolTable rows={dashboard.topTools} />
         </div>
         <div className="min-w-0 space-y-5">
-          <DashboardPanel description="Signals ranked by operational impact." title="Attention">
+          <DashboardPanel
+            description="Pending approvals, failures, credentials, budget, and runtime risks."
+            title="Needs attention"
+          >
             <div className="-m-4">
               {dashboard.attention.length === 0 ? (
                 <HealthRow
                   badge="Clear"
-                  detail="No reliability, catalog, budget, or runtime issues detected"
+                  detail="No pending approvals, failed tasks, credential gaps, or runtime risks detected"
                   icon={ShieldCheck}
                   label="No active items"
                   tone="success"
@@ -730,6 +738,7 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
                     <HealthRow
                       badge={item.severity}
                       detail={item.detail}
+                      href={item.href || undefined}
                       icon={tone === "danger" ? AlertTriangle : Activity}
                       key={item.key}
                       label={item.label}

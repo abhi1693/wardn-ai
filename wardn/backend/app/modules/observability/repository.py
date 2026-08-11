@@ -4,9 +4,10 @@ from uuid import UUID
 from sqlalchemy import and_, case, desc, func, literal, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents.models import Agent, AgentRun
+from app.modules.agents.models import Agent, AgentRun, AgentToolApproval
 from app.modules.limits.models import ResourceLimit, UsageBudget
 from app.modules.llm_providers.models import LLMProviderCredential
+from app.modules.mcp_gateway.models import MCPGatewayToolApproval
 from app.modules.mcp_registry.models import (
     MCPCatalogSource,
     MCPServerInstallation,
@@ -15,7 +16,8 @@ from app.modules.mcp_registry.models import (
 )
 from app.modules.mcp_runtime.models import MCPRuntimeSession, MCPToolInvocation
 from app.modules.observability.models import LLMModelPrice, LLMTrace, LLMUsageRecord
-from app.modules.organizations.models import OrganizationMembership, Workspace
+from app.modules.organizations.models import MembershipInvitation, OrganizationMembership, Workspace
+from app.modules.scheduled_tasks.models import WorkspaceScheduledTask
 from app.modules.users.models import User
 
 ACTIVE_RUNTIME_SESSION_STATUSES = ("pending", "starting", "running", "idle")
@@ -214,7 +216,9 @@ async def organization_dashboard_control_counts(
     session: AsyncSession,
     *,
     organization_id: UUID,
+    now: datetime,
     catalog_stale_before: datetime,
+    stalled_agent_run_before: datetime,
 ):
     workspace_ids = select(Workspace.id).where(Workspace.organization_id == organization_id)
     latest_versions = (
@@ -236,6 +240,15 @@ async def organization_dashboard_control_counts(
     installation_attention_condition = or_(
         MCPServerInstallation.status != "enabled",
         MCPServerInstallation.install_error != "",
+    )
+    installation_credential_attention_condition = and_(
+        MCPServerInstallation.install_error != "",
+        or_(
+            func.lower(MCPServerInstallation.install_error).like("%credential%"),
+            func.lower(MCPServerInstallation.install_error).like("%secret%"),
+            func.lower(MCPServerInstallation.install_error).like("%token%"),
+            func.lower(MCPServerInstallation.install_error).like("%api key%"),
+        ),
     )
     runtime_attention_condition = or_(
         MCPRuntimeSession.status.in_(ATTENTION_RUNTIME_SESSION_STATUSES),
@@ -262,17 +275,54 @@ async def organization_dashboard_control_counts(
             count_if(OrganizationMembership.is_active.is_(True)).label("active_members"),
         ).where(OrganizationMembership.organization_id == organization_id)
     )
+    invitation_result = await session.execute(
+        select(func.count(MembershipInvitation.id).label("pending_invitations")).where(
+            MembershipInvitation.organization_id == organization_id,
+            MembershipInvitation.status == "pending",
+            MembershipInvitation.expires_at > now,
+        )
+    )
     agent_result = await session.execute(
         select(
             func.count(Agent.id).label("agents"),
             count_if(Agent.is_active.is_(True)).label("active_agents"),
         ).where(Agent.organization_id == organization_id)
     )
+    agent_approval_result = await session.execute(
+        select(func.count(AgentToolApproval.id).label("pending_agent_tool_approvals")).where(
+            AgentToolApproval.organization_id == organization_id,
+            AgentToolApproval.status == "pending",
+            or_(AgentToolApproval.expires_at.is_(None), AgentToolApproval.expires_at > now),
+        )
+    )
+    gateway_approval_result = await session.execute(
+        select(func.count(MCPGatewayToolApproval.id).label("pending_gateway_tool_approvals")).where(
+            MCPGatewayToolApproval.organization_id == organization_id,
+            MCPGatewayToolApproval.status == "pending",
+        )
+    )
+    stalled_agent_result = await session.execute(
+        select(func.count(AgentRun.id).label("stalled_agent_runs")).where(
+            AgentRun.organization_id == organization_id,
+            AgentRun.status == "running",
+            AgentRun.updated_at <= stalled_agent_run_before,
+        )
+    )
+    scheduled_task_result = await session.execute(
+        select(func.count(WorkspaceScheduledTask.id).label("failed_scheduled_tasks")).where(
+            WorkspaceScheduledTask.organization_id == organization_id,
+            WorkspaceScheduledTask.is_active.is_(True),
+            WorkspaceScheduledTask.last_status.in_(("failed", "delivery_failed")),
+        )
+    )
     installation_result = await session.execute(
         select(
             func.count(MCPServerInstallation.id).label("installed_servers"),
             count_if(MCPServerInstallation.status == "enabled").label("enabled_servers"),
             count_if(installation_attention_condition).label("servers_needing_attention"),
+            count_if(installation_credential_attention_condition).label(
+                "installations_needing_credentials"
+            ),
             count_if(installation_update_condition).label("server_updates"),
         )
         .select_from(MCPServerInstallation)
@@ -369,7 +419,12 @@ async def organization_dashboard_control_counts(
     return {
         **workspace_result.mappings().one(),
         **member_result.mappings().one(),
+        "pending_invitations": int(invitation_result.scalar_one() or 0),
         **agent_result.mappings().one(),
+        "pending_tool_approvals": int(agent_approval_result.scalar_one() or 0)
+        + int(gateway_approval_result.scalar_one() or 0),
+        "failed_scheduled_tasks": int(scheduled_task_result.scalar_one() or 0),
+        "stalled_agent_runs": int(stalled_agent_result.scalar_one() or 0),
         **installation_result.mappings().one(),
         "tools": int(tool_schema_result.scalar_one() or 0),
         **runtime_result.mappings().one(),

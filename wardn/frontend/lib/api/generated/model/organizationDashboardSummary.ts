@@ -21,14 +21,18 @@ export interface OrganizationDashboardSummary {
   enabledCatalogSources: number;
   enabledServers: number;
   failedRequests: number;
+  failedScheduledTasks: number;
   /**
      * @minimum 0
      * @maximum 100
      */
   healthScore: number;
+  installationsNeedingCredentials: number;
   installedServers: number;
   members: number;
   monthlyBudgetUsd?: string | null;
+  pendingInvitations: number;
+  pendingToolApprovals: number;
   /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   projectedMonthlyCostUsd: string;
   providerCredentials: number;
@@ -40,6 +44,7 @@ export interface OrganizationDashboardSummary {
   serverUpdates: number;
   serversNeedingAttention: number;
   staleCatalogSources: number;
+  stalledAgentRuns: number;
   toolCalls: number;
   toolSuccessRate: number;
   tools: number;

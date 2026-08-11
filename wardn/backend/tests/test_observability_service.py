@@ -531,17 +531,24 @@ async def test_organization_dashboard_composes_usage_and_control_signals(monkeyp
 
     async def control_counts(*args, **kwargs):
         assert kwargs["organization_id"] == organization_id
+        assert kwargs["now"].tzinfo is not None
         assert kwargs["catalog_stale_before"].tzinfo is not None
+        assert kwargs["stalled_agent_run_before"].tzinfo is not None
         return {
             "workspaces": 1,
             "active_workspaces": 1,
             "members": 3,
             "active_members": 3,
+            "pending_invitations": 1,
             "agents": 2,
             "active_agents": 1,
+            "pending_tool_approvals": 2,
+            "failed_scheduled_tasks": 1,
+            "stalled_agent_runs": 1,
             "installed_servers": 3,
             "enabled_servers": 2,
             "servers_needing_attention": 1,
+            "installations_needing_credentials": 1,
             "server_updates": 1,
             "tools": 9,
             "runtime_sessions": 2,
@@ -653,9 +660,14 @@ async def test_organization_dashboard_composes_usage_and_control_signals(monkeyp
         end_date=date(2026, 7, 10),
     )
 
-    assert response.summary.health_score == 74
+    assert response.summary.health_score == 57
     assert response.summary.projected_monthly_cost_usd == Decimal("3.000000")
     assert response.summary.budget_utilization_percent == 30.0
+    assert response.summary.pending_invitations == 1
+    assert response.summary.pending_tool_approvals == 2
+    assert response.summary.failed_scheduled_tasks == 1
+    assert response.summary.stalled_agent_runs == 1
+    assert response.summary.installations_needing_credentials == 1
     assert response.summary.request_success_rate == 90.0
     assert response.summary.tool_success_rate == 90.0
     assert response.summary.average_tool_duration_ms == 125
@@ -666,10 +678,16 @@ async def test_organization_dashboard_composes_usage_and_control_signals(monkeyp
     assert response.top_tools[0].p95_duration_ms == 320
     assert {item.key for item in response.attention} >= {
         "catalog-errors",
+        "mcp-credentials",
         "mcp-servers",
+        "pending-invitations",
+        "pending-tool-approvals",
         "runtime-sessions",
+        "scheduled-tasks",
+        "stalled-agent-runs",
         "tool-failures",
     }
+    assert all(item.href for item in response.attention)
 
 
 @pytest.mark.asyncio

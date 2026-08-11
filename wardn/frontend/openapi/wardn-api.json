@@ -7295,6 +7295,11 @@
             "title": "Detail",
             "type": "string"
           },
+          "href": {
+            "default": "",
+            "title": "Href",
+            "type": "string"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -7573,10 +7578,18 @@
             "title": "Failedrequests",
             "type": "integer"
           },
+          "failedScheduledTasks": {
+            "title": "Failedscheduledtasks",
+            "type": "integer"
+          },
           "healthScore": {
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Healthscore",
+            "type": "integer"
+          },
+          "installationsNeedingCredentials": {
+            "title": "Installationsneedingcredentials",
             "type": "integer"
           },
           "installedServers": {
@@ -7598,6 +7611,14 @@
               }
             ],
             "title": "Monthlybudgetusd"
+          },
+          "pendingInvitations": {
+            "title": "Pendinginvitations",
+            "type": "integer"
+          },
+          "pendingToolApprovals": {
+            "title": "Pendingtoolapprovals",
+            "type": "integer"
           },
           "projectedMonthlyCostUsd": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
@@ -7640,6 +7661,10 @@
             "title": "Stalecatalogsources",
             "type": "integer"
           },
+          "stalledAgentRuns": {
+            "title": "Stalledagentruns",
+            "type": "integer"
+          },
           "toolCalls": {
             "title": "Toolcalls",
             "type": "integer"
@@ -7671,6 +7696,7 @@
           "activeWorkspaces",
           "members",
           "activeMembers",
+          "pendingInvitations",
           "requests",
           "requestSuccessRate",
           "failedRequests",
@@ -7681,10 +7707,14 @@
           "toolSuccessRate",
           "agents",
           "activeAgents",
+          "pendingToolApprovals",
+          "failedScheduledTasks",
+          "stalledAgentRuns",
           "tools",
           "installedServers",
           "enabledServers",
           "serversNeedingAttention",
+          "installationsNeedingCredentials",
           "serverUpdates",
           "runtimeSessions",
           "activeRuntimeSessions",

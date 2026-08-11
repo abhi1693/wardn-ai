@@ -7,6 +7,7 @@
 
 export interface OrganizationDashboardAttentionItem {
   detail: string;
+  href?: string;
   key: string;
   label: string;
   severity: string;
