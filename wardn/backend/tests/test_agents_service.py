@@ -3332,7 +3332,12 @@ async def test_stream_anthropic_messages_runs_dynamic_tool(monkeypatch) -> None:
         )
     ]
 
-    assert sent_bodies[0]["tools"][0]["input_schema"]["required"] == ["query"]
+    search_tool = next(
+        tool
+        for tool in sent_bodies[0]["tools"]
+        if tool["name"] == service.AGENT_SEARCH_TOOLS_TOOL_NAME
+    )
+    assert search_tool["input_schema"]["required"] == ["query"]
     assert sent_bodies[1]["messages"][-1]["content"] == [
         {
             "type": "tool_result",
@@ -4141,6 +4146,7 @@ async def test_stream_chatgpt_codex_exposes_dynamic_tools_instead_of_concrete_mc
 
     assert events == []
     assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME,
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
     ]
@@ -4519,6 +4525,7 @@ async def test_stream_openai_responses_uses_dynamic_tools_and_runs_resolved_targ
     ]
 
     assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME,
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
     ]
@@ -4654,6 +4661,7 @@ async def test_stream_openai_responses_injects_skill_guidance_for_scheduled_runs
 
     assert events == []
     assert [tool["name"] for tool in sent_bodies[0]["tools"]] == [
+        platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME,
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
     ]
