@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Users,
   Webhook,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -38,7 +39,9 @@ type AppShellActive =
   | "workspaces"
   | "organizations"
   | "organization-settings"
+  | "organization-members"
   | "workspace-settings"
+  | "workspace-members"
   | "workspace-dashboard"
   | "workspace-chat"
   | "workspace-chat-providers"
@@ -114,6 +117,12 @@ function organizationNavSections(workspaceContext?: WorkspaceContext): Navigatio
             href: organizationSettingsPath,
             activeKey: "organization-settings",
             icon: Settings,
+          },
+          {
+            label: "Members",
+            href: `/organizations/${encodeURIComponent(organizationId)}/members`,
+            activeKey: "organization-members",
+            icon: Users,
           },
           {
             label: "Usage",
@@ -260,6 +269,14 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
           icon: ShieldCheck,
         },
         {
+          label: "Members",
+          href: `/organizations/${encodeURIComponent(
+            organizationId
+          )}/workspaces/${encodeURIComponent(workspaceId)}/members`,
+          activeKey: "workspace-members",
+          icon: Users,
+        },
+        {
           label: "Workspace Settings",
           href: `/organizations/${encodeURIComponent(
             organizationId
@@ -278,6 +295,7 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
             "agent-tokens",
             "limits",
             "secret-backends",
+            "organization-members",
           ],
           icon: Building2,
         },
@@ -320,6 +338,7 @@ export function AppShell({
     active === "runtime" ||
     active === "workspace-observability" ||
     active === "workspace-guardrails" ||
+    active === "workspace-members" ||
     active === "workspace-settings";
   const navigationSections = isWorkspaceScope
     ? workspaceNavSections(workspaceContext)

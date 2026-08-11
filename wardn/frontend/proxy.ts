@@ -11,6 +11,10 @@ export function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-wardn-pathname", `${pathname}${search}`);
 
+  if (pathname.startsWith("/invitations/")) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   if (pathname === loginPath) {
     if (!hasSession || searchParams.get("reauth") === "1") {
       return NextResponse.next({ request: { headers: requestHeaders } });

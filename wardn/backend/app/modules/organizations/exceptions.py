@@ -24,3 +24,27 @@ class WorkspaceAccessDeniedError(OrganizationError):
 
 class DuplicateWorkspaceError(OrganizationError):
     pass
+
+
+class MembershipNotFoundError(OrganizationError):
+    pass
+
+
+class MembershipRoleError(OrganizationError):
+    pass
+
+
+class DuplicateInvitationError(OrganizationError):
+    pass
+
+
+class InvitationNotFoundError(OrganizationError):
+    pass
+
+
+class InvitationExpiredError(OrganizationError):
+    pass
+
+
+class InvitationEmailMismatchError(OrganizationError):
+    pass

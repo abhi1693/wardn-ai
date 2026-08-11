@@ -53,7 +53,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 
-def _set_session_cookie(response: Response, user: User) -> None:
+def set_session_cookie(response: Response, user: User) -> None:
     settings = get_settings()
     response.set_cookie(
         key=settings.session_cookie_name,
@@ -163,7 +163,7 @@ async def login(
             detail="invalid email or password",
         ) from exc
 
-    _set_session_cookie(response, user)
+    set_session_cookie(response, user)
     await session.refresh(user)
     return user
 
@@ -282,7 +282,7 @@ async def oidc_callback(
         frontend_redirect_url(settings, oidc_state.redirect_to),
         status_code=status.HTTP_302_FOUND,
     )
-    _set_session_cookie(response, user)
+    set_session_cookie(response, user)
     _clear_oidc_state_cookie(response, oidc_state.state)
     return response
 

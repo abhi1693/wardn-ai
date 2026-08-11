@@ -61,8 +61,14 @@ from app.modules.mcp_registry.exceptions import (
 from app.modules.mcp_runtime.exceptions import MCPRuntimeSessionNotFoundError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.organizations.exceptions import (
+    DuplicateInvitationError,
     DuplicateOrganizationError,
     DuplicateWorkspaceError,
+    InvitationEmailMismatchError,
+    InvitationExpiredError,
+    InvitationNotFoundError,
+    MembershipNotFoundError,
+    MembershipRoleError,
     OrganizationAccessDeniedError,
     OrganizationNotFoundError,
     WorkspaceAccessDeniedError,
@@ -127,6 +133,12 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     WorkspaceAccessDeniedError: _definition(403, "workspace_access_denied"),
     DuplicateOrganizationError: _definition(409, "organization_already_exists"),
     DuplicateWorkspaceError: _definition(409, "workspace_already_exists"),
+    MembershipNotFoundError: _definition(404, "membership_not_found"),
+    MembershipRoleError: _definition(409, "membership_role_conflict"),
+    DuplicateInvitationError: _definition(409, "invitation_already_exists"),
+    InvitationNotFoundError: _definition(404, "invitation_not_found"),
+    InvitationExpiredError: _definition(410, "invitation_expired"),
+    InvitationEmailMismatchError: _definition(403, "invitation_email_mismatch"),
     LimitAccessDeniedError: _definition(403, "limit_access_denied"),
     LimitNotFoundError: _definition(404, "limit_not_found"),
     InvalidLimitKeyError: _definition(400, "invalid_limit_key"),

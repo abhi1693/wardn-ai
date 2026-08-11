@@ -52,6 +52,19 @@ async def get_current_user(
     return await resolve_current_user(request, session, authorization)
 
 
+async def get_optional_current_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> User | None:
+    try:
+        return await resolve_current_user(request, session, authorization)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
+
+
 async def get_stream_current_user(
     request: Request,
     session: Annotated[

@@ -26,6 +26,7 @@ This page lists the main settings groups. See `wardn/backend/.env.example` and `
 * `WARDN_OIDC_CLIENT_ID`
 * `WARDN_OIDC_CLIENT_SECRET`
 * `WARDN_OIDC_ALLOWED_EMAIL_DOMAINS`
+* `WARDN_MEMBERSHIP_INVITATION_TTL_SECONDS`
 
 [#_secrets]
 == Secrets
@@ -59,4 +60,3 @@ This page lists the main settings groups. See `wardn/backend/.env.example` and `
 * `WARDN_SCHEDULED_TASK_WORKER_POLL_INTERVAL_SECONDS`
 * `WARDN_CHAT_PROVIDER_EVENT_WORKER_ENABLED`
 * `WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL`
-

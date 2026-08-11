@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     oidc_auto_create_users: bool = True
     oidc_allowed_email_domains: list[str] = []
     oidc_superuser_emails: list[str] = []
+    membership_invitation_ttl_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        ge=300,
+        le=90 * 24 * 60 * 60,
+    )
     openbao_auth_file_root: str = Field(default="/var/run/secrets", min_length=1, max_length=4096)
     openbao_auth_profiles_json: str = Field(default="{}", max_length=65_536)
     secret_cleanup_worker_poll_interval_seconds: float = Field(default=2.0, gt=0, le=60)

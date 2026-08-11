@@ -27,6 +27,12 @@ from app.modules.observability.router import usage_router
 from app.modules.observability.router import (
     workspace_router as workspace_observability_router,
 )
+from app.modules.organizations.membership_router import (
+    invitation_router as membership_invitation_router,
+)
+from app.modules.organizations.membership_router import (
+    organization_router as organization_membership_router,
+)
 from app.modules.organizations.router import router as organizations_router
 from app.modules.scheduled_tasks.router import workspace_router as workspace_scheduled_tasks_router
 from app.modules.secrets.router import router as secrets_router
@@ -38,6 +44,8 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(organizations_router)
+api_router.include_router(organization_membership_router)
+api_router.include_router(membership_invitation_router)
 api_router.include_router(secrets_router)
 api_router.include_router(limits_router)
 api_router.include_router(llm_providers_router)

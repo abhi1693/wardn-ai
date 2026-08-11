@@ -22,6 +22,7 @@ from app.modules.mcp_registry.models import (
 )
 from app.modules.mcp_runtime.models import MCPRuntimeEvent, MCPRuntimeSession, MCPToolInvocation
 from app.modules.organizations.models import (
+    MembershipInvitation,
     Organization,
     OrganizationMembership,
     Workspace,
@@ -54,6 +55,13 @@ def test_scoped_domain_models_declare_database_invariants() -> None:
     assert "ck_organization_memberships_role" in constraint_names(OrganizationMembership)
     assert "ck_workspaces_status" in constraint_names(Workspace)
     assert "ck_workspace_memberships_role" in constraint_names(WorkspaceMembership)
+    assert {
+        "ck_membership_invitations_role",
+        "ck_membership_invitations_scope_type",
+        "ck_membership_invitations_scope_workspace",
+        "ck_membership_invitations_status",
+        "uq_membership_invitations_token_hash",
+    } <= constraint_names(MembershipInvitation)
     assert {"ck_agents_scope", "ck_agents_scope_workspace"} <= constraint_names(Agent)
     assert "ck_conversation_messages_role" in constraint_names(ConversationMessage)
     assert {

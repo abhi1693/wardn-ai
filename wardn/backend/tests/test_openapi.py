@@ -30,8 +30,15 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/limits/{limit_id}",
         "/api/v1/me/usage",
         "/api/v1/mcp/gateway",
+        "/api/v1/invitations/{token}",
+        "/api/v1/invitations/{token}/accept",
+        "/api/v1/invitations/{token}/register",
         "/api/v1/organizations",
         "/api/v1/organizations/{organization_id}",
+        "/api/v1/organizations/{organization_id}/members",
+        "/api/v1/organizations/{organization_id}/members/{membership_id}",
+        "/api/v1/organizations/{organization_id}/invitations",
+        "/api/v1/organizations/{organization_id}/invitations/{invitation_id}",
         "/api/v1/organizations/{organization_id}/dashboard",
         "/api/v1/organizations/{organization_id}/llm/providers",
         "/api/v1/organizations/{organization_id}/llm/provider-credentials",
@@ -85,6 +92,16 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/organizations/{organization_id}/secrets/stores/{store_id}/validate",
         "/api/v1/organizations/{organization_id}/workspaces",
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}",
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/members",
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/members/{membership_id}"
+        ),
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/invitations",
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/invitations/{invitation_id}"
+        ),
         "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/mcp/gateway",
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
