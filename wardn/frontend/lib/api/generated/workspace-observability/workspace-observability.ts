@@ -7,11 +7,47 @@
 import type {
   LLMUsageListResponse,
   MCPToolUsageListResponse,
+  WorkspaceObservabilityDashboardParams,
+  WorkspaceObservabilityDashboardResponse,
   WorkspaceObservabilityListLlmUsageParams,
   WorkspaceObservabilityListMcpToolUsageParams
 } from '../model';
 
 import { apiRequest } from '../../client';
+
+export const getWorkspaceObservabilityDashboardUrl = (organizationId: string,
+    workspaceId: string,
+    params?: WorkspaceObservabilityDashboardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/dashboard?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/observability/dashboard`
+}
+
+/**
+ * @summary Workspace Observability Dashboard Route
+ */
+export const workspaceObservabilityDashboard = async (organizationId: string,
+    workspaceId: string,
+    params?: WorkspaceObservabilityDashboardParams, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceObservabilityDashboardResponse> => {
+
+  return apiRequest<WorkspaceObservabilityDashboardResponse>(getWorkspaceObservabilityDashboardUrl(organizationId,workspaceId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
 
 export const getWorkspaceObservabilityListLlmUsageUrl = (organizationId: string,
     workspaceId: string,

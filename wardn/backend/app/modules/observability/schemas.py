@@ -300,6 +300,86 @@ class OrganizationDashboardResponse(APIModel):
     attention: list[OrganizationDashboardAttentionItem]
 
 
+class WorkspaceObservabilityDashboardSummary(APIModel):
+    health_score: int = Field(ge=0, le=100)
+    agent_runs: int
+    failed_agent_runs: int
+    running_agent_runs: int
+    requests: int
+    request_success_rate: float
+    failed_requests: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
+    tool_success_rate: float
+    failed_tool_calls: int
+    running_tool_calls: int
+    average_tool_duration_ms: int | None = None
+    p95_tool_duration_ms: int | None = None
+    attributed_tool_calls: int
+    unattributed_tool_calls: int
+    attributed_llm_calls: int
+    unattributed_llm_calls: int
+    active_runtime_sessions: int
+    runtime_sessions_needing_attention: int
+
+
+class WorkspaceObservabilityTopToolRow(APIModel):
+    id: str
+    server_name: str
+    tool_name: str
+    calls: int
+    failed: int
+    error_rate: float
+    average_duration_ms: int | None = None
+    p95_duration_ms: int | None = None
+    last_called_at: datetime | None = None
+
+
+class WorkspaceObservabilityAgentRunRow(APIModel):
+    id: UUID
+    agent_id: UUID
+    agent_name: str
+    triggered_by_id: UUID | None = None
+    triggered_by_email: str
+    triggered_by_display_name: str
+    trigger_type: str
+    status: str
+    requests: int
+    failed_requests: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal
+    tool_calls: int
+    failed_tool_calls: int
+    trace_id: str
+    span_id: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    error: str
+
+
+class WorkspaceObservabilityAttentionItem(APIModel):
+    key: str
+    label: str
+    detail: str
+    severity: str
+    href: str = ""
+
+
+class WorkspaceObservabilityDashboardResponse(APIModel):
+    window: UsageSummaryWindow
+    summary: WorkspaceObservabilityDashboardSummary
+    activity: list[UsageTrendPoint]
+    attention: list[WorkspaceObservabilityAttentionItem]
+    top_tools: list[WorkspaceObservabilityTopToolRow]
+    top_models: list[UsageSummaryBreakdownRow]
+    top_agents: list[UsageSummaryBreakdownRow]
+    top_users: list[UsageSummaryBreakdownRow]
+    recent_runs: list[WorkspaceObservabilityAgentRunRow]
+
+
 class MCPToolUsageRead(APIModel):
     id: UUID
     organization_id: UUID | None = None

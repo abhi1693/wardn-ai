@@ -24,6 +24,7 @@ from app.modules.observability.schemas import (
     MCPToolUsageListResponse,
     OrganizationDashboardResponse,
     UsageSummaryResponse,
+    WorkspaceObservabilityDashboardResponse,
 )
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
@@ -184,6 +185,33 @@ async def me_usage_summary_route(
     return await service.user_usage_summary(
         session,
         user_id=current_user.id,
+        start_date=query.start_date,
+        end_date=query.end_date,
+        breakdown_limit=query.breakdown_limit,
+    )
+
+
+@workspace_router.get(
+    "/dashboard",
+    response_model=WorkspaceObservabilityDashboardResponse,
+    operation_id="workspace_observability_dashboard",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def workspace_observability_dashboard_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    query: Annotated[DashboardQuery, Depends(dashboard_query)],
+) -> WorkspaceObservabilityDashboardResponse:
+    await require_workspace_member_or_404(session, current_user, organization_id, workspace_id)
+    return await service.workspace_observability_dashboard(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
         start_date=query.start_date,
         end_date=query.end_date,
         breakdown_limit=query.breakdown_limit,

@@ -1,237 +1,68 @@
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  CircleDot,
-  Gauge,
-  ListTree,
-} from "lucide-react";
-import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/templates/app-shell";
-import { DateTimeText } from "@/components/atoms/date-time-text";
 import { Badge } from "@/components/atoms/badge";
-import { Button } from "@/components/atoms/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/atoms/table";
+import type { WorkspaceObservabilityDashboardResponse } from "@/lib/api/generated/model";
+import { backendJson } from "@/lib/api/server";
 import {
   type WorkspaceContext,
   workspaceObservabilityApiPath,
 } from "@/lib/workspace-context";
-import { backendJson } from "@/lib/api/server";
-
-type MCPToolUsageSummary = {
-  total: number;
-  succeeded: number;
-  failed: number;
-  running: number;
-  attributed: number;
-  unattributed: number;
-  averageDurationMs: number | null;
-};
-
-type MCPToolUsageRead = {
-  id: string;
-  organizationId: string | null;
-  workspaceId: string | null;
-  runtimeSessionId: string | null;
-  installationId: string;
-  userId: string | null;
-  userEmail: string;
-  userDisplayName: string;
-  agentId: string | null;
-  agentName: string;
-  agentRunId: string | null;
-  serverName: string;
-  serverVersion: string;
-  toolName: string;
-  status: string;
-  startedAt: string;
-  finishedAt: string | null;
-  durationMs: number | null;
-  inputSizeBytes: number;
-  outputSizeBytes: number;
-  isError: boolean;
-  error: string;
-};
-
-type MCPToolUsageListResponse = {
-  summary: MCPToolUsageSummary;
-  toolCalls: MCPToolUsageRead[];
-};
-
-type LLMUsageSummary = {
-  totalCalls: number;
-  succeeded: number;
-  failed: number;
-  running: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  totalCostUsd: string | number;
-  attributed: number;
-  unattributed: number;
-};
-
-type LLMUsageRead = {
-  id: string;
-  organizationId: string;
-  workspaceId: string;
-  userId: string | null;
-  userEmail: string;
-  userDisplayName: string;
-  agentId: string | null;
-  agentName: string;
-  agentRunId: string | null;
-  provider: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: string | number;
-  startedAt: string;
-  finishedAt: string | null;
-  status: string;
-  traceId: string;
-  spanId: string;
-  error: string;
-};
-
-type LLMUsageListResponse = {
-  summary: LLMUsageSummary;
-  records: LLMUsageRead[];
-};
+import { WorkspaceObservabilityDashboardClient } from "@/app/observability/workspace-observability-dashboard-client";
 
 type WorkspaceObservabilityViewProps = {
   workspaceContext: WorkspaceContext;
 };
 
-function emptyUsage(): MCPToolUsageListResponse {
+function emptyDashboard(): WorkspaceObservabilityDashboardResponse {
+  const today = new Date().toISOString().slice(0, 10);
   return {
+    activity: [],
+    attention: [],
+    recentRuns: [],
     summary: {
-      total: 0,
-      succeeded: 0,
-      failed: 0,
-      running: 0,
-      attributed: 0,
-      unattributed: 0,
-      averageDurationMs: null,
-    },
-    toolCalls: [],
-  };
-}
-
-function emptyLLMUsage(): LLMUsageListResponse {
-  return {
-    summary: {
-      totalCalls: 0,
-      succeeded: 0,
-      failed: 0,
-      running: 0,
-      inputTokens: 0,
-      outputTokens: 0,
+      activeRuntimeSessions: 0,
+      agentRuns: 0,
+      attributedLlmCalls: 0,
+      attributedToolCalls: 0,
+      averageToolDurationMs: null,
+      costUsd: "0",
+      failedAgentRuns: 0,
+      failedRequests: 0,
+      failedToolCalls: 0,
+      healthScore: 100,
+      p95ToolDurationMs: null,
+      requestSuccessRate: 100,
+      requests: 0,
+      runningAgentRuns: 0,
+      runningToolCalls: 0,
+      runtimeSessionsNeedingAttention: 0,
+      toolCalls: 0,
+      toolSuccessRate: 100,
       totalTokens: 0,
-      totalCostUsd: 0,
-      attributed: 0,
-      unattributed: 0,
+      unattributedLlmCalls: 0,
+      unattributedToolCalls: 0,
     },
-    records: [],
+    topAgents: [],
+    topModels: [],
+    topTools: [],
+    topUsers: [],
+    window: {
+      breakdownLimit: 8,
+      endDate: today,
+      startDate: today,
+      timezone: "UTC",
+    },
   };
 }
 
-async function getMcpToolUsage(context: WorkspaceContext) {
-  const path = workspaceObservabilityApiPath(context, "/mcp-tool-usage?limit=100");
+async function getDashboard(context: WorkspaceContext) {
+  const path = workspaceObservabilityApiPath(context, "/dashboard?breakdownLimit=8");
   if (!path) {
-    return emptyUsage();
+    return emptyDashboard();
   }
-  return backendJson<MCPToolUsageListResponse>(path);
-}
-
-async function getLLMUsage(context: WorkspaceContext) {
-  const path = workspaceObservabilityApiPath(context, "/llm-usage?limit=100");
-  if (!path) {
-    return emptyLLMUsage();
-  }
-  return backendJson<LLMUsageListResponse>(path);
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function formatCurrency(value: string | number) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return "$0";
-  }
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: numericValue < 0.01 ? 6 : 2,
-    minimumFractionDigits: numericValue > 0 ? 2 : 0,
-    style: "currency",
-  }).format(numericValue);
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDuration(value?: number | null) {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (value < 1000) {
-    return `${value} ms`;
-  }
-  return `${(value / 1000).toFixed(2)} s`;
-}
-
-function statusVariant(status: string, isError: boolean) {
-  if (status === "succeeded" && !isError) {
-    return "success" as const;
-  }
-  if (status === "running") {
-    return "secondary" as const;
-  }
-  return "outline" as const;
-}
-
-function actorLabel(call: MCPToolUsageRead) {
-  if (call.userDisplayName) {
-    return call.userDisplayName;
-  }
-  if (call.userEmail) {
-    return call.userEmail;
-  }
-  return "Unattributed";
-}
-
-function agentLabel(call: MCPToolUsageRead) {
-  return call.agentName || "Direct MCP";
-}
-
-function llmActorLabel(record: LLMUsageRead) {
-  if (record.userDisplayName) {
-    return record.userDisplayName;
-  }
-  if (record.userEmail) {
-    return record.userEmail;
-  }
-  return "Unattributed";
+  return backendJson<WorkspaceObservabilityDashboardResponse>(path);
 }
 
 export async function WorkspaceObservabilityView({
@@ -243,303 +74,26 @@ export async function WorkspaceObservabilityView({
     redirect("/");
   }
 
-  const [usage, llmUsage] = await Promise.all([
-    getMcpToolUsage(workspaceContext),
-    getLLMUsage(workspaceContext),
-  ]);
-  const { summary, toolCalls } = usage;
-  const { summary: llmSummary, records: llmRecords } = llmUsage;
-  const successRate =
-    summary.total > 0 ? Math.round((summary.succeeded / summary.total) * 100) : 0;
+  const dashboard = await getDashboard(workspaceContext);
 
   return (
     <AppShell
       active="workspace-observability"
       actions={
-        <Badge variant={summary.failed > 0 ? "secondary" : "outline"}>
-          {formatNumber(summary.total)} tool calls
+        <Badge variant={dashboard.summary.failedAgentRuns > 0 ? "secondary" : "outline"}>
+          <AlertTriangle className="size-3" />
+          {dashboard.summary.failedAgentRuns} failed runs
         </Badge>
       }
       eyebrow="Workspace"
       title="Observability"
       workspaceContext={workspaceContext}
     >
-      <section className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm text-muted-foreground">Tool calls</div>
-                <div className="mt-2 text-2xl font-semibold">{formatNumber(summary.total)}</div>
-              </div>
-              <Activity className="size-5 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm text-muted-foreground">Success rate</div>
-                <div className="mt-2 text-2xl font-semibold">{successRate}%</div>
-              </div>
-              <CheckCircle2 className="size-5 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm text-muted-foreground">Attributed</div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {formatNumber(summary.attributed)}
-                </div>
-              </div>
-              <ListTree className="size-5 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm text-muted-foreground">Average duration</div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {formatDuration(summary.averageDurationMs) || "n/a"}
-                </div>
-              </div>
-              <Gauge className="size-5 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>MCP Tool Usage</CardTitle>
-              <Badge variant={summary.failed > 0 ? "secondary" : "outline"}>
-                {formatNumber(summary.failed)} failed
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {toolCalls.length > 0 ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>When</TableHead>
-                      <TableHead>Person</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Tool</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Duration</TableHead>
-                      <TableHead className="text-right">I/O</TableHead>
-                      <TableHead className="text-right">Run</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {toolCalls.map((call) => {
-                      const runHref = call.agentRunId
-                        ? `/org/${encodeURIComponent(
-                            organization.id
-                          )}/workspace/${encodeURIComponent(
-                            workspace.id
-                          )}/agent-runs/${encodeURIComponent(call.agentRunId)}`
-                        : "";
-
-                      return (
-                        <TableRow key={call.id}>
-                          <TableCell className="min-w-40 align-top">
-                            <DateTimeText
-                              className="text-sm"
-                              fallback=""
-                              value={call.startedAt}
-                            />
-                          </TableCell>
-                          <TableCell className="min-w-44 align-top">
-                            <div className="font-medium">{actorLabel(call)}</div>
-                            {call.userEmail && call.userEmail !== call.userDisplayName ? (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {call.userEmail}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="min-w-40 align-top">
-                            <div>{agentLabel(call)}</div>
-                          </TableCell>
-                          <TableCell className="min-w-56 align-top">
-                            <div className="font-medium">{call.toolName}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {call.serverName}
-                            </div>
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <Badge variant={statusVariant(call.status, call.isError)}>
-                              {call.isError ? "error" : call.status}
-                            </Badge>
-                            {call.error ? (
-                              <div className="mt-1 max-w-56 truncate text-xs text-muted-foreground">
-                                {call.error}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-right align-top">
-                            {formatDuration(call.durationMs) || "-"}
-                          </TableCell>
-                          <TableCell className="text-right align-top">
-                            <div>{formatBytes(call.inputSizeBytes)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatBytes(call.outputSizeBytes)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right align-top">
-                            {runHref ? (
-                              <Button asChild size="sm" variant="outline">
-                                <Link href={runHref}>Trace</Link>
-                              </Button>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="flex min-h-56 flex-col items-center justify-center rounded-md border border-dashed text-center">
-                <CircleDot className="mb-3 size-6 text-muted-foreground" />
-                <div className="text-sm font-medium">No tool calls recorded</div>
-                <div className="mt-1 max-w-md text-sm text-muted-foreground">
-                  MCP tool usage will appear here after agents or gateway clients invoke workspace
-                  tools.
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>LLM Usage</CardTitle>
-                <Badge variant={llmSummary.failed > 0 ? "secondary" : "outline"}>
-                  {formatCurrency(llmSummary.totalCostUsd)}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {llmRecords.length > 0 ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-md border p-3">
-                      <div className="text-muted-foreground">Calls</div>
-                      <div className="mt-1 text-lg font-semibold">
-                        {formatNumber(llmSummary.totalCalls)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border p-3">
-                      <div className="text-muted-foreground">Tokens</div>
-                      <div className="mt-1 text-lg font-semibold">
-                        {formatNumber(llmSummary.totalTokens)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    {llmRecords.slice(0, 6).map((record) => {
-                      const runHref = record.agentRunId
-                        ? `/org/${encodeURIComponent(
-                            organization.id
-                          )}/workspace/${encodeURIComponent(
-                            workspace.id
-                          )}/agent-runs/${encodeURIComponent(record.agentRunId)}`
-                        : "";
-
-                      return (
-                        <div
-                          className="rounded-md border p-3 text-sm"
-                          key={record.id}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{record.model}</div>
-                              <div className="mt-1 truncate text-xs text-muted-foreground">
-                                {record.provider} / {llmActorLabel(record)}
-                              </div>
-                            </div>
-                            <Badge variant={record.status === "failed" ? "secondary" : "outline"}>
-                              {record.status}
-                            </Badge>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                            <span>{formatNumber(record.totalTokens)} tokens</span>
-                            <span className="font-mono">{formatCurrency(record.costUsd)}</span>
-                          </div>
-                          {runHref ? (
-                            <Button asChild className="mt-3 w-full" size="sm" variant="outline">
-                              <Link href={runHref}>Trace</Link>
-                            </Button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 size-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-sm font-medium">No model calls recorded</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        LLM usage will appear after agent model calls complete.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Attribution</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Workspace</span>
-                <span className="font-medium">{workspace.name}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Attributed calls</span>
-                <span className="font-mono">{formatNumber(summary.attributed)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Unattributed calls</span>
-                <span className="font-mono">{formatNumber(summary.unattributed)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Running</span>
-                <span className="font-mono">{formatNumber(summary.running)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">LLM attributed</span>
-                <span className="font-mono">{formatNumber(llmSummary.attributed)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">LLM cost</span>
-                <span className="font-mono">{formatCurrency(llmSummary.totalCostUsd)}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
+      <WorkspaceObservabilityDashboardClient
+        dashboard={dashboard}
+        organizationId={organization.id}
+        workspaceId={workspace.id}
+      />
     </AppShell>
   );
 }

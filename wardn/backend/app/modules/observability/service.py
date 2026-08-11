@@ -39,6 +39,11 @@ from app.modules.observability.schemas import (
     UsageSummaryTotals,
     UsageSummaryWindow,
     UsageTrendPoint,
+    WorkspaceObservabilityAgentRunRow,
+    WorkspaceObservabilityAttentionItem,
+    WorkspaceObservabilityDashboardResponse,
+    WorkspaceObservabilityDashboardSummary,
+    WorkspaceObservabilityTopToolRow,
 )
 from app.modules.users.models import User
 
@@ -978,6 +983,174 @@ def dashboard_attention_items(
     return items[:8]
 
 
+def format_duration_text(value: int | None) -> str:
+    if value is None:
+        return "n/a"
+    if value < 1000:
+        return f"{value} ms"
+    return f"{value / 1000:.1f} s"
+
+
+def workspace_observability_health_score(
+    *,
+    usage: UsageSummaryResponse,
+    runtime_attention: int,
+    failed_agent_runs: int,
+    tool_total: int,
+    tool_failed: int,
+    running_tool_calls: int,
+    p95_tool_duration_ms: int | None,
+    unattributed_tool_calls: int,
+) -> int:
+    completed_requests = usage.summary.succeeded + usage.summary.failed
+    completed_tools = max(tool_total - running_tool_calls, 0)
+    score = 100
+    score -= min(24, failed_agent_runs * 8)
+    score -= min(20, int(percent(usage.summary.failed, completed_requests) * 0.55))
+    score -= min(20, int(percent(tool_failed, completed_tools) * 0.55))
+    score -= min(15, runtime_attention * 5)
+    if p95_tool_duration_ms is not None:
+        if p95_tool_duration_ms >= 30_000:
+            score -= 12
+        elif p95_tool_duration_ms >= 10_000:
+            score -= 7
+        elif p95_tool_duration_ms >= 5_000:
+            score -= 3
+    if tool_total > 0:
+        score -= min(8, int(percent(unattributed_tool_calls, tool_total) * 0.2))
+    return max(min(score, 100), 0)
+
+
+def workspace_observability_top_tool_row(row) -> WorkspaceObservabilityTopToolRow:
+    calls = int_row_value(row, "calls")
+    failed = int_row_value(row, "failed")
+    server_name = str(row_value(row, "server_name", "") or "")
+    tool_name = str(row_value(row, "tool_name", "") or "")
+    return WorkspaceObservabilityTopToolRow(
+        id=f"{server_name}:{tool_name}",
+        serverName=server_name,
+        toolName=tool_name,
+        calls=calls,
+        failed=failed,
+        errorRate=percent(failed, calls),
+        averageDurationMs=optional_duration(row_value(row, "average_duration_ms", None)),
+        p95DurationMs=optional_duration(row_value(row, "p95_duration_ms", None)),
+        lastCalledAt=row_value(row, "last_called_at", None),
+    )
+
+
+def workspace_observability_run_row(row) -> WorkspaceObservabilityAgentRunRow:
+    input_tokens = int_row_value(row, "input_tokens")
+    output_tokens = int_row_value(row, "output_tokens")
+    return WorkspaceObservabilityAgentRunRow(
+        id=row_value(row, "id"),
+        agentId=row_value(row, "agent_id"),
+        agentName=str(row_value(row, "agent_name", "") or "Unknown agent"),
+        triggeredById=row_value(row, "triggered_by_id", None),
+        triggeredByEmail=str(row_value(row, "triggered_by_email", "") or ""),
+        triggeredByDisplayName=person_label(
+            row_value(row, "first_name", None),
+            row_value(row, "last_name", None),
+            row_value(row, "triggered_by_email", None),
+        ),
+        triggerType=str(row_value(row, "trigger_type", "") or "chat"),
+        status=str(row_value(row, "status", "") or "unknown"),
+        requests=int_row_value(row, "requests"),
+        failedRequests=int_row_value(row, "failed_requests"),
+        inputTokens=input_tokens,
+        outputTokens=output_tokens,
+        totalTokens=input_tokens + output_tokens,
+        costUsd=row_value(row, "cost_usd", Decimal("0")) or Decimal("0"),
+        toolCalls=int_row_value(row, "tool_calls"),
+        failedToolCalls=int_row_value(row, "failed_tool_calls"),
+        traceId=str(row_value(row, "trace_id", "") or ""),
+        spanId=str(row_value(row, "span_id", "") or ""),
+        startedAt=row_value(row, "started_at"),
+        finishedAt=row_value(row, "finished_at", None),
+        error=str(row_value(row, "error", "") or ""),
+    )
+
+
+def workspace_observability_attention_items(
+    *,
+    usage: UsageSummaryResponse,
+    summary: WorkspaceObservabilityDashboardSummary,
+    recent_runs: list[WorkspaceObservabilityAgentRunRow],
+    top_tools: list[WorkspaceObservabilityTopToolRow],
+) -> list[WorkspaceObservabilityAttentionItem]:
+    items: list[WorkspaceObservabilityAttentionItem] = []
+
+    def add(key: str, label: str, detail: str, severity: str, href: str = "") -> None:
+        items.append(
+            WorkspaceObservabilityAttentionItem(
+                key=key,
+                label=label,
+                detail=detail,
+                severity=severity,
+                href=href,
+            )
+        )
+
+    for run in [run for run in recent_runs if run.status == "failed"][:3]:
+        add(
+            f"run-{run.id}",
+            f"{run.agent_name} run failed",
+            run.error or f"{run.requests} model calls, {run.tool_calls} tool calls.",
+            "danger",
+            href=f"agent-runs/{run.id}",
+        )
+    if usage.summary.failed:
+        add(
+            "llm-failures",
+            f"{usage.summary.failed} failed model {pluralize(usage.summary.failed, 'request')}",
+            "Review provider errors, model limits, and failing run traces.",
+            "warning",
+        )
+    if summary.failed_tool_calls:
+        failed_tool_label = pluralize(summary.failed_tool_calls, "call")
+        add(
+            "tool-failures",
+            f"{summary.failed_tool_calls} failed MCP tool {failed_tool_label}",
+            "Failures are grouped by tool below so schema, auth, and upstream errors "
+            "are easier to isolate.",
+            "warning",
+        )
+    slow_tools = [tool for tool in top_tools if (tool.p95_duration_ms or 0) >= 5_000]
+    if slow_tools:
+        tool = slow_tools[0]
+        add(
+            "slow-tools",
+            f"{tool.tool_name} has slow p95 latency",
+            f"p95 {format_duration_text(tool.p95_duration_ms)} on {tool.server_name}.",
+            "warning",
+        )
+    if summary.runtime_sessions_needing_attention:
+        runtime_label = pluralize(summary.runtime_sessions_needing_attention, "session")
+        add(
+            "runtime-sessions",
+            f"{summary.runtime_sessions_needing_attention} runtime {runtime_label} need review",
+            "Runtime failures can make installed MCP servers fail after selection.",
+            "warning",
+        )
+    if summary.unattributed_tool_calls:
+        unattributed_tool_label = pluralize(summary.unattributed_tool_calls, "call")
+        add(
+            "unattributed-tools",
+            f"{summary.unattributed_tool_calls} unattributed tool {unattributed_tool_label}",
+            "Missing user, agent, or run IDs make audit trails harder to follow.",
+            "info",
+        )
+    if not items:
+        add(
+            "healthy",
+            "No active observability issues",
+            "Recent agent turns, model calls, and MCP tool calls are not showing triage signals.",
+            "success",
+        )
+    severity_order = {"danger": 0, "warning": 1, "info": 2, "success": 3}
+    return sorted(items, key=lambda item: severity_order.get(item.severity, 9))[:8]
+
+
 def dashboard_workspace_row(row) -> OrganizationDashboardWorkspaceRow:
     return OrganizationDashboardWorkspaceRow(
         id=row_value(row, "id"),
@@ -1046,6 +1219,129 @@ def dashboard_tool_row(row) -> OrganizationDashboardToolRow:
         averageDurationMs=optional_duration(row_value(row, "average_duration_ms", None)),
         p95DurationMs=optional_duration(row_value(row, "p95_duration_ms", None)),
         lastCalledAt=row_value(row, "last_called_at", None),
+    )
+
+
+async def workspace_observability_dashboard(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    breakdown_limit: int = DASHBOARD_DEFAULT_LIMIT,
+) -> WorkspaceObservabilityDashboardResponse:
+    if not 1 <= breakdown_limit <= DASHBOARD_MAX_LIMIT:
+        raise ValueError(f"breakdownLimit must be between 1 and {DASHBOARD_MAX_LIMIT}")
+
+    usage = await workspace_usage_summary(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_limit=breakdown_limit,
+    )
+    window = resolve_usage_summary_window(start_date=start_date, end_date=end_date)
+    control = await repository.workspace_observability_control_counts(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        started_at_from=window.started_at_from,
+        started_at_to=window.started_at_to,
+    )
+    tool_totals = await repository.workspace_observability_tool_usage_totals(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        started_at_from=window.started_at_from,
+        started_at_to=window.started_at_to,
+    )
+    llm_attribution = await repository.workspace_observability_llm_attribution_counts(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        started_at_from=window.started_at_from,
+        started_at_to=window.started_at_to,
+    )
+    tool_rows = await repository.workspace_observability_top_tool_rows(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        started_at_from=window.started_at_from,
+        started_at_to=window.started_at_to,
+        limit=breakdown_limit,
+    )
+    run_rows = await repository.workspace_observability_recent_run_rows(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        started_at_from=window.started_at_from,
+        started_at_to=window.started_at_to,
+        limit=max(10, breakdown_limit),
+    )
+    top_tools = [workspace_observability_top_tool_row(row) for row in tool_rows]
+    recent_runs = [workspace_observability_run_row(row) for row in run_rows]
+    tool_total = int_row_value(tool_totals, "tool_calls")
+    tool_failed = int_row_value(tool_totals, "failed_tool_calls")
+    running_tools = int_row_value(tool_totals, "running_tool_calls")
+    completed_tools = max(tool_total - running_tools, 0)
+    attributed_tool_calls = int_row_value(tool_totals, "attributed_tool_calls")
+    unattributed_tool_calls = int_row_value(tool_totals, "unattributed_tool_calls")
+    p95_tool_duration_ms = optional_duration(row_value(tool_totals, "p95_tool_duration_ms", None))
+    runtime_attention = int_row_value(control, "runtime_sessions_needing_attention")
+    summary = WorkspaceObservabilityDashboardSummary(
+        healthScore=workspace_observability_health_score(
+            usage=usage,
+            runtime_attention=runtime_attention,
+            failed_agent_runs=int_row_value(control, "failed_agent_runs"),
+            tool_total=tool_total,
+            tool_failed=tool_failed,
+            running_tool_calls=running_tools,
+            p95_tool_duration_ms=p95_tool_duration_ms,
+            unattributed_tool_calls=unattributed_tool_calls,
+        ),
+        agentRuns=int_row_value(control, "agent_runs"),
+        failedAgentRuns=int_row_value(control, "failed_agent_runs"),
+        runningAgentRuns=int_row_value(control, "running_agent_runs"),
+        requests=usage.summary.requests,
+        requestSuccessRate=success_rate(
+            usage.summary.succeeded,
+            usage.summary.succeeded + usage.summary.failed,
+        ),
+        failedRequests=usage.summary.failed,
+        totalTokens=usage.summary.total_tokens,
+        costUsd=usage.summary.cost_usd,
+        toolCalls=tool_total,
+        toolSuccessRate=success_rate(completed_tools - tool_failed, completed_tools),
+        failedToolCalls=tool_failed,
+        runningToolCalls=running_tools,
+        averageToolDurationMs=optional_duration(
+            row_value(tool_totals, "average_tool_duration_ms", None)
+        ),
+        p95ToolDurationMs=p95_tool_duration_ms,
+        attributedToolCalls=attributed_tool_calls,
+        unattributedToolCalls=unattributed_tool_calls,
+        attributedLlmCalls=int_row_value(llm_attribution, "attributed_llm_calls"),
+        unattributedLlmCalls=int_row_value(llm_attribution, "unattributed_llm_calls"),
+        activeRuntimeSessions=int_row_value(control, "active_runtime_sessions"),
+        runtimeSessionsNeedingAttention=runtime_attention,
+    )
+    return WorkspaceObservabilityDashboardResponse(
+        window=usage.window,
+        summary=summary,
+        activity=usage.daily,
+        attention=workspace_observability_attention_items(
+            usage=usage,
+            summary=summary,
+            recent_runs=recent_runs,
+            top_tools=top_tools,
+        ),
+        topTools=top_tools,
+        topModels=usage.by_model[:breakdown_limit],
+        topAgents=usage.by_agent[:breakdown_limit],
+        topUsers=usage.by_user[:breakdown_limit],
+        recentRuns=recent_runs,
     )
 
 

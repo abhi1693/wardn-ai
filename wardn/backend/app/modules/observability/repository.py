@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import and_, case, desc, func, literal, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents.models import Agent
+from app.modules.agents.models import Agent, AgentRun
 from app.modules.limits.models import ResourceLimit, UsageBudget
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.mcp_registry.models import (
@@ -709,6 +709,273 @@ async def organization_dashboard_top_tool_rows(
             Workspace.name,
         )
         .order_by(desc(call_count), desc(failed_calls), MCPToolInvocation.server_name.asc())
+        .limit(limit)
+    )
+    return list(result.mappings().all())
+
+
+async def workspace_observability_control_counts(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    started_at_from: datetime,
+    started_at_to: datetime,
+):
+    runtime_attention_condition = or_(
+        MCPRuntimeSession.status.in_(ATTENTION_RUNTIME_SESSION_STATUSES),
+        MCPRuntimeSession.failure_count > 0,
+        MCPRuntimeSession.last_error != "",
+    )
+    run_result = await session.execute(
+        select(
+            func.count(AgentRun.id).label("agent_runs"),
+            count_if(AgentRun.status == "failed").label("failed_agent_runs"),
+            count_if(AgentRun.status == "running").label("running_agent_runs"),
+        ).where(
+            AgentRun.organization_id == organization_id,
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.started_at >= started_at_from,
+            AgentRun.started_at < started_at_to,
+        )
+    )
+    runtime_result = await session.execute(
+        select(
+            count_if(MCPRuntimeSession.status.in_(ACTIVE_RUNTIME_SESSION_STATUSES)).label(
+                "active_runtime_sessions"
+            ),
+            count_if(runtime_attention_condition).label(
+                "runtime_sessions_needing_attention"
+            ),
+        ).where(
+            MCPRuntimeSession.organization_id == organization_id,
+            MCPRuntimeSession.workspace_id == workspace_id,
+        )
+    )
+    return {
+        **run_result.mappings().one(),
+        **runtime_result.mappings().one(),
+    }
+
+
+async def workspace_observability_tool_usage_totals(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    started_at_from: datetime,
+    started_at_to: datetime,
+):
+    result = await session.execute(
+        select(
+            func.count(MCPToolInvocation.id).label("tool_calls"),
+            count_if(
+                or_(
+                    MCPToolInvocation.status == "failed",
+                    MCPToolInvocation.is_error.is_(True),
+                )
+            ).label("failed_tool_calls"),
+            count_if(MCPToolInvocation.status == "running").label("running_tool_calls"),
+            count_if(
+                or_(
+                    MCPToolInvocation.user_id.is_not(None),
+                    MCPToolInvocation.agent_id.is_not(None),
+                    MCPToolInvocation.agent_run_id.is_not(None),
+                )
+            ).label("attributed_tool_calls"),
+            count_if(
+                and_(
+                    MCPToolInvocation.user_id.is_(None),
+                    MCPToolInvocation.agent_id.is_(None),
+                    MCPToolInvocation.agent_run_id.is_(None),
+                )
+            ).label("unattributed_tool_calls"),
+            func.avg(MCPToolInvocation.duration_ms).label("average_tool_duration_ms"),
+            func.percentile_cont(0.95)
+            .within_group(MCPToolInvocation.duration_ms)
+            .label("p95_tool_duration_ms"),
+        ).where(
+            *mcp_tool_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
+            )
+        )
+    )
+    return result.mappings().one()
+
+
+async def workspace_observability_llm_attribution_counts(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    started_at_from: datetime,
+    started_at_to: datetime,
+):
+    result = await session.execute(
+        select(
+            count_if(
+                or_(
+                    LLMUsageRecord.user_id.is_not(None),
+                    LLMUsageRecord.agent_id.is_not(None),
+                    LLMUsageRecord.agent_run_id.is_not(None),
+                )
+            ).label("attributed_llm_calls"),
+            count_if(
+                and_(
+                    LLMUsageRecord.user_id.is_(None),
+                    LLMUsageRecord.agent_id.is_(None),
+                    LLMUsageRecord.agent_run_id.is_(None),
+                )
+            ).label("unattributed_llm_calls"),
+        ).where(
+            *llm_usage_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
+            )
+        )
+    )
+    return result.mappings().one()
+
+
+async def workspace_observability_top_tool_rows(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    started_at_from: datetime,
+    started_at_to: datetime,
+    limit: int,
+):
+    failed_calls = count_if(
+        or_(
+            MCPToolInvocation.status == "failed",
+            MCPToolInvocation.is_error.is_(True),
+        )
+    )
+    call_count = func.count(MCPToolInvocation.id)
+    result = await session.execute(
+        select(
+            MCPToolInvocation.server_name,
+            MCPToolInvocation.tool_name,
+            call_count.label("calls"),
+            failed_calls.label("failed"),
+            func.avg(MCPToolInvocation.duration_ms).label("average_duration_ms"),
+            func.percentile_cont(0.95)
+            .within_group(MCPToolInvocation.duration_ms)
+            .label("p95_duration_ms"),
+            func.max(MCPToolInvocation.started_at).label("last_called_at"),
+        )
+        .where(
+            *mcp_tool_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
+            )
+        )
+        .group_by(MCPToolInvocation.server_name, MCPToolInvocation.tool_name)
+        .order_by(desc(failed_calls), desc(call_count), MCPToolInvocation.server_name.asc())
+        .limit(limit)
+    )
+    return list(result.mappings().all())
+
+
+async def workspace_observability_recent_run_rows(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    started_at_from: datetime,
+    started_at_to: datetime,
+    limit: int,
+):
+    llm_usage = (
+        select(
+            LLMUsageRecord.agent_run_id.label("agent_run_id"),
+            func.count(LLMUsageRecord.id).label("requests"),
+            count_if(LLMUsageRecord.status == "failed").label("failed_requests"),
+            func.coalesce(func.sum(LLMUsageRecord.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(LLMUsageRecord.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0).label("cost_usd"),
+            func.max(LLMUsageRecord.trace_id).label("trace_id"),
+            func.max(LLMUsageRecord.span_id).label("span_id"),
+        )
+        .where(
+            *llm_usage_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
+            ),
+            LLMUsageRecord.agent_run_id.is_not(None),
+        )
+        .group_by(LLMUsageRecord.agent_run_id)
+        .subquery()
+    )
+    tool_usage = (
+        select(
+            MCPToolInvocation.agent_run_id.label("agent_run_id"),
+            func.count(MCPToolInvocation.id).label("tool_calls"),
+            count_if(
+                or_(
+                    MCPToolInvocation.status == "failed",
+                    MCPToolInvocation.is_error.is_(True),
+                )
+            ).label("failed_tool_calls"),
+        )
+        .where(
+            *mcp_tool_scope_filters(
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                started_at_from=started_at_from,
+                started_at_to=started_at_to,
+            ),
+            MCPToolInvocation.agent_run_id.is_not(None),
+        )
+        .group_by(MCPToolInvocation.agent_run_id)
+        .subquery()
+    )
+    result = await session.execute(
+        select(
+            AgentRun.id,
+            AgentRun.agent_id,
+            Agent.name.label("agent_name"),
+            AgentRun.triggered_by_id,
+            User.email.label("triggered_by_email"),
+            User.first_name,
+            User.last_name,
+            AgentRun.trigger_type,
+            AgentRun.status,
+            func.coalesce(llm_usage.c.requests, 0).label("requests"),
+            func.coalesce(llm_usage.c.failed_requests, 0).label("failed_requests"),
+            func.coalesce(llm_usage.c.input_tokens, 0).label("input_tokens"),
+            func.coalesce(llm_usage.c.output_tokens, 0).label("output_tokens"),
+            func.coalesce(llm_usage.c.cost_usd, 0).label("cost_usd"),
+            func.coalesce(tool_usage.c.tool_calls, 0).label("tool_calls"),
+            func.coalesce(tool_usage.c.failed_tool_calls, 0).label("failed_tool_calls"),
+            func.coalesce(llm_usage.c.trace_id, "").label("trace_id"),
+            func.coalesce(llm_usage.c.span_id, "").label("span_id"),
+            AgentRun.started_at,
+            AgentRun.finished_at,
+            AgentRun.error,
+        )
+        .select_from(AgentRun)
+        .join(Agent, Agent.id == AgentRun.agent_id)
+        .outerjoin(User, User.id == AgentRun.triggered_by_id)
+        .outerjoin(llm_usage, llm_usage.c.agent_run_id == AgentRun.id)
+        .outerjoin(tool_usage, tool_usage.c.agent_run_id == AgentRun.id)
+        .where(
+            AgentRun.organization_id == organization_id,
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.started_at >= started_at_from,
+            AgentRun.started_at < started_at_to,
+        )
+        .order_by(AgentRun.started_at.desc(), AgentRun.created_at.desc())
         .limit(limit)
     )
     return list(result.mappings().all())

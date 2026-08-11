@@ -672,6 +672,196 @@ async def test_organization_dashboard_composes_usage_and_control_signals(monkeyp
     }
 
 
+@pytest.mark.asyncio
+async def test_workspace_observability_dashboard_composes_triage_signals(monkeypatch) -> None:
+    organization_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    async def workspace_usage_summary(*args, **kwargs):
+        assert kwargs["organization_id"] == organization_id
+        assert kwargs["workspace_id"] == workspace_id
+        return service.UsageSummaryResponse(
+            window=service.UsageSummaryWindow(
+                startDate=date(2026, 7, 1),
+                endDate=date(2026, 7, 10),
+                timezone="UTC",
+                breakdownLimit=8,
+            ),
+            summary=service.UsageSummaryTotals(
+                requests=5,
+                succeeded=4,
+                failed=1,
+                running=0,
+                inputTokens=1000,
+                outputTokens=400,
+                totalTokens=1400,
+                costUsd=Decimal("0.42"),
+                toolCalls=9,
+            ),
+            byUser=[
+                service.UsageSummaryBreakdownRow(
+                    id=str(user_id),
+                    label="Asha Rao",
+                    requests=5,
+                    inputTokens=1000,
+                    outputTokens=400,
+                    totalTokens=1400,
+                    costUsd=Decimal("0.42"),
+                    toolCalls=9,
+                )
+            ],
+            byWorkspace=[],
+            byAgent=[
+                service.UsageSummaryBreakdownRow(
+                    id=str(agent_id),
+                    label="Triage agent",
+                    requests=5,
+                    inputTokens=1000,
+                    outputTokens=400,
+                    totalTokens=1400,
+                    costUsd=Decimal("0.42"),
+                    toolCalls=9,
+                )
+            ],
+            byModel=[
+                service.UsageSummaryBreakdownRow(
+                    id="openai:gpt-4.1-mini",
+                    label="openai / gpt-4.1-mini",
+                    requests=5,
+                    inputTokens=1000,
+                    outputTokens=400,
+                    totalTokens=1400,
+                    costUsd=Decimal("0.42"),
+                    toolCalls=0,
+                )
+            ],
+            daily=[],
+        )
+
+    async def control_counts(*args, **kwargs):
+        assert kwargs["started_at_from"] == datetime(2026, 7, 1, tzinfo=UTC)
+        assert kwargs["started_at_to"] == datetime(2026, 7, 11, tzinfo=UTC)
+        return {
+            "agent_runs": 3,
+            "failed_agent_runs": 1,
+            "running_agent_runs": 1,
+            "active_runtime_sessions": 2,
+            "runtime_sessions_needing_attention": 1,
+        }
+
+    async def tool_totals(*args, **kwargs):
+        assert kwargs["started_at_from"] == datetime(2026, 7, 1, tzinfo=UTC)
+        assert kwargs["started_at_to"] == datetime(2026, 7, 11, tzinfo=UTC)
+        return {
+            "tool_calls": 9,
+            "failed_tool_calls": 2,
+            "running_tool_calls": 1,
+            "attributed_tool_calls": 8,
+            "unattributed_tool_calls": 1,
+            "average_tool_duration_ms": 1450.4,
+            "p95_tool_duration_ms": 6200,
+        }
+
+    async def top_tool_rows(*args, **kwargs):
+        return [
+            {
+                "server_name": "acme/github",
+                "tool_name": "search_issues",
+                "calls": 9,
+                "failed": 2,
+                "average_duration_ms": 1450.4,
+                "p95_duration_ms": 6200,
+                "last_called_at": datetime(2026, 7, 10, 12, tzinfo=UTC),
+            }
+        ]
+
+    async def llm_attribution_counts(*args, **kwargs):
+        assert kwargs["started_at_from"] == datetime(2026, 7, 1, tzinfo=UTC)
+        assert kwargs["started_at_to"] == datetime(2026, 7, 11, tzinfo=UTC)
+        return {
+            "attributed_llm_calls": 4,
+            "unattributed_llm_calls": 1,
+        }
+
+    async def recent_run_rows(*args, **kwargs):
+        return [
+            {
+                "id": run_id,
+                "agent_id": agent_id,
+                "agent_name": "Triage agent",
+                "triggered_by_id": user_id,
+                "triggered_by_email": "asha@example.com",
+                "first_name": "Asha",
+                "last_name": "Rao",
+                "trigger_type": "chat",
+                "status": "failed",
+                "requests": 5,
+                "failed_requests": 1,
+                "input_tokens": 1000,
+                "output_tokens": 400,
+                "cost_usd": Decimal("0.42"),
+                "tool_calls": 9,
+                "failed_tool_calls": 2,
+                "trace_id": "trace-1",
+                "span_id": "span-1",
+                "started_at": datetime(2026, 7, 10, 12, tzinfo=UTC),
+                "finished_at": datetime(2026, 7, 10, 12, 1, tzinfo=UTC),
+                "error": "Provider timeout",
+            }
+        ]
+
+    monkeypatch.setattr(service, "workspace_usage_summary", workspace_usage_summary)
+    monkeypatch.setattr(
+        service.repository,
+        "workspace_observability_control_counts",
+        control_counts,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "workspace_observability_tool_usage_totals",
+        tool_totals,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "workspace_observability_llm_attribution_counts",
+        llm_attribution_counts,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "workspace_observability_top_tool_rows",
+        top_tool_rows,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "workspace_observability_recent_run_rows",
+        recent_run_rows,
+    )
+
+    response = await service.workspace_observability_dashboard(
+        object(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 10),
+    )
+
+    assert response.summary.health_score < 100
+    assert response.summary.tool_calls == 9
+    assert response.summary.p95_tool_duration_ms == 6200
+    assert response.summary.unattributed_llm_calls == 1
+    assert response.recent_runs[0].trace_id == "trace-1"
+    assert response.recent_runs[0].triggered_by_display_name == "Asha Rao"
+    assert response.top_tools[0].error_rate == 22.2
+    assert {item.key for item in response.attention} >= {
+        f"run-{run_id}",
+        "tool-failures",
+        "slow-tools",
+    }
+
+
 def test_usage_summary_window_defaults_to_thirty_days() -> None:
     window = service.resolve_usage_summary_window(today=date(2026, 7, 16))
 

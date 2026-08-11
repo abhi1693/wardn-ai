@@ -25,6 +25,11 @@ from app.modules.observability.schemas import (
     UsageSummaryTotals,
     UsageSummaryWindow,
     UsageTrendPoint,
+    WorkspaceObservabilityAgentRunRow,
+    WorkspaceObservabilityAttentionItem,
+    WorkspaceObservabilityDashboardResponse,
+    WorkspaceObservabilityDashboardSummary,
+    WorkspaceObservabilityTopToolRow,
 )
 from app.modules.users.dependencies import get_current_user
 from app.modules.users.models import User
@@ -194,6 +199,93 @@ def dashboard_response() -> OrganizationDashboardResponse:
         ),
         providers=[],
         attention=[],
+    )
+
+
+def workspace_dashboard_response() -> WorkspaceObservabilityDashboardResponse:
+    run_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    return WorkspaceObservabilityDashboardResponse(
+        window=UsageSummaryWindow(
+            startDate=date(2026, 7, 1),
+            endDate=date(2026, 7, 9),
+            timezone="UTC",
+            breakdownLimit=8,
+        ),
+        summary=WorkspaceObservabilityDashboardSummary(
+            healthScore=84,
+            agentRuns=4,
+            failedAgentRuns=1,
+            runningAgentRuns=1,
+            requests=10,
+            requestSuccessRate=90.0,
+            failedRequests=1,
+            totalTokens=1200,
+            costUsd="0.042",
+            toolCalls=25,
+            toolSuccessRate=92.0,
+            failedToolCalls=2,
+            runningToolCalls=1,
+            averageToolDurationMs=180,
+            p95ToolDurationMs=900,
+            attributedToolCalls=24,
+            unattributedToolCalls=1,
+            attributedLlmCalls=9,
+            unattributedLlmCalls=1,
+            activeRuntimeSessions=2,
+            runtimeSessionsNeedingAttention=1,
+        ),
+        activity=[],
+        attention=[
+            WorkspaceObservabilityAttentionItem(
+                key="tool-failures",
+                label="2 failed MCP tool calls",
+                detail="Review failed tools.",
+                severity="warning",
+                href="",
+            )
+        ],
+        topTools=[
+            WorkspaceObservabilityTopToolRow(
+                id="github:search_issues",
+                serverName="github",
+                toolName="search_issues",
+                calls=10,
+                failed=2,
+                errorRate=20.0,
+                averageDurationMs=180,
+                p95DurationMs=900,
+                lastCalledAt=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+            )
+        ],
+        topModels=[],
+        topAgents=[],
+        topUsers=[],
+        recentRuns=[
+            WorkspaceObservabilityAgentRunRow(
+                id=run_id,
+                agentId=agent_id,
+                agentName="Workspace Assistant",
+                triggeredById=TEST_USER_ID,
+                triggeredByEmail="user@example.com",
+                triggeredByDisplayName="Test User",
+                triggerType="chat",
+                status="failed",
+                requests=2,
+                failedRequests=1,
+                inputTokens=100,
+                outputTokens=50,
+                totalTokens=150,
+                costUsd="0.000125",
+                toolCalls=3,
+                failedToolCalls=1,
+                traceId="trace-1",
+                spanId="span-1",
+                startedAt=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+                finishedAt=datetime(2026, 7, 9, 12, 0, 1, tzinfo=UTC),
+                error="Provider timeout",
+            )
+        ],
     )
 
 
@@ -492,6 +584,60 @@ def test_usage_summary_route_rejects_ranges_over_366_days() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "usage summary range cannot exceed 366 days"
+
+
+def test_workspace_observability_dashboard_route(monkeypatch) -> None:
+    seen = {}
+
+    async def workspace_observability_dashboard(
+        session,
+        *,
+        organization_id,
+        workspace_id,
+        start_date,
+        end_date,
+        breakdown_limit,
+    ):
+        seen["organization_id"] = organization_id
+        seen["workspace_id"] = workspace_id
+        seen["start_date"] = start_date
+        seen["end_date"] = end_date
+        seen["breakdown_limit"] = breakdown_limit
+        return workspace_dashboard_response()
+
+    monkeypatch.setattr(
+        observability_router,
+        "require_workspace_member_or_404",
+        fake_require_workspace_member,
+    )
+    monkeypatch.setattr(
+        observability_service,
+        "workspace_observability_dashboard",
+        workspace_observability_dashboard,
+    )
+
+    response = observability_client(authenticated=True).get(
+        workspace_observability_path("/dashboard"),
+        params={
+            "startDate": "2026-07-01",
+            "endDate": "2026-07-09",
+            "breakdownLimit": 8,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["healthScore"] == 84
+    assert payload["summary"]["p95ToolDurationMs"] == 900
+    assert payload["topTools"][0]["errorRate"] == 20.0
+    assert payload["recentRuns"][0]["traceId"] == "trace-1"
+    assert seen == {
+        "organization_id": TEST_ORGANIZATION_ID,
+        "workspace_id": TEST_WORKSPACE_ID,
+        "start_date": date(2026, 7, 1),
+        "end_date": date(2026, 7, 9),
+        "breakdown_limit": 8,
+    }
 
 
 def test_list_mcp_tool_usage_route(monkeypatch) -> None:
