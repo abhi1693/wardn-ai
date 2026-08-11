@@ -1143,17 +1143,17 @@ export function WorkspaceDashboardClient({
           <div className="p-5 md:p-6">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{workspace.currentUserRole}</Badge>
-              <Badge variant={badgeVariant(scoreTone)}>{healthScore}/100 posture</Badge>
-              <span className="text-sm text-muted-foreground">
+              <Badge variant={badgeVariant(scoreTone)}>Posture {healthScore}/100</Badge>
+              <span className="rounded-sm border border-border bg-muted/35 px-2 py-0.5 text-xs text-muted-foreground">
                 {usage.window.startDate} to {usage.window.endDate}
               </span>
             </div>
-            <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <h2 className="text-2xl font-semibold leading-8 text-foreground md:text-3xl md:leading-10">
                   {workspace.name}
                 </h2>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                   {activeAgents > 0
                     ? "Workspace assistant ready"
                     : "Workspace assistant not started"}
@@ -1162,7 +1162,7 @@ export function WorkspaceDashboardClient({
                   {formatCount(runtime.toolCalls.total)} MCP tool calls.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2 sm:flex-nowrap lg:justify-end">
                 <Button asChild size="sm">
                   <Link href={chatPath}>
                     <MessageSquare className="size-4" />
