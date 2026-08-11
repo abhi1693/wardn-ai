@@ -9203,6 +9203,442 @@
         "title": "WorkspaceListResponse",
         "type": "object"
       },
+      "WorkspaceObservabilityAgentRunRow": {
+        "properties": {
+          "agentId": {
+            "format": "uuid",
+            "title": "Agentid",
+            "type": "string"
+          },
+          "agentName": {
+            "title": "Agentname",
+            "type": "string"
+          },
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "failedRequests": {
+            "title": "Failedrequests",
+            "type": "integer"
+          },
+          "failedToolCalls": {
+            "title": "Failedtoolcalls",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputTokens": {
+            "title": "Inputtokens",
+            "type": "integer"
+          },
+          "outputTokens": {
+            "title": "Outputtokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "spanId": {
+            "title": "Spanid",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "title": "Startedat",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          },
+          "traceId": {
+            "title": "Traceid",
+            "type": "string"
+          },
+          "triggerType": {
+            "title": "Triggertype",
+            "type": "string"
+          },
+          "triggeredByDisplayName": {
+            "title": "Triggeredbydisplayname",
+            "type": "string"
+          },
+          "triggeredByEmail": {
+            "title": "Triggeredbyemail",
+            "type": "string"
+          },
+          "triggeredById": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggeredbyid"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "agentName",
+          "triggeredByEmail",
+          "triggeredByDisplayName",
+          "triggerType",
+          "status",
+          "requests",
+          "failedRequests",
+          "inputTokens",
+          "outputTokens",
+          "totalTokens",
+          "costUsd",
+          "toolCalls",
+          "failedToolCalls",
+          "traceId",
+          "spanId",
+          "startedAt",
+          "error"
+        ],
+        "title": "WorkspaceObservabilityAgentRunRow",
+        "type": "object"
+      },
+      "WorkspaceObservabilityAttentionItem": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "href": {
+            "default": "",
+            "title": "Href",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "detail",
+          "severity"
+        ],
+        "title": "WorkspaceObservabilityAttentionItem",
+        "type": "object"
+      },
+      "WorkspaceObservabilityDashboardResponse": {
+        "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/UsageTrendPoint"
+            },
+            "title": "Activity",
+            "type": "array"
+          },
+          "attention": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceObservabilityAttentionItem"
+            },
+            "title": "Attention",
+            "type": "array"
+          },
+          "recentRuns": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceObservabilityAgentRunRow"
+            },
+            "title": "Recentruns",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/WorkspaceObservabilityDashboardSummary"
+          },
+          "topAgents": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Topagents",
+            "type": "array"
+          },
+          "topModels": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Topmodels",
+            "type": "array"
+          },
+          "topTools": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceObservabilityTopToolRow"
+            },
+            "title": "Toptools",
+            "type": "array"
+          },
+          "topUsers": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBreakdownRow"
+            },
+            "title": "Topusers",
+            "type": "array"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageSummaryWindow"
+          }
+        },
+        "required": [
+          "window",
+          "summary",
+          "activity",
+          "attention",
+          "topTools",
+          "topModels",
+          "topAgents",
+          "topUsers",
+          "recentRuns"
+        ],
+        "title": "WorkspaceObservabilityDashboardResponse",
+        "type": "object"
+      },
+      "WorkspaceObservabilityDashboardSummary": {
+        "properties": {
+          "activeRuntimeSessions": {
+            "title": "Activeruntimesessions",
+            "type": "integer"
+          },
+          "agentRuns": {
+            "title": "Agentruns",
+            "type": "integer"
+          },
+          "attributedLlmCalls": {
+            "title": "Attributedllmcalls",
+            "type": "integer"
+          },
+          "attributedToolCalls": {
+            "title": "Attributedtoolcalls",
+            "type": "integer"
+          },
+          "averageToolDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Averagetooldurationms"
+          },
+          "costUsd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Costusd",
+            "type": "string"
+          },
+          "failedAgentRuns": {
+            "title": "Failedagentruns",
+            "type": "integer"
+          },
+          "failedRequests": {
+            "title": "Failedrequests",
+            "type": "integer"
+          },
+          "failedToolCalls": {
+            "title": "Failedtoolcalls",
+            "type": "integer"
+          },
+          "healthScore": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Healthscore",
+            "type": "integer"
+          },
+          "p95ToolDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95Tooldurationms"
+          },
+          "requestSuccessRate": {
+            "title": "Requestsuccessrate",
+            "type": "number"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "runningAgentRuns": {
+            "title": "Runningagentruns",
+            "type": "integer"
+          },
+          "runningToolCalls": {
+            "title": "Runningtoolcalls",
+            "type": "integer"
+          },
+          "runtimeSessionsNeedingAttention": {
+            "title": "Runtimesessionsneedingattention",
+            "type": "integer"
+          },
+          "toolCalls": {
+            "title": "Toolcalls",
+            "type": "integer"
+          },
+          "toolSuccessRate": {
+            "title": "Toolsuccessrate",
+            "type": "number"
+          },
+          "totalTokens": {
+            "title": "Totaltokens",
+            "type": "integer"
+          },
+          "unattributedLlmCalls": {
+            "title": "Unattributedllmcalls",
+            "type": "integer"
+          },
+          "unattributedToolCalls": {
+            "title": "Unattributedtoolcalls",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "healthScore",
+          "agentRuns",
+          "failedAgentRuns",
+          "runningAgentRuns",
+          "requests",
+          "requestSuccessRate",
+          "failedRequests",
+          "totalTokens",
+          "costUsd",
+          "toolCalls",
+          "toolSuccessRate",
+          "failedToolCalls",
+          "runningToolCalls",
+          "attributedToolCalls",
+          "unattributedToolCalls",
+          "attributedLlmCalls",
+          "unattributedLlmCalls",
+          "activeRuntimeSessions",
+          "runtimeSessionsNeedingAttention"
+        ],
+        "title": "WorkspaceObservabilityDashboardSummary",
+        "type": "object"
+      },
+      "WorkspaceObservabilityTopToolRow": {
+        "properties": {
+          "averageDurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Averagedurationms"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "errorRate": {
+            "title": "Errorrate",
+            "type": "number"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lastCalledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastcalledat"
+          },
+          "p95DurationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95Durationms"
+          },
+          "serverName": {
+            "title": "Servername",
+            "type": "string"
+          },
+          "toolName": {
+            "title": "Toolname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "serverName",
+          "toolName",
+          "calls",
+          "failed",
+          "errorRate"
+        ],
+        "title": "WorkspaceObservabilityTopToolRow",
+        "type": "object"
+      },
       "WorkspaceRead": {
         "properties": {
           "createdAt": {
@@ -22346,6 +22782,141 @@
         "summary": "Get Workspace Mcp Runtime Summary",
         "tags": [
           "workspace-mcp-runtime"
+        ]
+      }
+    },
+    "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}/observability/dashboard": {
+      "get": {
+        "operationId": "workspace_observability_dashboard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endDate",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "in": "query",
+            "name": "breakdownLimit",
+            "required": false,
+            "schema": {
+              "default": 8,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Breakdownlimit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceObservabilityDashboardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Workspace Observability Dashboard Route",
+        "tags": [
+          "workspace-observability"
         ]
       }
     },
