@@ -39,6 +39,8 @@ from app.modules.organizations.schemas import (
     MemberListResponse,
     MemberRead,
     MembershipRoleUpdate,
+    PendingInvitationListResponse,
+    PendingInvitationRead,
 )
 from app.modules.organizations.service import (
     ORG_ADMIN_ROLES,
@@ -89,6 +91,23 @@ def invitation_response(invitation: MembershipInvitation) -> InvitationRead:
         accepted_at=invitation.accepted_at,
         created_at=invitation.created_at,
         updated_at=invitation.updated_at,
+    )
+
+
+def pending_invitation_response(
+    invitation: MembershipInvitation,
+    organization: Organization,
+    workspace: Workspace | None,
+) -> PendingInvitationRead:
+    return PendingInvitationRead(
+        id=invitation.id,
+        role=invitation.role,
+        scope_type=cast(Literal["organization", "workspace"], invitation.scope_type),
+        organization_id=organization.id,
+        organization_name=organization.name,
+        workspace_id=workspace.id if workspace else None,
+        workspace_name=workspace.name if workspace else None,
+        expires_at=invitation.expires_at,
     )
 
 
@@ -617,6 +636,55 @@ async def _active_invitation(
     return invitation, organization, workspace
 
 
+async def _active_pending_invitation_by_id(
+    session: AsyncSession,
+    invitation_id: uuid.UUID,
+    user: User,
+    *,
+    for_update: bool = False,
+) -> tuple[MembershipInvitation, Organization, Workspace | None]:
+    invitation = await repository.get_pending_invitation_for_email_by_id(
+        session,
+        invitation_id=invitation_id,
+        email=normalize_email(user.email),
+        for_update=for_update,
+    )
+    if invitation is None:
+        raise InvitationNotFoundError("invitation is invalid or no longer available")
+    if invitation_status(invitation) == "expired":
+        raise InvitationExpiredError("invitation has expired")
+    organization = await repository.get_organization_by_id(session, invitation.organization_id)
+    if organization is None or organization.status != "active":
+        raise OrganizationNotFoundError("organization not found")
+    workspace = None
+    if invitation.workspace_id is not None:
+        workspace = await repository.get_workspace_by_id(session, invitation.workspace_id)
+        if (
+            workspace is None
+            or workspace.organization_id != organization.id
+            or workspace.status != "active"
+        ):
+            raise WorkspaceNotFoundError("workspace not found")
+    return invitation, organization, workspace
+
+
+async def list_pending_invitations_for_user(
+    session: AsyncSession,
+    user: User,
+) -> PendingInvitationListResponse:
+    rows = await repository.list_pending_invitations_for_email(
+        session,
+        email=normalize_email(user.email),
+        now=datetime.now(UTC),
+    )
+    return PendingInvitationListResponse(
+        invitations=[
+            pending_invitation_response(invitation, organization, workspace)
+            for invitation, organization, workspace in rows
+        ]
+    )
+
+
 async def preview_invitation(
     session: AsyncSession,
     token: str,
@@ -746,6 +814,20 @@ async def accept_invitation(
     invitation, organization, workspace = await _active_invitation(
         session,
         token,
+        for_update=True,
+    )
+    return await _accept_invitation(session, invitation, organization, workspace, user)
+
+
+async def accept_pending_invitation(
+    session: AsyncSession,
+    invitation_id: uuid.UUID,
+    user: User,
+) -> InvitationAcceptanceRead:
+    invitation, organization, workspace = await _active_pending_invitation_by_id(
+        session,
+        invitation_id,
+        user,
         for_update=True,
     )
     return await _accept_invitation(session, invitation, organization, workspace, user)

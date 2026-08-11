@@ -7,10 +7,57 @@
 import type {
   InvitationAcceptanceRead,
   InvitationPreview,
-  InvitationRegistration
+  InvitationRegistration,
+  PendingInvitationListResponse
 } from '../model';
 
 import { apiRequest } from '../../client';
+
+export const getInvitationsPendingListUrl = () => {
+
+
+
+
+  return `/api/v1/invitations/pending`
+}
+
+/**
+ * @summary List Pending Invitations
+ */
+export const invitationsPendingList = async ( options?: Parameters<typeof apiRequest>[1]): Promise<PendingInvitationListResponse> => {
+
+  return apiRequest<PendingInvitationListResponse>(getInvitationsPendingListUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export const getInvitationsPendingAcceptUrl = (invitationId: string,) => {
+
+
+
+
+  return `/api/v1/invitations/pending/${invitationId}/accept`
+}
+
+/**
+ * @summary Accept Pending Invitation
+ */
+export const invitationsPendingAccept = async (invitationId: string, options?: Parameters<typeof apiRequest>[1]): Promise<InvitationAcceptanceRead> => {
+
+  return apiRequest<InvitationAcceptanceRead>(getInvitationsPendingAcceptUrl(invitationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
 
 export const getInvitationsPreviewUrl = (token: string,) => {
 
@@ -33,6 +80,8 @@ export const invitationsPreview = async (token: string, options?: Parameters<typ
 
   }
 );}
+
+
 export const getInvitationsAcceptUrl = (token: string,) => {
 
 
@@ -78,3 +127,5 @@ export const invitationsRegister = async (token: string,
     body: JSON.stringify(invitationRegistration)
   }
 );}
+
+

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -478,6 +479,46 @@ async def get_invitation_by_token_hash(
     for_update: bool = False,
 ) -> MembershipInvitation | None:
     statement = select(MembershipInvitation).where(MembershipInvitation.token_hash == token_hash)
+    if for_update:
+        statement = statement.with_for_update()
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def list_pending_invitations_for_email(
+    session: AsyncSession,
+    *,
+    email: str,
+    now: datetime,
+) -> list[tuple[MembershipInvitation, Organization, Workspace | None]]:
+    result = await session.execute(
+        select(MembershipInvitation, Organization, Workspace)
+        .join(Organization, Organization.id == MembershipInvitation.organization_id)
+        .outerjoin(Workspace, Workspace.id == MembershipInvitation.workspace_id)
+        .where(
+            func.lower(MembershipInvitation.email) == email.casefold(),
+            MembershipInvitation.status == "pending",
+            MembershipInvitation.expires_at > now,
+            Organization.status == "active",
+            (MembershipInvitation.workspace_id.is_(None)) | (Workspace.status == "active"),
+        )
+        .order_by(MembershipInvitation.created_at.desc(), MembershipInvitation.id.desc())
+    )
+    return list(result.tuples().all())
+
+
+async def get_pending_invitation_for_email_by_id(
+    session: AsyncSession,
+    *,
+    invitation_id: uuid.UUID,
+    email: str,
+    for_update: bool = False,
+) -> MembershipInvitation | None:
+    statement = select(MembershipInvitation).where(
+        MembershipInvitation.id == invitation_id,
+        func.lower(MembershipInvitation.email) == email.casefold(),
+        MembershipInvitation.status == "pending",
+    )
     if for_update:
         statement = statement.with_for_update()
     result = await session.execute(statement)

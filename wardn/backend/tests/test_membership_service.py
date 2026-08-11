@@ -459,6 +459,110 @@ async def test_accept_workspace_invitation_creates_required_memberships(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_list_pending_invitations_for_user_returns_current_email_invites(monkeypatch) -> None:
+    organization = Organization(
+        id=uuid4(),
+        name="Platform",
+        slug="platform",
+        status="active",
+    )
+    workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization.id,
+        name="Production",
+        slug="production",
+        status="active",
+    )
+    invitation = MembershipInvitation(
+        id=uuid4(),
+        organization_id=organization.id,
+        workspace_id=workspace.id,
+        scope_type="workspace",
+        email="member@example.com",
+        role="admin",
+        token_hash="hash",
+        status="pending",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+    )
+    user = User(id=uuid4(), email="Member@Example.com", is_active=True)
+    seen = {}
+
+    async def list_pending(*args, **kwargs):
+        seen.update(kwargs)
+        return [(invitation, organization, workspace)]
+
+    monkeypatch.setattr(
+        membership_service.repository,
+        "list_pending_invitations_for_email",
+        list_pending,
+    )
+
+    response = await membership_service.list_pending_invitations_for_user(FakeSession(), user)
+
+    assert seen["email"] == "member@example.com"
+    assert response.invitations[0].id == invitation.id
+    assert response.invitations[0].organization_name == "Platform"
+    assert response.invitations[0].workspace_name == "Production"
+
+
+@pytest.mark.asyncio
+async def test_accept_pending_invitation_by_id_uses_current_user_email(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    organization = Organization(
+        id=uuid4(),
+        name="Platform",
+        slug="platform",
+        status="active",
+    )
+    invitation = MembershipInvitation(
+        id=uuid4(),
+        organization_id=organization.id,
+        scope_type="organization",
+        email="member@example.com",
+        role="admin",
+        token_hash="hash",
+        status="pending",
+        expires_at=now + timedelta(days=1),
+    )
+    user = User(id=uuid4(), email="Member@Example.com", is_active=True)
+    seen = {}
+
+    async def get_pending(*args, **kwargs):
+        seen.update(kwargs)
+        return invitation
+
+    async def get_organization(*args, **kwargs):
+        return organization
+
+    async def missing_membership(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        membership_service.repository,
+        "get_pending_invitation_for_email_by_id",
+        get_pending,
+    )
+    monkeypatch.setattr(membership_service.repository, "get_organization_by_id", get_organization)
+    monkeypatch.setattr(
+        membership_service.repository,
+        "get_organization_membership_any",
+        missing_membership,
+    )
+    session = FakeSession()
+
+    response = await membership_service.accept_pending_invitation(session, invitation.id, user)
+
+    assert seen["invitation_id"] == invitation.id
+    assert seen["email"] == "member@example.com"
+    membership = session.added[0]
+    assert isinstance(membership, OrganizationMembership)
+    assert membership.role == "admin"
+    assert invitation.status == "accepted"
+    assert invitation.accepted_by_id == user.id
+    assert response.organization_id == organization.id
+
+
+@pytest.mark.asyncio
 async def test_invitation_requires_matching_authenticated_email(monkeypatch) -> None:
     now = datetime.now(UTC)
     organization = Organization(

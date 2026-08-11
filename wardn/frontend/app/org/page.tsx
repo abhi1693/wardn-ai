@@ -3,12 +3,17 @@ import Link from "next/link";
 
 import { Button } from "@/components/atoms/button";
 import { Card, CardContent } from "@/components/atoms/card";
+import { backendJson } from "@/lib/api/server";
+import type { PendingInvitationListResponse } from "@/lib/api/generated/model";
 import { getOrganizationOptions } from "@/lib/workspace-context";
 
 import { OrganizationSelectClient } from "./organization-select-client";
 
 export default async function OrganizationSelectionPage() {
   const organizations = await getOrganizationOptions();
+  const pendingInvitations = await backendJson<PendingInvitationListResponse>(
+    "/api/v1/invitations/pending"
+  );
 
   return (
     <main className="min-h-screen bg-background">
@@ -41,13 +46,24 @@ export default async function OrganizationSelectionPage() {
         </header>
 
         {organizations.length > 0 ? (
-          <OrganizationSelectClient organizations={organizations} />
+          <OrganizationSelectClient
+            organizations={organizations}
+            pendingInvitations={pendingInvitations.invitations}
+          />
         ) : (
-          <Card>
-            <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-              Create an organization to begin.
-            </CardContent>
-          </Card>
+          <>
+            <OrganizationSelectClient
+              organizations={[]}
+              pendingInvitations={pendingInvitations.invitations}
+            />
+            {pendingInvitations.invitations.length === 0 ? (
+              <Card>
+                <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+                  Create an organization to begin.
+                </CardContent>
+              </Card>
+            ) : null}
+          </>
         )}
       </section>
     </main>

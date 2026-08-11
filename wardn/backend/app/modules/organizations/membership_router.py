@@ -17,6 +17,7 @@ from app.modules.organizations.schemas import (
     MemberListResponse,
     MemberRead,
     MembershipRoleUpdate,
+    PendingInvitationListResponse,
 )
 from app.modules.users.auth_router import set_session_cookie
 from app.modules.users.dependencies import get_current_user, get_optional_current_user
@@ -263,6 +264,35 @@ async def revoke_workspace_invitation(
         organization_id,
         workspace_id,
         invitation_id,
+    )
+
+
+@invitation_router.get(
+    "/pending",
+    response_model=PendingInvitationListResponse,
+    operation_id="invitations_pending_list",
+)
+async def list_pending_invitations(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> PendingInvitationListResponse:
+    return await membership_service.list_pending_invitations_for_user(session, current_user)
+
+
+@invitation_router.post(
+    "/pending/{invitation_id}/accept",
+    response_model=InvitationAcceptanceRead,
+    operation_id="invitations_pending_accept",
+)
+async def accept_pending_invitation(
+    invitation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> InvitationAcceptanceRead:
+    return await membership_service.accept_pending_invitation(
+        session,
+        invitation_id,
+        current_user,
     )
 
 

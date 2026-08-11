@@ -30,6 +30,8 @@ def test_openapi_exposes_expected_paths() -> None:
         "/api/v1/limits/{limit_id}",
         "/api/v1/me/usage",
         "/api/v1/mcp/gateway",
+        "/api/v1/invitations/pending",
+        "/api/v1/invitations/pending/{invitation_id}/accept",
         "/api/v1/invitations/{token}",
         "/api/v1/invitations/{token}/accept",
         "/api/v1/invitations/{token}/register",

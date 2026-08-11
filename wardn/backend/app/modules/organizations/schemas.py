@@ -139,6 +139,21 @@ class InvitationListResponse(APIModel):
     invitations: list[InvitationRead]
 
 
+class PendingInvitationRead(APIModel):
+    id: UUID
+    role: str
+    scope_type: InvitationScopeType
+    organization_id: UUID
+    organization_name: str
+    workspace_id: UUID | None
+    workspace_name: str | None
+    expires_at: datetime
+
+
+class PendingInvitationListResponse(APIModel):
+    invitations: list[PendingInvitationRead]
+
+
 class InvitationCreated(APIModel):
     invitation: InvitationRead
     token: str
