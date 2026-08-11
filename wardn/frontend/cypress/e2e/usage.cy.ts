@@ -43,8 +43,10 @@ describe("usage summary scope", () => {
 
   it("applies top usage filters and preserves them across scope changes", () => {
     cy.visit(`/org/${organizationId}/usage`);
-    cy.findByLabelText("Start date").clear().type("2026-06-01");
-    cy.findByLabelText("End date").clear().type("2026-06-30");
+    cy.findByLabelText("Start date").clear();
+    cy.findByLabelText("Start date").type("2026-06-01");
+    cy.findByLabelText("End date").clear();
+    cy.findByLabelText("End date").type("2026-06-30");
     cy.findByLabelText("Rows").select("50");
     cy.findByRole("button", { name: "Apply" }).click();
 
