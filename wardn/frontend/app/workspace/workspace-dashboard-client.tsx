@@ -40,26 +40,34 @@ import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
 import type {
   AgentRead,
+  MCPGatewayToolApprovalRead,
   MCPRuntimeSummaryResponse,
   MCPServerInstallationRead,
   MCPToolUsageListResponse,
   UsageSummaryBreakdownRow,
   UsageSummaryResponse,
+  WorkspaceObservabilityAgentRunRow,
+  WorkspaceObservabilityDashboardResponse,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
-import { formatUserDateBucket } from "@/lib/date-time";
+import { formatUserDateBucket, formatUserShortDateTime } from "@/lib/date-time";
 
 type WorkspaceDashboardPaths = {
+  agentRuns: string;
   agents: string;
   chat: string;
   install: string;
   observability: string;
   runtime: string;
+  scheduledTasks: string;
+  workspace: string;
 };
 
 type WorkspaceDashboardClientProps = {
   agents: AgentRead[];
+  gatewayApprovals: MCPGatewayToolApprovalRead[];
   installations: MCPServerInstallationRead[];
+  observability: WorkspaceObservabilityDashboardResponse;
   paths: WorkspaceDashboardPaths;
   runtime: MCPRuntimeSummaryResponse;
   toolUsage: MCPToolUsageListResponse;
@@ -85,6 +93,8 @@ type AttentionItem = {
   label: string;
   severity: "danger" | "info" | "success" | "warning";
 };
+
+type DashboardTone = "danger" | "info" | "neutral" | "success" | "warning";
 
 const chartColors = ["#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed"];
 const compactNumberFormatter = new Intl.NumberFormat("en-US", {
@@ -142,6 +152,51 @@ function shortLabel(value: string, maxLength = 24) {
 
 function pluralize(value: number, singular: string, plural = `${singular}s`) {
   return value === 1 ? singular : plural;
+}
+
+function commaList(values: string[], fallback: string, limit = 3) {
+  const visible = values.filter(Boolean).slice(0, limit);
+  if (visible.length === 0) {
+    return fallback;
+  }
+  const remaining = values.length - visible.length;
+  return remaining > 0 ? `${visible.join(", ")} +${remaining}` : visible.join(", ");
+}
+
+function runStatusTone(status: string): DashboardTone {
+  if (status === "failed") {
+    return "danger";
+  }
+  if (status === "running" || status === "waiting_confirmation" || status === "submitted") {
+    return "warning";
+  }
+  if (status === "succeeded") {
+    return "success";
+  }
+  return "info";
+}
+
+function runStatusLabel(status: string) {
+  return status.replaceAll("_", " ") || "unknown";
+}
+
+function runHref(agentRunsPath: string, runId: string) {
+  return `${agentRunsPath}/${encodeURIComponent(runId)}`;
+}
+
+function installationHref(installPath: string, installationId: string) {
+  return `${installPath}/${encodeURIComponent(installationId)}`;
+}
+
+function attentionHref(workspacePath: string, href?: string) {
+  if (!href) {
+    return undefined;
+  }
+  return href.startsWith("/") ? href : `${workspacePath}/${href}`;
+}
+
+function formatTimestamp(value: string | null | undefined) {
+  return formatUserShortDateTime(value, "No timestamp");
 }
 
 function runtimeLabel(value: string) {
@@ -616,18 +671,18 @@ function RuntimePanel({
 
 function AttentionPanel({ items }: { items: AttentionItem[] }) {
   return (
-    <DashboardPanel description="Current workspace signals ranked for action." title="Attention">
+    <DashboardPanel description="Prioritized workspace actions." title="What to do next">
       <div className="-m-4">
         {items.length === 0 ? (
           <HealthRow
             badge="Clear"
-            detail="No model, runtime, connection, or access issues detected"
+            detail="No approvals, failed runs, broken tools, or runtime issues detected"
             icon={ShieldCheck}
             label="No active items"
             tone="success"
           />
         ) : (
-          items.slice(0, 5).map((item) => (
+          items.slice(0, 6).map((item) => (
             <HealthRow
               badge={item.severity}
               detail={item.detail}
@@ -645,19 +700,27 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
 }
 
 function buildAttentionItems({
+  agentRunsPath,
   agents,
+  gatewayApprovals,
   installPath,
   installations,
+  observability,
   observabilityPath,
+  paths,
   runtime,
   runtimePath,
   usage,
   workspace,
 }: {
+  agentRunsPath: string;
   agents: AgentRead[];
+  gatewayApprovals: MCPGatewayToolApprovalRead[];
   installPath: string;
   installations: MCPServerInstallationRead[];
+  observability: WorkspaceObservabilityDashboardResponse;
   observabilityPath: string;
+  paths: WorkspaceDashboardPaths;
   runtime: MCPRuntimeSummaryResponse;
   runtimePath: string;
   usage: UsageSummaryResponse;
@@ -666,8 +729,42 @@ function buildAttentionItems({
   const items: AttentionItem[] = [];
   const installationAttention = installations.filter(installationNeedsAttention).length;
   const updateCount = installations.filter((installation) => installation.updateAvailable).length;
+  const waitingRuns = observability.recentRuns.filter(
+    (run) => run.status === "waiting_confirmation"
+  );
+  const pendingApprovals = gatewayApprovals.length + waitingRuns.length;
 
-  if (usage.summary.failed > 0) {
+  if (pendingApprovals > 0) {
+    const approvalHref =
+      gatewayApprovals[0]?.installationId
+        ? installationHref(installPath, gatewayApprovals[0].installationId)
+        : waitingRuns[0]
+          ? runHref(agentRunsPath, waitingRuns[0].id)
+          : installPath;
+    items.push({
+      detail: `${formatCount(pendingApprovals)} pending ${pluralize(
+        pendingApprovals,
+        "approval"
+      )} blocking tool execution`,
+      href: approvalHref,
+      key: "pending-approvals",
+      label: "Review approvals",
+      severity: "danger",
+    });
+  }
+
+  for (const item of observability.attention.filter((item) => item.severity !== "success")) {
+    items.push({
+      detail: item.detail,
+      href: attentionHref(paths.workspace, item.href) ?? observabilityPath,
+      key: `observability-${item.key}`,
+      label: item.label,
+      severity:
+        item.severity === "danger" ? "danger" : item.severity === "warning" ? "warning" : "info",
+    });
+  }
+
+  if (usage.summary.failed > 0 && !items.some((item) => item.key === "observability-llm-failures")) {
     items.push({
       detail: `${formatCount(usage.summary.failed)} failed ${pluralize(
         usage.summary.failed,
@@ -739,6 +836,202 @@ function buildAttentionItems({
   return items;
 }
 
+function brokenSignalCount({
+  installationAttention,
+  observability,
+  runtime,
+}: {
+  installationAttention: number;
+  observability: WorkspaceObservabilityDashboardResponse;
+  runtime: MCPRuntimeSummaryResponse;
+}) {
+  return (
+    installationAttention +
+    runtime.failedSessions +
+    runtime.staleActiveSessions +
+    observability.summary.failedAgentRuns +
+    observability.summary.failedRequests +
+    observability.summary.failedToolCalls +
+    observability.summary.runtimeSessionsNeedingAttention
+  );
+}
+
+function WorkspaceHomePanel({
+  activeAgents,
+  agentRunsPath,
+  agents,
+  attentionItems,
+  assignedTools,
+  gatewayApprovals,
+  installationAttention,
+  installations,
+  installPath,
+  observability,
+  runtime,
+  paths,
+}: {
+  activeAgents: number;
+  agentRunsPath: string;
+  agents: AgentRead[];
+  attentionItems: AttentionItem[];
+  assignedTools: number;
+  gatewayApprovals: MCPGatewayToolApprovalRead[];
+  installationAttention: number;
+  installations: MCPServerInstallationRead[];
+  installPath: string;
+  observability: WorkspaceObservabilityDashboardResponse;
+  runtime: MCPRuntimeSummaryResponse;
+  paths: WorkspaceDashboardPaths;
+}) {
+  const enabledInstallations = installations.filter(
+    (installation) => installation.status === "enabled"
+  ).length;
+  const activeAgentNames = commaList(
+    agents.filter((agent) => agent.isActive).map((agent) => agent.name),
+    "No active agents"
+  );
+  const waitingRuns = observability.recentRuns.filter(
+    (run) => run.status === "waiting_confirmation"
+  );
+  const approvalCount = gatewayApprovals.length + waitingRuns.length;
+  const firstApprovalHref =
+    gatewayApprovals[0]?.installationId
+      ? installationHref(installPath, gatewayApprovals[0].installationId)
+      : waitingRuns[0]
+        ? runHref(agentRunsPath, waitingRuns[0].id)
+        : paths.agentRuns;
+  const brokenCount = brokenSignalCount({ installationAttention, observability, runtime });
+  const latestRun = observability.recentRuns[0];
+  const nextAction =
+    attentionItems.find((item) => item.severity === "danger" || item.severity === "warning") ??
+    attentionItems.find((item) => item.severity !== "success");
+
+  return (
+    <DashboardPanel
+      description="Agents, tools, broken state, approvals, recent activity, and next action."
+      title="Workspace home"
+    >
+      <div className="overflow-hidden rounded-md border border-border">
+        <HealthRow
+          badge={`${formatCount(activeAgents)}/${formatCount(agents.length)}`}
+          detail={activeAgentNames}
+          href={paths.agents}
+          icon={Bot}
+          label="Active agents"
+          tone={activeAgents > 0 ? "success" : "warning"}
+        />
+        <HealthRow
+          badge={formatCount(assignedTools)}
+          detail={`${formatCount(enabledInstallations)} enabled MCP ${pluralize(
+            enabledInstallations,
+            "connection"
+          )}`}
+          href={installPath}
+          icon={Wrench}
+          label="Installed tools"
+          tone={assignedTools > 0 || enabledInstallations > 0 ? "success" : "warning"}
+        />
+        <HealthRow
+          badge={formatCount(brokenCount)}
+          detail={`${formatCount(observability.summary.failedAgentRuns)} failed runs · ${formatCount(
+            observability.summary.failedToolCalls
+          )} failed tool calls · ${formatCount(installationAttention)} broken connections`}
+          href={brokenCount > 0 ? paths.observability : paths.runtime}
+          icon={brokenCount > 0 ? AlertTriangle : ShieldCheck}
+          label="Broken"
+          tone={brokenCount > 0 ? "danger" : "success"}
+        />
+        <HealthRow
+          badge={formatCount(approvalCount)}
+          detail={
+            approvalCount > 0
+              ? `${formatCount(gatewayApprovals.length)} gateway · ${formatCount(
+                  waitingRuns.length
+                )} agent-run`
+              : "No tool approvals waiting"
+          }
+          href={firstApprovalHref}
+          icon={PlugZap}
+          label="Needs approval"
+          tone={approvalCount > 0 ? "danger" : "success"}
+        />
+        <HealthRow
+          badge={latestRun ? runStatusLabel(latestRun.status) : "None"}
+          detail={
+            latestRun
+              ? `${latestRun.agentName} · ${formatTimestamp(
+                  latestRun.finishedAt ?? latestRun.startedAt
+                )}`
+              : "No agent runs in this window"
+          }
+          href={latestRun ? runHref(agentRunsPath, latestRun.id) : agentRunsPath}
+          icon={Activity}
+          label="Ran recently"
+          tone={latestRun ? runStatusTone(latestRun.status) : "neutral"}
+        />
+        <HealthRow
+          badge={nextAction ? nextAction.severity : "Clear"}
+          detail={nextAction?.detail ?? "No immediate workspace action needed"}
+          href={nextAction?.href ?? paths.chat}
+          icon={nextAction?.severity === "danger" ? AlertTriangle : ArrowRight}
+          label="Do next"
+          tone={nextAction?.severity ?? "success"}
+        />
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function RecentRunsPanel({
+  agentRunsPath,
+  runs,
+}: {
+  agentRunsPath: string;
+  runs: WorkspaceObservabilityAgentRunRow[];
+}) {
+  return (
+    <DashboardPanel
+      action={
+        <Button asChild size="sm" variant="outline">
+          <Link href={agentRunsPath}>
+            <Activity className="size-4" />
+            Runs
+          </Link>
+        </Button>
+      }
+      description="Latest agent executions in this workspace."
+      title="Recent runs"
+    >
+      <div className="-m-4">
+        {runs.length === 0 ? (
+          <HealthRow
+            detail="No agent runs recorded in the current window"
+            href={agentRunsPath}
+            icon={Activity}
+            label="No recent runs"
+            tone="neutral"
+          />
+        ) : (
+          runs.slice(0, 5).map((run) => (
+            <HealthRow
+              badge={runStatusLabel(run.status)}
+              detail={`${run.agentName} · ${formatCount(run.requests)} model ${pluralize(
+                run.requests,
+                "request"
+              )} · ${formatTimestamp(run.finishedAt ?? run.startedAt)}`}
+              href={runHref(agentRunsPath, run.id)}
+              icon={run.status === "failed" ? AlertTriangle : Activity}
+              key={run.id}
+              label={run.triggerType || "Agent run"}
+              tone={runStatusTone(run.status)}
+            />
+          ))
+        )}
+      </div>
+    </DashboardPanel>
+  );
+}
+
 function topToolRows(toolUsage: MCPToolUsageListResponse) {
   const rows = new Map<
     string,
@@ -802,7 +1095,9 @@ function TopToolsPanel({ toolUsage }: { toolUsage: MCPToolUsageListResponse }) {
 
 export function WorkspaceDashboardClient({
   agents,
+  gatewayApprovals,
   installations,
+  observability,
   paths,
   runtime,
   toolUsage,
@@ -811,6 +1106,7 @@ export function WorkspaceDashboardClient({
 }: WorkspaceDashboardClientProps) {
   const chatPath = paths.chat || "/";
   const agentsPath = paths.agents || "/";
+  const agentRunsPath = paths.agentRuns || "/";
   const installPath = paths.install || "/";
   const observabilityPath = paths.observability || "/";
   const runtimePath = paths.runtime || "/";
@@ -826,10 +1122,14 @@ export function WorkspaceDashboardClient({
   const healthScore = workspaceHealthScore({ agents, installations, runtime, usage });
   const scoreTone = healthTone(healthScore);
   const attentionItems = buildAttentionItems({
+    agentRunsPath,
     agents,
+    gatewayApprovals,
     installPath,
     installations,
+    observability,
     observabilityPath,
+    paths,
     runtime,
     runtimePath,
     usage,
@@ -914,13 +1214,31 @@ export function WorkspaceDashboardClient({
                   <div className="mt-1 text-muted-foreground">Tools</div>
                 </div>
                 <div className="px-2 py-2">
-                  <div className="text-lg font-semibold">{formatCount(installationAttention)}</div>
-                  <div className="mt-1 text-muted-foreground">Review</div>
+                  <div className="text-lg font-semibold">{formatCount(attentionItems.length)}</div>
+                  <div className="mt-1 text-muted-foreground">Actions</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <WorkspaceHomePanel
+          activeAgents={activeAgents}
+          agentRunsPath={agentRunsPath}
+          agents={agents}
+          assignedTools={assignedTools}
+          attentionItems={attentionItems}
+          gatewayApprovals={gatewayApprovals}
+          installationAttention={installationAttention}
+          installations={installations}
+          installPath={installPath}
+          observability={observability}
+          paths={paths}
+          runtime={runtime}
+        />
+        <AttentionPanel items={attentionItems} />
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -955,14 +1273,15 @@ export function WorkspaceDashboardClient({
           value={formatCompact(runtime.toolCalls.total)}
         />
         <DashboardMetricCard
-          detail={`${formatCount(activeAgents)}/${formatCount(agents.length)} active · ${formatCount(
+          badge={`${formatCount(activeAgents)}/${formatCount(agents.length)}`}
+          detail={`${formatCount(
             assignedTools
-          )} workspace tools`}
+          )} assigned workspace ${pluralize(assignedTools, "tool")}`}
           href={agentsPath}
           icon={Bot}
-          label="Workspace assistant"
+          label="Active agents"
           tone={activeAgents > 0 ? "success" : "warning"}
-          value={activeAgents > 0 ? "Ready" : "Setup"}
+          value={formatCount(activeAgents)}
         />
       </section>
 
@@ -979,7 +1298,7 @@ export function WorkspaceDashboardClient({
 
       <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <TopToolsPanel toolUsage={toolUsage} />
-        <AttentionPanel items={attentionItems} />
+        <RecentRunsPanel agentRunsPath={agentRunsPath} runs={observability.recentRuns} />
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -988,9 +1307,9 @@ export function WorkspaceDashboardClient({
           href={agentsPath}
         >
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">Workspace assistant</div>
+            <div className="text-sm font-semibold text-foreground">Agents</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {activeAgents > 0 ? "Ready" : "Not started"} · {formatCount(assignedTools)} tools
+              {formatCount(activeAgents)} active · {formatCount(assignedTools)} tools
             </div>
           </div>
           <Sparkles className="size-5 shrink-0 text-muted-foreground" />

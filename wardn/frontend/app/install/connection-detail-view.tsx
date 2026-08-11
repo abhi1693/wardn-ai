@@ -3,8 +3,13 @@ import {
   ArrowLeft,
   Bot,
   CheckCircle2,
+  ClipboardCheck,
   Edit2,
+  KeyRound,
+  LockKeyhole,
   Play,
+  ServerCrash,
+  ShieldAlert,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
@@ -45,10 +50,28 @@ import type {
 import { ConnectionApprovalsClient } from "./connection-approvals-client";
 
 type ConnectionTool = {
+  annotations: Record<string, unknown>;
   description: string;
   title: string;
   toolName: string;
   toolSchemaId?: string;
+};
+
+type ConnectionInputField = {
+  configured: boolean;
+  description: string;
+  format: string;
+  name: string;
+  required: boolean;
+  secret: boolean;
+  section: "connection" | "runtime";
+};
+
+type SafetyRisk = {
+  detail: string;
+  label: "High" | "Low" | "Medium";
+  score: number;
+  variant: "destructive" | "secondary" | "success";
 };
 
 type OptionalResult<T> = {
@@ -125,18 +148,20 @@ async function getConnectionTools(
   const availableForConnection = availableTools.filter(
     (tool) => tool.installationId === installationId
   );
-  const schemaIdsByToolName = new Map(
-    availableForConnection.map((tool) => [tool.toolName, tool.toolSchemaId])
+  const availableByToolName = new Map(
+    availableForConnection.map((tool) => [tool.toolName, tool])
   );
 
   const tools: ConnectionTool[] =
     installedTools.data?.tools.map((tool) => ({
+      annotations: tool.annotations ?? {},
       description: tool.description,
       title: tool.title || tool.toolName,
       toolName: tool.toolName,
-      toolSchemaId: schemaIdsByToolName.get(tool.toolName),
+      toolSchemaId: availableByToolName.get(tool.toolName)?.toolSchemaId,
     })) ??
     availableForConnection.map((tool) => ({
+      annotations: tool.annotations ?? {},
       description: tool.description,
       title: tool.title || tool.toolName,
       toolName: tool.toolName,
@@ -151,6 +176,158 @@ async function getConnectionTools(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function runtimeFieldRows(installation: MCPServerInstallationRead): ConnectionInputField[] {
+  const runtimeConfig = installation.runtimeConfig as Record<string, unknown>;
+  const packageConfig = isRecord(runtimeConfig.package) ? runtimeConfig.package : {};
+  const transportConfig = isRecord(runtimeConfig.transport) ? runtimeConfig.transport : {};
+  const fieldGroups: Array<{
+    fields: unknown;
+    section: "connection" | "runtime";
+  }> = [
+    { fields: packageConfig.environmentVariables, section: "connection" },
+    { fields: transportConfig.headers, section: "connection" },
+    { fields: packageConfig.headers, section: "connection" },
+    { fields: packageConfig.packageArguments, section: "runtime" },
+  ];
+  const rows = fieldGroups.flatMap(({ fields, section }) => {
+    if (!Array.isArray(fields)) {
+      return [];
+    }
+    return fields.filter(isRecord).map((field) => ({
+      configured: field.configured === true,
+      description: typeof field.description === "string" ? field.description : "",
+      format: typeof field.format === "string" ? field.format : "string",
+      name: String(field.name ?? ""),
+      required: field.isRequired === true,
+      secret: field.isSecret === true,
+      section,
+    }));
+  });
+  return rows.filter((field) => field.name);
+}
+
+function readOnlyToolCount(tools: ConnectionTool[]) {
+  return tools.filter((tool) => tool.annotations.readOnlyHint === true).length;
+}
+
+function riskyToolCount(tools: ConnectionTool[]) {
+  return tools.filter((tool) => tool.annotations.readOnlyHint !== true).length;
+}
+
+function destructiveToolCount(tools: ConnectionTool[]) {
+  return tools.filter((tool) => tool.annotations.destructiveHint === true).length;
+}
+
+function openWorldToolCount(tools: ConnectionTool[]) {
+  return tools.filter((tool) => tool.annotations.openWorldHint === true).length;
+}
+
+function toolRiskLabel(tool: ConnectionTool) {
+  if (tool.annotations.destructiveHint === true) {
+    return "Destructive";
+  }
+  if (tool.annotations.openWorldHint === true) {
+    return "External";
+  }
+  if (tool.annotations.readOnlyHint === true) {
+    return "Read-only";
+  }
+  return "Review";
+}
+
+function toolRiskVariant(tool: ConnectionTool) {
+  if (tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true) {
+    return "success" as const;
+  }
+  if (tool.annotations.destructiveHint === true) {
+    return "destructive" as const;
+  }
+  return "secondary" as const;
+}
+
+function safetyRisk({
+  fields,
+  health,
+  matchingPolicies,
+  tools,
+}: {
+  fields: ConnectionInputField[];
+  health: ReturnType<typeof healthSummary>;
+  matchingPolicies: GuardrailPolicyRead[];
+  tools: ConnectionTool[];
+}): SafetyRisk {
+  const missingRequired = fields.filter((field) => field.required && !field.configured).length;
+  const mutatingOrUnknown = riskyToolCount(tools);
+  const destructive = destructiveToolCount(tools);
+  let score = 0;
+  if (health.variant === "destructive") {
+    score += 4;
+  } else if (health.variant === "secondary" || health.variant === "outline") {
+    score += 2;
+  }
+  score += missingRequired * 3;
+  score += destructive * 3;
+  score += mutatingOrUnknown > 0 ? 2 : 0;
+  score += openWorldToolCount(tools) > 0 ? 1 : 0;
+  if (matchingPolicies.length === 0 && tools.length > 0) {
+    score += 2;
+  }
+  if (score >= 7) {
+    return {
+      detail: "Resolve required configuration and add guardrails before broad agent access.",
+      label: "High",
+      score,
+      variant: "destructive",
+    };
+  }
+  if (score >= 3) {
+    return {
+      detail: "Review guardrails and runtime health before relying on this connection.",
+      label: "Medium",
+      score,
+      variant: "secondary",
+    };
+  }
+  return {
+    detail: "Configuration, guardrails, and runtime health show no major safety gaps.",
+    label: "Low",
+    score,
+    variant: "success",
+  };
+}
+
+function recommendedGuardrails({
+  matchingPolicies,
+  tools,
+}: {
+  matchingPolicies: GuardrailPolicyRead[];
+  tools: ConnectionTool[];
+}) {
+  const activePolicies = matchingPolicies.filter((policy) => policy.isActive);
+  const hasRequireConfirmation = activePolicies.some((policy) => policy.mode === "require_confirmation");
+  const hasDeny = activePolicies.some((policy) => policy.mode === "deny");
+  const riskyTools = riskyToolCount(tools);
+  const destructiveTools = destructiveToolCount(tools);
+  const recommendations: string[] = [];
+
+  if (riskyTools > 0 && !hasRequireConfirmation) {
+    recommendations.push("Require approval for mutating or unknown tools on this connection.");
+  }
+  if (destructiveTools > 0 && !hasDeny) {
+    recommendations.push("Deny destructive tools unless a specific workflow needs them.");
+  }
+  if (openWorldToolCount(tools) > 0) {
+    recommendations.push("Constrain external-network tools to trusted targets and reviewers.");
+  }
+  if (matchingPolicies.length === 0 && tools.length > 0) {
+    recommendations.push("Generate starter guardrails so every discovered tool has an explicit rule.");
+  }
+  if (recommendations.length === 0) {
+    recommendations.push("Existing matching guardrails cover the discovered tool set.");
+  }
+  return recommendations;
 }
 
 function stringValues(value: unknown) {
@@ -358,6 +535,12 @@ export async function ConnectionDetailView({
       return priorityCompare !== 0 ? priorityCompare : left.name.localeCompare(right.name);
     });
   const health = healthSummary(installation, runtimeResult.data, runtimeResult.error);
+  const inputFields = runtimeFieldRows(installation);
+  const requiredFields = inputFields.filter((field) => field.required);
+  const requiredSecrets = requiredFields.filter((field) => field.secret);
+  const missingRequiredFields = requiredFields.filter((field) => !field.configured);
+  const risk = safetyRisk({ fields: inputFields, health, matchingPolicies, tools });
+  const guardrailRecommendations = recommendedGuardrails({ matchingPolicies, tools });
   const iconUrl = serverIconUrlFromIcons(installation.server.icons);
   const displayName = installation.server.title || installation.serverName;
   const accessHref = `/org/${encodeURIComponent(
@@ -423,6 +606,171 @@ export async function ConnectionDetailView({
                   {installation.updateAvailable ? "Update available" : `Version ${installation.installedVersion}`}
                 </Badge>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-[var(--shadow-card)]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-semibold">Install Safety Review</div>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Configuration, validation, discovered tools, guardrails, and runtime health for this
+              MCP server install.
+            </p>
+          </div>
+          <Badge variant={risk.variant}>Risk: {risk.label}</Badge>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Required Inputs</div>
+              <KeyRound className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold">
+              {requiredFields.length - missingRequiredFields.length}/{requiredFields.length}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">
+              {requiredSecrets.length} required {requiredSecrets.length === 1 ? "secret" : "secrets"}.
+            </div>
+          </div>
+
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Validation Status</div>
+              <ClipboardCheck className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-2">
+              <Badge variant={health.variant}>{health.label}</Badge>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+              {health.description}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Discovered Tools</div>
+              <Wrench className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold">{tools.length}</div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">
+              {readOnlyToolCount(tools)} read-only, {riskyToolCount(tools)} need review.
+            </div>
+          </div>
+
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Risk Level</div>
+              <ShieldAlert className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-2">
+              <Badge variant={risk.variant}>{risk.label}</Badge>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">{risk.detail}</div>
+          </div>
+
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Recommended Guardrails</div>
+              <ShieldCheck className="size-4 text-muted-foreground" />
+            </div>
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">
+              {guardrailRecommendations.slice(0, 2).map((recommendation) => (
+                <li key={recommendation}>{recommendation}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">Runtime Health</div>
+              <ServerCrash className="size-4 text-muted-foreground" />
+            </div>
+            <div className="mt-2">
+              <Badge variant={health.variant}>{health.label}</Badge>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+              {runtimeResult.data?.health?.status ||
+                runtimeResult.data?.runtimeSession?.status ||
+                "No active runtime session"}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Required args and secrets
+            </div>
+            {inputFields.length > 0 ? (
+              <div className="grid gap-2">
+                {inputFields.map((field) => (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                    key={`${field.section}-${field.name}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs font-semibold">{field.name}</span>
+                        <Badge variant={field.section === "connection" ? "secondary" : "outline"}>
+                          {field.section}
+                        </Badge>
+                        {field.secret ? (
+                          <Badge variant="outline">
+                            <LockKeyhole className="mr-1 size-3" />
+                            Secret
+                          </Badge>
+                        ) : null}
+                        {field.required ? <Badge variant="secondary">Required</Badge> : null}
+                      </div>
+                      {field.description ? (
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {field.description}
+                        </div>
+                      ) : null}
+                    </div>
+                    <Badge
+                      variant={
+                        field.required && !field.configured
+                          ? "destructive"
+                          : field.configured
+                            ? "success"
+                            : "outline"
+                      }
+                    >
+                      {field.configured ? "Configured" : field.required ? "Missing" : "Optional"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                This install does not declare required arguments or secrets.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Guardrail recommendations
+            </div>
+            <div className="space-y-2">
+              {guardrailRecommendations.map((recommendation) => (
+                <div
+                  className="rounded-md border border-border px-3 py-2 text-sm leading-6"
+                  key={recommendation}
+                >
+                  {recommendation}
+                </div>
+              ))}
+              <Button asChild className="mt-2" size="sm" variant="outline">
+                <Link href={matchingPolicies.length > 0 ? accessHref : `${accessHref}/new`}>
+                  Review guardrails
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -507,6 +855,7 @@ export async function ConnectionDetailView({
               <TableHeader>
                 <TableRow>
                   <TableHead>Tool</TableHead>
+                  <TableHead>Risk</TableHead>
                   <TableHead>Description</TableHead>
                 </TableRow>
               </TableHeader>
@@ -523,6 +872,9 @@ export async function ConnectionDetailView({
                         </div>
                       </TableCell>
                       <TableCell>
+                        <Badge variant={toolRiskVariant(tool)}>{toolRiskLabel(tool)}</Badge>
+                      </TableCell>
+                      <TableCell>
                         <span className="text-sm leading-6">
                           {tool.description || "No description provided."}
                         </span>
@@ -531,7 +883,7 @@ export async function ConnectionDetailView({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="h-32 text-center" colSpan={2}>
+                    <TableCell className="h-32 text-center" colSpan={3}>
                       <div className="mx-auto max-w-md">
                         <div className="font-medium text-foreground">No tools discovered</div>
                         <div className="mt-1 text-sm text-muted-foreground">

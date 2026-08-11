@@ -11,6 +11,7 @@ import pytest
 from app.modules.agents import (
     approvals,
     chat_orchestrator,
+    platform_tools,
     provider_clients,
     service,
     skills,
@@ -3474,7 +3475,7 @@ def test_response_function_tools_include_configured_mcp_target() -> None:
     assert f"MCP installation ID: {installation.id}" in description
 
 
-def test_agent_dynamic_function_tools_expose_only_search_and_run() -> None:
+def test_agent_dynamic_function_tools_include_platform_context() -> None:
     runtime_tool = make_agent_runtime_tool(
         wire_name="wardn_namespace",
         tool_name="namespace_list",
@@ -3484,11 +3485,14 @@ def test_agent_dynamic_function_tools_expose_only_search_and_run() -> None:
     function_tools = service.agent_dynamic_function_tools({"wardn_namespace": runtime_tool})
 
     assert [tool["name"] for tool in function_tools] == [
+        platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME,
         service.AGENT_SEARCH_TOOLS_TOOL_NAME,
         service.AGENT_RUN_TOOL_TOOL_NAME,
     ]
     assert all(tool["name"] != "wardn_namespace" for tool in function_tools)
-    assert service.agent_dynamic_function_tools({}) == []
+    assert [tool["name"] for tool in service.agent_dynamic_function_tools({})] == [
+        platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME
+    ]
 
 
 def test_execute_agent_search_tools_returns_allowed_exact_tool_names() -> None:
@@ -5162,6 +5166,30 @@ def test_agent_runtime_instructions_adds_scheduled_skill_guidance() -> None:
     assert "scheduled run" in instructions
     assert "GitHub PR Review (owner/repo/github-pr-review)" in instructions
     assert "search_tools" in instructions
+
+
+def test_agent_runtime_instructions_include_platform_context_without_skills() -> None:
+    agent = Agent(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        name="Assistant",
+        instructions="Help.",
+        scope="workspace",
+        model_name="gpt-5.1",
+        is_active=True,
+    )
+
+    instructions = chat_orchestrator.agent_runtime_instructions(
+        agent,
+        skill_tools=[],
+        approved_skill_context=[],
+    )
+
+    assert instructions.startswith("Help.")
+    assert platform_tools.ASK_WARDN_PLATFORM_TOOL_NAME in instructions
+    assert "Wardn platform context" in instructions
+    assert "Wardn runtime skills" not in instructions
 
 
 @pytest.mark.asyncio

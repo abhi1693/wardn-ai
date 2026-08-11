@@ -5,19 +5,26 @@ import { apiStreamFetch, apiUrl } from "@/lib/api/client";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
+  Activity,
   AlertTriangle,
   Bot,
+  ClipboardCheck,
   Cpu,
   Database,
+  History,
   Info,
   KeyRound,
   ListTree,
   Loader2,
   Network,
   PanelRight,
+  RotateCcw,
   Send,
+  ServerCrash,
+  ShieldAlert,
   ShieldCheck,
   Square,
+  TimerOff,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -138,10 +145,36 @@ const toneClassNames: Record<NonNullable<ChatStatProps["tone"]>, string> = {
   warning: "border-amber-200 bg-amber-50 text-amber-700",
 };
 
-const promptSuggestions = [
-  "Summarize recent workspace activity.",
-  "Check which MCP tools are available.",
-  "Review the latest failed agent runs.",
+const promptSuggestions: Array<{
+  icon: LucideIcon;
+  prompt: string;
+  title: string;
+}> = [
+  {
+    icon: ServerCrash,
+    prompt: "Why did the latest failing MCP server or tool fail?",
+    title: "MCP failures",
+  },
+  {
+    icon: ShieldAlert,
+    prompt: "Which agents can access production tools in this workspace?",
+    title: "Production access",
+  },
+  {
+    icon: ClipboardCheck,
+    prompt: "What approvals are waiting on me?",
+    title: "Approvals",
+  },
+  {
+    icon: History,
+    prompt: "What changed in this workspace today?",
+    title: "Today's changes",
+  },
+  {
+    icon: TimerOff,
+    prompt: "Which scheduled tasks are failing repeatedly?",
+    title: "Scheduled failures",
+  },
 ];
 
 function pluralize(value: number, singular: string, plural = `${singular}s`) {
@@ -241,14 +274,24 @@ function StatusBadge({ agent }: { agent: AgentRead }) {
 
 function ContextPanel({
   agent,
+  agentsPath,
+  approvalsPath,
   connectionsPath,
   credentials,
+  observabilityPath,
   runsPath,
+  runtimePath,
+  scheduledTasksPath,
 }: {
   agent: AgentRead;
+  agentsPath: string;
+  approvalsPath: string;
   connectionsPath: string;
   credentials: LlmCredentialRead[];
+  observabilityPath: string;
   runsPath: string;
+  runtimePath: string;
+  scheduledTasksPath: string;
 }) {
   const credential = credentialLabel(credentials, agent.providerCredentialId);
   const serverLabel = `${agent.serverCount} ${pluralize(agent.serverCount, "server")}`;
@@ -327,6 +370,12 @@ function ContextPanel({
         <div className="mb-3 text-sm font-semibold">Workspace links</div>
         <div className="grid gap-2">
           <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={agentsPath}>
+              <Bot className="size-4" />
+              Agents
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
             <Link href={runsPath}>
               <ListTree className="size-4" />
               Agent runs
@@ -336,6 +385,30 @@ function ContextPanel({
             <Link href={connectionsPath}>
               <Network className="size-4" />
               Connections
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={approvalsPath}>
+              <ClipboardCheck className="size-4" />
+              Approvals
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={observabilityPath}>
+              <Activity className="size-4" />
+              Observability
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={runtimePath}>
+              <ServerCrash className="size-4" />
+              Runtime
+            </Link>
+          </Button>
+          <Button asChild className="justify-start" size="sm" variant="outline">
+            <Link href={scheduledTasksPath}>
+              <TimerOff className="size-4" />
+              Scheduled tasks
             </Link>
           </Button>
         </div>
@@ -674,8 +747,13 @@ export function AgentChatClient({
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const workspaceBasePath = `/org/${organization.id}/workspace/${workspaceId}`;
+  const agentsPath = `${workspaceBasePath}/agents`;
+  const approvalsPath = `${workspaceBasePath}/agents/${currentAgent.id}`;
   const runsPath = `${workspaceBasePath}/agent-runs`;
   const connectionsPath = `${workspaceBasePath}/install`;
+  const observabilityPath = `${workspaceBasePath}/observability`;
+  const runtimePath = `${workspaceBasePath}/runtime`;
+  const scheduledTasksPath = `${workspaceBasePath}/scheduled-tasks`;
   const serverLabel = `${currentAgent.serverCount} ${pluralize(
     currentAgent.serverCount,
     "server"
@@ -688,13 +766,10 @@ export function AgentChatClient({
   const messageCount = messages.filter((message) => message.role !== "system").length;
   const isEmptyConversation = messages.length === 0 && !error && status !== "submitted";
 
-  async function submitMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = input.trim();
+  async function submitPromptText(text: string) {
     if (!text || isRunning || isStartingNewChat) {
       return;
     }
-    setInput("");
     setCommandError("");
     if (chatCommandName(text) === "new") {
       setIsStartingNewChat(true);
@@ -717,6 +792,20 @@ export function AgentChatClient({
     }
     setLastSubmittedText(text);
     await sendMessage({ text });
+  }
+
+  async function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || isRunning || isStartingNewChat) {
+      return;
+    }
+    setInput("");
+    await submitPromptText(text);
+  }
+
+  async function resubmitPrompt(text: string) {
+    await submitPromptText(text.trim());
   }
 
   async function retryLastMessage() {
@@ -925,9 +1014,14 @@ export function AgentChatClient({
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <ContextPanel
                 agent={currentAgent}
+                agentsPath={agentsPath}
+                approvalsPath={approvalsPath}
                 connectionsPath={connectionsPath}
                 credentials={credentials}
+                observabilityPath={observabilityPath}
                 runsPath={runsPath}
+                runtimePath={runtimePath}
+                scheduledTasksPath={scheduledTasksPath}
               />
             </div>
           </DialogContent>
@@ -950,23 +1044,36 @@ export function AgentChatClient({
                 <Bot className="size-5" />
               </div>
               <h2 className="text-2xl font-semibold leading-8 text-foreground">
-                How can I help with this workspace?
+                Ask Wardn about this workspace
               </h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
                 {currentAgent.name} is using {currentAgent.modelName || "no selected model"} with{" "}
                 {serverLabel} and {toolLabel} available.
               </p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {promptSuggestions.map((suggestion) => (
-                  <button
-                    className="min-h-8 rounded-full border border-border bg-card px-3 py-1.5 text-sm leading-5 shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/35"
-                    key={suggestion}
-                    onClick={() => setSuggestion(suggestion)}
-                    type="button"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
+              <div className="mt-6 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
+                {promptSuggestions.map((suggestion) => {
+                  const SuggestionIcon = suggestion.icon;
+                  return (
+                    <button
+                      className="flex min-h-12 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-left text-sm leading-5 shadow-[var(--shadow-card)] transition-colors hover:border-ring/40 hover:bg-muted/35"
+                      key={suggestion.prompt}
+                      onClick={() => setSuggestion(suggestion.prompt)}
+                      type="button"
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
+                        <SuggestionIcon className="size-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block font-medium text-foreground">
+                          {suggestion.title}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {suggestion.prompt}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="mt-4 w-full max-w-2xl">
                 <ChatComposer
@@ -1016,6 +1123,18 @@ export function AgentChatClient({
                         )}
                       >
                         <MessageLabel role={message.role} />
+                        {isUser && text ? (
+                          <button
+                            aria-label="Resubmit prompt"
+                            className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground opacity-0 shadow-[var(--shadow-card)] transition hover:bg-muted hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={isRunning || isStartingNewChat}
+                            onClick={() => void resubmitPrompt(text)}
+                            title="Resubmit prompt"
+                            type="button"
+                          >
+                            <RotateCcw className="size-3.5" />
+                          </button>
+                        ) : null}
                         {!isUser && traceHref ? (
                           <Link
                             className="inline-flex items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

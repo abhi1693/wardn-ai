@@ -2,6 +2,10 @@ import json
 import re
 from typing import Any
 
+from app.modules.agents.platform_tools import (
+    ASK_WARDN_PLATFORM_TOOL_NAME,
+    ask_wardn_platform_tool_schema,
+)
 from app.modules.agents.skills import (
     WARDN_GET_SKILL_TOOL_NAME,
     WARDN_SEARCH_SKILLS_TOOL_NAME,
@@ -24,6 +28,7 @@ AGENT_RUN_TOOL_TOOL_NAME = "run_tool"
 AGENT_DYNAMIC_TOOL_NAMES = {
     AGENT_SEARCH_TOOLS_TOOL_NAME,
     AGENT_RUN_TOOL_TOOL_NAME,
+    ASK_WARDN_PLATFORM_TOOL_NAME,
 }
 AGENT_SEARCH_TOOLS_DEFAULT_LIMIT = 8
 AGENT_SEARCH_TOOLS_MAX_LIMIT = 20
@@ -114,9 +119,11 @@ def agent_dynamic_function_tools(
     skill_tools: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     assigned_tool_count = len(allowed_catalog_tools(catalog)) + len(denied_catalog_tools(catalog))
+    tools = [ask_wardn_platform_tool_schema()]
     if assigned_tool_count == 0 and not installed_catalog_tools(catalog) and not skill_tools:
-        return []
-    return [
+        return tools
+    tools.extend(
+        [
         {
             "type": "function",
             "name": AGENT_SEARCH_TOOLS_TOOL_NAME,
@@ -200,7 +207,9 @@ def agent_dynamic_function_tools(
                 "additionalProperties": False,
             },
         },
-    ]
+        ]
+    )
+    return tools
 
 
 def is_agent_dynamic_tool_name(name: str) -> bool:

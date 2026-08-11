@@ -8,9 +8,15 @@ import {
   CircleDot,
   Clock,
   Database,
+  FileText,
+  History,
+  Link2,
+  ListChecks,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
+  Shield,
   Sparkles,
   Timer,
   Wrench,
@@ -331,6 +337,79 @@ function skillEventFromStep(step: AgentRunStepRead): RunSkillEvent | null {
   };
 }
 
+function stepPayload(step: AgentRunStepRead) {
+  return objectValue(step.payload);
+}
+
+function payloadApprovalId(step: AgentRunStepRead) {
+  const payload = stepPayload(step);
+  const approval = objectValue(payload.approval);
+  return stringValue(payload.approvalId) || stringValue(approval.id);
+}
+
+function isToolStep(step: AgentRunStepRead) {
+  return (
+    step.stepType === "tool_call" ||
+    step.stepType === "tool_result" ||
+    step.stepType === "tool_progress" ||
+    step.stepType === "tool_discovery"
+  );
+}
+
+function isApprovalStep(step: AgentRunStepRead) {
+  return (
+    step.stepType.includes("approval") ||
+    step.status === "requires_confirmation" ||
+    Boolean(payloadApprovalId(step))
+  );
+}
+
+function isGuardrailStep(step: AgentRunStepRead) {
+  return step.stepType === "guardrail_decision";
+}
+
+function isOutputStep(step: AgentRunStepRead) {
+  return step.stepType === "model_output";
+}
+
+function isErrorStep(step: AgentRunStepRead) {
+  return (
+    step.stepType === "error" ||
+    step.status === "failed" ||
+    step.status === "blocked" ||
+    step.status === "expired" ||
+    Boolean(stringValue(stepPayload(step).error))
+  );
+}
+
+function uniqueValues(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function auditDetailList(values: string[], fallback: string, limit = 3) {
+  const visible = uniqueValues(values).slice(0, limit);
+  if (visible.length === 0) {
+    return fallback;
+  }
+  const remaining = uniqueValues(values).length - visible.length;
+  return remaining > 0 ? `${visible.join(", ")} +${remaining}` : visible.join(", ");
+}
+
+function auditStatusVariant(
+  tone: "danger" | "info" | "neutral" | "success" | "warning"
+) {
+  if (tone === "danger") {
+    return "destructive" as const;
+  }
+  if (tone === "success") {
+    return "success" as const;
+  }
+  if (tone === "warning" || tone === "info") {
+    return "secondary" as const;
+  }
+  return "outline" as const;
+}
+
 function SkillEventBadge({ event }: { event: RunSkillEvent }) {
   if (event.eventType === "search") {
     return <Badge variant="secondary">Search</Badge>;
@@ -417,6 +496,231 @@ function Metric({
   );
 }
 
+function AuditRow({
+  badge,
+  detail,
+  href,
+  icon: Icon,
+  label,
+  tone = "neutral",
+}: {
+  badge: string;
+  detail: string;
+  href?: string;
+  icon: typeof Activity;
+  label: string;
+  tone?: "danger" | "info" | "neutral" | "success" | "warning";
+}) {
+  const content = (
+    <>
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-md border",
+            tone === "danger"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : tone === "warning"
+                ? "border-amber-200 bg-amber-50 text-amber-700"
+                : tone === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-border bg-muted text-muted-foreground"
+          )}
+        >
+          <Icon className="size-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-foreground">{label}</div>
+          <div className="truncate text-xs leading-5 text-muted-foreground">{detail}</div>
+        </div>
+      </div>
+      <Badge variant={auditStatusVariant(tone)}>{badge}</Badge>
+    </>
+  );
+  const className =
+    "flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0";
+  if (href) {
+    return (
+      <Link className={cn(className, "transition-colors hover:bg-muted/50")} href={href}>
+        {content}
+      </Link>
+    );
+  }
+  return <div className={className}>{content}</div>;
+}
+
+function AuditRecordPanel({
+  deliveryRecipients,
+  detail,
+  observabilityHref,
+  previousRunHref,
+  runtimeHref,
+  workspaceRunsHref,
+}: {
+  deliveryRecipients: AgentRunDeliveryRecipientRead[];
+  detail: AgentRunDetailResponse;
+  observabilityHref: string;
+  previousRunHref: string;
+  runtimeHref: string;
+  workspaceRunsHref: string;
+}) {
+  const inputSteps = detail.steps.filter((step) => step.stepType === "model_input");
+  const toolSteps = detail.steps.filter(isToolStep);
+  const approvalSteps = detail.steps.filter(isApprovalStep);
+  const guardrailSteps = detail.steps.filter(isGuardrailStep);
+  const outputSteps = detail.steps.filter(isOutputStep);
+  const errorSteps = detail.steps.filter(isErrorStep);
+  const retrySteps = detail.steps.filter((step) => step.stepType.includes("resume"));
+  const failedRecipients = deliveryRecipients.filter((recipient) => recipient.status === "failed");
+  const messageCount = inputSteps.reduce((sum, step) => {
+    const count = numberValue(stepPayload(step).messageCount);
+    return sum + (count ?? 0);
+  }, 0);
+  const approvalCount = uniqueValues(
+    approvalSteps.map((step) => payloadApprovalId(step) || step.id)
+  ).length;
+  const runtimeInvocationCount = uniqueValues(
+    detail.steps.map((step) => step.mcpToolInvocationId ?? "")
+  ).length;
+  const errorCount = errorSteps.length + failedRecipients.length + (detail.run.error ? 1 : 0);
+  const retryCount = retrySteps.length + (detail.run.previousAgentRunId ? 1 : 0);
+
+  return (
+    <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <ListChecks className="size-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold tracking-normal">Audit Record</h2>
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            Inputs, tools, approvals, guardrails, outputs, errors, retries, and runtime links.
+          </div>
+        </div>
+        <Badge variant={errorCount > 0 ? "destructive" : "success"}>
+          {errorCount > 0 ? `${errorCount} issue${errorCount === 1 ? "" : "s"}` : "Complete"}
+        </Badge>
+      </div>
+      <div className="grid gap-0 lg:grid-cols-2">
+        <div className="border-b border-border lg:border-r">
+          <AuditRow
+            badge={inputSteps.length ? `${inputSteps.length}` : "None"}
+            detail={
+              inputSteps.length
+                ? `${formatInteger(messageCount || inputSteps.length)} context message${
+                    (messageCount || inputSteps.length) === 1 ? "" : "s"
+                  } captured`
+                : "No persisted model input step"
+            }
+            href="#activity-timeline"
+            icon={FileText}
+            label="Input and context"
+            tone={inputSteps.length ? "success" : "warning"}
+          />
+          <AuditRow
+            badge={`${toolSteps.length}`}
+            detail={auditDetailList(
+              toolSteps.map((step) => step.title || stringValue(stepPayload(step).toolName)),
+              "No MCP tools called"
+            )}
+            href="#activity-timeline"
+            icon={Wrench}
+            label="Tools called"
+            tone={toolSteps.length ? "success" : "neutral"}
+          />
+          <AuditRow
+            badge={`${approvalCount}`}
+            detail={auditDetailList(
+              approvalSteps.map((step) => step.title || payloadApprovalId(step)),
+              "No approval request recorded"
+            )}
+            href="#activity-timeline"
+            icon={CheckCircle2}
+            label="Approvals requested"
+            tone={approvalCount > 0 ? "warning" : "success"}
+          />
+          <AuditRow
+            badge={`${guardrailSteps.length}`}
+            detail={auditDetailList(
+              guardrailSteps.map((step) => {
+                const payload = stepPayload(step);
+                return stringValue(payload.policyName) || stringValue(payload.mode) || step.title;
+              }),
+              "No guardrail decision recorded"
+            )}
+            href="#activity-timeline"
+            icon={Shield}
+            label="Guardrails triggered"
+            tone={guardrailSteps.some((step) => step.status === "deny") ? "danger" : "info"}
+          />
+        </div>
+        <div>
+          <AuditRow
+            badge={`${outputSteps.length + deliveryRecipients.length}`}
+            detail={`${formatInteger(outputSteps.length)} model output step${
+              outputSteps.length === 1 ? "" : "s"
+            } · ${formatInteger(deliveryRecipients.length)} recipient${
+              deliveryRecipients.length === 1 ? "" : "s"
+            }`}
+            href={deliveryRecipients.length > 0 ? "#output-recipients" : "#activity-timeline"}
+            icon={Send}
+            label="Outputs produced"
+            tone={outputSteps.length + deliveryRecipients.length > 0 ? "success" : "warning"}
+          />
+          <AuditRow
+            badge={`${errorCount}`}
+            detail={
+              errorCount > 0
+                ? auditDetailList(
+                    [
+                      detail.run.error,
+                      ...errorSteps.map((step) => stringValue(stepPayload(step).error) || step.title),
+                      ...failedRecipients.map((recipient) => recipient.error || recipientName(recipient)),
+                    ],
+                    "Errors recorded"
+                  )
+                : "No run, step, or delivery errors"
+            }
+            href={errorCount > 0 ? "#activity-timeline" : undefined}
+            icon={errorCount > 0 ? AlertTriangle : CheckCircle2}
+            label="Errors"
+            tone={errorCount > 0 ? "danger" : "success"}
+          />
+          <AuditRow
+            badge={`${retryCount}`}
+            detail={
+              retryCount > 0
+                ? `${formatInteger(retrySteps.length)} resume event${
+                    retrySteps.length === 1 ? "" : "s"
+                  } · ${detail.run.previousAgentRunId ? "rerun lineage present" : "no previous run"}`
+                : detail.run.canRerun
+                  ? "Run can be rerun from this state"
+                  : "No retry or resume state recorded"
+            }
+            href={previousRunHref || workspaceRunsHref}
+            icon={RotateCcw}
+            label="Retry state"
+            tone={retryCount > 0 ? "warning" : "info"}
+          />
+          <AuditRow
+            badge={`${runtimeInvocationCount}`}
+            detail={
+              runtimeInvocationCount > 0
+                ? `${formatInteger(runtimeInvocationCount)} linked MCP invocation${
+                    runtimeInvocationCount === 1 ? "" : "s"
+                  }`
+                : "Open runtime and observability logs for correlated sessions"
+            }
+            href={runtimeInvocationCount > 0 ? observabilityHref : runtimeHref}
+            icon={Link2}
+            label="Runtime and session logs"
+            tone={runtimeInvocationCount > 0 ? "success" : "info"}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function AgentRunDetailClient({
   agentRunId,
   initialDetail,
@@ -431,6 +735,12 @@ export function AgentRunDetailClient({
   const detailPath = `/api/v1/organizations/${encodeURIComponent(
     organizationId
   )}/workspaces/${encodeURIComponent(workspaceId)}/agent-runs/${encodeURIComponent(agentRunId)}`;
+  const workspaceBasePath = `/org/${encodeURIComponent(
+    organizationId
+  )}/workspace/${encodeURIComponent(workspaceId)}`;
+  const workspaceRunsHref = `${workspaceBasePath}/agent-runs`;
+  const observabilityHref = `${workspaceBasePath}/observability`;
+  const runtimeHref = `${workspaceBasePath}/runtime`;
   const runIsActive = isActiveRun(detail.run.status);
   const lastActivity = useMemo(() => latestActivityTime(detail), [detail]);
   const lastActivityAge = now - lastActivity;
@@ -450,9 +760,7 @@ export function AgentRunDetailClient({
   const skillFetches = skillEvents.filter((event) => event.eventType === "fetch").length;
   const deliveryRecipients = detail.deliveryRecipients ?? [];
   const previousRunHref = detail.run.previousAgentRunId
-    ? `/org/${encodeURIComponent(organizationId)}/workspace/${encodeURIComponent(
-        workspaceId
-      )}/agent-runs/${encodeURIComponent(detail.run.previousAgentRunId)}`
+    ? `${workspaceRunsHref}/${encodeURIComponent(detail.run.previousAgentRunId)}`
     : "";
 
   useEffect(() => {
@@ -573,6 +881,15 @@ export function AgentRunDetailClient({
         />
       </section>
 
+      <AuditRecordPanel
+        deliveryRecipients={deliveryRecipients}
+        detail={detail}
+        observabilityHref={observabilityHref}
+        previousRunHref={previousRunHref}
+        runtimeHref={runtimeHref}
+        workspaceRunsHref={workspaceRunsHref}
+      />
+
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card>
           <CardHeader>
@@ -621,37 +938,44 @@ export function AgentRunDetailClient({
               <span className="text-muted-foreground">Finished</span>
               <span className="text-right font-medium">{formatDate(detail.run.finishedAt)}</span>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Previous run</span>
-              {previousRunHref ? (
+            {previousRunHref ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Previous run</span>
                 <Link
-                  className="max-w-40 truncate font-mono text-xs underline-offset-4 hover:underline"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted"
                   href={previousRunHref}
+                  title={detail.run.previousAgentRunId ?? ""}
                 >
-                  {detail.run.previousAgentRunId}
+                  <History className="size-3.5" />
+                  Open previous run
                 </Link>
-              ) : (
-                <span className="text-right font-medium">None</span>
-              )}
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Trace</span>
-              <span className="max-w-40 truncate font-mono text-xs">
-                {detail.run.traceId || "Not recorded"}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Span</span>
-              <span className="max-w-40 truncate font-mono text-xs">
-                {detail.run.spanId || "Not recorded"}
-              </span>
-            </div>
+              </div>
+            ) : null}
+            {detail.run.traceId ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Trace</span>
+                <span className="max-w-40 truncate font-mono text-xs" title={detail.run.traceId}>
+                  {detail.run.traceId}
+                </span>
+              </div>
+            ) : null}
+            {detail.run.spanId ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Span</span>
+                <span className="max-w-40 truncate font-mono text-xs" title={detail.run.spanId}>
+                  {detail.run.spanId}
+                </span>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>
 
       {deliveryRecipients.length > 0 ? (
-        <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+        <section
+          className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]"
+          id="output-recipients"
+        >
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
             <div>
               <div className="flex items-center gap-2">
@@ -698,7 +1022,10 @@ export function AgentRunDetailClient({
         </section>
       ) : null}
 
-      <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+      <section
+        className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]"
+        id="activity-timeline"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
