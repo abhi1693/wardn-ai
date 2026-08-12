@@ -16,6 +16,27 @@ class WorkspaceAgentModelUpdate(APIModel):
     model_name: str = Field(min_length=1, max_length=255)
 
 
+class AgentIdentityRead(APIModel):
+    name: str | None = None
+    theme: str | None = None
+    emoji: str | None = None
+    avatar: str | None = None
+    avatar_url: str | None = None
+
+
+class AgentIdentityUpdate(APIModel):
+    name: str | None = Field(default=None, max_length=50)
+    theme: str | None = Field(default=None, max_length=120)
+    emoji: str | None = Field(default=None, max_length=32)
+    avatar: str | None = Field(default=None, max_length=512)
+    avatar_url: str | None = Field(default=None, max_length=1024)
+
+
+class WorkspaceAgentPersonalityUpdate(APIModel):
+    identity: AgentIdentityUpdate | None = None
+    personality: str | None = Field(default=None, max_length=4000)
+
+
 class AgentSkillUpdateRequest(APIModel):
     skill_ids: list[str] = Field(default_factory=list)
 
@@ -39,6 +60,8 @@ class AgentRead(APIModel):
     name: str
     description: str
     instructions: str
+    personality: str = ""
+    identity: AgentIdentityRead = Field(default_factory=AgentIdentityRead)
     scope: AgentScope
     model_name: str
     skill_ids: list[str] = Field(default_factory=list)

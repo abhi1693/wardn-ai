@@ -180,6 +180,7 @@ from app.modules.agents.schemas import (
     AgentSkillUsageSummaryRead,
     AgentSkillWorkflowRead,
     WorkspaceAgentModelUpdate,
+    WorkspaceAgentPersonalityUpdate,
     WorkspaceApprovedSkillRead,
     WorkspaceSkillAgentAssignmentRequest,
     WorkspaceSkillApproveRequest,
@@ -278,6 +279,15 @@ QUICK_START_AGENT_INSTRUCTIONS = (
     "workspace tools through Wardn's tool search and execution flow. Ask before destructive "
     "actions."
 )
+QUICK_START_AGENT_IDENTITY_NAME = "Wardn"
+QUICK_START_AGENT_IDENTITY_AVATAR = "W"
+QUICK_START_AGENT_IDENTITY_THEME = "evidence-first workspace operator"
+QUICK_START_AGENT_PERSONALITY = (
+    "Operate like a concise, evidence-first workspace partner. Be direct and human, state "
+    "what you are checking when work is multi-step, surface uncertainty, and ask before "
+    "destructive or high-risk actions. Use tools to verify live workspace state instead of "
+    "guessing."
+)
 CANCELABLE_AGENT_RUN_STATUSES = {"running", "submitted", "waiting_confirmation"}
 CANCELED_RUN_ERROR = "Run canceled by user."
 GUIDED_SKILL_WORKFLOWS = [
@@ -365,6 +375,31 @@ class AgentToolRefreshFailure:
     config_name: str
     error_type: str
     error: str
+
+
+def normalize_agent_personality_value(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def normalize_agent_identity_value(value: str | None) -> str:
+    return " ".join((value or "").split())
+
+
+def apply_default_workspace_assistant_personality(agent: Agent) -> bool:
+    changed = False
+    if not (getattr(agent, "personality", "") or "").strip():
+        agent.personality = QUICK_START_AGENT_PERSONALITY
+        changed = True
+    if not (getattr(agent, "identity_name", "") or "").strip():
+        agent.identity_name = QUICK_START_AGENT_IDENTITY_NAME
+        changed = True
+    if not (getattr(agent, "identity_theme", "") or "").strip():
+        agent.identity_theme = QUICK_START_AGENT_IDENTITY_THEME
+        changed = True
+    if not (getattr(agent, "identity_avatar", "") or "").strip():
+        agent.identity_avatar = QUICK_START_AGENT_IDENTITY_AVATAR
+        changed = True
+    return changed
 
 
 def agent_log_extra(
@@ -1559,6 +1594,10 @@ async def ensure_workspace_assistant_agent(
             name=QUICK_START_AGENT_NAME,
             description=QUICK_START_AGENT_DESCRIPTION,
             instructions=QUICK_START_AGENT_INSTRUCTIONS,
+            personality=QUICK_START_AGENT_PERSONALITY,
+            identity_name=QUICK_START_AGENT_IDENTITY_NAME,
+            identity_theme=QUICK_START_AGENT_IDENTITY_THEME,
+            identity_avatar=QUICK_START_AGENT_IDENTITY_AVATAR,
             scope="workspace",
             model_name=model_name,
             skill_ids=[WARDN_FIND_SKILLS_ID],
@@ -1586,6 +1625,8 @@ async def ensure_workspace_assistant_agent(
             changed = True
         if not agent.instructions.strip():
             agent.instructions = QUICK_START_AGENT_INSTRUCTIONS
+            changed = True
+        if apply_default_workspace_assistant_personality(agent):
             changed = True
         if not agent.is_active:
             agent.is_active = True
@@ -1641,6 +1682,10 @@ async def update_workspace_assistant_model(
             name=QUICK_START_AGENT_NAME,
             description=QUICK_START_AGENT_DESCRIPTION,
             instructions=QUICK_START_AGENT_INSTRUCTIONS,
+            personality=QUICK_START_AGENT_PERSONALITY,
+            identity_name=QUICK_START_AGENT_IDENTITY_NAME,
+            identity_theme=QUICK_START_AGENT_IDENTITY_THEME,
+            identity_avatar=QUICK_START_AGENT_IDENTITY_AVATAR,
             scope="workspace",
             model_name=model_name,
             skill_ids=[WARDN_FIND_SKILLS_ID],
@@ -1656,6 +1701,7 @@ async def update_workspace_assistant_model(
             agent.description = QUICK_START_AGENT_DESCRIPTION
         if not agent.instructions.strip():
             agent.instructions = QUICK_START_AGENT_INSTRUCTIONS
+        apply_default_workspace_assistant_personality(agent)
         agent.is_active = True
     await session.flush()
     await session.refresh(agent)
@@ -1673,6 +1719,66 @@ async def update_workspace_assistant_model(
             "llm_provider_credential_id": str(agent.provider_credential_id),
             "agent_model_name": agent.model_name,
         },
+    )
+    return agent_response(
+        agent,
+        server_count=await repository.count_agent_servers(session, agent.id),
+        tool_count=await repository.count_agent_tools(session, agent.id),
+    )
+
+
+async def update_workspace_assistant_personality(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    payload: WorkspaceAgentPersonalityUpdate,
+) -> AgentRead:
+    await require_agent_scope_permission(
+        session,
+        user,
+        organization_id,
+        scope="workspace",
+        workspace_id=workspace_id,
+    )
+    agent = await repository.get_agent_by_name(
+        session,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        name=QUICK_START_AGENT_NAME,
+    )
+    if agent is None:
+        raise AgentNotFoundError("workspace assistant not found")
+
+    identity = payload.identity
+    if identity is not None:
+        fields = identity.model_fields_set
+        if "name" in fields:
+            agent.identity_name = normalize_agent_identity_value(identity.name)
+        if "theme" in fields:
+            agent.identity_theme = normalize_agent_identity_value(identity.theme)
+        if "emoji" in fields:
+            agent.identity_emoji = normalize_agent_identity_value(identity.emoji)
+        if "avatar" in fields:
+            agent.identity_avatar = normalize_agent_identity_value(identity.avatar)
+        if "avatar_url" in fields:
+            agent.identity_avatar_url = normalize_agent_identity_value(identity.avatar_url)
+    if "personality" in payload.model_fields_set:
+        agent.personality = normalize_agent_personality_value(payload.personality)
+
+    agent.scope = "workspace"
+    agent.workspace_id = workspace_id
+    await session.flush()
+    await session.refresh(agent)
+    logger.info(
+        "Updated workspace assistant personality.",
+        extra=agent_log_extra(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            user_id=user.id,
+            scope=agent.scope,
+        ),
     )
     return agent_response(
         agent,

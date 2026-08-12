@@ -4,17 +4,20 @@
  * Wardn AI API
  * OpenAPI spec version: 0.0.1
  */
+import type { AgentIdentityRead } from './agentIdentityRead';
 
 export interface AgentRead {
   createdAt: string;
   createdById?: string | null;
   description: string;
   id: string;
+  identity?: AgentIdentityRead;
   instructions: string;
   isActive: boolean;
   modelName: string;
   name: string;
   organizationId: string;
+  personality?: string;
   providerCredentialId?: string | null;
   scope: 'workspace';
   serverCount: number;

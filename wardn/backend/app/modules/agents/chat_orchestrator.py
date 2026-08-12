@@ -1054,6 +1054,7 @@ def agent_runtime_instructions(
 ) -> str:
     base = (agent.instructions or "").strip()
     sections = [base] if base else []
+    sections.extend(agent_identity_personality_sections(agent))
     lines = [
         "Wardn platform context:",
         f"- Use {ASK_WARDN_PLATFORM_TOOL_NAME} before answering questions about Wardn "
@@ -1110,6 +1111,34 @@ def agent_runtime_instructions(
 
     sections.append("\n".join(lines))
     return "\n\n".join(sections)
+
+
+def agent_identity_personality_sections(agent: Agent) -> list[str]:
+    identity_name = (getattr(agent, "identity_name", "") or "").strip() or agent.name
+    identity_theme = (getattr(agent, "identity_theme", "") or "").strip()
+    identity_emoji = (getattr(agent, "identity_emoji", "") or "").strip()
+    personality = (getattr(agent, "personality", "") or "").strip()
+    if not (identity_name or identity_theme or identity_emoji or personality):
+        return []
+
+    lines = ["Agent identity and personality:"]
+    if identity_name:
+        lines.append(f"- Name: {identity_name}")
+    if identity_theme:
+        lines.append(f"- Theme: {identity_theme}")
+    if identity_emoji:
+        lines.append(f"- Emoji: {identity_emoji}")
+    if personality:
+        lines.extend(["", "Persona:", personality])
+    lines.extend(
+        [
+            "",
+            "Embody this persona and tone in user-facing replies unless higher-priority "
+            "instructions override it. Keep factual, safety, and workspace access rules above "
+            "style preferences.",
+        ]
+    )
+    return ["\n".join(lines)]
 
 
 def approved_skill_sort_key(skill: AgentSkillContext) -> tuple[str, str]:

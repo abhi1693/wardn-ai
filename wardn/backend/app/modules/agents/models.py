@@ -78,6 +78,12 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    personality: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    identity_name: Mapped[str] = mapped_column(String(50), default="", nullable=False)
+    identity_theme: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    identity_emoji: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    identity_avatar: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    identity_avatar_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
     scope: Mapped[AgentScope] = mapped_column(
         String(32),
         default=AgentScope.ORGANIZATION,

@@ -17,7 +17,7 @@ import dynamic from "next/dynamic";
 
 import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
-import type { ConversationMessageRead } from "@/lib/api/generated/model";
+import type { AgentRead, ConversationMessageRead } from "@/lib/api/generated/model";
 
 import type { LlmCredentialRead } from "../../llm-credentials/types";
 
@@ -126,6 +126,31 @@ export function uiMessages(messages: ConversationMessageRead[] = []): UIMessage[
     }));
 }
 
+function trimmed(value?: string | null) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function agentDisplayName(agent?: AgentRead | null) {
+  return trimmed(agent?.identity?.name) || trimmed(agent?.name) || "Assistant";
+}
+
+export function agentTheme(agent?: AgentRead | null) {
+  return trimmed(agent?.identity?.theme);
+}
+
+export function agentPersonality(agent?: AgentRead | null) {
+  return trimmed(agent?.personality);
+}
+
+export function agentAvatarText(agent?: AgentRead | null) {
+  const avatar = trimmed(agent?.identity?.avatar) || trimmed(agent?.identity?.emoji);
+  if (avatar && !avatar.includes("/") && avatar.length <= 4) {
+    return avatar;
+  }
+  const displayName = agentDisplayName(agent);
+  return displayName.slice(0, 1).toUpperCase();
+}
+
 export const MessageMarkdown = dynamic(
   () => import("./agent-message-markdown").then((module) => module.AgentMessageMarkdown),
   {
@@ -158,7 +183,13 @@ export function ReasoningSummary({ summaries }: { summaries: ReasoningSummaryPar
   );
 }
 
-export function MessageAvatar({ role }: { role: MessageRole }) {
+export function MessageAvatar({
+  agent,
+  role,
+}: {
+  agent?: AgentRead | null;
+  role: MessageRole;
+}) {
   if (role === "user") {
     return (
       <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-[var(--shadow-card)]">
@@ -166,21 +197,40 @@ export function MessageAvatar({ role }: { role: MessageRole }) {
       </div>
     );
   }
+  const avatarUrl = trimmed(agent?.identity?.avatarUrl);
+  const avatarText = agentAvatarText(agent);
   return (
-    <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
-      <Bot className="size-4" />
+    <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
+      {avatarUrl ? (
+        <span
+          aria-label={agentDisplayName(agent)}
+          className="size-full bg-cover bg-center"
+          role="img"
+          style={{ backgroundImage: `url(${avatarUrl})` }}
+        />
+      ) : avatarText ? (
+        <span className="text-xs font-semibold">{avatarText}</span>
+      ) : (
+        <Bot className="size-4" />
+      )}
     </div>
   );
 }
 
-export function MessageLabel({ role }: { role: MessageRole }) {
+export function MessageLabel({
+  agent,
+  role,
+}: {
+  agent?: AgentRead | null;
+  role: MessageRole;
+}) {
   if (role === "user") {
     return "You";
   }
   if (role === "system") {
     return "System";
   }
-  return "Assistant";
+  return agentDisplayName(agent);
 }
 
 export function isToolActivityPart(part: MessagePart): part is ToolActivityPart {

@@ -155,6 +155,10 @@ def test_openapi_exposes_expected_paths() -> None:
         ),
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/workspace-assistant/personality"
+        ),
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
             "/agents/{agent_id}"
         ),
         (
@@ -601,6 +605,12 @@ def test_workspace_agents_openapi_contract() -> None:
             "/agents/workspace-assistant/model"
         )
     ]
+    personality = schema["paths"][
+        (
+            "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+            "/agents/workspace-assistant/personality"
+        )
+    ]
     runs = schema["paths"][
         (
             "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
@@ -671,6 +681,15 @@ def test_workspace_agents_openapi_contract() -> None:
         "$ref": "#/components/schemas/WorkspaceAgentModelUpdate"
     }
     assert model_switch["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AgentRead"
+    }
+    assert personality["patch"]["operationId"] == (
+        "workspace_agents_update_workspace_assistant_personality"
+    )
+    assert personality["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WorkspaceAgentPersonalityUpdate"
+    }
+    assert personality["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AgentRead"
     }
     assert runs["get"]["operationId"] == "workspace_agent_runs_list"

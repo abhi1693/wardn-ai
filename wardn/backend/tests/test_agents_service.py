@@ -32,6 +32,7 @@ from app.modules.agents.schemas import (
     AgentChatRequest,
     AgentSkillUpdateRequest,
     WorkspaceAgentModelUpdate,
+    WorkspaceAgentPersonalityUpdate,
     WorkspaceSkillAgentAssignmentRequest,
     WorkspaceSkillApproveRequest,
 )
@@ -5200,6 +5201,37 @@ def test_agent_runtime_instructions_include_platform_context_without_skills() ->
     assert "Wardn runtime skills" not in instructions
 
 
+def test_agent_runtime_instructions_include_identity_and_personality() -> None:
+    agent = Agent(
+        id=uuid4(),
+        organization_id=uuid4(),
+        workspace_id=uuid4(),
+        name="Workspace Assistant",
+        instructions="Use tools carefully.",
+        personality="Sound direct, practical, and lightly conversational.",
+        identity_name="NetClaw",
+        identity_theme="ops assistant",
+        identity_emoji="NC",
+        scope="workspace",
+        model_name="gpt-5.1",
+        is_active=True,
+    )
+
+    instructions = chat_orchestrator.agent_runtime_instructions(
+        agent,
+        skill_tools=[],
+        approved_skill_context=[],
+    )
+
+    assert instructions.startswith("Use tools carefully.")
+    assert "Agent identity and personality" in instructions
+    assert "- Name: NetClaw" in instructions
+    assert "- Theme: ops assistant" in instructions
+    assert "- Emoji: NC" in instructions
+    assert "Sound direct, practical, and lightly conversational." in instructions
+    assert "Embody this persona and tone" in instructions
+
+
 @pytest.mark.asyncio
 async def test_execute_agent_skill_tool_searches_wardn_hub(monkeypatch) -> None:
     class FakeHubClient:
@@ -5875,7 +5907,15 @@ async def test_quick_start_workspace_agent_creates_default_agent(monkeypatch) ->
     assert agent.workspace_id == workspace_id
     assert agent.provider_credential_id == workspace_credential.id
     assert agent.model_name == "gpt-4o-mini"
+    assert agent.personality == service.QUICK_START_AGENT_PERSONALITY
+    assert agent.identity_name == service.QUICK_START_AGENT_IDENTITY_NAME
+    assert agent.identity_theme == service.QUICK_START_AGENT_IDENTITY_THEME
+    assert agent.identity_avatar == service.QUICK_START_AGENT_IDENTITY_AVATAR
     assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
+    assert response.agent.personality == service.QUICK_START_AGENT_PERSONALITY
+    assert response.agent.identity.name == service.QUICK_START_AGENT_IDENTITY_NAME
+    assert response.agent.identity.theme == service.QUICK_START_AGENT_IDENTITY_THEME
+    assert response.agent.identity.avatar == service.QUICK_START_AGENT_IDENTITY_AVATAR
     assert response.agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
     assert response.agent.tool_count == 4
     assert response.agent.server_count == 1
@@ -5969,6 +6009,11 @@ async def test_quick_start_workspace_agent_reuses_existing_agent(monkeypatch) ->
     )
 
     assert response.agent.id == agent.id
+    assert agent.personality == service.QUICK_START_AGENT_PERSONALITY
+    assert agent.identity_name == service.QUICK_START_AGENT_IDENTITY_NAME
+    assert agent.identity_theme == service.QUICK_START_AGENT_IDENTITY_THEME
+    assert agent.identity_avatar == service.QUICK_START_AGENT_IDENTITY_AVATAR
+    assert response.agent.identity.name == service.QUICK_START_AGENT_IDENTITY_NAME
     assert response.agent.skill_ids == []
     assert response.agent.provider_credential_id == credential.id
     assert response.agent.model_name == "gpt-4o-mini"
@@ -6086,6 +6131,10 @@ async def test_update_workspace_assistant_model_updates_existing_agent(monkeypat
     assert agent.workspace_id == workspace_id
     assert agent.description == service.QUICK_START_AGENT_DESCRIPTION
     assert agent.instructions == service.QUICK_START_AGENT_INSTRUCTIONS
+    assert agent.personality == service.QUICK_START_AGENT_PERSONALITY
+    assert agent.identity_name == service.QUICK_START_AGENT_IDENTITY_NAME
+    assert agent.identity_theme == service.QUICK_START_AGENT_IDENTITY_THEME
+    assert agent.identity_avatar == service.QUICK_START_AGENT_IDENTITY_AVATAR
     assert agent.skill_ids == []
     assert agent.is_active is True
     assert assigned_servers == [(installation, True, [])]
@@ -6173,12 +6222,172 @@ async def test_update_workspace_assistant_model_creates_missing_agent(monkeypatc
     assert agent.name == service.QUICK_START_AGENT_NAME
     assert agent.description == service.QUICK_START_AGENT_DESCRIPTION
     assert agent.instructions == service.QUICK_START_AGENT_INSTRUCTIONS
+    assert agent.personality == service.QUICK_START_AGENT_PERSONALITY
+    assert agent.identity_name == service.QUICK_START_AGENT_IDENTITY_NAME
+    assert agent.identity_theme == service.QUICK_START_AGENT_IDENTITY_THEME
+    assert agent.identity_avatar == service.QUICK_START_AGENT_IDENTITY_AVATAR
     assert agent.provider_credential_id == credential.id
     assert agent.model_name == "gpt-5.1"
     assert agent.skill_ids == [skills.WARDN_FIND_SKILLS_ID]
     assert agent.is_active is True
     assert response.id == agent.id
     assert create_limit_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_assistant_personality_updates_existing_agent(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        provider_credential_id=uuid4(),
+        name=service.QUICK_START_AGENT_NAME,
+        description="Default assistant",
+        instructions="Use tools.",
+        personality="Old persona",
+        identity_name="Old",
+        identity_theme="old theme",
+        identity_emoji="O",
+        identity_avatar="O",
+        identity_avatar_url="",
+        scope="workspace",
+        model_name="gpt-5.1",
+        skill_ids=[],
+        is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+
+    async def require_agent_scope_permission(*args, **kwargs):
+        assert kwargs["scope"] == "workspace"
+        assert kwargs["workspace_id"] == workspace_id
+        return workspace_id
+
+    async def get_agent_by_name(*args, **kwargs):
+        assert kwargs["name"] == service.QUICK_START_AGENT_NAME
+        return agent
+
+    async def count_agent_servers(*args, **kwargs):
+        return 0
+
+    async def count_agent_tools(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        service,
+        "require_agent_scope_permission",
+        require_agent_scope_permission,
+    )
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    response = await service.update_workspace_assistant_personality(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        WorkspaceAgentPersonalityUpdate(
+            identity={
+                "name": "NetClaw",
+                "theme": "migration operator",
+                "emoji": "NC",
+                "avatar": "N",
+                "avatarUrl": "https://example.com/avatar.png",
+            },
+            personality=(
+                "Be calm and concise.\n"
+                "Acknowledge work before taking multi-step operational actions."
+            ),
+        ),
+    )
+
+    assert agent.personality == (
+        "Be calm and concise.\n"
+        "Acknowledge work before taking multi-step operational actions."
+    )
+    assert agent.identity_name == "NetClaw"
+    assert agent.identity_theme == "migration operator"
+    assert agent.identity_emoji == "NC"
+    assert agent.identity_avatar == "N"
+    assert agent.identity_avatar_url == "https://example.com/avatar.png"
+    assert response.identity.name == "NetClaw"
+    assert response.identity.theme == "migration operator"
+    assert response.identity.emoji == "NC"
+    assert response.identity.avatar == "N"
+    assert response.identity.avatar_url == "https://example.com/avatar.png"
+    assert response.personality == agent.personality
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_assistant_personality_preserves_omitted_fields(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace_id = uuid4()
+    user = User(id=uuid4(), email="admin@example.com", is_superuser=False)
+    agent = Agent(
+        id=uuid4(),
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        created_by_id=user.id,
+        provider_credential_id=uuid4(),
+        name=service.QUICK_START_AGENT_NAME,
+        description="Default assistant",
+        instructions="Use tools.",
+        personality="Keep me",
+        identity_name="KeepName",
+        identity_theme="keep theme",
+        identity_emoji="K",
+        identity_avatar="K",
+        identity_avatar_url="https://example.com/keep.png",
+        scope="workspace",
+        model_name="gpt-5.1",
+        skill_ids=[],
+        is_active=True,
+        created_at=datetime(2026, 6, 23, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+
+    async def require_agent_scope_permission(*args, **kwargs):
+        return workspace_id
+
+    async def get_agent_by_name(*args, **kwargs):
+        return agent
+
+    async def count_agent_servers(*args, **kwargs):
+        return 0
+
+    async def count_agent_tools(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        service,
+        "require_agent_scope_permission",
+        require_agent_scope_permission,
+    )
+    monkeypatch.setattr(service.repository, "get_agent_by_name", get_agent_by_name)
+    monkeypatch.setattr(service.repository, "count_agent_servers", count_agent_servers)
+    monkeypatch.setattr(service.repository, "count_agent_tools", count_agent_tools)
+
+    response = await service.update_workspace_assistant_personality(
+        FakeSession(),
+        user,
+        organization_id,
+        workspace_id,
+        WorkspaceAgentPersonalityUpdate(identity={"theme": None}),
+    )
+
+    assert agent.personality == "Keep me"
+    assert agent.identity_name == "KeepName"
+    assert agent.identity_theme == ""
+    assert agent.identity_emoji == "K"
+    assert agent.identity_avatar == "K"
+    assert agent.identity_avatar_url == "https://example.com/keep.png"
+    assert response.identity.name == "KeepName"
+    assert response.identity.theme is None
 
 
 @pytest.mark.asyncio

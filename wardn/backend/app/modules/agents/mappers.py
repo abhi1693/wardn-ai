@@ -3,6 +3,7 @@ from typing import Any
 
 from app.modules.agents.models import Agent, AgentRun, ConversationMessage, WorkspaceConversation
 from app.modules.agents.schemas import (
+    AgentIdentityRead,
     AgentRead,
     AgentRunRead,
     AgentRunStepRead,
@@ -62,6 +63,30 @@ def sanitize_run_payload(value: Any) -> Any:
     return value
 
 
+def is_agent_avatar_url(value: str) -> bool:
+    return value.lower().startswith(("http://", "https://", "data:image/"))
+
+
+def agent_avatar_url(agent: Agent) -> str | None:
+    avatar_url = (getattr(agent, "identity_avatar_url", "") or "").strip()
+    if avatar_url and is_agent_avatar_url(avatar_url):
+        return avatar_url
+    avatar = (getattr(agent, "identity_avatar", "") or "").strip()
+    if is_agent_avatar_url(avatar):
+        return avatar
+    return None
+
+
+def agent_identity_response(agent: Agent) -> AgentIdentityRead:
+    return AgentIdentityRead(
+        name=(getattr(agent, "identity_name", "") or "").strip() or agent.name,
+        theme=(getattr(agent, "identity_theme", "") or "").strip() or None,
+        emoji=(getattr(agent, "identity_emoji", "") or "").strip() or None,
+        avatar=(getattr(agent, "identity_avatar", "") or "").strip() or None,
+        avatarUrl=agent_avatar_url(agent),
+    )
+
+
 def agent_response(agent: Agent, *, server_count: int, tool_count: int) -> AgentRead:
     return AgentRead(
         id=agent.id,
@@ -70,8 +95,10 @@ def agent_response(agent: Agent, *, server_count: int, tool_count: int) -> Agent
         createdById=agent.created_by_id,
         providerCredentialId=agent.provider_credential_id,
         name=agent.name,
-        description=agent.description,
-        instructions=agent.instructions,
+        description=agent.description or "",
+        instructions=agent.instructions or "",
+        personality=(getattr(agent, "personality", "") or ""),
+        identity=agent_identity_response(agent),
         scope=agent.scope,
         modelName=agent.model_name,
         skillIds=agent.skill_ids or [],

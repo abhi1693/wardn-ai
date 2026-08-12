@@ -16,6 +16,7 @@ import type {
   AgentToolApprovalDecisionResponse,
   AgentToolApprovalRead,
   WorkspaceAgentModelUpdate,
+  WorkspaceAgentPersonalityUpdate,
   WorkspaceAgentsListParams
 } from '../model';
 
@@ -154,6 +155,32 @@ export const workspaceAgentsUpdateWorkspaceAssistantModel = async (organizationI
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(workspaceAgentModelUpdate)
+  }
+);}
+
+
+export const getWorkspaceAgentsUpdateWorkspaceAssistantPersonalityUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}/agents/workspace-assistant/personality`
+}
+
+/**
+ * @summary Update Workspace Assistant Personality Route
+ */
+export const workspaceAgentsUpdateWorkspaceAssistantPersonality = async (organizationId: string,
+    workspaceId: string,
+    workspaceAgentPersonalityUpdate: WorkspaceAgentPersonalityUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
+
+  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantPersonalityUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(workspaceAgentPersonalityUpdate)
   }
 );}
 

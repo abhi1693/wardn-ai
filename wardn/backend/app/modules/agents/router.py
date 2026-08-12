@@ -23,6 +23,7 @@ from app.modules.agents.schemas import (
     AgentToolApprovalDecisionResponse,
     AgentToolApprovalRead,
     WorkspaceAgentModelUpdate,
+    WorkspaceAgentPersonalityUpdate,
     WorkspaceApprovedSkillRead,
     WorkspaceSkillAgentAssignmentRequest,
     WorkspaceSkillApproveRequest,
@@ -48,6 +49,7 @@ from app.modules.agents.service import (
     stream_agent_chat,
     update_agent_skills,
     update_workspace_assistant_model,
+    update_workspace_assistant_personality,
 )
 from app.modules.users.dependencies import get_current_user, get_stream_current_user
 from app.modules.users.models import User
@@ -427,6 +429,32 @@ async def update_workspace_assistant_model_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentRead:
     return await update_workspace_assistant_model(
+        session,
+        current_user,
+        organization_id,
+        workspace_id,
+        payload,
+    )
+
+
+@workspace_router.patch(
+    "/workspace-assistant/personality",
+    response_model=AgentRead,
+    operation_id="workspace_agents_update_workspace_assistant_personality",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
+async def update_workspace_assistant_personality_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    payload: WorkspaceAgentPersonalityUpdate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AgentRead:
+    return await update_workspace_assistant_personality(
         session,
         current_user,
         organization_id,

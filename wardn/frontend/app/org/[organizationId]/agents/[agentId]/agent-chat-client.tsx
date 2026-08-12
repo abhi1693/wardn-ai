@@ -12,19 +12,24 @@ import {
   Cpu,
   Database,
   History,
+  ImageIcon,
   Info,
   KeyRound,
   ListTree,
   Loader2,
   Network,
   PanelRight,
+  Palette,
+  PencilLine,
   RotateCcw,
   Send,
   ServerCrash,
   ShieldAlert,
   ShieldCheck,
+  Smile,
   Square,
   TimerOff,
+  UserRound,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -43,6 +48,8 @@ import { Badge } from "@/components/atoms/badge";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import { DeferredRender } from "@/components/molecules/deferred-render";
 import { Button } from "@/components/atoms/button";
+import { Input } from "@/components/atoms/input";
+import { Label } from "@/components/atoms/label";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +77,7 @@ import {
   workspaceAgentsGetConversation,
   workspaceAgentsDecideToolApproval,
   workspaceAgentsUpdateWorkspaceAssistantModel,
+  workspaceAgentsUpdateWorkspaceAssistantPersonality,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
 import { formatUserShortDate } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
@@ -77,6 +85,10 @@ import { cn } from "@/lib/utils";
 import type { LlmCredentialRead } from "../../llm-credentials/types";
 import {
   agentRunIdFromMessage,
+  agentAvatarText,
+  agentDisplayName,
+  agentPersonality,
+  agentTheme,
   credentialLabel,
   isToolActivityPart,
   messageText,
@@ -114,6 +126,14 @@ type ModelSwitcherProps = {
   agent: AgentRead;
   canManageModel: boolean;
   credentials: LlmCredentialRead[];
+  onAgentChange: (agent: AgentRead) => void;
+  organizationId: string;
+  workspaceId: string;
+};
+
+type PersonalityEditorProps = {
+  agent: AgentRead;
+  canManagePersonality: boolean;
   onAgentChange: (agent: AgentRead) => void;
   organizationId: string;
   workspaceId: string;
@@ -238,6 +258,39 @@ function displayDate(value?: string | null) {
   return formatUserShortDate(value, "No activity");
 }
 
+function inputValue(value?: string | null) {
+  return typeof value === "string" ? value : "";
+}
+
+function nullableTrimmed(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function IdentityMark({ agent, className }: { agent: AgentRead; className?: string }) {
+  const avatarUrl = agent.identity?.avatarUrl?.trim();
+  const avatarText = agentAvatarText(agent);
+  return (
+    <span
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]",
+        className
+      )}
+    >
+      {avatarUrl ? (
+        <span
+          aria-label={agentDisplayName(agent)}
+          className="size-full bg-cover bg-center"
+          role="img"
+          style={{ backgroundImage: `url(${avatarUrl})` }}
+        />
+      ) : (
+        <span className="text-xs font-semibold">{avatarText}</span>
+      )}
+    </span>
+  );
+}
+
 function ChatStat({
   detail,
   icon: Icon,
@@ -297,17 +350,18 @@ function ContextPanel({
   const serverLabel = `${agent.serverCount} ${pluralize(agent.serverCount, "server")}`;
   const toolLabel = `${agent.toolCount} ${pluralize(agent.toolCount, "tool")}`;
   const modelLabel = agent.modelName || "No model";
+  const displayName = agentDisplayName(agent);
+  const theme = agentTheme(agent);
+  const personality = agentPersonality(agent);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <section className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
         <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Bot className="size-5" />
-          </div>
+          <IdentityMark agent={agent} className="size-10 bg-primary text-primary-foreground" />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-sm font-semibold leading-5">{agent.name}</h2>
+              <h2 className="truncate text-sm font-semibold leading-5">{displayName}</h2>
               <StatusBadge agent={agent} />
             </div>
             <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">
@@ -331,6 +385,36 @@ function ContextPanel({
             tone={agent.toolCount > 0 ? "success" : "neutral"}
             value={compactCount(agent.toolCount)}
           />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">Identity</div>
+          <UserRound className="size-4 text-muted-foreground" />
+        </div>
+        <div className="space-y-3 text-sm">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <Smile className="size-4 shrink-0" />
+              Name
+            </span>
+            <span className="truncate text-right text-xs font-medium text-foreground">
+              {displayName}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <Palette className="size-4 shrink-0" />
+              Theme
+            </span>
+            <span className="truncate text-right text-xs font-medium text-foreground">
+              {theme || "Not set"}
+            </span>
+          </div>
+          <div className="rounded-md border border-border bg-muted/35 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {personality || "No personality guidance set."}
+          </div>
         </div>
       </section>
 
@@ -629,6 +713,201 @@ function ModelSwitcher({
               type="button"
             >
               {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PersonalityEditor({
+  agent,
+  canManagePersonality,
+  onAgentChange,
+  organizationId,
+  workspaceId,
+}: PersonalityEditorProps) {
+  const [open, setOpen] = useState(false);
+  const [identityName, setIdentityName] = useState(inputValue(agent.identity?.name));
+  const [identityTheme, setIdentityTheme] = useState(inputValue(agent.identity?.theme));
+  const [identityEmoji, setIdentityEmoji] = useState(inputValue(agent.identity?.emoji));
+  const [identityAvatar, setIdentityAvatar] = useState(inputValue(agent.identity?.avatar));
+  const [identityAvatarUrl, setIdentityAvatarUrl] = useState(
+    inputValue(agent.identity?.avatarUrl)
+  );
+  const [personality, setPersonality] = useState(inputValue(agent.personality));
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const displayName = agentDisplayName(agent);
+  const theme = agentTheme(agent);
+
+  function resetFields() {
+    setIdentityName(inputValue(agent.identity?.name));
+    setIdentityTheme(inputValue(agent.identity?.theme));
+    setIdentityEmoji(inputValue(agent.identity?.emoji));
+    setIdentityAvatar(inputValue(agent.identity?.avatar));
+    setIdentityAvatarUrl(inputValue(agent.identity?.avatarUrl));
+    setPersonality(inputValue(agent.personality));
+  }
+
+  function updateOpen(nextOpen: boolean) {
+    setOpen(nextOpen);
+    setError("");
+    if (nextOpen) {
+      resetFields();
+    }
+  }
+
+  async function savePersonality() {
+    if (isSaving) {
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const updatedAgent = await workspaceAgentsUpdateWorkspaceAssistantPersonality(
+        organizationId,
+        workspaceId,
+        {
+          identity: {
+            avatar: nullableTrimmed(identityAvatar),
+            avatarUrl: nullableTrimmed(identityAvatarUrl),
+            emoji: nullableTrimmed(identityEmoji),
+            name: nullableTrimmed(identityName),
+            theme: nullableTrimmed(identityTheme),
+          },
+          personality: nullableTrimmed(personality),
+        }
+      );
+      onAgentChange(updatedAgent);
+      setOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Personality could not be saved.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (!canManagePersonality) {
+    return (
+      <Badge className="h-8 gap-1.5 px-2.5" variant="outline">
+        <UserRound className="size-3.5" />
+        <span className="max-w-40 truncate">{displayName}</span>
+      </Badge>
+    );
+  }
+
+  return (
+    <Dialog onOpenChange={updateOpen} open={open}>
+      <DialogTrigger asChild>
+        <Button size="sm" type="button" variant="outline">
+          <UserRound className="size-4" />
+          <span className="max-w-40 truncate">{displayName}</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Agent personality</DialogTitle>
+          <DialogDescription>
+            Set the identity and persona used in chat responses.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="agent-identity-name">Name</Label>
+              <Input
+                id="agent-identity-name"
+                maxLength={50}
+                onChange={(event) => setIdentityName(event.target.value)}
+                placeholder={agent.name}
+                value={identityName}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="agent-identity-theme">Theme</Label>
+              <Input
+                id="agent-identity-theme"
+                maxLength={120}
+                onChange={(event) => setIdentityTheme(event.target.value)}
+                placeholder="evidence-first operator"
+                value={identityTheme}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="agent-identity-emoji">Emoji or marker</Label>
+              <Input
+                id="agent-identity-emoji"
+                maxLength={32}
+                onChange={(event) => setIdentityEmoji(event.target.value)}
+                placeholder="W"
+                value={identityEmoji}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="agent-identity-avatar">Avatar</Label>
+              <Input
+                id="agent-identity-avatar"
+                maxLength={512}
+                onChange={(event) => setIdentityAvatar(event.target.value)}
+                placeholder="W"
+                value={identityAvatar}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="agent-identity-avatar-url">Avatar URL</Label>
+            <div className="flex items-center gap-2">
+              <ImageIcon className="size-4 text-muted-foreground" />
+              <Input
+                id="agent-identity-avatar-url"
+                maxLength={1024}
+                onChange={(event) => setIdentityAvatarUrl(event.target.value)}
+                placeholder="https://example.com/avatar.png"
+                value={identityAvatarUrl}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="agent-personality">Personality</Label>
+            <textarea
+              className="min-h-36 w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
+              id="agent-personality"
+              maxLength={4000}
+              onChange={(event) => setPersonality(event.target.value)}
+              placeholder="Be concise, practical, and clear about what you are checking."
+              value={personality}
+            />
+            <div className="flex justify-between gap-3 text-xs text-muted-foreground">
+              <span>{theme || "No theme set"}</span>
+              <span>{personality.length}/4000</span>
+            </div>
+          </div>
+
+          {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={isSaving}
+              onClick={() => setOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button disabled={isSaving} onClick={savePersonality} type="button">
+              {isSaving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <PencilLine className="size-4" />
+              )}
               Save
             </Button>
           </div>
@@ -978,6 +1257,13 @@ export function AgentChatClient({
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
       <div className="absolute right-5 top-4 z-10 flex shrink-0 items-center gap-2">
+        <PersonalityEditor
+          agent={currentAgent}
+          canManagePersonality={canManageModel}
+          onAgentChange={setCurrentAgent}
+          organizationId={organization.id}
+          workspaceId={workspaceId}
+        />
         <ModelSwitcher
           agent={currentAgent}
           canManageModel={canManageModel}
@@ -1008,7 +1294,7 @@ export function AgentChatClient({
           </DialogTrigger>
           <DialogContent className="top-0 right-0 left-auto flex h-dvh max-w-md translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0 sm:w-[420px]">
             <DialogHeader className="border-b border-border px-5 py-4">
-              <DialogTitle>{currentAgent.name}</DialogTitle>
+              <DialogTitle>{agentDisplayName(currentAgent)}</DialogTitle>
               <DialogDescription>Workspace chat context</DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -1040,15 +1326,14 @@ export function AgentChatClient({
         >
           {isEmptyConversation ? (
             <div className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
-              <div className="mb-5 flex size-11 items-center justify-center rounded-md border border-border bg-card text-primary shadow-[var(--shadow-card)]">
-                <Bot className="size-5" />
-              </div>
+              <IdentityMark agent={currentAgent} className="mb-5 size-11" />
               <h2 className="text-2xl font-semibold leading-8 text-foreground">
-                Ask Wardn about this workspace
+                Ask {agentDisplayName(currentAgent)} about this workspace
               </h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                {currentAgent.name} is using {currentAgent.modelName || "no selected model"} with{" "}
-                {serverLabel} and {toolLabel} available.
+                {agentTheme(currentAgent) || currentAgent.name} is using{" "}
+                {currentAgent.modelName || "no selected model"} with {serverLabel} and {toolLabel}{" "}
+                available.
               </p>
               <div className="mt-6 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
                 {promptSuggestions.map((suggestion) => {
@@ -1114,7 +1399,7 @@ export function AgentChatClient({
                       isUser ? "flex-row-reverse" : "w-full"
                     )}
                   >
-                    <MessageAvatar role={message.role} />
+                    <MessageAvatar agent={currentAgent} role={message.role} />
                     <div className={cn("min-w-0", isUser ? "max-w-[720px]" : "flex-1")}>
                       <div
                         className={cn(
@@ -1122,7 +1407,7 @@ export function AgentChatClient({
                           isUser && "justify-end"
                         )}
                       >
-                        <MessageLabel role={message.role} />
+                        <MessageLabel agent={currentAgent} role={message.role} />
                         {isUser && text ? (
                           <button
                             aria-label="Resubmit prompt"
@@ -1173,7 +1458,7 @@ export function AgentChatClient({
 
           {status === "submitted" ? (
             <div aria-live="polite" className="flex items-start gap-3" role="status">
-              <MessageAvatar role="assistant" />
+              <MessageAvatar agent={currentAgent} role="assistant" />
               <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-[var(--shadow-card)]">
                 <Loader2 className="size-4 animate-spin" />
                 Thinking
