@@ -3,8 +3,11 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Iterator
+import threading
+import time
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +37,11 @@ DEFAULT_REGISTRY_LIMIT = 100
 PROGRESS_PAGE_INTERVAL = 10
 REGISTRY_SYNC_USER_AGENT = "Wardn/0.1 (+https://wardnai.dev)"
 DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY = 20
+DEFAULT_CATALOG_REQUEST_INTERVAL_SECONDS = 0.25
+DEFAULT_CATALOG_RETRY_MAX_ATTEMPTS = 5
+DEFAULT_CATALOG_RETRY_BASE_SECONDS = 1.0
+DEFAULT_CATALOG_RETRY_MAX_SECONDS = 60.0
+RETRYABLE_CATALOG_STATUS_CODES = {429, 500, 502, 503, 504}
 WARDN_HUB_VERSION_SUMMARY_FIELDS = "name,latestVersion,metadata"
 CURATED_SERVERS = {
     "grafana": {
@@ -95,6 +103,115 @@ CURATED_SERVERS = {
     },
 }
 logger = logging.getLogger(__name__)
+
+
+class CatalogRequestPacer:
+    """Reserve outbound request slots shared by concurrent catalog workers."""
+
+    def __init__(self, interval_seconds: float) -> None:
+        if interval_seconds < 0:
+            raise ValueError("catalog request interval must not be negative")
+        self.interval_seconds = interval_seconds
+        self._lock = threading.Lock()
+        self._next_request_at = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            request_at = max(now, self._next_request_at)
+            self._next_request_at = request_at + self.interval_seconds
+        delay = request_at - now
+        if delay > 0:
+            time.sleep(delay)
+
+    def defer(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        with self._lock:
+            self._next_request_at = max(
+                self._next_request_at,
+                time.monotonic() + seconds,
+            )
+
+
+def retry_after_seconds(error: HTTPError) -> float | None:
+    value = error.headers.get("Retry-After") if error.headers is not None else None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            return None
+        return max(0.0, retry_at.timestamp() - time.time())
+
+
+def fetch_registry_payload_with_retry(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    pacer: CatalogRequestPacer | None = None,
+    max_attempts: int = DEFAULT_CATALOG_RETRY_MAX_ATTEMPTS,
+    retry_base_seconds: float = DEFAULT_CATALOG_RETRY_BASE_SECONDS,
+    retry_max_seconds: float = DEFAULT_CATALOG_RETRY_MAX_SECONDS,
+):
+    if max_attempts < 1:
+        raise ValueError("catalog retry attempts must be greater than 0")
+    if retry_base_seconds <= 0 or retry_max_seconds <= 0:
+        raise ValueError("catalog retry delays must be greater than 0")
+    if retry_base_seconds > retry_max_seconds:
+        raise ValueError("catalog retry base must not exceed its maximum")
+
+    request_pacer = pacer or CatalogRequestPacer(0)
+    for attempt in range(1, max_attempts + 1):
+        request_pacer.wait()
+        try:
+            return (
+                fetch_registry_payload(url, headers=headers)
+                if headers
+                else fetch_registry_payload(url)
+            )
+        except HTTPError as exc:
+            if exc.code not in RETRYABLE_CATALOG_STATUS_CODES or attempt >= max_attempts:
+                raise
+            server_delay = retry_after_seconds(exc)
+            retry_delay = max(
+                server_delay or 0,
+                min(
+                    retry_max_seconds,
+                    retry_base_seconds * (2 ** (attempt - 1)),
+                ),
+            )
+            request_pacer.defer(retry_delay)
+            logger.warning(
+                "Catalog request was rate limited or temporarily unavailable; retrying.",
+                extra={
+                    "mcp_catalog_http_status": exc.code,
+                    "mcp_catalog_retry_attempt": attempt,
+                    "mcp_catalog_retry_delay_seconds": retry_delay,
+                },
+            )
+        except (TimeoutError, URLError) as exc:
+            if attempt >= max_attempts:
+                raise
+            retry_delay = min(
+                retry_max_seconds,
+                retry_base_seconds * (2 ** (attempt - 1)),
+            )
+            request_pacer.defer(retry_delay)
+            logger.warning(
+                "Catalog request timed out or could not connect; retrying.",
+                extra={
+                    "mcp_catalog_retry_attempt": attempt,
+                    "mcp_catalog_retry_delay_seconds": retry_delay,
+                    "error_type": exc.__class__.__name__,
+                },
+            )
+    raise RuntimeError("catalog request retry loop exhausted")
 
 
 class RegistrySource(StrEnum):
@@ -234,6 +351,7 @@ def load_wardn_hub_version_detail_documents(
     source_url: str,
     headers: dict[str, str] | None = None,
     concurrency: int = DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY,
+    fetch_payload: Callable[..., object] | None = None,
 ) -> list[dict]:
     if concurrency < 1:
         raise ValueError("Wardn Hub version detail concurrency must be greater than 0")
@@ -254,7 +372,7 @@ def load_wardn_hub_version_detail_documents(
 
     def fetch_detail_documents(summary: tuple[str, str]) -> list[dict]:
         server_name, version = summary
-        detail_payload = fetch_registry_payload(
+        detail_payload = (fetch_payload or fetch_registry_payload)(
             wardn_hub_version_detail_url(source_url, server_name, version),
             headers=headers,
         )
@@ -601,6 +719,10 @@ def iter_supported_server_batches_from_registry_url(
     github_token: str | None = None,
     wardn_hub_version_details: bool = False,
     wardn_hub_version_detail_concurrency: int = DEFAULT_WARDN_HUB_VERSION_DETAIL_CONCURRENCY,
+    request_interval_seconds: float = 0,
+    retry_max_attempts: int = 1,
+    retry_base_seconds: float = DEFAULT_CATALOG_RETRY_BASE_SECONDS,
+    retry_max_seconds: float = DEFAULT_CATALOG_RETRY_MAX_SECONDS,
 ) -> Iterator[list[MCPServerCreate]]:
     if limit < 1:
         raise ValueError("--limit must be greater than 0")
@@ -613,6 +735,17 @@ def iter_supported_server_batches_from_registry_url(
     page = 1
     pages_fetched = 0
     server_count = 0
+    request_pacer = CatalogRequestPacer(request_interval_seconds)
+
+    def fetch_with_policy(url: str, headers: dict[str, str] | None = None):
+        return fetch_registry_payload_with_retry(
+            url,
+            headers=headers,
+            pacer=request_pacer,
+            max_attempts=retry_max_attempts,
+            retry_base_seconds=retry_base_seconds,
+            retry_max_seconds=retry_max_seconds,
+        )
 
     logger.info("Loading supported MCP servers from registry: %s", source_url)
 
@@ -632,10 +765,7 @@ def iter_supported_server_batches_from_registry_url(
             ),
         )
         logger.debug("Fetching registry page %s, cursor=%s", pages_fetched + 1, cursor)
-        if headers:
-            payload = fetch_registry_payload(page_url, headers=headers)
-        else:
-            payload = fetch_registry_payload(page_url)
+        payload = fetch_with_policy(page_url, headers=headers)
         documents: list[dict] = []
         if wardn_hub_version_details:
             documents = load_wardn_hub_version_detail_documents(
@@ -643,6 +773,7 @@ def iter_supported_server_batches_from_registry_url(
                 source_url=source_url,
                 headers=headers,
                 concurrency=wardn_hub_version_detail_concurrency,
+                fetch_payload=fetch_with_policy,
             )
             documents = [strip_unsupported_package_targets(server) for server in documents]
             documents = [sanitize_source_urls(server) for server in documents]

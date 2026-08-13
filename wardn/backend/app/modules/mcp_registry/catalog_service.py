@@ -776,6 +776,14 @@ async def sync_catalog_source(
                     wardn_hub_version_detail_concurrency=(
                         get_settings().mcp_catalog_sync_detail_concurrency
                     ),
+                    request_interval_seconds=(
+                        get_settings().mcp_catalog_sync_request_interval_seconds
+                        if is_wardn_hub_source
+                        else 0
+                    ),
+                    retry_max_attempts=get_settings().mcp_catalog_sync_retry_max_attempts,
+                    retry_base_seconds=get_settings().mcp_catalog_sync_retry_base_seconds,
+                    retry_max_seconds=get_settings().mcp_catalog_sync_retry_max_seconds,
                 )
                 while True:
                     batch = await asyncio.to_thread(next_catalog_sync_batch, batch_iterator)

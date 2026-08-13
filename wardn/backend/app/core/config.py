@@ -125,7 +125,11 @@ class Settings(BaseSettings):
     mcp_job_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
     mcp_job_worker_retry_base_seconds: int = Field(default=15, ge=1, le=3600)
     mcp_job_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
-    mcp_catalog_sync_detail_concurrency: int = Field(default=20, ge=1, le=100)
+    mcp_catalog_sync_detail_concurrency: int = Field(default=4, ge=1, le=32)
+    mcp_catalog_sync_request_interval_seconds: float = Field(default=0.25, ge=0, le=60)
+    mcp_catalog_sync_retry_max_attempts: int = Field(default=5, ge=1, le=10)
+    mcp_catalog_sync_retry_base_seconds: float = Field(default=1, ge=0.1, le=300)
+    mcp_catalog_sync_retry_max_seconds: float = Field(default=60, ge=0.1, le=900)
     mcp_runtime_provider: Literal["auto", "local", "kubernetes", "remote"] = "local"
     mcp_runtime_namespace: str = Field(default="wardn-runtimes", min_length=1, max_length=63)
     mcp_runtime_kubernetes_namespace_prefix: str = Field(
@@ -337,6 +341,8 @@ class Settings(BaseSettings):
             raise ValueError("agent run resume worker heartbeat must be shorter than its lease")
         if self.mcp_job_worker_retry_base_seconds > self.mcp_job_worker_retry_max_seconds:
             raise ValueError("MCP job worker retry base must not exceed its maximum")
+        if self.mcp_catalog_sync_retry_base_seconds > self.mcp_catalog_sync_retry_max_seconds:
+            raise ValueError("MCP catalog sync retry base must not exceed its maximum")
         if (
             self.agent_run_resume_worker_retry_base_seconds
             > self.agent_run_resume_worker_retry_max_seconds

@@ -1,8 +1,11 @@
 import json
 import logging
 import threading
+from email.message import Message
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
+import pytest
 from typer.testing import CliRunner
 
 from app.commands import create_app
@@ -335,6 +338,84 @@ def test_fetch_registry_payload_allows_user_agent_override(monkeypatch) -> None:
     )
 
     assert captured_headers["User-agent"] == "Custom/1.0"
+
+
+def test_catalog_request_pacer_spaces_concurrent_request_slots(monkeypatch) -> None:
+    clock = {"now": 100.0, "sleeps": []}
+
+    def sleep(seconds: float) -> None:
+        clock["sleeps"].append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(commands.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(commands.time, "sleep", sleep)
+    pacer = commands.CatalogRequestPacer(0.5)
+
+    pacer.wait()
+    pacer.wait()
+    pacer.wait()
+
+    assert clock["sleeps"] == [0.5, 0.5]
+
+
+def test_catalog_request_retry_honors_retry_after(monkeypatch) -> None:
+    clock = {"now": 100.0, "sleeps": []}
+    attempts = 0
+    headers = Message()
+    headers["Retry-After"] = "3"
+
+    def sleep(seconds: float) -> None:
+        clock["sleeps"].append(seconds)
+        clock["now"] += seconds
+
+    def fetch_registry_payload(url, headers=None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HTTPError(url, 429, "Too Many Requests", retry_headers, None)
+        return {"servers": [], "metadata": {"count": 0}}
+
+    retry_headers = headers
+    monkeypatch.setattr(commands.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(commands.time, "sleep", sleep)
+    monkeypatch.setattr(commands, "fetch_registry_payload", fetch_registry_payload)
+
+    payload = commands.fetch_registry_payload_with_retry(
+        "https://hub.wardnai.dev/api/v1/mcp/servers",
+        max_attempts=2,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert payload["servers"] == []
+    assert attempts == 2
+    assert clock["sleeps"] == [3]
+
+
+def test_catalog_request_retry_recovers_from_read_timeout(monkeypatch) -> None:
+    attempts = 0
+    sleeps = []
+
+    def fetch_registry_payload(url, headers=None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("read timed out")
+        return {"servers": [], "metadata": {"count": 0}}
+
+    monkeypatch.setattr(commands.time, "sleep", sleeps.append)
+    monkeypatch.setattr(commands, "fetch_registry_payload", fetch_registry_payload)
+
+    payload = commands.fetch_registry_payload_with_retry(
+        "https://hub.wardnai.dev/api/v1/mcp/servers",
+        max_attempts=2,
+        retry_base_seconds=2,
+        retry_max_seconds=10,
+    )
+
+    assert payload["servers"] == []
+    assert attempts == 2
+    assert sleeps == [pytest.approx(2, abs=0.01)]
 
 
 def test_registry_url_loader_strips_unsupported_mcpb_packages(monkeypatch) -> None:

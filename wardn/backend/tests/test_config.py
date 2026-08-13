@@ -70,6 +70,24 @@ def test_settings_allow_telemetry_opt_out() -> None:
     assert make_settings(telemetry=False).telemetry is False
 
 
+def test_settings_pace_and_retry_catalog_sync_by_default() -> None:
+    settings = make_settings()
+
+    assert settings.mcp_catalog_sync_detail_concurrency == 4
+    assert settings.mcp_catalog_sync_request_interval_seconds == 0.25
+    assert settings.mcp_catalog_sync_retry_max_attempts == 5
+    assert settings.mcp_catalog_sync_retry_base_seconds == 1
+    assert settings.mcp_catalog_sync_retry_max_seconds == 60
+
+
+def test_settings_reject_catalog_retry_base_above_maximum() -> None:
+    with pytest.raises(ValidationError, match="catalog sync retry base"):
+        make_settings(
+            mcp_catalog_sync_retry_base_seconds=10,
+            mcp_catalog_sync_retry_max_seconds=5,
+        )
+
+
 def test_settings_require_complete_oidc_config_in_production() -> None:
     with pytest.raises(ValidationError, match="OIDC mode requires"):
         make_settings(

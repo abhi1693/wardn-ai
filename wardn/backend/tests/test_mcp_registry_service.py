@@ -530,7 +530,16 @@ async def test_sync_catalog_source_fetches_only_wardn_hub_changes_after_watermar
     assert calls["kwargs"]["version"] == "latest"
     assert calls["kwargs"]["pagination"] == "cursor"
     assert calls["kwargs"]["wardn_hub_version_details"] is True
-    assert calls["kwargs"]["wardn_hub_version_detail_concurrency"] == 20
+    settings = catalog_service.get_settings()
+    assert calls["kwargs"]["wardn_hub_version_detail_concurrency"] == (
+        settings.mcp_catalog_sync_detail_concurrency
+    )
+    assert calls["kwargs"]["request_interval_seconds"] == (
+        settings.mcp_catalog_sync_request_interval_seconds
+    )
+    assert calls["kwargs"]["retry_max_attempts"] == (
+        settings.mcp_catalog_sync_retry_max_attempts
+    )
     assert calls["servers"][0].meta[service.CATALOG_SOURCE_META_KEY]["sourceUrl"] == (
         "https://hub.wardnai.dev/api/v1/mcp/servers"
     )
