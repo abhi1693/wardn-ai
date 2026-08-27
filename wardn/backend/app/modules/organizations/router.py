@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import ErrorResponse
@@ -242,9 +242,19 @@ async def delete_workspace_route(
     workspace_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    replacement_workspace_id: Annotated[
+        UUID | None,
+        Query(alias="replacementWorkspaceId"),
+    ] = None,
 ) -> None:
     try:
-        await delete_workspace(session, current_user, organization_id, workspace_id)
+        await delete_workspace(
+            session,
+            current_user,
+            organization_id,
+            workspace_id,
+            replacement_workspace_id=replacement_workspace_id,
+        )
     except (OrganizationNotFoundError, WorkspaceNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:

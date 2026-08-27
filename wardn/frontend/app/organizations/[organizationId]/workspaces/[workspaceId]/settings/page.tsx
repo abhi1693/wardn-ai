@@ -19,8 +19,8 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
     notFound();
   }
   const canDelete =
-    (workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin") &&
-    !(organization.slug === "default" && workspace.slug === "default");
+    workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin";
+  const isDefaultWorkspace = organization.slug === "default" && workspace.slug === "default";
 
   return (
     <AppShell
@@ -53,7 +53,12 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
                   managed-secret connections.
                 </p>
               </div>
-              <DeleteWorkspaceDialog organizationId={organization.id} workspace={workspace} />
+              <DeleteWorkspaceDialog
+                isDefaultWorkspace={isDefaultWorkspace}
+                organizationId={organization.id}
+                replacementWorkspaces={workspaceContext.workspaces}
+                workspace={workspace}
+              />
             </div>
           </section>
         ) : null}

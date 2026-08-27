@@ -12,7 +12,8 @@ import type {
   WorkspaceCreate,
   WorkspaceListResponse,
   WorkspaceRead,
-  WorkspaceUpdate
+  WorkspaceUpdate,
+  WorkspacesDeleteParams
 } from '../model';
 
 import { apiRequest } from '../../client';
@@ -158,21 +159,30 @@ export const workspacesCreate = async (organizationId: string,
 
 
 export const getWorkspacesDeleteUrl = (organizationId: string,
-    workspaceId: string,) => {
+    workspaceId: string,
+    params?: WorkspacesDeleteParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}`
+  return stringifiedParams.length > 0 ? `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}?${stringifiedParams}` : `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}`
 }
 
 /**
  * @summary Delete Workspace Route
  */
 export const workspacesDelete = async (organizationId: string,
-    workspaceId: string, options?: Parameters<typeof apiRequest>[1]): Promise<void> => {
+    workspaceId: string,
+    params?: WorkspacesDeleteParams, options?: Parameters<typeof apiRequest>[1]): Promise<void> => {
 
-  return apiRequest<void>(getWorkspacesDeleteUrl(organizationId,workspaceId),
+  return apiRequest<void>(getWorkspacesDeleteUrl(organizationId,workspaceId,params),
   {
     ...options,
     method: 'DELETE'

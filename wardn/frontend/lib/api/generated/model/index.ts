@@ -362,6 +362,7 @@ export * from './workspaceScheduledTaskUpdate';
 export * from './workspaceScheduledTaskUpdateConversationPolicy';
 export * from './workspaceScheduledTaskUpdateScheduleConfig';
 export * from './workspaceScheduledTaskUpdateScheduleType';
+export * from './workspacesDeleteParams';
 export * from './workspaceSkillAgentAssignmentRequest';
 export * from './workspaceSkillApproveRequest';
 export * from './workspaceSkillsSearchParams';

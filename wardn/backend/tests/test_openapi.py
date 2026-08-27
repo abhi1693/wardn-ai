@@ -1128,6 +1128,17 @@ def test_workspace_delete_openapi_contract() -> None:
     assert workspace_delete["operationId"] == "workspaces_delete"
     assert workspace_delete["responses"]["204"]["description"] == "Successful Response"
     assert "409" in workspace_delete["responses"]
+    replacement_parameter = next(
+        parameter
+        for parameter in workspace_delete["parameters"]
+        if parameter["name"] == "replacementWorkspaceId"
+    )
+    assert replacement_parameter["in"] == "query"
+    assert replacement_parameter["required"] is False
+    assert replacement_parameter["schema"]["anyOf"] == [
+        {"format": "uuid", "type": "string"},
+        {"type": "null"},
+    ]
 
 
 def test_user_openapi_schemas_do_not_expose_password_hashes() -> None:

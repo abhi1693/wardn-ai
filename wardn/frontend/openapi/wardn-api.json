@@ -18717,6 +18717,23 @@
             }
           },
           {
+            "in": "query",
+            "name": "replacementWorkspaceId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Replacementworkspaceid"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,

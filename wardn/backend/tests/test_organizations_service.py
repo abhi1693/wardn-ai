@@ -28,6 +28,7 @@ class FakeSession:
         self.added: list[object] = []
         self.deleted: list[object] = []
         self.flushed = False
+        self.flush_count = 0
         self.refreshed: list[object] = []
 
     def add(self, instance: object) -> None:
@@ -35,6 +36,7 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flushed = True
+        self.flush_count += 1
         for instance in self.added:
             if getattr(instance, "id", None) is None:
                 instance.id = uuid4()
@@ -437,7 +439,7 @@ async def test_workspace_admin_can_delete_empty_workspace(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_protected_default_workspace_cannot_be_deleted(monkeypatch) -> None:
+async def test_default_workspace_requires_replacement_before_deletion(monkeypatch) -> None:
     organization_id = uuid4()
     workspace = Workspace(
         id=uuid4(),
@@ -457,8 +459,69 @@ async def test_protected_default_workspace_cannot_be_deleted(monkeypatch) -> Non
     monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
     monkeypatch.setattr(service.repository, "get_default_workspace", default_workspace)
 
-    with pytest.raises(WorkspaceDeletionBlockedError, match="default workspace"):
+    with pytest.raises(WorkspaceDeletionBlockedError, match="select an active replacement"):
         await service.delete_workspace(FakeSession(), user, organization_id, workspace.id)
+
+
+@pytest.mark.asyncio
+async def test_default_workspace_promotes_replacement_before_deletion(monkeypatch) -> None:
+    organization_id = uuid4()
+    default_workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Default Workspace",
+        slug="default",
+        status="active",
+    )
+    replacement_workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Replacement",
+        slug="replacement",
+        status="active",
+    )
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        requested_id = args[3]
+        if requested_id == default_workspace.id:
+            return default_workspace, None, None
+        if requested_id == replacement_workspace.id:
+            return replacement_workspace, None, None
+        raise AssertionError(f"unexpected workspace ID: {requested_id}")
+
+    async def get_default_workspace(*args, **kwargs):
+        return default_workspace
+
+    async def no_dependencies(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_default_workspace", get_default_workspace)
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "count_installations_for_workspace",
+        no_dependencies,
+    )
+    monkeypatch.setattr(
+        service.managed_secrets_repository,
+        "count_managed_secrets_for_workspace",
+        no_dependencies,
+    )
+    session = FakeSession()
+
+    await service.delete_workspace(
+        session,
+        user,
+        organization_id,
+        default_workspace.id,
+        replacement_workspace_id=replacement_workspace.id,
+    )
+
+    assert default_workspace.slug == f"deleting-{default_workspace.id.hex}"
+    assert replacement_workspace.slug == "default"
+    assert session.deleted == [default_workspace]
+    assert session.flush_count == 3
 
 
 @pytest.mark.asyncio

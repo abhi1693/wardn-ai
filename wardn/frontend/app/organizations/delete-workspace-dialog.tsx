@@ -18,20 +18,31 @@ import {
 import { Button } from "@/components/atoms/button";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/atoms/select";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import type { WorkspaceRead } from "@/lib/api/generated/model";
 import { workspacesDelete } from "@/lib/api/generated/organizations/organizations";
-import { clearSelectionCookie } from "@/lib/selection-cookies";
+import { clearSelectionCookie, setSelectionCookie } from "@/lib/selection-cookies";
 import { selectedWorkspaceCookie } from "@/lib/workspace-types";
 
 type DeleteWorkspaceDialogProps = {
+  isDefaultWorkspace?: boolean;
   organizationId: string;
+  replacementWorkspaces?: WorkspaceRead[];
   trigger?: ReactElement;
   workspace: WorkspaceRead;
 };
 
 export function DeleteWorkspaceDialog({
+  isDefaultWorkspace = false,
   organizationId,
+  replacementWorkspaces = [],
   trigger,
   workspace,
 }: DeleteWorkspaceDialogProps) {
@@ -40,7 +51,15 @@ export function DeleteWorkspaceDialog({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
-  const confirmed = confirmation === workspace.name;
+  const [replacementWorkspaceId, setReplacementWorkspaceId] = useState("");
+  const eligibleReplacements = replacementWorkspaces.filter(
+    (candidate) =>
+      candidate.id !== workspace.id &&
+      candidate.status === "active" &&
+      (candidate.currentUserRole === "owner" || candidate.currentUserRole === "admin")
+  );
+  const confirmed =
+    confirmation === workspace.name && (!isDefaultWorkspace || Boolean(replacementWorkspaceId));
 
   async function deleteWorkspace(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -50,8 +69,16 @@ export function DeleteWorkspaceDialog({
     setDeleting(true);
     setError("");
     try {
-      await workspacesDelete(organizationId, workspace.id);
-      clearSelectionCookie(selectedWorkspaceCookie);
+      await workspacesDelete(
+        organizationId,
+        workspace.id,
+        isDefaultWorkspace ? { replacementWorkspaceId } : undefined
+      );
+      if (isDefaultWorkspace) {
+        setSelectionCookie(selectedWorkspaceCookie, replacementWorkspaceId);
+      } else {
+        clearSelectionCookie(selectedWorkspaceCookie);
+      }
       setOpen(false);
       router.push(`/org/${encodeURIComponent(organizationId)}/workspaces`);
       router.refresh();
@@ -71,6 +98,7 @@ export function DeleteWorkspaceDialog({
         if (!nextOpen) {
           setConfirmation("");
           setError("");
+          setReplacementWorkspaceId("");
         }
       }}
       open={open}
@@ -89,8 +117,42 @@ export function DeleteWorkspaceDialog({
           <AlertDialogDescription>
             This permanently deletes the workspace and its workspace-scoped data. This action
             cannot be undone.
+            {isDefaultWorkspace ? " Choose which workspace becomes the new default." : ""}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {isDefaultWorkspace ? (
+          <div className="grid gap-2 py-2">
+            <Label htmlFor={`replacement-workspace-${workspace.id}`}>New default workspace</Label>
+            <Select
+              disabled={deleting || eligibleReplacements.length === 0}
+              onValueChange={setReplacementWorkspaceId}
+              value={replacementWorkspaceId}
+            >
+              <SelectTrigger id={`replacement-workspace-${workspace.id}`}>
+                <SelectValue
+                  placeholder={
+                    eligibleReplacements.length === 0
+                      ? "No eligible workspace available"
+                      : "Select a workspace"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {eligibleReplacements.map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {eligibleReplacements.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Create or reactivate another workspace before deleting this default workspace.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="grid gap-2 py-2">
           <Label htmlFor={`delete-workspace-${workspace.id}`}>

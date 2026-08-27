@@ -96,10 +96,8 @@ function roleLabel(role: string) {
     .join(" ");
 }
 
-function canDeleteWorkspace(organization: OrganizationRead, workspace: WorkspaceRead) {
-  const canManage = workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin";
-  const isProtectedDefault = organization.slug === "default" && workspace.slug === "default";
-  return canManage && !isProtectedDefault;
+function canDeleteWorkspace(workspace: WorkspaceRead) {
+  return workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin";
 }
 
 export function OrganizationWorkspacesList({
@@ -239,9 +237,13 @@ export function OrganizationWorkspacesList({
                         <Badge variant="outline">{roleLabel(workspace.currentUserRole)}</Badge>
                       </div>
                     </div>
-                    {canDeleteWorkspace(organization, workspace) ? (
+                    {canDeleteWorkspace(workspace) ? (
                       <DeleteWorkspaceDialog
+                        isDefaultWorkspace={
+                          organization.slug === "default" && workspace.slug === "default"
+                        }
                         organizationId={organization.id}
+                        replacementWorkspaces={workspaces}
                         trigger={
                           <Button
                             aria-label={`Delete ${workspace.name} workspace`}

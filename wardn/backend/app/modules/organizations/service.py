@@ -487,6 +487,8 @@ async def delete_workspace(
     user: User,
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    *,
+    replacement_workspace_id: uuid.UUID | None = None,
 ) -> None:
     workspace, _organization_membership, _workspace_membership = await require_workspace_admin(
         session,
@@ -495,8 +497,25 @@ async def delete_workspace(
         workspace_id,
     )
     default_workspace = await repository.get_default_workspace(session)
-    if default_workspace is not None and default_workspace.id == workspace.id:
-        raise WorkspaceDeletionBlockedError("the protected default workspace cannot be deleted")
+    is_default_workspace = default_workspace is not None and default_workspace.id == workspace.id
+    replacement_workspace: Workspace | None = None
+    if is_default_workspace:
+        if replacement_workspace_id is None:
+            raise WorkspaceDeletionBlockedError(
+                "select an active replacement workspace before deleting the default workspace"
+            )
+        if replacement_workspace_id == workspace.id:
+            raise WorkspaceDeletionBlockedError(
+                "the replacement workspace must be different from the workspace being deleted"
+            )
+        replacement_workspace, _replacement_org_membership, _replacement_membership = (
+            await require_workspace_admin(
+                session,
+                user,
+                organization_id,
+                replacement_workspace_id,
+            )
+        )
 
     installation_count = await mcp_registry_repository.count_installations_for_workspace(
         session,
@@ -517,13 +536,24 @@ async def delete_workspace(
             "before deleting this workspace"
         )
 
+    if replacement_workspace is not None:
+        workspace.slug = f"deleting-{workspace.id.hex}"
+        await session.flush()
+        replacement_workspace.slug = "default"
+        await session.flush()
+
     await repository.delete_workspace(session, workspace)
     await session.flush()
     logger.info(
         "Deleted workspace.",
-        extra=organization_log_extra(
-            organization_id=organization_id,
-            workspace_id=workspace.id,
-            user_id=user.id,
-        ),
+        extra={
+            **organization_log_extra(
+                organization_id=organization_id,
+                workspace_id=workspace.id,
+                user_id=user.id,
+            ),
+            "replacement_workspace_id": (
+                str(replacement_workspace.id) if replacement_workspace is not None else None
+            ),
+        },
     )

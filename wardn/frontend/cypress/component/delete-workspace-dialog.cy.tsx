@@ -47,7 +47,7 @@ function mountDialog() {
 }
 
 describe("workspace deletion", () => {
-  it("offers deletion on manageable cards but protects the default workspace", () => {
+  it("offers deletion on both manageable workspace cards", () => {
     const defaultWorkspace: WorkspaceRead = {
       ...workspace,
       id: "workspace-default",
@@ -64,7 +64,7 @@ describe("workspace deletion", () => {
     );
 
     cy.findByRole("button", { name: "Delete Test Workspace workspace" }).should("be.visible");
-    cy.findByRole("button", { name: "Delete Default Workspace workspace" }).should("not.exist");
+    cy.findByRole("button", { name: "Delete Default Workspace workspace" }).should("be.visible");
   });
 
   it("requires the exact workspace name before deleting and clears stale selection", () => {
@@ -87,6 +87,47 @@ describe("workspace deletion", () => {
     cy.get("@push").should("have.been.calledWith", "/org/organization-1/workspaces");
     cy.get("@refresh").should("have.been.calledOnce");
     cy.getCookie("wardn_selected_workspace").should("be.null");
+  });
+
+  it("requires a replacement before deleting the default workspace", () => {
+    const defaultWorkspace: WorkspaceRead = {
+      ...workspace,
+      id: "workspace-default",
+      name: "Default Workspace",
+      slug: "default",
+    };
+    cy.intercept(
+      "DELETE",
+      "/api/v1/organizations/organization-1/workspaces/workspace-default?replacementWorkspaceId=workspace-1",
+      { statusCode: 204 }
+    ).as("deleteDefaultWorkspace");
+    cy.setCookie("wardn_selected_workspace", defaultWorkspace.id);
+    cy.mount(
+      <AppRouterContext.Provider value={routerContext()}>
+        <DeleteWorkspaceDialog
+          isDefaultWorkspace
+          organizationId="organization-1"
+          replacementWorkspaces={[defaultWorkspace, workspace]}
+          workspace={defaultWorkspace}
+        />
+      </AppRouterContext.Provider>
+    );
+
+    cy.findByRole("button", { name: "Delete workspace" }).click();
+    cy.findByLabelText(/Type Default Workspace to confirm/).type("Default Workspace");
+    cy.findByRole("alertdialog")
+      .findByRole("button", { name: "Delete workspace" })
+      .should("be.disabled");
+    cy.findByLabelText("New default workspace").click();
+    cy.findByRole("option", { name: "Test Workspace" }).click();
+    cy.findByRole("alertdialog")
+      .findByRole("button", { name: "Delete workspace" })
+      .should("be.enabled")
+      .click();
+
+    cy.wait("@deleteDefaultWorkspace");
+    cy.getCookie("wardn_selected_workspace").should("have.property", "value", workspace.id);
+    cy.get("@push").should("have.been.calledWith", "/org/organization-1/workspaces");
   });
 
   it("keeps the dialog open and explains dependency conflicts", () => {
