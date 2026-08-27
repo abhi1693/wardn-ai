@@ -1,0 +1,138 @@
+= Product Roadmap
+:revdate: 2026-08-27
+:page-revdate: {revdate}
+:description: Planned Wardn AI product investments, including governed agent memory, knowledge retrieval, and token-efficient capability reuse.
+
+This roadmap describes product direction, not a release commitment. Scope, order, and
+maturity can change as designs are validated against real workloads. New capabilities
+remain marked Alpha or Beta in the application until they meet their promotion criteria.
+
+[#_knowledge_and_memory]
+== Governed knowledge and agent memory
+
+Wardn plans to add provider-backed knowledge retrieval and durable agent memory without
+replacing its existing agent, MCP, workflow, access-rule, approval, and audit systems.
+Wardn remains the control plane for authorization, provenance, retention, context budgets,
+and execution. External or self-hosted providers can supply extraction, consolidation,
+embeddings, indexing, graph storage, retrieval, and reranking.
+
+The design keeps these concerns separate:
+
+* Conversation state for the current thread and its checkpoints
+* Knowledge retrieval for authoritative documents, runbooks, repositories, and policies
+* Semantic memory for durable facts and preferences
+* Episodic memory for prior run outcomes
+* Procedural memory for reviewable improvements to agent instructions and skills
+* Capability memory for tools, skills, and workflows that succeeded on similar tasks
+
+Memory is treated as untrusted context. It cannot expand permissions, bypass approval, or
+execute a tool directly. Every recalled capability must still exist in the current catalog,
+match its expected version or schema digest, be assigned to the agent, and pass the current
+access rules.
+
+[#_memory_phase_0]
+=== Phase 0: provider contracts and evaluation
+
+Status: Planned
+
+* Define separate provider contracts for agent memory and knowledge retrieval.
+* Keep provider-neutral scope, provenance, sensitivity, retention, deletion, and audit
+  metadata in Wardn.
+* Support capability negotiation for filtering, citations, temporal facts, graphs,
+  feedback, export, hard deletion, data residency, and customer-managed encryption.
+* Build an observe-only replay benchmark from existing agent runs before retrieved memory
+  is added to prompts.
+* Measure retrieval precision, added latency, total provider cost, stale recall, and tenant
+  isolation.
+
+[#_memory_phase_1]
+=== Phase 1: capability memory
+
+Status: Planned Alpha
+
+Capability memory is the first proving case. Wardn records compact, sanitized evidence
+about which configured tool, skill, or workflow succeeded for a task. A later similar task
+can receive a small recommendation before the model runs, while existing tool search
+remains available as a fallback.
+
+* Link memories to agent runs, run steps, tool invocations, request IDs, capability digests,
+  policy revisions, outcomes, and explicit user feedback.
+* Never store credentials, secret argument values, or confidential raw tool output in a
+  memory provider.
+* Reject recalled tools that are removed, changed, unassigned, expired, or currently
+  blocked by policy.
+* Add run evidence showing which memories were used and which memories were learned.
+* Compare managed and self-hosted memory providers through the same conformance suite.
+
+The Alpha is successful when capability memory reduces repeated tool and skill discovery,
+prompt tokens, and cost per successful task without reducing task success or weakening
+policy enforcement.
+
+[#_memory_phase_2]
+=== Phase 2: workspace knowledge retrieval
+
+Status: Planned Alpha
+
+* Add workspace knowledge collections and versioned source connections.
+* Support hosted and model-neutral retrieval providers.
+* Preserve source identity, revision, access-control provenance, and citations in every
+  result.
+* Support incremental synchronization, deletion propagation, retrieval filters, and
+  per-agent collection bindings.
+* Apply hard context-token and provider-cost budgets before knowledge reaches a model.
+
+[#_memory_phase_3]
+=== Phase 3: user and workspace memory
+
+Status: Planned Beta after Alpha validation
+
+* Add private user, agent, shared workspace, and organization-governed namespaces.
+* Support stable facts and preferences with correction, expiration, inspection, export,
+  retention, and deletion controls.
+* Distinguish verified execution evidence, user-asserted information, and model-inferred
+  memories.
+* Consolidate memories asynchronously so memory processing does not add avoidable latency
+  to interactive runs.
+
+[#_memory_phase_4]
+=== Phase 4: temporal and procedural memory
+
+Status: Exploratory
+
+* Evaluate temporal or graph-backed providers for operational facts that change over time.
+* Detect superseded and contradictory facts without discarding their provenance.
+* Turn proposed procedural improvements into reviewable, versioned agent-instruction or
+  skill changes.
+* Do not let an agent silently rewrite protected instructions, skills, access rules, or
+  workflow definitions.
+
+[#_memory_efficiency]
+== Token and cost efficiency
+
+Memory is only an improvement when its total cost is lower than the work it avoids. Wardn
+will account for extraction, embedding, storage, retrieval, reranking, and injected-context
+costs alongside model and tool usage.
+
+The planned retrieval path is:
+
+. Reuse an exact, still-valid capability match when available.
+. Retrieve a small number of relevant capability memories.
+. Validate candidates against the current catalog and access policy.
+. Fall back to current tool and skill search when confidence is low.
+. Search external catalogs only when installed capabilities do not fit.
+
+Stable system instructions and tool definitions can also use model-provider prompt caching.
+Retrieved memory remains compact, deduplicated, and limited by an explicit context budget.
+
+[#_memory_promotion]
+== Promotion criteria
+
+Memory and knowledge capabilities do not advance from Alpha or Beta based only on feature
+completeness. Promotion also requires:
+
+* No cross-tenant or cross-scope disclosure in isolation tests
+* Reliable deletion and export behavior across supported providers
+* Clear provenance and citations in run inspection
+* Measurably fewer discovery calls or prompt tokens per successful task
+* No material regression in task success, approval, or guardrail enforcement
+* Graceful operation when a memory or retrieval provider is unavailable

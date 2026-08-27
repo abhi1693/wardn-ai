@@ -1,4 +1,5 @@
 * xref:index.adoc[]
+* xref:roadmap.adoc[]
 
 * Getting Started
 ** xref:getting-started/overview.adoc[]
@@ -35,4 +36,3 @@
 ** xref:reference/commands.adoc[]
 ** xref:reference/environment-variables.adoc[]
 ** xref:reference/documentation-authoring.adoc[]
-
