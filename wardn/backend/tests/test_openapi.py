@@ -1119,6 +1119,17 @@ def test_mcp_runtime_openapi_contract() -> None:
     )
 
 
+def test_workspace_delete_openapi_contract() -> None:
+    schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
+    workspace_delete = schema["paths"][
+        "/api/v1/organizations/{organization_id}/workspaces/{workspace_id}"
+    ]["delete"]
+
+    assert workspace_delete["operationId"] == "workspaces_delete"
+    assert workspace_delete["responses"]["204"]["description"] == "Successful Response"
+    assert "409" in workspace_delete["responses"]
+
+
 def test_user_openapi_schemas_do_not_expose_password_hashes() -> None:
     schema = TestClient(create_app()).get("/api/v1/openapi.json").json()
     user_read_properties = schema["components"]["schemas"]["UserRead"]["properties"]

@@ -157,6 +157,31 @@ export const workspacesCreate = async (organizationId: string,
 );}
 
 
+export const getWorkspacesDeleteUrl = (organizationId: string,
+    workspaceId: string,) => {
+
+
+
+
+  return `/api/v1/organizations/${organizationId}/workspaces/${workspaceId}`
+}
+
+/**
+ * @summary Delete Workspace Route
+ */
+export const workspacesDelete = async (organizationId: string,
+    workspaceId: string, options?: Parameters<typeof apiRequest>[1]): Promise<void> => {
+
+  return apiRequest<void>(getWorkspacesDeleteUrl(organizationId,workspaceId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
 export const getWorkspacesGetUrl = (organizationId: string,
     workspaceId: string,) => {
 

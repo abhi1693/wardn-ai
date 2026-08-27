@@ -4,6 +4,7 @@ import { AppShell } from "@/components/templates/app-shell";
 
 import { getWorkspaceContext } from "../../../../data";
 import { WorkspaceForm } from "../../../../workspace-form";
+import { DeleteWorkspaceDialog } from "../../../../delete-workspace-dialog";
 
 type WorkspaceSettingsPageProps = {
   params: Promise<{ organizationId: string; workspaceId: string }>;
@@ -17,6 +18,9 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
   if (!organization || !workspace) {
     notFound();
   }
+  const canDelete =
+    (workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin") &&
+    !(organization.slug === "default" && workspace.slug === "default");
 
   return (
     <AppShell
@@ -39,6 +43,20 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
             organizationId={organization.id}
           />
         </section>
+        {canDelete ? (
+          <section className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold">Danger zone</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Permanently delete this workspace after removing installed MCP servers and
+                  managed-secret connections.
+                </p>
+              </div>
+              <DeleteWorkspaceDialog organizationId={organization.id} workspace={workspace} />
+            </div>
+          </section>
+        ) : null}
       </div>
     </AppShell>
   );

@@ -10,6 +10,7 @@ from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
     OrganizationAccessDeniedError,
     WorkspaceAccessDeniedError,
+    WorkspaceDeletionBlockedError,
 )
 from app.modules.organizations.models import (
     Organization,
@@ -25,6 +26,7 @@ from tests.database_fakes import EmptyResult
 class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
+        self.deleted: list[object] = []
         self.flushed = False
         self.refreshed: list[object] = []
 
@@ -47,6 +49,9 @@ class FakeSession:
 
     async def execute(self, *args, **kwargs) -> EmptyResult:
         return EmptyResult()
+
+    async def delete(self, instance: object) -> None:
+        self.deleted.append(instance)
 
 
 class ConstraintFailureSession(FakeSession):
@@ -388,3 +393,122 @@ async def test_workspace_member_is_not_workspace_admin(monkeypatch) -> None:
             organization_id,
             workspace_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_workspace_admin_can_delete_empty_workspace(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Temporary",
+        slug="temporary",
+        status="active",
+    )
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        return workspace, None, None
+
+    async def no_default_workspace(*args, **kwargs):
+        return None
+
+    async def no_dependencies(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_default_workspace", no_default_workspace)
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "count_installations_for_workspace",
+        no_dependencies,
+    )
+    monkeypatch.setattr(
+        service.managed_secrets_repository,
+        "count_managed_secrets_for_workspace",
+        no_dependencies,
+    )
+    session = FakeSession()
+
+    await service.delete_workspace(session, user, organization_id, workspace.id)
+
+    assert session.deleted == [workspace]
+    assert session.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_protected_default_workspace_cannot_be_deleted(monkeypatch) -> None:
+    organization_id = uuid4()
+    workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Default Workspace",
+        slug="default",
+        status="active",
+    )
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        return workspace, None, None
+
+    async def default_workspace(*args, **kwargs):
+        return workspace
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_default_workspace", default_workspace)
+
+    with pytest.raises(WorkspaceDeletionBlockedError, match="default workspace"):
+        await service.delete_workspace(FakeSession(), user, organization_id, workspace.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("installation_count", "managed_secret_count", "message"),
+    [
+        (1, 0, "uninstall all MCP server configurations"),
+        (0, 1, "remove connections that own managed secrets"),
+    ],
+)
+async def test_workspace_dependencies_block_deletion(
+    monkeypatch,
+    installation_count: int,
+    managed_secret_count: int,
+    message: str,
+) -> None:
+    organization_id = uuid4()
+    workspace = Workspace(
+        id=uuid4(),
+        organization_id=organization_id,
+        name="Production",
+        slug="production",
+        status="active",
+    )
+    user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
+
+    async def require_workspace_admin(*args, **kwargs):
+        return workspace, None, None
+
+    async def no_default_workspace(*args, **kwargs):
+        return None
+
+    async def count_installations(*args, **kwargs):
+        return installation_count
+
+    async def count_managed_secrets(*args, **kwargs):
+        return managed_secret_count
+
+    monkeypatch.setattr(service, "require_workspace_admin", require_workspace_admin)
+    monkeypatch.setattr(service.repository, "get_default_workspace", no_default_workspace)
+    monkeypatch.setattr(
+        service.mcp_registry_repository,
+        "count_installations_for_workspace",
+        count_installations,
+    )
+    monkeypatch.setattr(
+        service.managed_secrets_repository,
+        "count_managed_secrets_for_workspace",
+        count_managed_secrets,
+    )
+
+    with pytest.raises(WorkspaceDeletionBlockedError, match=message):
+        await service.delete_workspace(FakeSession(), user, organization_id, workspace.id)

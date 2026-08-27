@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.secrets.models import ManagedSecret, SecretHandle, SecretStore
@@ -39,6 +39,18 @@ async def list_managed_secret_handles(
         select(SecretHandle).where(SecretHandle.managed_secret_id.in_(managed_secret_ids))
     )
     return list(result.scalars().all())
+
+
+async def count_managed_secrets_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> int:
+    result = await session.execute(
+        select(func.count()).select_from(ManagedSecret).where(
+            ManagedSecret.workspace_id == workspace_id,
+        )
+    )
+    return int(result.scalar_one())
 
 
 async def activate_committed_provisioning(

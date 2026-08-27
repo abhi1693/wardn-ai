@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,6 +19,7 @@ import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
 import { Card, CardContent, CardHeader } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
+import { DeleteWorkspaceDialog } from "@/app/organizations/delete-workspace-dialog";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
 import { formatUserDate } from "@/lib/date-time";
 import { setSelectionCookie } from "@/lib/selection-cookies";
@@ -92,6 +94,12 @@ function roleLabel(role: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function canDeleteWorkspace(organization: OrganizationRead, workspace: WorkspaceRead) {
+  const canManage = workspace.currentUserRole === "owner" || workspace.currentUserRole === "admin";
+  const isProtectedDefault = organization.slug === "default" && workspace.slug === "default";
+  return canManage && !isProtectedDefault;
 }
 
 export function OrganizationWorkspacesList({
@@ -231,6 +239,23 @@ export function OrganizationWorkspacesList({
                         <Badge variant="outline">{roleLabel(workspace.currentUserRole)}</Badge>
                       </div>
                     </div>
+                    {canDeleteWorkspace(organization, workspace) ? (
+                      <DeleteWorkspaceDialog
+                        organizationId={organization.id}
+                        trigger={
+                          <Button
+                            aria-label={`Delete ${workspace.name} workspace`}
+                            size="icon"
+                            title="Delete workspace"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        }
+                        workspace={workspace}
+                      />
+                    ) : null}
                   </div>
                 </CardHeader>
 

@@ -13,6 +13,7 @@ from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
     OrganizationNotFoundError,
     WorkspaceAccessDeniedError,
+    WorkspaceDeletionBlockedError,
     WorkspaceNotFoundError,
 )
 from app.modules.organizations.schemas import (
@@ -28,6 +29,7 @@ from app.modules.organizations.schemas import (
 from app.modules.organizations.service import (
     create_organization,
     create_workspace,
+    delete_workspace,
     get_organization,
     get_workspace,
     list_organizations,
@@ -223,3 +225,29 @@ async def update_workspace_route(
     except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return response
+
+
+@router.delete(
+    "/{organization_id}/workspaces/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="workspaces_delete",
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+    },
+)
+async def delete_workspace_route(
+    organization_id: UUID,
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    try:
+        await delete_workspace(session, current_user, organization_id, workspace_id)
+    except (OrganizationNotFoundError, WorkspaceNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (OrganizationAccessDeniedError, WorkspaceAccessDeniedError) as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except WorkspaceDeletionBlockedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.errors import is_constraint_violation
 from app.modules.limits import service as limits_service
+from app.modules.mcp_registry import repository as mcp_registry_repository
 from app.modules.organizations import repository
 from app.modules.organizations.exceptions import (
     DuplicateOrganizationError,
@@ -13,6 +14,7 @@ from app.modules.organizations.exceptions import (
     OrganizationAccessDeniedError,
     OrganizationNotFoundError,
     WorkspaceAccessDeniedError,
+    WorkspaceDeletionBlockedError,
     WorkspaceNotFoundError,
 )
 from app.modules.organizations.models import (
@@ -31,6 +33,7 @@ from app.modules.organizations.schemas import (
     WorkspaceRead,
     WorkspaceUpdate,
 )
+from app.modules.secrets import managed_repository as managed_secrets_repository
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -476,4 +479,51 @@ async def update_workspace(
     return workspace_response(
         workspace,
         role=workspace_role_for_user(user, organization_membership, workspace_membership),
+    )
+
+
+async def delete_workspace(
+    session: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> None:
+    workspace, _organization_membership, _workspace_membership = await require_workspace_admin(
+        session,
+        user,
+        organization_id,
+        workspace_id,
+    )
+    default_workspace = await repository.get_default_workspace(session)
+    if default_workspace is not None and default_workspace.id == workspace.id:
+        raise WorkspaceDeletionBlockedError("the protected default workspace cannot be deleted")
+
+    installation_count = await mcp_registry_repository.count_installations_for_workspace(
+        session,
+        workspace.id,
+    )
+    if installation_count:
+        raise WorkspaceDeletionBlockedError(
+            "uninstall all MCP server configurations before deleting this workspace"
+        )
+
+    managed_secret_count = await managed_secrets_repository.count_managed_secrets_for_workspace(
+        session,
+        workspace.id,
+    )
+    if managed_secret_count:
+        raise WorkspaceDeletionBlockedError(
+            "remove connections that own managed secrets and wait for secret cleanup "
+            "before deleting this workspace"
+        )
+
+    await repository.delete_workspace(session, workspace)
+    await session.flush()
+    logger.info(
+        "Deleted workspace.",
+        extra=organization_log_extra(
+            organization_id=organization_id,
+            workspace_id=workspace.id,
+            user_id=user.id,
+        ),
     )

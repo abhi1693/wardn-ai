@@ -26,6 +26,10 @@ class DuplicateWorkspaceError(OrganizationError):
     pass
 
 
+class WorkspaceDeletionBlockedError(OrganizationError):
+    pass
+
+
 class MembershipNotFoundError(OrganizationError):
     pass
 

@@ -275,6 +275,10 @@ async def get_default_workspace(session: AsyncSession) -> Workspace | None:
     return result.scalar_one_or_none()
 
 
+async def delete_workspace(session: AsyncSession, workspace: Workspace) -> None:
+    await session.delete(workspace)
+
+
 async def get_workspace_membership(
     session: AsyncSession,
     workspace_id: uuid.UUID,
