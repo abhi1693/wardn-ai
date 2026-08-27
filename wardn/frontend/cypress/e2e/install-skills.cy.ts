@@ -115,6 +115,7 @@ describe("skill marketplace", () => {
     cy.intercept("GET", "**/skills/search*").as("skillSearch");
     cy.visit(`/org/${organizationId}/workspace/${workspaceId}/skills`);
     cy.findByRole("heading", { name: "Skill Marketplace" }).should("be.visible");
+    cy.get("header").findByLabelText("Feature maturity: Alpha").should("be.visible");
     cy.findByText("Discover Hub Skills").should("be.visible");
     cy.findByLabelText("Search Wardn Hub skills").should("have.value", "").type("kubernetes ops");
     cy.findByRole("button", { name: "Search" }).click();

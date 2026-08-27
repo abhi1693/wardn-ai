@@ -1,13 +1,37 @@
 import { AlertTriangle, Boxes, Search } from "lucide-react";
 
 import { Button } from "@/components/atoms/button";
+import { FeatureMaturityBadge } from "@/components/atoms/feature-maturity-badge";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { EmptyState } from "@/components/molecules/empty-state";
 import { SignalBar } from "@/components/molecules/signal-bar";
+import { getFeatureMaturity } from "@/lib/feature-maturity";
 
 describe("atomic design details", () => {
+  it("defaults features to GA and labels pre-GA maturity explicitly", () => {
+    expect(getFeatureMaturity("dashboard")).to.equal("ga");
+    expect(getFeatureMaturity("workspace-skills")).to.equal("alpha");
+    expect(getFeatureMaturity("workspace-scheduled-tasks")).to.equal("alpha");
+
+    cy.mount(
+      <div className="flex gap-2 p-4">
+        <FeatureMaturityBadge maturity="alpha" />
+        <FeatureMaturityBadge maturity="beta" />
+      </div>
+    );
+
+    cy.findByLabelText("Feature maturity: Alpha")
+      .should("be.visible")
+      .and("have.attr", "title")
+      .and("contain", "early access");
+    cy.findByLabelText("Feature maturity: Beta")
+      .should("be.visible")
+      .and("have.attr", "title")
+      .and("contain", "still being refined");
+  });
+
   it("renders a semantic metric with status and navigation affordances", () => {
     cy.mount(
       <div className="w-80 p-4">

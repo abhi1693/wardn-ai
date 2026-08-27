@@ -94,8 +94,8 @@ describe("desktop UX details", () => {
       const navigation = $navigation[0];
       expect(navigation.scrollHeight).to.be.at.most(navigation.clientHeight);
     });
-    cy.findByRole("link", { name: "Scheduled Tasks" }).focus();
-    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks");
+    cy.findByRole("link", { name: "Scheduled Tasks, Alpha" }).focus();
+    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks · Alpha");
     cy.assertDesktopFit();
 
     cy.reload();

@@ -41,12 +41,17 @@ import {
 
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { Button } from "@/components/atoms/button";
+import { FeatureMaturityBadge } from "@/components/atoms/feature-maturity-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/atoms/tooltip";
 import { LogoutButton } from "@/components/molecules/logout-button";
 import { ThemeSwitcher } from "@/components/molecules/theme-switcher";
 import { WorkspaceSelector } from "@/components/molecules/workspace-selector";
 import { AppShellCommandMenu } from "@/components/organisms/desktop-command-menu";
 import { MutationFeedbackOutlet } from "@/components/providers/mutation-feedback-provider";
+import {
+  featureMaturityLabel,
+  getPreGaFeatureMaturity,
+} from "@/lib/feature-maturity";
 import { cn } from "@/lib/utils";
 import type { WorkspaceContext } from "@/lib/workspace-types";
 
@@ -554,15 +559,19 @@ function AppShellFrame({
     items: section.items.map((item) => ({
       ...item,
       active: item.activeKey === active || item.activeKeys?.includes(active),
+      maturity: getPreGaFeatureMaturity(item.activeKey),
     })),
   }));
   const commandDestinations = primaryNavSections.flatMap((section) =>
     section.items.map((item) => ({
       group: section.label,
       href: item.href,
-      label: item.label,
+      label: item.maturity
+        ? `${item.label} · ${featureMaturityLabel(item.maturity)}`
+        : item.label,
     }))
   );
+  const activeFeatureMaturity = getPreGaFeatureMaturity(active);
   const breadcrumbLabel = selectedOrganization?.name ?? eyebrow;
   const showBreadcrumbParent = breadcrumbLabel !== title;
   const contextSwitchHref =
@@ -601,6 +610,11 @@ function AppShellFrame({
               const navigationLink = (
                 <Link
                   aria-current={item.active ? "page" : undefined}
+                  aria-label={
+                    item.maturity
+                      ? `${item.label}, ${featureMaturityLabel(item.maturity)}`
+                      : undefined
+                  }
                   className={cn(
                     "relative flex min-h-9 items-center gap-2.5 rounded-md px-3 text-sm text-sidebar-foreground transition-colors hover:bg-muted hover:text-foreground active:bg-muted",
                     sidebarCompact && "min-h-8 justify-center px-2",
@@ -611,14 +625,30 @@ function AppShellFrame({
                   key={item.label}
                 >
                   <Icon className="size-4 shrink-0" />
-                  <span className={cn(sidebarCompact && "sr-only")}>{item.label}</span>
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate",
+                      sidebarCompact && "sr-only"
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                  {!sidebarCompact && item.maturity ? (
+                    <FeatureMaturityBadge
+                      aria-hidden="true"
+                      className="px-1 py-0 text-[9px]"
+                      maturity={item.maturity}
+                    />
+                  ) : null}
                 </Link>
               );
               return sidebarCompact ? (
                 <Tooltip key={item.label}>
                   <TooltipTrigger asChild>{navigationLink}</TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {item.label}
+                    {item.maturity
+                      ? `${item.label} · ${featureMaturityLabel(item.maturity)}`
+                      : item.label}
                   </TooltipContent>
                 </Tooltip>
               ) : (
@@ -743,9 +773,14 @@ function AppShellFrame({
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                 </>
               ) : null}
-              <h1 className="truncate text-lg font-semibold leading-6 text-foreground">
-                {title}
-              </h1>
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-lg font-semibold leading-6 text-foreground">
+                  {title}
+                </h1>
+                {activeFeatureMaturity ? (
+                  <FeatureMaturityBadge maturity={activeFeatureMaturity} />
+                ) : null}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <AppShellCommandMenu destinations={commandDestinations} />

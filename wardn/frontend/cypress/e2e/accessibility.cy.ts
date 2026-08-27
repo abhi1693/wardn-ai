@@ -85,8 +85,8 @@ describe("desktop accessibility", () => {
     cy.visit(`/org/${organizationId}/workspace/${workspaceId}/agent-runs`);
     cy.findByRole("button", { name: "Collapse sidebar" }).click();
     cy.findByRole("button", { name: "Expand sidebar" }).should("be.visible");
-    cy.findByRole("link", { name: "Scheduled Tasks" }).should("be.visible").focus();
-    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks");
+    cy.findByRole("link", { name: "Scheduled Tasks, Alpha" }).should("be.visible").focus();
+    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks · Alpha");
     cy.assertDesktopFit();
     checkWcag();
   });

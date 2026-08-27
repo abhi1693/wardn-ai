@@ -74,6 +74,7 @@ describe("reliable feature forms", () => {
   it("validates scheduled tasks, focuses errors, and submits after correction", () => {
     openAuthenticated(`${scheduledTasksBasePath}/new`);
     cy.findByRole("heading", { name: "New Scheduled Task" }).should("be.visible");
+    cy.get("header").findByLabelText("Feature maturity: Alpha").should("be.visible");
     cy.findByRole("button", { name: "Review" }).click();
     cy.findByRole("button", { name: "Create" }).click();
 
