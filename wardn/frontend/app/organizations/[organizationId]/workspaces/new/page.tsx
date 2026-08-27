@@ -21,7 +21,7 @@ export default async function NewWorkspacePage({ params }: NewWorkspacePageProps
     <AppShell
       active="organizations"
       eyebrow="Organization"
-      title={`Add workspace to ${organization.name}`}
+      title="New Workspace"
       workspaceContext={workspaceContext}
     >
       <WorkspaceForm mode="create" organizationId={organization.id} />

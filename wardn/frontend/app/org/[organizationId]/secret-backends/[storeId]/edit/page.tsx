@@ -39,7 +39,7 @@ export default async function EditSecretBackendPage({ params }: EditSecretBacken
         </Button>
       }
       eyebrow="Secret Backends"
-      title="Edit Backend"
+      title="Edit Secret Backend"
       workspaceContext={workspaceContext}
     >
       <div className="mx-auto max-w-3xl">

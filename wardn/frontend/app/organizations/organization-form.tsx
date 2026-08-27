@@ -181,7 +181,13 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
             </Button>
             <Button disabled={submitting || (mode === "edit" && !isDirty)} type="submit">
               <Save className="size-4" />
-              {submitting ? "Saving" : "Save"}
+              {submitting
+                ? mode === "create"
+                  ? "Creating"
+                  : "Saving"
+                : mode === "create"
+                  ? "Create organization"
+                  : "Save changes"}
             </Button>
           </StickyFormActions>
         </CardContent>

@@ -34,6 +34,8 @@ describe("governance and runtime operations", () => {
   it("changes the workspace guardrail default through the API", () => {
     cy.visit(`${workspaceBasePath}/guardrails`);
     cy.findByRole("heading", { level: 1, name: "Access Rules" }).should("be.visible");
+    cy.findByRole("link", { name: "Access Rules" }).should("have.attr", "aria-current", "page");
+    cy.title().should("equal", "Access Rules · Platform · Wardn AI");
     cy.findByText("Open by default").should("be.visible");
     cy.findByRole("button", { name: "Enable default deny" }).click();
     cy.findByText("Default deny").should("be.visible");

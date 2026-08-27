@@ -238,7 +238,7 @@ export function CatalogSourceForm({
             </Button>
             <Button disabled={isSaving || (mode === "edit" && !isDirty)} type="submit">
               <Save className="size-4" />
-              {mode === "edit" ? "Save" : "Create"}
+              {mode === "edit" ? "Save changes" : "Create source"}
             </Button>
           </StickyFormActions>
         </form>

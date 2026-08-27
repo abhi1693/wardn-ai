@@ -35,8 +35,8 @@ export default async function NewOrganizationTokenPage({
           </Link>
         </Button>
       }
-      eyebrow="Agent Tokens"
-      title="Create Token"
+      eyebrow="Gateway Tokens"
+      title="New Gateway Token"
       workspaceContext={workspaceContext}
     >
       <CreateTokenClient organization={organization} workspaces={workspaces} />

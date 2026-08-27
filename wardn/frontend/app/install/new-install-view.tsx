@@ -82,7 +82,7 @@ export async function NewInstallView({ searchParams, workspaceContext }: NewInst
     <AppShell
       active="install"
       eyebrow="Connections"
-      title="Add Connection"
+      title="New Connection"
       workspaceContext={workspaceContext}
     >
       <InstallFormClient

@@ -43,7 +43,7 @@ export default async function ModelPricingPage({ params }: ModelPricingPageProps
         ) : undefined
       }
       eyebrow="Organization"
-      title="LLM Pricing"
+      title="Model Pricing"
       workspaceContext={workspaceContext}
     >
       <div className="flex items-center gap-2 text-sm text-muted-foreground">

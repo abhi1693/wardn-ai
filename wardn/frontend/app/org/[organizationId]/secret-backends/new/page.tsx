@@ -35,7 +35,7 @@ export default async function NewSecretBackendPage({ params }: NewSecretBackendP
         </Button>
       }
       eyebrow="Secret Backends"
-      title="Create Backend"
+      title="New Secret Backend"
       workspaceContext={workspaceContext}
     >
       <div className="mx-auto max-w-3xl">

@@ -20,7 +20,7 @@ export default async function NewCatalogSourcePage({
     <AppShell
       active="catalog"
       eyebrow="MCP Catalog"
-      title="New source"
+      title="New Catalog Source"
       workspaceContext={workspaceContext}
     >
       <CatalogSourceForm

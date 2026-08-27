@@ -37,7 +37,7 @@ export async function InstallListView({ workspaceContext }: InstallListViewProps
         <Button asChild size="sm">
           <Link href={`${basePath}/new`}>
             <Plus className="size-4" />
-            Add connection
+            New connection
           </Link>
         </Button>
       }

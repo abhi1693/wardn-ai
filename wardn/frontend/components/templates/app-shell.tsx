@@ -186,7 +186,7 @@ function organizationNavSections(workspaceContext?: WorkspaceContext): Navigatio
             icon: BadgeDollarSign,
           },
           {
-            label: "Agent Tokens",
+            label: "Gateway Tokens",
             href: `${organizationBasePath}/tokens`,
             activeKey: "agent-tokens",
             icon: KeyRound,
@@ -301,7 +301,7 @@ function workspaceNavSections(workspaceContext?: WorkspaceContext): NavigationSe
       label: "Administration",
       items: [
         {
-          label: "Access",
+          label: "Access Rules",
           href: `${workspaceBasePath}/guardrails`,
           activeKey: "workspace-guardrails",
           icon: ShieldCheck,
@@ -390,7 +390,7 @@ const organizationRouteChrome: Record<
     eyebrow: "Organization",
     title: "Secret Backends",
   },
-  tokens: { active: "agent-tokens", eyebrow: "Organization", title: "Agent Tokens" },
+  tokens: { active: "agent-tokens", eyebrow: "Organization", title: "Gateway Tokens" },
   usage: { active: "usage", eyebrow: "Organization", title: "Usage" },
   workspaces: { active: "workspaces", eyebrow: "Organization", title: "Workspaces" },
 };
@@ -408,7 +408,7 @@ const workspaceRouteChrome: Record<
     title: "Chat Providers",
   },
   dashboard: { active: "workspace-dashboard", eyebrow: "Workspace", title: "Dashboard" },
-  guardrails: { active: "workspace-guardrails", eyebrow: "Workspace", title: "Access" },
+  guardrails: { active: "workspace-guardrails", eyebrow: "Workspace", title: "Access Rules" },
   install: { active: "install", eyebrow: "Workspace", title: "Connections" },
   observability: {
     active: "workspace-observability",
@@ -473,6 +473,40 @@ type AppShellFrameProps = AppShellProps & {
   wrapContent?: boolean;
 };
 
+function isWorkspaceActive(active: AppShellActive) {
+  return (
+    active === "workspace-dashboard" ||
+    active === "workspace-chat" ||
+    active === "workspace-chat-providers" ||
+    active === "workspace-scheduled-tasks" ||
+    active === "workspace-runs" ||
+    active === "workspace-skills" ||
+    active === "install" ||
+    active === "runtime" ||
+    active === "workspace-observability" ||
+    active === "workspace-guardrails" ||
+    active === "workspace-members" ||
+    active === "workspace-settings"
+  );
+}
+
+export function browserTitleForChrome({
+  active,
+  title,
+  workspaceContext,
+}: Pick<AppShellChrome, "active" | "title" | "workspaceContext">) {
+  const workspaceScope = isWorkspaceActive(active);
+  const scopeName = workspaceScope
+    ? workspaceContext?.selectedWorkspace?.name
+    : workspaceContext?.selectedOrganization?.name;
+  const pageTitle =
+    active === "workspace-dashboard" && title === scopeName ? "Dashboard" : title;
+
+  return [pageTitle, scopeName, "Wardn AI"]
+    .filter((part, index, parts): part is string => Boolean(part) && parts.indexOf(part) === index)
+    .join(" · ");
+}
+
 function AppShellFrame({
   active,
   eyebrow,
@@ -505,19 +539,12 @@ function AppShellFrame({
     window.dispatchEvent(new Event(sidebarPreferenceEvent));
   }
 
-  const isWorkspaceScope =
-    active === "workspace-dashboard" ||
-    active === "workspace-chat" ||
-    active === "workspace-chat-providers" ||
-    active === "workspace-scheduled-tasks" ||
-    active === "workspace-runs" ||
-    active === "workspace-skills" ||
-    active === "install" ||
-    active === "runtime" ||
-    active === "workspace-observability" ||
-    active === "workspace-guardrails" ||
-    active === "workspace-members" ||
-    active === "workspace-settings";
+  const isWorkspaceScope = isWorkspaceActive(active);
+  const browserTitle = browserTitleForChrome({ active, title, workspaceContext });
+
+  useLayoutEffect(() => {
+    document.title = browserTitle;
+  }, [browserTitle]);
   const navigationSections = isWorkspaceScope
     ? workspaceNavSections(workspaceContext)
     : organizationNavSections(workspaceContext);

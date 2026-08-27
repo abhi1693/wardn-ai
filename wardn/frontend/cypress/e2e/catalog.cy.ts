@@ -28,12 +28,12 @@ describe("catalog source management", () => {
   it("creates a Wardn Hub source from only the Hub URL and token", () => {
     resetCatalog([]);
     openAuthenticated(`/org/${organizationId}/catalog/new`);
-    cy.findByRole("heading", { name: "New source" }).should("be.visible");
+    cy.findByRole("heading", { name: "New Catalog Source" }).should("be.visible");
     cy.findByLabelText("Hub URL").should("have.value", "https://hub.wardnai.dev");
     cy.findByLabelText("Secret backend").should("contain.text", "k3s wardn");
     cy.findByLabelText("Name").type("Production Hub");
     cy.findByLabelText("API token").type("hub-token");
-    cy.findByRole("button", { name: "Create" }).click();
+    cy.findByRole("button", { name: "Create source" }).click();
 
     cy.location("pathname").should("equal", `/org/${organizationId}/catalog`);
     cy.findByRole("article", { name: /Production Hub catalog source/ })
@@ -57,7 +57,7 @@ describe("catalog source management", () => {
 
   it("keeps the existing token when editing without entering a token", () => {
     openAuthenticated(`/org/${organizationId}/catalog/edit/source-1`);
-    cy.findByRole("heading", { name: "Edit source" }).should("be.visible");
+    cy.findByRole("heading", { name: "Edit Catalog Source" }).should("be.visible");
     cy.findByLabelText("API token").should(
       "have.attr",
       "placeholder",
@@ -65,7 +65,7 @@ describe("catalog source management", () => {
     );
     cy.findByLabelText("Name").clear();
     cy.findByLabelText("Name").type("Wardn Hub Production");
-    cy.findByRole("button", { name: "Save" }).click();
+    cy.findByRole("button", { name: "Save changes" }).click();
     cy.location("pathname").should("equal", `/org/${organizationId}/catalog`);
     cy.findByRole("article", { name: "Wardn Hub Production catalog source" }).should(
       "be.visible"
@@ -231,10 +231,10 @@ describe("catalog source visual details", () => {
 
   it("keeps the source form aligned and usable on desktop", () => {
     cy.visit(`/org/${organizationId}/catalog/new`);
-    cy.findByRole("heading", { name: "New source" }).should("be.visible");
+    cy.findByRole("heading", { name: "New Catalog Source" }).should("be.visible");
     cy.findByLabelText("Hub URL").should("be.visible");
     cy.findByLabelText("API token").should("be.visible");
-    cy.findByRole("button", { name: "Create" }).should("be.visible");
+    cy.findByRole("button", { name: "Create source" }).should("be.visible");
     cy.assertDesktopFit();
     cy.screenshot("catalog-new-source-light", { capture: "fullPage" });
   });

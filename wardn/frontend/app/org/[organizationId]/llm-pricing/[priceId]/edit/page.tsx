@@ -49,8 +49,8 @@ export default async function EditModelPricePage({ params }: EditModelPricePageP
           </Link>
         </Button>
       }
-      eyebrow="LLM Pricing"
-      title="Edit Price"
+      eyebrow="Model Pricing"
+      title="Edit Model Price"
       workspaceContext={workspaceContext}
     >
       <ModelPriceForm

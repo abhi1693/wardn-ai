@@ -41,7 +41,7 @@ export default async function DeleteSecretBackendPage({
         </Button>
       }
       eyebrow="Secret Backends"
-      title="Delete Backend"
+      title="Delete Secret Backend"
       workspaceContext={workspaceContext}
     >
       <div className="mx-auto max-w-2xl">

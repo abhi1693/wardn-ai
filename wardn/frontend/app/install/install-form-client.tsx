@@ -470,7 +470,7 @@ export function InstallFormClient({
 
     setIsMutating(true);
     setError("");
-    setJobProgress("Queueing installation");
+    setJobProgress("Queueing connection setup");
     try {
       const body: Record<string, unknown> = {
         version: selectedServer.server.version,
@@ -491,20 +491,20 @@ export function InstallFormClient({
         body as MCPServerInstallRequest
       );
       const installation = await waitForJob<MCPServerInstallationRead>({
-        failureMessage: "Connection installation failed.",
+        failureMessage: "Connection setup failed.",
         fetchJob: (jobId, signal) =>
           workspaceMcpRegistryGetOperationJob(organizationId, workspaceId, jobId, { signal }),
         initialJob: job,
         onProgress: setJobProgress,
-        pendingMessage: "Installation queued",
+        pendingMessage: "Connection setup queued",
         readResult: (completedJob: MCPOperationJobRead) => {
           const result = completedJob.result?.installation;
           if (!result || typeof result !== "object" || !("id" in result)) {
-            throw new Error("Installation completed without an installation result.");
+            throw new Error("Connection setup completed without a result.");
           }
           return result as MCPServerInstallationRead;
         },
-        timeoutMessage: "Installation is still running. Check the installation list shortly.",
+        timeoutMessage: "Connection setup is still running. Check connections shortly.",
       });
       setInstallations((current) => [...current.filter((item) => item.id !== installation.id), installation]);
       router.push(basePath);
@@ -1000,7 +1000,13 @@ export function InstallFormClient({
         {selectedServer ? (
           <Button disabled={isMutating || (isEdit && !isDirty)} type="submit">
             <Download className="size-4" />
-            {isMutating ? "Saving" : isEdit ? "Save" : "Add"}
+            {isMutating
+              ? isEdit
+                ? "Saving"
+                : "Creating"
+              : isEdit
+                ? "Save"
+                : "Create connection"}
           </Button>
         ) : null}
       </StickyFormActions>

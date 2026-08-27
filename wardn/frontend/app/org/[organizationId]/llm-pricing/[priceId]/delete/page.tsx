@@ -49,8 +49,8 @@ export default async function DeleteModelPricePage({
           </Link>
         </Button>
       }
-      eyebrow="LLM Pricing"
-      title="Delete Price"
+      eyebrow="Model Pricing"
+      title="Delete Model Price"
       workspaceContext={workspaceContext}
     >
       <div className="mx-auto max-w-2xl">

@@ -78,7 +78,7 @@ export function AgentTokensClient({
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <CardTitle>Agent Tokens</CardTitle>
+                <CardTitle>Gateway Tokens</CardTitle>
                 <CardDescription>
                   Manage bearer tokens for the common MCP gateway.
                 </CardDescription>
@@ -162,7 +162,7 @@ export function AgentTokensClient({
               <EmptyState
                 description="Create a scoped token to connect an MCP client to the common gateway."
                 icon={KeyRound}
-                title="No agent tokens"
+                title="No gateway tokens"
               />
             )}
           </CardContent>

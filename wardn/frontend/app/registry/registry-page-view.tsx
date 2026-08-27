@@ -52,7 +52,7 @@ export async function CatalogPageView({ workspaceContext }: CatalogPageViewProps
         <Button asChild size="sm">
           <Link href={organizationId ? `/org/${encodeURIComponent(organizationId)}/catalog/new` : "/org"}>
             <Plus className="size-4" />
-            Add server
+            New server
           </Link>
         </Button>
       }

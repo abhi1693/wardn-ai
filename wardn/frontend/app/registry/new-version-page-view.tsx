@@ -46,7 +46,7 @@ export async function NewVersionPageView({
     <AppShell
       active="catalog"
       eyebrow="MCP Catalog"
-      title="Add server version"
+      title="New Server Version"
       workspaceContext={workspaceContext}
     >
       <ServerForm

@@ -51,7 +51,7 @@ export default async function EditGuardrailPage({ params }: EditGuardrailPagePro
         </Button>
       }
       eyebrow="Access Rules"
-      title="Edit Rule"
+      title="Edit Access Rule"
       workspaceContext={workspaceContext}
     >
       <GuardrailForm

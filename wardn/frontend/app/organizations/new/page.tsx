@@ -10,7 +10,7 @@ export default async function NewOrganizationPage() {
     <AppShell
       active="organizations"
       eyebrow="Administration"
-      title="Add organization"
+      title="New Organization"
       workspaceContext={workspaceContext}
     >
       <OrganizationForm mode="create" />

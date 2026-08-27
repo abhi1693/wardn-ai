@@ -20,7 +20,7 @@ export default async function Dashboard() {
           <Button asChild size="sm">
             <Link href="/organizations/new">
               <Plus className="size-4" />
-              Add organization
+              New organization
             </Link>
           </Button>
         ) : undefined}
@@ -36,7 +36,7 @@ export default async function Dashboard() {
               href={`/organizations/${organization.id}/workspaces/new`}
             >
               <Plus className="size-4" />
-              <span className="ml-2">Create workspace</span>
+              <span className="ml-2">New workspace</span>
             </Link>
 
             {workspaces.map((workspace) => (

@@ -42,7 +42,7 @@ export default async function NewLlmCredentialPage({ params }: NewLlmCredentialP
         </Button>
       }
       eyebrow="LLM Credentials"
-      title="Create Credential"
+      title="New LLM Credential"
       workspaceContext={workspaceContext}
     >
       <CredentialForm

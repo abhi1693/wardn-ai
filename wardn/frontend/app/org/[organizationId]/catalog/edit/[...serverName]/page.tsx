@@ -41,7 +41,7 @@ export default async function EditCatalogSourcePage({
     <AppShell
       active="catalog"
       eyebrow="MCP Catalog"
-      title="Edit source"
+      title="Edit Catalog Source"
       workspaceContext={workspaceContext}
     >
       <CatalogSourceForm

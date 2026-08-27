@@ -30,7 +30,7 @@ export default async function OrganizationSelectionPage() {
         <Button asChild size="sm">
           <Link href="/organizations/new">
             <Plus className="size-4" />
-            Add organization
+            New organization
           </Link>
         </Button>
       </header>

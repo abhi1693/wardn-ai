@@ -46,8 +46,8 @@ export default async function EditOrganizationTokenPage({
           </Link>
         </Button>
       }
-      eyebrow="Agent Tokens"
-      title="Edit Token"
+      eyebrow="Gateway Tokens"
+      title="Edit Gateway Token"
       workspaceContext={workspaceContext}
     >
       <EditTokenClient organization={organization} token={token} workspaces={workspaces} />

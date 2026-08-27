@@ -43,7 +43,7 @@ export default async function OrganizationTokensPage({ params }: OrganizationTok
         </Button>
       }
       eyebrow="Organization"
-      title="Agent Tokens"
+      title="Gateway Tokens"
       workspaceContext={workspaceContext}
     >
       <AgentTokensClient initialTokens={tokens} organization={organization} />

@@ -50,7 +50,7 @@ export default async function OrganizationPage({ params }: OrganizationPageProps
           <Button asChild size="sm">
             <Link href={`/organizations/${organization.id}/workspaces/new`}>
               <Plus className="size-4" />
-              Add workspace
+              New workspace
             </Link>
           </Button>
         </>

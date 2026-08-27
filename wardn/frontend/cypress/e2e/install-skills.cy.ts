@@ -17,7 +17,7 @@ describe("MCP install runtime selection", () => {
 
   it("loads the supported server picker with Hub metadata", () => {
     cy.visit(installPath);
-    cy.findByRole("heading", { name: "Add Connection" }).should("be.visible");
+    cy.findByRole("heading", { name: "New Connection" }).should("be.visible");
     cy.get('img[src="https://skills.sh/badge/google-search-console.svg"]')
       .should("have.class", "object-contain");
     cy.findByRole("link", { name: "View in Hub" })
@@ -42,7 +42,7 @@ describe("MCP install runtime selection", () => {
     cy.visit(selectedServerPath());
     cy.findByRole("combobox", { name: "Runtime" }).should("contain.text", "Streamable HTTP");
     cy.findByTestId("install-target-details").should("contain.text", "gsc.example.com");
-    cy.findByRole("button", { name: "Add" }).click();
+    cy.findByRole("button", { name: "Create connection" }).click();
     cy.location("pathname").should("equal", `/org/${organizationId}/workspace/${workspaceId}/install`);
 
     cy.backendRequests().then((requests) => {
@@ -76,7 +76,7 @@ describe("MCP install runtime selection", () => {
     cy.findByTestId("install-target-details")
       .should("contain.text", "google-search-console-mcp")
       .and("contain.text", "Package version: 1.0.0");
-    cy.findByRole("button", { name: "Add" }).click();
+    cy.findByRole("button", { name: "Create connection" }).click();
     cy.location("pathname").should("equal", `/org/${organizationId}/workspace/${workspaceId}/install`);
 
     cy.backendRequests().then((requests) => {
@@ -92,7 +92,7 @@ describe("MCP install runtime selection", () => {
     cy.findByText("Kubernetes API", { exact: true }).should("be.visible");
     cy.findByText("Deny other egress", { exact: true }).should("be.visible");
     cy.findByText("Remote MCP endpoints", { exact: true }).should("not.exist");
-    cy.findByRole("button", { name: "Add" }).click();
+    cy.findByRole("button", { name: "Create connection" }).click();
 
     cy.backendRequests().then((requests) => {
       const install = requests.find((entry) => entry.method === "PUT");

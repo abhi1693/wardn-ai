@@ -52,7 +52,7 @@ export default async function EditLlmCredentialPage({
         </Button>
       }
       eyebrow="LLM Credentials"
-      title="Edit Credential"
+      title="Edit LLM Credential"
       workspaceContext={workspaceContext}
     >
       <CredentialForm

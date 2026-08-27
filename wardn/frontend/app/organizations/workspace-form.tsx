@@ -177,7 +177,13 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
         </Button>
         <Button disabled={submitting || (mode === "edit" && !isDirty)} type="submit">
           <Save className="size-4" />
-          Save
+          {submitting
+            ? mode === "create"
+              ? "Creating"
+              : "Saving"
+            : mode === "create"
+              ? "Create workspace"
+              : "Save changes"}
         </Button>
       </StickyFormActions>
     </form>

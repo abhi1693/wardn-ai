@@ -406,7 +406,7 @@ export function CatalogListClient({
                                 entry.server.name,
                                 entry.server.version
                               )}
-                              title="Add new version"
+                              title="New version"
                             >
                               <Plus className="size-4" />
                             </Link>

@@ -37,6 +37,7 @@ describe("operational data surfaces", () => {
   it("filters, paginates, restores, and configures the runs table", () => {
     cy.visit(runsPath);
     cy.findByRole("heading", { level: 1, name: "Runs" }).should("be.visible");
+    cy.title().should("equal", "Runs · Platform · Wardn AI");
     cy.findByText("Page 1 of 2").should("be.visible");
     cy.assertDesktopFit();
     cy.findByRole("link", { name: "Open run run-01" }).should("be.visible");

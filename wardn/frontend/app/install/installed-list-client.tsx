@@ -477,7 +477,7 @@ export function InstalledListClient({
                       credentials, runtime state, and access decisions visible here.
                     </div>
                     <Button asChild className="mt-4" size="sm">
-                      <Link href={`${basePath}/new`}>Add connection</Link>
+                      <Link href={`${basePath}/new`}>New connection</Link>
                     </Button>
                   </div>
                 </TableCell>

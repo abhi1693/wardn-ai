@@ -40,7 +40,7 @@ export default async function NewGuardrailPage({ params }: NewGuardrailPageProps
         </Button>
       }
       eyebrow="Access Rules"
-      title="Create Rule"
+      title="New Access Rule"
       workspaceContext={workspaceContext}
     >
       <GuardrailForm

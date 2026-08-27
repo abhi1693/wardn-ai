@@ -308,7 +308,7 @@ export function CatalogSourcesClient({
           </div>
           <Button asChild size="sm" variant="outline">
             <Link href={`/org/${encodeURIComponent(organizationId)}/catalog/new`}>
-              Add source
+              New source
             </Link>
           </Button>
         </Card>

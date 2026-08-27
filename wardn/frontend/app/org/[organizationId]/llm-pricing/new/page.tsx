@@ -39,8 +39,8 @@ export default async function NewModelPricePage({ params }: NewModelPricePagePro
           </Link>
         </Button>
       }
-      eyebrow="LLM Pricing"
-      title="New Price"
+      eyebrow="Model Pricing"
+      title="New Model Price"
       workspaceContext={workspaceContext}
     >
       <ModelPriceForm

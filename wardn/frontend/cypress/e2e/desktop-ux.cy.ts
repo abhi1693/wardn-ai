@@ -5,24 +5,42 @@ const workspaceId = "workspace-1";
 const sidebarPreferenceKey = "wardn.sidebar.mode";
 
 const routes = [
-  { name: "workspaces", path: `/org/${organizationId}/workspaces`, title: "Workspaces" },
-  { name: "usage", path: `/org/${organizationId}/usage`, title: "Usage" },
   {
-    name: "connections",
-    path: `/org/${organizationId}/workspace/${workspaceId}/install/new`,
-    title: "Add Connection",
+    browserTitle: "Workspaces · Default Organization · Wardn AI",
+    name: "workspaces",
+    path: `/org/${organizationId}/workspaces`,
+    title: "Workspaces",
   },
   {
+    browserTitle: "Usage · Default Organization · Wardn AI",
+    name: "usage",
+    path: `/org/${organizationId}/usage`,
+    title: "Usage",
+  },
+  {
+    browserTitle: "New Connection · Platform · Wardn AI",
+    name: "connections",
+    path: `/org/${organizationId}/workspace/${workspaceId}/install/new`,
+    title: "New Connection",
+  },
+  {
+    browserTitle: "Skill Marketplace · Platform · Wardn AI",
     name: "skills",
     path: `/org/${organizationId}/workspace/${workspaceId}/skills`,
     title: "Skill Marketplace",
   },
-  { name: "catalog", path: `/org/${organizationId}/catalog/new`, title: "New source" },
+  {
+    browserTitle: "New Catalog Source · Default Organization · Wardn AI",
+    name: "catalog",
+    path: `/org/${organizationId}/catalog/new`,
+    title: "New Catalog Source",
+  },
 ] as const;
 
 function verifyRoute(route: (typeof routes)[number], theme: "light" | "dark") {
   cy.visit(route.path);
   cy.findByRole("heading", { level: 1, name: route.title }).should("be.visible");
+  cy.title().should("equal", route.browserTitle);
   cy.findByRole("navigation", { name: "Primary" }).should("be.visible");
   cy.findByRole("button", { name: `Switch to ${theme === "light" ? "dark" : "light"} theme` }).should(
     "be.visible"
@@ -49,7 +67,7 @@ describe("desktop UX details", () => {
     cy.visit(routes[2].path);
     cy.findByRole("button", { name: "Select Google Search Console" }).click();
     cy.findByText("Connection Source", { exact: true }).should("be.visible");
-    cy.findByRole("button", { name: "Add" }).should("be.visible");
+    cy.findByRole("button", { name: "Create connection" }).should("be.visible");
     cy.assertDesktopFit();
   });
 
