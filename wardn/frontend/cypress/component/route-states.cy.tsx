@@ -2,15 +2,15 @@ import { AppShellError } from "@/components/templates/app-shell-error";
 import { AppShellLoading } from "@/components/templates/app-shell-loading";
 
 describe("route states", () => {
-  it("keeps the desktop shell stable while a workspace route loads", () => {
+  it("renders only the page content fallback while a workspace route loads", () => {
     cy.mount(<AppShellLoading label="Loading workspace" />);
 
     cy.findByRole("status", { name: "Loading workspace" })
       .should("be.visible")
       .and("have.attr", "aria-busy", "true");
-    cy.findByText("Wardn AI").should("be.visible");
-    cy.get("aside").should("have.css", "width", "260px");
     cy.get('[data-testid="route-loading"]').should("have.class", "max-w-[1360px]");
+    cy.get("aside").should("not.exist");
+    cy.get("header").should("not.exist");
   });
 
   it("renders loading surfaces correctly in dark theme", () => {
@@ -22,7 +22,7 @@ describe("route states", () => {
     cy.mount(<AppShellLoading label="Loading organization" />);
 
     cy.findByRole("status", { name: "Loading organization" }).should("be.visible");
-    cy.get("main").should("have.class", "bg-background");
+    cy.get('[data-testid="route-loading"]').should("have.class", "min-h-screen");
   });
 
   it("offers retry and a safe exit when a workspace route fails", () => {

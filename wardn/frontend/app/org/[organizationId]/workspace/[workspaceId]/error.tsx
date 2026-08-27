@@ -11,6 +11,7 @@ export default function WorkspaceError({
 }) {
   return (
     <AppShellError
+      embedded
       error={error}
       reset={() => {
         if (unstable_retry) {

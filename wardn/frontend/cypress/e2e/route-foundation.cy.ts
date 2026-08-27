@@ -34,15 +34,20 @@ describe("desktop route foundation", () => {
     cy.assertDesktopFit();
   });
 
-  it("shows the workspace loading boundary during a delayed navigation", () => {
+  it("keeps the workspace shell mounted during a delayed navigation", () => {
     cy.visit(`/org/${organizationId}/workspace/workspace-1/skills`);
     cy.findByRole("heading", { level: 1, name: "Skill Marketplace" }).should("be.visible");
     cy.resetBackend({ organizationsDelayMs: 800 });
 
-    cy.get("body").type("{ctrl}k");
-    cy.findByRole("combobox", { name: "Search destinations" }).type("connections{enter}");
-    cy.findByRole("status", { name: "Loading workspace" }).should("be.visible");
-    cy.findByRole("heading", { level: 1, name: "Connections" }).should("be.visible");
+    cy.get("aside").then(($initialSidebar) => {
+      cy.get("body").type("{ctrl}k");
+      cy.findByRole("combobox", { name: "Search destinations" }).type("connections{enter}");
+      cy.findByRole("status", { name: "Loading workspace" }).should("be.visible");
+      cy.get("aside").should(($currentSidebar) => {
+        expect($currentSidebar[0]).to.equal($initialSidebar[0]);
+      });
+      cy.findByRole("heading", { level: 1, name: "Connections" }).should("be.visible");
+    });
   });
 
   it("recovers from an organization route failure after retry", () => {

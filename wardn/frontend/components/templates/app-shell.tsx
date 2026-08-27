@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Activity,
   BadgeDollarSign,
@@ -23,7 +25,16 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { LogoutButton } from "@/components/molecules/logout-button";
@@ -316,7 +327,126 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-export function AppShell({
+type AppShellChrome = Omit<AppShellProps, "children">;
+
+type PersistentAppShellContextValue = {
+  register: (pathname: string, chrome: AppShellChrome) => void;
+  unregister: (pathname: string) => void;
+};
+
+const PersistentAppShellContext = createContext<PersistentAppShellContextValue | null>(null);
+
+type RegisteredChrome = {
+  pathname: string;
+  chrome: AppShellChrome;
+};
+
+const organizationRouteChrome: Record<
+  string,
+  Pick<AppShellChrome, "active" | "eyebrow" | "title">
+> = {
+  catalog: { active: "catalog", eyebrow: "MCP Catalog", title: "Catalog" },
+  dashboard: { active: "org-dashboard", eyebrow: "Organization", title: "Dashboard" },
+  limits: { active: "limits", eyebrow: "Organization", title: "Limits" },
+  "llm-credentials": {
+    active: "llm-credentials",
+    eyebrow: "Organization",
+    title: "LLM Credentials",
+  },
+  "llm-pricing": {
+    active: "llm-pricing",
+    eyebrow: "Organization",
+    title: "Model Pricing",
+  },
+  "secret-backends": {
+    active: "secret-backends",
+    eyebrow: "Organization",
+    title: "Secret Backends",
+  },
+  tokens: { active: "agent-tokens", eyebrow: "Organization", title: "Agent Tokens" },
+  usage: { active: "usage", eyebrow: "Organization", title: "Usage" },
+  workspaces: { active: "workspaces", eyebrow: "Organization", title: "Workspaces" },
+};
+
+const workspaceRouteChrome: Record<
+  string,
+  Pick<AppShellChrome, "active" | "eyebrow" | "title">
+> = {
+  "agent-runs": { active: "workspace-runs", eyebrow: "Workspace", title: "Runs" },
+  agents: { active: "workspace-runs", eyebrow: "Workspace", title: "Agents" },
+  chat: { active: "workspace-chat", eyebrow: "Workspace", title: "Chat" },
+  "chat-providers": {
+    active: "workspace-chat-providers",
+    eyebrow: "Workspace",
+    title: "Chat Providers",
+  },
+  dashboard: { active: "workspace-dashboard", eyebrow: "Workspace", title: "Dashboard" },
+  guardrails: { active: "workspace-guardrails", eyebrow: "Workspace", title: "Access" },
+  install: { active: "install", eyebrow: "Workspace", title: "Connections" },
+  observability: {
+    active: "workspace-observability",
+    eyebrow: "Workspace",
+    title: "Observability",
+  },
+  runtime: { active: "runtime", eyebrow: "Workspace", title: "Runtime" },
+  "scheduled-tasks": {
+    active: "workspace-scheduled-tasks",
+    eyebrow: "Workspace",
+    title: "Scheduled Tasks",
+  },
+  skills: { active: "workspace-skills", eyebrow: "Workspace", title: "Skill Marketplace" },
+};
+
+function pathSegments(pathname: string) {
+  return pathname.split("/").filter(Boolean).map((segment) => decodeURIComponent(segment));
+}
+
+function workspaceContextForPath(
+  pathname: string,
+  workspaceContext: WorkspaceContext
+): WorkspaceContext {
+  const segments = pathSegments(pathname);
+  const workspaceSegmentIndex = segments.indexOf("workspace");
+  if (workspaceSegmentIndex === -1) {
+    return workspaceContext;
+  }
+
+  const workspaceId = segments[workspaceSegmentIndex + 1];
+  return {
+    ...workspaceContext,
+    selectedWorkspace:
+      workspaceContext.workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
+  };
+}
+
+function fallbackChrome(pathname: string, workspaceContext: WorkspaceContext): AppShellChrome {
+  const segments = pathSegments(pathname);
+  const workspaceSegmentIndex = segments.indexOf("workspace");
+  const routedContext = workspaceContextForPath(pathname, workspaceContext);
+
+  if (workspaceSegmentIndex !== -1) {
+    const route = segments[workspaceSegmentIndex + 2] ?? "dashboard";
+    const chrome = workspaceRouteChrome[route] ?? workspaceRouteChrome.dashboard;
+    return {
+      ...chrome,
+      title:
+        route === "dashboard" ? routedContext.selectedWorkspace?.name ?? chrome.title : chrome.title,
+      workspaceContext: routedContext,
+    };
+  }
+
+  const route = segments[2] ?? "dashboard";
+  return {
+    ...(organizationRouteChrome[route] ?? organizationRouteChrome.dashboard),
+    workspaceContext: routedContext,
+  };
+}
+
+type AppShellFrameProps = AppShellProps & {
+  wrapContent?: boolean;
+};
+
+function AppShellFrame({
   active,
   eyebrow,
   title,
@@ -326,7 +456,8 @@ export function AppShell({
   contentClassName,
   contentInnerClassName,
   children,
-}: AppShellProps) {
+  wrapContent = true,
+}: AppShellFrameProps) {
   const isWorkspaceScope =
     active === "workspace-dashboard" ||
     active === "workspace-chat" ||
@@ -466,15 +597,81 @@ export function AppShell({
           </div>
         </header>
 
-        <div
-          className={cn(
-            "mx-auto min-h-screen w-full max-w-[1360px] px-6 pb-8 pt-20",
-            contentClassName
-          )}
-        >
-          <div className={cn("space-y-6", contentInnerClassName)}>{children}</div>
-        </div>
+        {wrapContent ? (
+          <div
+            className={cn(
+              "mx-auto min-h-screen w-full max-w-[1360px] px-6 pb-8 pt-20",
+              contentClassName
+            )}
+          >
+            <div className={cn("space-y-6", contentInnerClassName)}>{children}</div>
+          </div>
+        ) : (
+          children
+        )}
       </section>
     </main>
+  );
+}
+
+export function AppShell({ children, ...chrome }: AppShellProps) {
+  const persistentShell = useContext(PersistentAppShellContext);
+  const pathname = usePathname();
+
+  useLayoutEffect(() => {
+    if (!persistentShell) {
+      return;
+    }
+    persistentShell.register(pathname, chrome);
+    return () => persistentShell.unregister(pathname);
+  }, [chrome, pathname, persistentShell]);
+
+  if (!persistentShell) {
+    return <AppShellFrame {...chrome}>{children}</AppShellFrame>;
+  }
+
+  return (
+    <div
+      className={cn(
+        "mx-auto min-h-screen w-full max-w-[1360px] px-6 pb-8 pt-20",
+        chrome.contentClassName
+      )}
+    >
+      <div className={cn("space-y-6", chrome.contentInnerClassName)}>{children}</div>
+    </div>
+  );
+}
+
+type PersistentAppShellProps = {
+  children: ReactNode;
+  workspaceContext: WorkspaceContext;
+};
+
+export function PersistentAppShell({ children, workspaceContext }: PersistentAppShellProps) {
+  const pathname = usePathname();
+  const [registeredChrome, setRegisteredChrome] = useState<RegisteredChrome | null>(null);
+  const register = useCallback((registeredPathname: string, chrome: AppShellChrome) => {
+    setRegisteredChrome({ pathname: registeredPathname, chrome });
+  }, []);
+  const unregister = useCallback((registeredPathname: string) => {
+    setRegisteredChrome((current) =>
+      current?.pathname === registeredPathname ? null : current
+    );
+  }, []);
+  const persistentContext = useMemo(
+    () => ({ register, unregister }),
+    [register, unregister]
+  );
+  const chrome =
+    registeredChrome?.pathname === pathname
+      ? registeredChrome.chrome
+      : fallbackChrome(pathname, workspaceContext);
+
+  return (
+    <PersistentAppShellContext.Provider value={persistentContext}>
+      <AppShellFrame {...chrome} wrapContent={false}>
+        {children}
+      </AppShellFrame>
+    </PersistentAppShellContext.Provider>
   );
 }
