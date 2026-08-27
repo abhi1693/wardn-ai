@@ -7,6 +7,8 @@ import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -23,6 +25,7 @@ import {
   secretStoresUpdate,
   secretStoresValidate,
 } from "@/lib/api/generated/secrets/secrets";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import {
   secretBackendValidationMessage,
@@ -78,6 +81,12 @@ export function SecretBackendForm({
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { isDirty } = useFormSafety({
+    currentValue: { authProfile, baseUrl, isActive, name },
+    formId: "secret-backend-form",
+    initialValue: initialForm,
+    isSaving: saving,
+  });
 
   const canSave =
     name.trim().length > 0 &&
@@ -88,6 +97,14 @@ export function SecretBackendForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
+      focusFirstInvalidFormControl(
+        "secret-backend-form",
+        !name.trim()
+          ? "secret-backend-name"
+          : !baseUrl.trim()
+            ? "secret-backend-base-url"
+            : "secret-backend-auth-profile"
+      );
       return;
     }
 
@@ -166,7 +183,7 @@ export function SecretBackendForm({
         </div>
       </CardHeader>
       <CardContent>
-        <form className="space-y-6" onSubmit={submit}>
+        <form className="space-y-6" id="secret-backend-form" onSubmit={submit}>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Backend type</Label>
@@ -243,7 +260,7 @@ export function SecretBackendForm({
             </AsyncFeedback>
           ) : null}
 
-          <div className="flex justify-end gap-2">
+          <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
             <Button asChild type="button" variant="outline">
               <Link href={listPath}>
                 <ArrowLeft className="size-4" />
@@ -265,11 +282,11 @@ export function SecretBackendForm({
                 {validating ? "Validating" : "Validate"}
               </Button>
             ) : null}
-            <Button disabled={!canSave} type="submit">
+            <Button disabled={saving || (isEditing && !isDirty)} type="submit">
               {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
               {saving ? "Saving" : isEditing ? "Save backend" : "Create backend"}
             </Button>
-          </div>
+          </StickyFormActions>
         </form>
       </CardContent>
     </Card>

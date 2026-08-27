@@ -7,6 +7,8 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -21,6 +23,7 @@ import {
   selectedOrganizationCookie,
   selectedWorkspaceCookie,
 } from "@/lib/workspace-types";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 type OrganizationFormProps = {
   formId?: string;
@@ -45,12 +48,27 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
   );
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const effectiveFormId = formId ?? "organization-form";
+  const { confirmNavigation, isDirty } = useFormSafety({
+    currentValue: { name, slug, status },
+    formId: effectiveFormId,
+    initialValue: {
+      name: initialOrganization?.name ?? "",
+      slug: initialOrganization?.slug ?? "",
+      status: (initialOrganization?.status as OrganizationUpdateStatus) ?? "active",
+    },
+    isSaving: submitting,
+  });
 
   const canSave = useMemo(() => name.trim().length > 0 && slug.trim().length > 0, [name, slug]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave || submitting) {
+      focusFirstInvalidFormControl(
+        effectiveFormId,
+        name.trim() ? "organization-slug" : "organization-name"
+      );
       return;
     }
     setSubmitting(true);
@@ -84,7 +102,7 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
     : "Create the core identity for a new organization.";
 
   return (
-    <form className="mx-auto max-w-4xl space-y-8" id={formId} onSubmit={submit}>
+    <form className="mx-auto max-w-4xl space-y-8" id={effectiveFormId} onSubmit={submit}>
       <div>
         <h2 className="mb-2 text-4xl font-bold leading-[44px] tracking-normal text-[var(--on-surface)]">
           {title}
@@ -111,6 +129,7 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
                   setSlug(slugify(event.target.value));
                 }
               }}
+              required
               value={name}
             />
           </div>
@@ -123,6 +142,7 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
                 disabled={mode === "edit"}
                 id="organization-slug"
                 onChange={(event) => setSlug(slugify(event.target.value))}
+                required
                 value={slug}
               />
             </div>
@@ -147,15 +167,23 @@ export function OrganizationForm({ formId, initialOrganization, mode }: Organiza
             ) : null}
           </div>
 
-          <div className="flex items-center justify-end gap-4 border-t border-[var(--outline-variant)] pt-4">
-            <Button onClick={() => router.back()} type="button" variant="outline">
+          <StickyFormActions className="-mx-8 -mb-8 px-8" position="bottom">
+            <Button
+              onClick={() => {
+                if (confirmNavigation()) {
+                  router.back();
+                }
+              }}
+              type="button"
+              variant="outline"
+            >
               Cancel
             </Button>
-            <Button disabled={!canSave || submitting} type="submit">
+            <Button disabled={submitting || (mode === "edit" && !isDirty)} type="submit">
               <Save className="size-4" />
               {submitting ? "Saving" : "Save"}
             </Button>
-          </div>
+          </StickyFormActions>
         </CardContent>
       </Card>
     </form>

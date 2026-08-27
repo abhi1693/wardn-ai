@@ -7,6 +7,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -22,6 +24,7 @@ import {
   organizationObservabilityPrefillLlmModelPrice,
   organizationObservabilityUpdateLlmModelPrice,
 } from "@/lib/api/generated/organization-observability/organization-observability";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import type { LlmCredentialRead } from "../llm-credentials/types";
 import type { LLMModelPriceRead, ProviderModel } from "./types";
@@ -105,6 +108,26 @@ export function ModelPriceForm({
     !modelError &&
     !selectedModelUnavailable &&
     !isSubmitting;
+  const { isDirty } = useFormSafety({
+    currentValue: {
+      cacheReadPrice,
+      cacheWritePrice,
+      inputPrice,
+      model,
+      outputPrice,
+      providerCredentialId,
+    },
+    formId: "model-price-form",
+    initialValue: {
+      cacheReadPrice: decimalText(initialPrice?.cacheReadUsdPer1mTokens),
+      cacheWritePrice: decimalText(initialPrice?.cacheWriteUsdPer1mTokens),
+      inputPrice: decimalText(initialPrice?.inputUsdPer1mTokens),
+      model: initialCredentialId ? initialPrice?.model ?? "" : "",
+      outputPrice: decimalText(initialPrice?.outputUsdPer1mTokens),
+      providerCredentialId: initialCredentialId,
+    },
+    isSaving: isSubmitting,
+  });
 
   useEffect(() => {
     if (!providerCredentialId) {
@@ -145,6 +168,16 @@ export function ModelPriceForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave || !effectiveCredential) {
+      focusFirstInvalidFormControl(
+        "model-price-form",
+        !effectiveCredential
+          ? "provider-credential"
+          : !model.trim() || modelError || selectedModelUnavailable
+            ? "model"
+            : !inputPrice.trim()
+              ? "input-price"
+              : "output-price"
+      );
       return;
     }
 
@@ -226,7 +259,7 @@ export function ModelPriceForm({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <form onSubmit={submit}>
+          <form id="model-price-form" onSubmit={submit}>
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="provider-credential">LLM credential</Label>
@@ -317,6 +350,7 @@ export function ModelPriceForm({
                   inputMode="decimal"
                   onChange={(event) => setInputPrice(event.target.value)}
                   placeholder="0.40"
+                  required
                   value={inputPrice}
                 />
               </div>
@@ -327,6 +361,7 @@ export function ModelPriceForm({
                   inputMode="decimal"
                   onChange={(event) => setOutputPrice(event.target.value)}
                   placeholder="1.60"
+                  required
                   value={outputPrice}
                 />
               </div>
@@ -355,15 +390,15 @@ export function ModelPriceForm({
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
+            <StickyFormActions className="px-4" position="bottom">
               <Button asChild type="button" variant="outline">
                 <Link href={listPath}>Cancel</Link>
               </Button>
-              <Button disabled={!canSave} type="submit">
+              <Button disabled={isSubmitting || (Boolean(isEdit) && !isDirty)} type="submit">
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Save />}
                 Save price
               </Button>
-            </div>
+            </StickyFormActions>
           </form>
         </CardContent>
       </Card>

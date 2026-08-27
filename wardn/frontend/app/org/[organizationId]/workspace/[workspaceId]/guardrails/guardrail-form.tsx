@@ -7,6 +7,8 @@ import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -34,6 +36,7 @@ import {
   workspaceGuardrailPoliciesCreate,
   workspaceGuardrailPoliciesUpdate,
 } from "@/lib/api/generated/workspace-guardrail-policies/workspace-guardrail-policies";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import type {
   GuardrailServerOption,
@@ -162,6 +165,28 @@ export function GuardrailForm({
     Number.isFinite(Number(priority)) &&
     Number(priority) >= 0 &&
     (toolScope === "all" || selectedToolIds.length > 0);
+  const { isDirty } = useFormSafety({
+    currentValue: {
+      description,
+      isActive,
+      mode,
+      name,
+      priority,
+      selectedToolIds: [...selectedToolIds].sort(),
+      toolScope,
+    },
+    formId: "guardrail-form",
+    initialValue: {
+      description: policy?.description ?? "",
+      isActive: policy?.isActive ?? true,
+      mode: (policy?.mode as GuardrailMode) ?? "deny",
+      name: policy?.name ?? "",
+      priority: String(policy?.priority ?? 100),
+      selectedToolIds: [...initialSelectedToolIds].sort(),
+      toolScope: initialSelectedToolIds.length > 0 ? "selected" : "all",
+    },
+    isSaving: isSubmitting,
+  });
 
   function toggleTool(toolSchemaId: string) {
     setSelectedToolIds((current) =>
@@ -188,6 +213,14 @@ export function GuardrailForm({
   async function submitPolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
+      focusFirstInvalidFormControl(
+        "guardrail-form",
+        !name.trim()
+          ? "guardrail-name"
+          : !Number.isFinite(Number(priority)) || Number(priority) < 0
+            ? "guardrail-priority"
+            : "guardrail-tool-selection"
+      );
       return;
     }
 
@@ -246,7 +279,7 @@ export function GuardrailForm({
         </div>
       </CardHeader>
       <CardContent>
-        <form className="space-y-6" onSubmit={submitPolicy}>
+        <form className="space-y-6" id="guardrail-form" onSubmit={submitPolicy}>
           {error ? (
             <AsyncFeedback variant="error">{error}</AsyncFeedback>
           ) : null}
@@ -325,7 +358,7 @@ export function GuardrailForm({
           </div>
 
           {toolScope === "selected" ? (
-            <div className="space-y-3">
+            <div className="space-y-3" id="guardrail-tool-selection" tabIndex={-1}>
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="guardrail-tool-filter">Tool list</Label>
@@ -417,6 +450,8 @@ export function GuardrailForm({
                 id="guardrail-priority"
                 min={0}
                 onChange={(event) => setPriority(event.target.value)}
+                required
+                step={1}
                 type="number"
                 value={priority}
               />
@@ -432,14 +467,14 @@ export function GuardrailForm({
             </label>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
             <Button asChild type="button" variant="outline">
               <Link href={basePath}>
                 <ArrowLeft className="size-4" />
                 Back
               </Link>
             </Button>
-            <Button disabled={!canSave} type="submit">
+            <Button disabled={isSubmitting || (isEditing && !isDirty)} type="submit">
               {isSubmitting ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
@@ -447,7 +482,7 @@ export function GuardrailForm({
               )}
               {isEditing ? "Save rule" : "Create rule"}
             </Button>
-          </div>
+          </StickyFormActions>
         </form>
       </CardContent>
     </Card>

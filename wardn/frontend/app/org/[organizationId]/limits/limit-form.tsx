@@ -7,6 +7,8 @@ import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -30,6 +32,7 @@ import type {
   WorkspaceRead,
 } from "@/lib/api/generated/model";
 import { limitsUpsert } from "@/lib/api/generated/limits/limits";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import {
   displayLimitKey,
@@ -80,6 +83,18 @@ export function LimitForm({
     parsedValue >= 0 &&
     !isSubmitting &&
     scopeId.trim().length > 0;
+  const { isDirty } = useFormSafety({
+    currentValue: { limitKey, scopeId, scopeType, value },
+    formId: "limit-form",
+    initialValue: {
+      limitKey: initialLimit?.limitKey ?? initialKnownKey.value,
+      scopeId: initialLimit?.scopeId ?? organizationId,
+      scopeType:
+        (initialLimit?.scopeType as LimitScopeType | undefined) ?? initialKnownKey.defaultScope,
+      value: String(initialLimit?.value ?? 10),
+    },
+    isSaving: isSubmitting,
+  });
 
   function updateScopeType(nextScopeType: LimitScopeType) {
     setScopeType(nextScopeType);
@@ -101,6 +116,10 @@ export function LimitForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
+      focusFirstInvalidFormControl(
+        "limit-form",
+        !scopeId.trim() ? "limit-target" : "limit-value"
+      );
       return;
     }
 
@@ -140,7 +159,7 @@ export function LimitForm({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <form onSubmit={submit}>
+          <form id="limit-form" onSubmit={submit}>
             <div className="space-y-5 p-4">
               {isEdit ? (
                 <div className="grid gap-0 overflow-hidden rounded-md border bg-card sm:grid-cols-2">
@@ -177,7 +196,7 @@ export function LimitForm({
                     <div>
                       <Label>Target</Label>
                       <Select onValueChange={setScopeId} value={scopeId}>
-                        <SelectTrigger className="mt-2">
+                        <SelectTrigger className="mt-2" id="limit-target">
                           <SelectValue placeholder="Select workspace" />
                         </SelectTrigger>
                         <SelectContent>
@@ -209,6 +228,7 @@ export function LimitForm({
                   onChange={(event) => setValue(event.target.value)}
                   step={1}
                   type="number"
+                  required
                   value={value}
                 />
                 {valueHelp ? (
@@ -221,15 +241,15 @@ export function LimitForm({
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
+            <StickyFormActions className="px-4" position="bottom">
               <Button asChild type="button" variant="outline">
                 <Link href={listPath}>Cancel</Link>
               </Button>
-              <Button disabled={!canSave} type="submit">
+              <Button disabled={isSubmitting || (Boolean(isEdit) && !isDirty)} type="submit">
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Save />}
                 Save limit
               </Button>
-            </div>
+            </StickyFormActions>
           </form>
         </CardContent>
       </Card>

@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/atoms/select";
 import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
-import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useFormSafety } from "@/hooks/use-form-safety";
 import { useVisibilityPolling } from "@/hooks/use-visibility-polling";
 import type {
   ChatProviderConnectionCreate,
@@ -619,9 +619,13 @@ export function ChatProviderFormClient({
     slackBotUserId,
     webhookSecret,
   });
-  const [initialFormSnapshot, setInitialFormSnapshot] = useState(currentFormSnapshot);
-  const isDirty = currentFormSnapshot !== initialFormSnapshot;
-  const confirmNavigation = useUnsavedChanges(isDirty && !isSaving);
+  const [initialFormSnapshot] = useState(currentFormSnapshot);
+  const { isDirty, markSaved } = useFormSafety({
+    currentValue: currentFormSnapshot,
+    formId: "chat-provider-form",
+    initialValue: initialFormSnapshot,
+    isSaving,
+  });
 
   const selectedApprovalThreadIds = useMemo(
     () =>
@@ -857,7 +861,7 @@ export function ChatProviderFormClient({
         isActive,
         name: normalizedName,
       });
-      setInitialFormSnapshot(currentFormSnapshot);
+      markSaved();
       setNotice("Provider connection updated.");
       router.refresh();
     } catch (caught) {
@@ -871,18 +875,11 @@ export function ChatProviderFormClient({
     validationIssues.find((issue) => issue.fieldId === fieldId)?.message;
 
   return (
-    <form className="space-y-4" noValidate onSubmit={submit}>
+    <form className="space-y-4" id="chat-provider-form" noValidate onSubmit={submit}>
       <StickyFormActions
         context={
           <Button asChild size="sm" type="button" variant="ghost">
-            <Link
-              href={basePath}
-              onClick={(event) => {
-                if (!confirmNavigation()) {
-                  event.preventDefault();
-                }
-              }}
-            >
+            <Link href={basePath}>
               <ArrowLeft className="size-4" />
               Back
             </Link>
@@ -890,18 +887,11 @@ export function ChatProviderFormClient({
         }
       >
         <Button asChild type="button" variant="outline">
-          <Link
-            href={basePath}
-            onClick={(event) => {
-              if (!confirmNavigation()) {
-                event.preventDefault();
-              }
-            }}
-          >
+          <Link href={basePath}>
             Cancel
           </Link>
         </Button>
-        <Button disabled={isSaving} type="submit">
+        <Button disabled={isSaving || (mode === "edit" && !isDirty)} type="submit">
           {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
           {mode === "create" ? "Create provider" : "Save changes"}
         </Button>

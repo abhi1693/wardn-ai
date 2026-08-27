@@ -9,6 +9,8 @@ import { useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -19,6 +21,7 @@ import {
   organizationMcpRegistryUpdateServerVersion,
 } from "@/lib/api/generated/organization-mcp-registry/organization-mcp-registry";
 import type { MCPServerCreate } from "@/lib/api/generated/model";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import {
   DEFAULT_SCHEMA,
@@ -74,6 +77,39 @@ export function ServerForm({
   const [sourceImportMessage, setSourceImportMessage] = useState("");
   const [isImportingSource, setIsImportingSource] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [initialFormValue] = useState(() => ({
+    description,
+    iconUrl,
+    isNameOverrideEnabled,
+    name,
+    packages,
+    remotes,
+    repositorySource,
+    repositorySubfolder,
+    repositoryUrl,
+    title,
+    version,
+    websiteUrl,
+  }));
+  const { confirmNavigation, isDirty } = useFormSafety({
+    currentValue: {
+      description,
+      iconUrl,
+      isNameOverrideEnabled,
+      name,
+      packages,
+      remotes,
+      repositorySource,
+      repositorySubfolder,
+      repositoryUrl,
+      title,
+      version,
+      websiteUrl,
+    },
+    formId: "server-form",
+    initialValue: initialFormValue,
+    isSaving: isSubmitting,
+  });
   const derivedName = generatedServerName(repositorySource, repositoryUrl, packages);
   const effectiveName = mode === "create" && !isNameOverrideEnabled ? name || derivedName : name;
 
@@ -191,9 +227,11 @@ export function ServerForm({
     try {
       const serverName = effectiveName.trim();
       if (!serverName) {
+        focusFirstInvalidFormControl("server-form", "server-name");
         throw new Error("Add repository details or override the server name.");
       }
       if (!SERVER_NAME_PATTERN.test(serverName)) {
+        focusFirstInvalidFormControl("server-form", "server-name");
         throw new Error("Server name must use the namespace/server format.");
       }
 
@@ -216,6 +254,7 @@ export function ServerForm({
         }));
 
       if (remotePayload.length === 0 && packagePayload.length === 0) {
+        focusFirstInvalidFormControl("server-form", "server-repository-url");
         throw new Error("Add at least one remote endpoint or package target.");
       }
 
@@ -287,7 +326,7 @@ export function ServerForm({
   }
 
   return (
-    <form className="space-y-5" onSubmit={submitForm}>
+    <form className="space-y-5" id="server-form" onSubmit={submitForm}>
       {error ? (
         <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
@@ -457,20 +496,24 @@ export function ServerForm({
         updatePackageEnvironment={updatePackageEnvironment}
       />
 
-      <div className="flex justify-end gap-2">
+      <StickyFormActions position="bottom">
         <Button
           disabled={isSubmitting}
-          onClick={() => router.push(editSuccessPath ?? createSuccessPath ?? "/org")}
+          onClick={() => {
+            if (confirmNavigation()) {
+              router.push(editSuccessPath ?? createSuccessPath ?? "/org");
+            }
+          }}
           type="button"
           variant="outline"
         >
           Cancel
         </Button>
-        <Button disabled={isSubmitting} type="submit">
+        <Button disabled={isSubmitting || (mode === "edit" && !isDirty)} type="submit">
           <Save className="size-4" />
           {isSubmitting ? "Saving" : "Save"}
         </Button>
-      </div>
+      </StickyFormActions>
     </form>
   );
 }

@@ -15,6 +15,8 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -39,6 +41,7 @@ import {
   llmProviderCredentialsValidate,
 } from "@/lib/api/generated/llm-provider-credentials/llm-provider-credentials";
 import { cn } from "@/lib/utils";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import type {
   CredentialFormProps,
@@ -225,6 +228,29 @@ export function CredentialForm({
         ? true
         : apiKey.trim().length > 0 && effectiveSecretStoreId.length > 0
       : !isChatgptConnectorCreate);
+  const [initialFormValue] = useState(() => ({
+    apiKey: "",
+    isActive: credential?.isActive ?? true,
+    name: credential?.name ?? "",
+    provider: providerForCredential(credential),
+    selectedSecretStoreId: "",
+    visibility: credential?.visibility ?? "organization",
+    workspaceId: credential?.workspaceId ?? "",
+  }));
+  const { isDirty } = useFormSafety({
+    currentValue: {
+      apiKey,
+      isActive,
+      name,
+      provider,
+      selectedSecretStoreId,
+      visibility,
+      workspaceId,
+    },
+    formId: "credential-form",
+    initialValue: initialFormValue,
+    isSaving: isSubmitting,
+  });
 
   const completeChatgptDeviceFlow = useCallback(async (flow: ChatgptDeviceFlow) => {
     if (isCompletingChatgpt) {
@@ -322,6 +348,16 @@ export function CredentialForm({
   async function submitCredential(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
+      focusFirstInvalidFormControl(
+        "credential-form",
+        !name.trim()
+          ? "credential-name"
+          : visibility === "workspace" && !workspaceId
+            ? "credential-workspace"
+            : isApiKeyCredential && !isEditing && !effectiveSecretStoreId
+              ? "credential-api-key-secret-store"
+              : "credential-api-key"
+      );
       return;
     }
 
@@ -405,7 +441,7 @@ export function CredentialForm({
           </div>
         </CardHeader>
         <CardContent>
-          <form className="space-y-6" onSubmit={submitCredential}>
+          <form className="space-y-6" id="credential-form" onSubmit={submitCredential}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="credential-provider">Provider</Label>
@@ -718,7 +754,7 @@ export function CredentialForm({
               </AsyncFeedback>
             ) : null}
 
-            <div className="flex justify-end gap-2">
+            <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
               <Button asChild type="button" variant="outline">
                 <Link href={`/org/${organization.id}/llm-credentials`}>Cancel</Link>
               </Button>
@@ -738,7 +774,7 @@ export function CredentialForm({
                 </Button>
               ) : null}
               {isChatgptConnectorCreate ? null : (
-                <Button disabled={!canSave} type="submit">
+                <Button disabled={isSubmitting || (isEditing && !isDirty)} type="submit">
                   {isSubmitting ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : isEditing ? (
@@ -749,7 +785,7 @@ export function CredentialForm({
                   {isEditing ? "Save changes" : "Create credential"}
                 </Button>
               )}
-            </div>
+            </StickyFormActions>
           </form>
         </CardContent>
       </Card>

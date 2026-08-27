@@ -23,6 +23,22 @@ export function focusFormIssue(issue: FormIssue | undefined) {
   });
 }
 
+export function focusFirstInvalidFormControl(formId: string, preferredFieldId?: string) {
+  window.requestAnimationFrame(() => {
+    const form = document.getElementById(formId);
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    const preferred = preferredFieldId ? document.getElementById(preferredFieldId) : null;
+    const fallback = form.querySelector<HTMLElement>(
+      '[aria-invalid="true"], input:invalid, select:invalid, textarea:invalid'
+    );
+    const control = preferred instanceof HTMLElement ? preferred : fallback;
+    control?.focus();
+    control?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 export function FormErrorSummary({
   className,
   issues,

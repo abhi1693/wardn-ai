@@ -6,13 +6,20 @@ type StickyFormActionsProps = {
   children: ReactNode;
   className?: string;
   context?: ReactNode;
+  position?: "bottom" | "top";
 };
 
-export function StickyFormActions({ children, className, context }: StickyFormActionsProps) {
+export function StickyFormActions({
+  children,
+  className,
+  context,
+  position = "top",
+}: StickyFormActionsProps) {
   return (
     <div
       className={cn(
-        "sticky top-0 z-20 flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-border bg-card/95 px-6 py-2 backdrop-blur",
+        "sticky z-20 flex min-h-14 flex-wrap items-center justify-between gap-3 bg-card/95 px-6 py-2 backdrop-blur",
+        position === "top" ? "top-14 border-b border-border" : "bottom-0 border-t border-border",
         className
       )}
       data-slot="sticky-form-actions"

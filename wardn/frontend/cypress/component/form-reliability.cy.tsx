@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Link from "next/link";
 
 import { Button } from "@/components/atoms/button";
 import { Input } from "@/components/atoms/input";
@@ -6,6 +7,7 @@ import { FormErrorSummary } from "@/components/molecules/form-error-summary";
 import { FormField } from "@/components/molecules/form-field";
 import { FormSection } from "@/components/organisms/form-section";
 import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
+import { useFormSafety } from "@/hooks/use-form-safety";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 function UnsavedChangesHarness() {
@@ -29,6 +31,23 @@ function UnsavedChangesHarness() {
       </button>
       <output>{left ? "Left" : "Editing"}</output>
     </div>
+  );
+}
+
+function FormSafetyHarness() {
+  const [name, setName] = useState("Initial");
+  const { isDirty } = useFormSafety({
+    currentValue: { name },
+    formId: "safe-form",
+    initialValue: { name: "Initial" },
+  });
+
+  return (
+    <form id="safe-form" onSubmit={(event) => event.preventDefault()}>
+      <label htmlFor="safe-name">Safe name</label>
+      <input id="safe-name" onChange={(event) => setName(event.target.value)} value={name} />
+      <button disabled={!isDirty} type="submit">Save safe form</button>
+    </form>
   );
 }
 
@@ -113,5 +132,37 @@ describe("form reliability building blocks", () => {
     cy.findByRole("button", { name: "Leave" }).click();
     cy.get("@confirm").should("have.been.calledOnce");
     cy.findByText("Editing").should("be.visible");
+  });
+
+  it("submits the active editor with Ctrl+S and tracks unchanged state", () => {
+    const submit = cy.stub().as("submit");
+    cy.mount(
+      <div onSubmit={submit}>
+        <FormSafetyHarness />
+      </div>
+    );
+
+    cy.findByRole("button", { name: "Save safe form" }).should("be.disabled");
+    cy.findByLabelText("Safe name").type(" updated");
+    cy.findByRole("button", { name: "Save safe form" }).should("be.enabled");
+    cy.findByLabelText("Safe name").type("{ctrl}s");
+    cy.get("@submit").should("have.been.calledOnce");
+  });
+
+  it("blocks same-tab links while an editor is dirty", () => {
+    cy.window().then((window) => {
+      const confirm = cy.stub(window, "confirm").returns(false);
+      cy.wrap(confirm).as("confirmLink");
+    });
+    cy.mount(
+      <div>
+        <UnsavedChangesHarness />
+        <Link href="/org">Organizations</Link>
+      </div>
+    );
+
+    cy.findByLabelText("Name").type("Changed");
+    cy.findByRole("link", { name: "Organizations" }).click();
+    cy.get("@confirmLink").should("have.been.calledOnce");
   });
 });

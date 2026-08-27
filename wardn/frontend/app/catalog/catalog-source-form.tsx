@@ -7,6 +7,8 @@ import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -23,6 +25,7 @@ import {
   organizationMcpCatalogCreateSource,
   organizationMcpCatalogUpdateSource,
 } from "@/lib/api/generated/organization-mcp-catalog/organization-mcp-catalog";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import type { MCPCatalogSource } from "./catalog-source-types";
 
@@ -56,6 +59,19 @@ export function CatalogSourceForm({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const catalogPath = `/org/${encodeURIComponent(organizationId)}/catalog`;
+  const { isDirty } = useFormSafety({
+    currentValue: { apiToken, apiTokenSecretStoreId, baseUrl, isEnabled, name, syncMode },
+    formId: "catalog-source-form",
+    initialValue: {
+      apiToken: "",
+      apiTokenSecretStoreId: secretStores[0]?.id ?? "",
+      baseUrl: initialSource?.baseUrl ?? wardnHubCatalogProvider.baseUrl,
+      isEnabled: initialSource?.isEnabled ?? true,
+      name: initialSource?.name ?? wardnHubCatalogProvider.name,
+      syncMode: initialSource?.syncMode ?? "latest_only",
+    },
+    isSaving,
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,11 +80,13 @@ export function CatalogSourceForm({
     const needsToken = !initialSource?.hasAuthToken;
     if ((needsToken || apiToken.trim()) && !apiTokenSecretStoreId) {
       setError("Select a secret backend for the API token.");
+      focusFirstInvalidFormControl("catalog-source-form", "catalog-secret-store");
       setIsSaving(false);
       return;
     }
     if (needsToken && !apiToken.trim()) {
       setError("Wardn Hub requires an API token.");
+      focusFirstInvalidFormControl("catalog-source-form", "catalog-api-token");
       setIsSaving(false);
       return;
     }
@@ -119,7 +137,7 @@ export function CatalogSourceForm({
         {error ? (
           <AsyncFeedback className="mb-4" variant="error">{error}</AsyncFeedback>
         ) : null}
-        <form className="space-y-5" onSubmit={submit}>
+        <form className="space-y-5" id="catalog-source-form" onSubmit={submit}>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="catalog-name">Name</Label>
@@ -211,18 +229,18 @@ export function CatalogSourceForm({
             </label>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <StickyFormActions className="-mx-4 -mb-4 px-4" position="bottom">
             <Button asChild type="button" variant="outline">
               <Link href={catalogPath}>
                 <ArrowLeft className="size-4" />
                 Back
               </Link>
             </Button>
-            <Button disabled={isSaving} type="submit">
+            <Button disabled={isSaving || (mode === "edit" && !isDirty)} type="submit">
               <Save className="size-4" />
               {mode === "edit" ? "Save" : "Create"}
             </Button>
-          </div>
+          </StickyFormActions>
         </form>
       </CardContent>
     </Card>

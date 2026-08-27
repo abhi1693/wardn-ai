@@ -7,6 +7,8 @@ import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -22,6 +24,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { authUpdateApiToken } from "@/lib/api/generated/auth/auth";
 import { formatUserDateTimeInputValue, parseUserDateTimeInputValue } from "@/lib/date-time";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import { type ScopeMode, TokenFields } from "../../token-form";
 
@@ -57,6 +60,19 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
     name.trim().length > 0 &&
     !isSubmitting &&
     (scopeMode !== "workspaces" || selectedWorkspaceIds.size > 0);
+  const { isDirty } = useFormSafety({
+    currentValue: { description, expiresAt, isActive, name, scopeMode, selectedWorkspaceIds },
+    formId: "edit-token-form",
+    initialValue: {
+      description: token.description,
+      expiresAt: formatUserDateTimeInputValue(token.expiresAt),
+      isActive: token.isActive,
+      name: token.name,
+      scopeMode: scopeModeForToken(token),
+      selectedWorkspaceIds: new Set(token.workspaceIds),
+    },
+    isSaving: isSubmitting,
+  });
 
   function toggleWorkspace(workspaceId: string) {
     setSelectedWorkspaceIds((current) => {
@@ -73,6 +89,10 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
   async function updateToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) {
+      focusFirstInvalidFormControl(
+        "edit-token-form",
+        name.trim() ? "token-workspaces" : "token-name"
+      );
       return;
     }
 
@@ -115,7 +135,7 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
           </div>
         </CardHeader>
         <CardContent>
-          <form className="space-y-6" onSubmit={updateToken}>
+          <form className="space-y-6" id="edit-token-form" onSubmit={updateToken}>
             <TokenFields
               activeWorkspaces={activeWorkspaces}
               description={description}
@@ -144,15 +164,15 @@ export function EditTokenClient({ organization, token, workspaces }: EditTokenCl
               <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
-            <div className="flex justify-end gap-2">
+            <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
               <Button asChild type="button" variant="outline">
                 <Link href={`/org/${organization.id}/tokens`}>Cancel</Link>
               </Button>
-              <Button disabled={!canSave} type="submit">
+              <Button disabled={isSubmitting || !isDirty} type="submit">
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Check />}
                 Save changes
               </Button>
-            </div>
+            </StickyFormActions>
           </form>
         </CardContent>
       </Card>

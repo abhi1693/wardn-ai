@@ -68,7 +68,7 @@ import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialo
 import { SearchField } from "@/components/molecules/search-field";
 import { MetricStrip } from "@/components/organisms/metric-strip";
 import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
-import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useFormSafety } from "@/hooks/use-form-safety";
 import { useUrlState } from "@/hooks/use-url-state";
 import type {
   ChatProviderConnectionRead,
@@ -841,9 +841,13 @@ export function ScheduledTaskFormClient({
   const [submissionIssues, setSubmissionIssues] = useState<FormIssue[]>([]);
   const isTestingRoutes = Object.values(routeTests).some((test) => test.status === "testing");
   const currentFormSnapshot = JSON.stringify(form);
-  const [initialFormSnapshot, setInitialFormSnapshot] = useState(currentFormSnapshot);
-  const isDirty = currentFormSnapshot !== initialFormSnapshot;
-  const confirmNavigation = useUnsavedChanges(isDirty && !isSaving);
+  const [initialFormSnapshot] = useState(currentFormSnapshot);
+  const { isDirty, markSaved } = useFormSafety({
+    currentValue: currentFormSnapshot,
+    formId: "scheduled-task-form",
+    initialValue: initialFormSnapshot,
+    isSaving,
+  });
 
   function routeForKey(key: string) {
     if (key !== "chat" && !providerOptions.some((option) => option.key === key)) {
@@ -1118,7 +1122,7 @@ export function ScheduledTaskFormClient({
         await workspaceScheduledTasksCreate(organizationId, workspaceId, payload);
         setFeedback({ variant: "success", text: "Scheduled task created." });
       }
-      setInitialFormSnapshot(currentFormSnapshot);
+      markSaved();
       router.push(scheduledTasksHref);
       router.refresh();
     } catch (error) {
@@ -1226,14 +1230,7 @@ export function ScheduledTaskFormClient({
               title="Back to scheduled tasks"
               variant="ghost"
             >
-              <Link
-                href={scheduledTasksHref}
-                onClick={(event) => {
-                  if (!confirmNavigation()) {
-                    event.preventDefault();
-                  }
-                }}
-              >
+              <Link href={scheduledTasksHref}>
                 <ArrowLeft className="size-4" />
               </Link>
             </Button>
@@ -1261,14 +1258,7 @@ export function ScheduledTaskFormClient({
           }
         >
             <Button asChild size="sm" type="button" variant="ghost">
-              <Link
-                href={scheduledTasksHref}
-                onClick={(event) => {
-                  if (!confirmNavigation()) {
-                    event.preventDefault();
-                  }
-                }}
-              >
+              <Link href={scheduledTasksHref}>
                 Cancel
               </Link>
             </Button>
@@ -1288,7 +1278,7 @@ export function ScheduledTaskFormClient({
             </Button>
             <Button
               className="bg-primary text-primary-foreground hover:bg-primary/90"
-              disabled={isSaving}
+              disabled={isSaving || (isReviewSection && Boolean(editingTask) && !isDirty)}
               onClick={
                 isReviewSection
                   ? undefined

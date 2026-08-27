@@ -8,6 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/atoms/select";
+import { confirmActiveFormNavigation } from "@/hooks/use-unsaved-changes";
 import { setSelectionCookie } from "@/lib/selection-cookies";
 import {
   selectedOrganizationCookie,
@@ -46,6 +47,9 @@ export function WorkspaceSelector({ context }: WorkspaceSelectorProps) {
     <Select
       disabled={!hasWorkspaces}
       onValueChange={(workspaceId) => {
+        if (!confirmActiveFormNavigation()) {
+          return;
+        }
         const workspace = context.workspaces.find((item) => item.id === workspaceId);
         if (!workspace) {
           return;

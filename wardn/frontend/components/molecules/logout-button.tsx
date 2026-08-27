@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from "@/components/atoms/tooltip";
 import { authLogout } from "@/lib/api/generated/auth/auth";
+import { confirmActiveFormNavigation } from "@/hooks/use-unsaved-changes";
 import type { VariantProps } from "class-variance-authority";
 
 type LogoutButtonProps = {
@@ -24,6 +25,9 @@ export function LogoutButton({ className, iconOnly = false, variant }: LogoutBut
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleLogout() {
+    if (!confirmActiveFormNavigation()) {
+      return;
+    }
     setIsSubmitting(true);
     await authLogout();
     router.replace("/login");

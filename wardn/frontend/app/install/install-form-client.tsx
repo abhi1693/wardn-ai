@@ -17,6 +17,8 @@ import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -39,6 +41,7 @@ import {
   isOperationJobPollingCancelled,
   useOperationJobPoller,
 } from "@/lib/use-operation-job";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import {
   configuredFieldNames,
@@ -201,6 +204,24 @@ export function InstallFormClient({
     [secretStores]
   );
   const [configSecretStoreId, setConfigSecretStoreId] = useState(activeSecretStores[0]?.id ?? "");
+  const formValue = {
+    configName,
+    configSecretStoreId,
+    customHeaders,
+    installValues,
+    networkPolicy,
+    selectedInstallTarget,
+    selectedServer: selectedServer
+      ? `${selectedServer.server.name}:${selectedServer.server.version}`
+      : null,
+  };
+  const [initialFormValue] = useState(formValue);
+  const { confirmNavigation, isDirty } = useFormSafety({
+    currentValue: formValue,
+    formId: "install-form",
+    initialValue: initialFormValue,
+    isSaving: isMutating,
+  });
   const customHeaderId = useRef(0);
   const customEgressId = useRef(networkPolicy.customEgress.length);
 
@@ -384,12 +405,14 @@ export function InstallFormClient({
     event.preventDefault();
     if (!selectedServer) {
       setError("Select a connection first.");
+      focusFirstInvalidFormControl("install-form", "install-server-search");
       return;
     }
 
     const trimmedConfigName = configName.trim();
     if (!trimmedConfigName) {
       setError("Instance name is required.");
+      focusFirstInvalidFormControl("install-form", "install-config-name");
       return;
     }
 
@@ -401,6 +424,7 @@ export function InstallFormClient({
     );
     if (duplicate) {
       setError("An instance with this name already exists for the selected connection.");
+      focusFirstInvalidFormControl("install-form", "install-config-name");
       return;
     }
 
@@ -412,6 +436,7 @@ export function InstallFormClient({
     });
     if (missing.length > 0) {
       setError(`Missing required settings: ${missing.map((field) => field.name).join(", ")}`);
+      focusFirstInvalidFormControl("install-form", `install-${missing[0].name}`);
       return;
     }
 
@@ -420,10 +445,15 @@ export function InstallFormClient({
       .filter((header) => !header.name.trim() || !header.value.trim());
     if (incompleteCustomHeaders.length > 0) {
       setError("Custom headers require both a key and a value.");
+      focusFirstInvalidFormControl(
+        "install-form",
+        `${incompleteCustomHeaders[0].id}-name`
+      );
       return;
     }
     if (needsSecretBackend && !configSecretStoreId) {
       setError("Secret backend is required for connection secrets.");
+      focusFirstInvalidFormControl("install-form", "install-secret-backend");
       return;
     }
     let networkPolicyPayload = null;
@@ -496,7 +526,7 @@ export function InstallFormClient({
   const serverPageEnd = serverPreviousCursors.length * SERVER_PICKER_PAGE_SIZE + serverResults.length;
 
   return (
-    <form className="space-y-5" onSubmit={submitConfiguration}>
+    <form className="space-y-5" id="install-form" onSubmit={submitConfiguration}>
       {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
       {jobProgress ? (
         <AsyncFeedback variant="progress">{jobProgress}</AsyncFeedback>
@@ -941,8 +971,8 @@ export function InstallFormClient({
                 {customHeaders.length === 0 ? <div className="text-sm text-muted-foreground">No custom headers.</div> : null}
                 {customHeaders.map((header) => (
                   <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" key={header.id}>
-                    <Input autoComplete="off" onChange={(event) => updateCustomHeader(header.id, { name: event.target.value })} placeholder="Header key" value={header.name} />
-                    <Input autoComplete="off" onChange={(event) => updateCustomHeader(header.id, { value: event.target.value })} placeholder="Header value" type="password" value={header.value} />
+                    <Input autoComplete="off" id={`${header.id}-name`} onChange={(event) => updateCustomHeader(header.id, { name: event.target.value })} placeholder="Header key" value={header.name} />
+                    <Input autoComplete="off" id={`${header.id}-value`} onChange={(event) => updateCustomHeader(header.id, { value: event.target.value })} placeholder="Header value" type="password" value={header.value} />
                     <Button aria-label="Remove custom header" disabled={isMutating} onClick={() => removeCustomHeader(header.id)} size="icon" type="button" variant="outline">
                       <X className="size-4" />
                     </Button>
@@ -954,22 +984,26 @@ export function InstallFormClient({
         </>
       ) : null}
 
-      <div className={selectedServer ? "flex justify-end gap-2 border-t pt-4" : "flex justify-end"}>
+      <StickyFormActions position="bottom">
         <Button
           disabled={isMutating}
-          onClick={() => router.push(basePath)}
+          onClick={() => {
+            if (confirmNavigation()) {
+              router.push(basePath);
+            }
+          }}
           type="button"
           variant="outline"
         >
           Cancel
         </Button>
         {selectedServer ? (
-          <Button disabled={isMutating} type="submit">
+          <Button disabled={isMutating || (isEdit && !isDirty)} type="submit">
             <Download className="size-4" />
             {isMutating ? "Saving" : isEdit ? "Save" : "Add"}
           </Button>
         ) : null}
-      </div>
+      </StickyFormActions>
     </form>
   );
 }

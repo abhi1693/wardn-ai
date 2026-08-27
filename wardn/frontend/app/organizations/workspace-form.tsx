@@ -7,6 +7,8 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -18,6 +20,7 @@ import {
 } from "@/lib/api/generated/organizations/organizations";
 import { setSelectionCookie } from "@/lib/selection-cookies";
 import { selectedOrganizationCookie } from "@/lib/workspace-types";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 type WorkspaceFormProps = {
   initialWorkspace?: WorkspaceRead;
@@ -43,12 +46,27 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
   );
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { confirmNavigation, isDirty } = useFormSafety({
+    currentValue: { description, name, slug, status },
+    formId: "workspace-form",
+    initialValue: {
+      description: initialWorkspace?.description ?? "",
+      name: initialWorkspace?.name ?? "",
+      slug: initialWorkspace?.slug ?? "",
+      status: (initialWorkspace?.status as WorkspaceUpdateStatus) ?? "active",
+    },
+    isSaving: submitting,
+  });
 
   const canSave = useMemo(() => name.trim().length > 0 && slug.trim().length > 0, [name, slug]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave || submitting) {
+      focusFirstInvalidFormControl(
+        "workspace-form",
+        name.trim() ? "workspace-slug" : "workspace-name"
+      );
       return;
     }
     setSubmitting(true);
@@ -79,7 +97,7 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
   }
 
   return (
-    <form className="space-y-5" onSubmit={submit}>
+    <form className="space-y-5" id="workspace-form" onSubmit={submit}>
       {error ? (
         <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
@@ -99,6 +117,7 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
                   setSlug(slugify(event.target.value));
                 }
               }}
+              required
               value={name}
             />
           </div>
@@ -109,6 +128,7 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
               disabled={mode === "edit"}
               id="workspace-slug"
               onChange={(event) => setSlug(slugify(event.target.value))}
+              required
               value={slug}
             />
           </div>
@@ -143,15 +163,23 @@ export function WorkspaceForm({ initialWorkspace, mode, organizationId }: Worksp
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button onClick={() => router.back()} type="button" variant="outline">
+      <StickyFormActions position="bottom">
+        <Button
+          onClick={() => {
+            if (confirmNavigation()) {
+              router.back();
+            }
+          }}
+          type="button"
+          variant="outline"
+        >
           Cancel
         </Button>
-        <Button disabled={!canSave || submitting} type="submit">
+        <Button disabled={submitting || (mode === "edit" && !isDirty)} type="submit">
           <Save className="size-4" />
           Save
         </Button>
-      </div>
+      </StickyFormActions>
     </form>
   );
 }

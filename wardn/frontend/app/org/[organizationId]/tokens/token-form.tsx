@@ -125,7 +125,11 @@ export function TokenFields({
       </div>
 
       {scopeMode === "workspaces" ? (
-        <div className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4">
+        <div
+          className="space-y-3 rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4"
+          id="token-workspaces"
+          tabIndex={-1}
+        >
           <div className="flex items-center justify-between gap-3">
             <Label>Workspaces</Label>
             <Badge variant="outline">{selectedWorkspaceIds.size} selected</Badge>

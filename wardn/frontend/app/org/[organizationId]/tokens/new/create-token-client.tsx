@@ -6,6 +6,8 @@ import { type FormEvent, useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { focusFirstInvalidFormControl } from "@/components/molecules/form-error-summary";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import {
   Card,
   CardContent,
@@ -22,6 +24,7 @@ import type {
   WorkspaceRead,
 } from "@/lib/api/generated/model";
 import { authCreateApiToken } from "@/lib/api/generated/auth/auth";
+import { useFormSafety } from "@/hooks/use-form-safety";
 
 import { type ScopeMode, TokenFields } from "../token-form";
 
@@ -50,6 +53,18 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
     name.trim().length > 0 &&
     !isSubmitting &&
     (scopeMode !== "workspaces" || selectedWorkspaceIds.size > 0);
+  useFormSafety({
+    currentValue: { description, expiresAt, name, scopeMode, selectedWorkspaceIds },
+    formId: "create-token-form",
+    initialValue: {
+      description: "",
+      expiresAt: "",
+      name: "Wardn MCP Gateway",
+      scopeMode: "organization",
+      selectedWorkspaceIds: new Set<string>(),
+    },
+    isSaving: isSubmitting,
+  });
 
   function toggleWorkspace(workspaceId: string) {
     setSelectedWorkspaceIds((current) => {
@@ -87,6 +102,10 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
   async function createToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canCreate) {
+      focusFirstInvalidFormControl(
+        "create-token-form",
+        name.trim() ? "token-workspaces" : "token-name"
+      );
       return;
     }
 
@@ -184,7 +203,7 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
           </div>
         </CardHeader>
         <CardContent>
-          <form className="space-y-6" onSubmit={createToken}>
+          <form className="space-y-6" id="create-token-form" onSubmit={createToken}>
             <TokenFields
               activeWorkspaces={activeWorkspaces}
               description={description}
@@ -203,15 +222,15 @@ export function CreateTokenClient({ organization, workspaces }: CreateTokenClien
               <AsyncFeedback variant="error">{error}</AsyncFeedback>
             ) : null}
 
-            <div className="flex justify-end gap-2">
+            <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
               <Button asChild type="button" variant="outline">
                 <Link href={`/org/${organization.id}/tokens`}>Cancel</Link>
               </Button>
-              <Button disabled={!canCreate} type="submit">
+              <Button disabled={isSubmitting} type="submit">
                 {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <KeyRound />}
                 Create token
               </Button>
-            </div>
+            </StickyFormActions>
           </form>
         </CardContent>
       </Card>

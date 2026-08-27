@@ -47,6 +47,7 @@ import {
 import { Badge } from "@/components/atoms/badge";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import { DeferredRender } from "@/components/molecules/deferred-render";
+import { StickyFormActions } from "@/components/organisms/sticky-form-actions";
 import { Button } from "@/components/atoms/button";
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
@@ -79,6 +80,7 @@ import {
   workspaceAgentsUpdateWorkspaceAssistantModel,
   workspaceAgentsUpdateWorkspaceAssistantPersonality,
 } from "@/lib/api/generated/workspace-agents/workspace-agents";
+import { useFormSafety } from "@/hooks/use-form-safety";
 import { formatUserShortDate } from "@/lib/date-time";
 import { cn } from "@/lib/utils";
 
@@ -538,8 +540,18 @@ function ModelSwitcher({
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const { confirmNavigation, isDirty, markSaved } = useFormSafety({
+    currentValue: { credentialId, modelName },
+    enabled: open,
+    formId: "agent-model-form",
+    initialValue: { credentialId: currentCredentialId, modelName: agent.modelName ?? "" },
+    isSaving,
+  });
 
   function updateOpen(nextOpen: boolean) {
+    if (!nextOpen && open && !confirmNavigation()) {
+      return;
+    }
     setOpen(nextOpen);
     if (nextOpen) {
       setCredentialId(currentCredentialId);
@@ -605,6 +617,7 @@ function ModelSwitcher({
         }
       );
       onAgentChange(updatedAgent);
+      markSaved();
       setOpen(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Model could not be changed.");
@@ -644,7 +657,14 @@ function ModelSwitcher({
             Select the LLM credential and model used by this workspace assistant.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <form
+          className="space-y-4"
+          id="agent-model-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveModel();
+          }}
+        >
           <div className="space-y-2">
             <div className="text-xs font-medium text-muted-foreground">Credential</div>
             <Select
@@ -698,25 +718,24 @@ function ModelSwitcher({
 
           {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
 
-          <div className="flex justify-end gap-2">
+          <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
             <Button
               disabled={isSaving}
-              onClick={() => setOpen(false)}
+              onClick={() => updateOpen(false)}
               type="button"
               variant="outline"
             >
               Cancel
             </Button>
             <Button
-              disabled={!credentialId || !modelName || isLoadingModels || isSaving}
-              onClick={saveModel}
-              type="button"
+              disabled={!credentialId || !modelName || isLoadingModels || isSaving || !isDirty}
+              type="submit"
             >
               {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
               Save
             </Button>
-          </div>
-        </div>
+          </StickyFormActions>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -740,6 +759,27 @@ function PersonalityEditor({
   const [personality, setPersonality] = useState(inputValue(agent.personality));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const { confirmNavigation, isDirty, markSaved } = useFormSafety({
+    currentValue: {
+      identityAvatar,
+      identityAvatarUrl,
+      identityEmoji,
+      identityName,
+      identityTheme,
+      personality,
+    },
+    enabled: open,
+    formId: "agent-personality-form",
+    initialValue: {
+      identityAvatar: inputValue(agent.identity?.avatar),
+      identityAvatarUrl: inputValue(agent.identity?.avatarUrl),
+      identityEmoji: inputValue(agent.identity?.emoji),
+      identityName: inputValue(agent.identity?.name),
+      identityTheme: inputValue(agent.identity?.theme),
+      personality: inputValue(agent.personality),
+    },
+    isSaving,
+  });
   const displayName = agentDisplayName(agent);
   const theme = agentTheme(agent);
 
@@ -753,6 +793,9 @@ function PersonalityEditor({
   }
 
   function updateOpen(nextOpen: boolean) {
+    if (!nextOpen && open && !confirmNavigation()) {
+      return;
+    }
     setOpen(nextOpen);
     setError("");
     if (nextOpen) {
@@ -782,6 +825,7 @@ function PersonalityEditor({
         }
       );
       onAgentChange(updatedAgent);
+      markSaved();
       setOpen(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Personality could not be saved.");
@@ -814,7 +858,14 @@ function PersonalityEditor({
             Set the identity and persona used in chat responses.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <form
+          className="grid gap-4"
+          id="agent-personality-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void savePersonality();
+          }}
+        >
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="agent-identity-name">Name</Label>
@@ -893,16 +944,16 @@ function PersonalityEditor({
 
           {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
 
-          <div className="flex justify-end gap-2">
+          <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
             <Button
               disabled={isSaving}
-              onClick={() => setOpen(false)}
+              onClick={() => updateOpen(false)}
               type="button"
               variant="outline"
             >
               Cancel
             </Button>
-            <Button disabled={isSaving} onClick={savePersonality} type="button">
+            <Button disabled={isSaving || !isDirty} type="submit">
               {isSaving ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
@@ -910,8 +961,8 @@ function PersonalityEditor({
               )}
               Save
             </Button>
-          </div>
-        </div>
+          </StickyFormActions>
+        </form>
       </DialogContent>
     </Dialog>
   );

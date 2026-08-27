@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/atoms/button";
+import { confirmActiveFormNavigation } from "@/hooks/use-unsaved-changes";
 import {
   CommandDialog,
   CommandEmpty,
@@ -50,6 +51,9 @@ export function DesktopCommandMenu({ destinations, onNavigate }: DesktopCommandM
   }, []);
 
   function navigate(href: string) {
+    if (!confirmActiveFormNavigation()) {
+      return;
+    }
     setOpen(false);
     onNavigate(href);
   }
