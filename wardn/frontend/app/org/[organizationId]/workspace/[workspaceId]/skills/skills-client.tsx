@@ -29,6 +29,7 @@ import {
 import { Input } from "@/components/atoms/input";
 import { Label } from "@/components/atoms/label";
 import { EmptyState } from "@/components/molecules/empty-state";
+import { useUrlState } from "@/hooks/use-url-state";
 import {
   Table,
   TableBody,
@@ -133,8 +134,8 @@ export function SkillsClient({
   workspaceId,
 }: SkillsClientProps) {
   const [catalog, setCatalog] = useState(initialCatalog);
-  const [activeTab, setActiveTab] = useState<SkillTab>("discover");
-  const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useUrlState<SkillTab>("skills-tab", "discover");
+  const [query, setQuery] = useUrlState("skills-query");
   const [results, setResults] = useState<AgentSkillSearchResultRead[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [resultCount, setResultCount] = useState<number | null>(null);

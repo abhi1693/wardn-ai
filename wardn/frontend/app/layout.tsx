@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/atoms/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { FrontendTelemetry } from "@/components/providers/frontend-telemetry";
 import { MutationFeedbackProvider } from "@/components/providers/mutation-feedback-provider";
+import { NavigationStateRestoration } from "@/components/providers/navigation-state-restoration";
 
 const appTitle = "Wardn AI";
 const appDescription = "MCP operations for home-lab workspaces.";
@@ -84,6 +85,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           <TooltipProvider delayDuration={300}>
             <FrontendTelemetry />
+            <NavigationStateRestoration />
             <MutationFeedbackProvider>{children}</MutationFeedbackProvider>
             <Toaster closeButton position="bottom-right" richColors />
           </TooltipProvider>

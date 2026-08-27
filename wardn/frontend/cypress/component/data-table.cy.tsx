@@ -61,6 +61,7 @@ function OperationsTable() {
 
 describe("DataTable", () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     window.history.replaceState({}, "", "/data-table");
   });
 
@@ -111,6 +112,26 @@ describe("DataTable", () => {
     cy.findByRole("menuitemcheckbox", { name: "owner" }).click();
     cy.findByRole("columnheader", { name: "Owner" }).should("not.exist");
     cy.location("search").should("contain", "ops-hidden=owner");
+  });
+
+  it("restores sorting, pagination, and columns after returning to a bare URL", () => {
+    cy.mount(<OperationsTable />);
+    cy.findByRole("button", { name: "Sort by Operation" }).click();
+    cy.findByRole("button", { name: "Next page" }).click();
+    cy.findByRole("button", { name: "Columns" }).click();
+    cy.findByRole("menuitemcheckbox", { name: "owner" }).click();
+
+    cy.then(() => window.history.replaceState({}, "", "/data-table/2/edit"));
+    cy.mount(<div>Editing</div>);
+    cy.then(() => window.history.replaceState({}, "", "/data-table"));
+    cy.mount(<OperationsTable />);
+
+    cy.findByText("Page 2 of 3").should("be.visible");
+    cy.findByRole("columnheader", { name: "Owner" }).should("not.exist");
+    cy.location("search")
+      .should("contain", "ops-sort=name")
+      .and("contain", "ops-page=2")
+      .and("contain", "ops-hidden=owner");
   });
 
   it("bounds rendered rows for large client datasets", () => {

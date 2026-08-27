@@ -12,13 +12,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { StatusDot } from "@/components/atoms/status-dot";
 import { Badge } from "@/components/atoms/badge";
 import { Button } from "@/components/atoms/button";
 import { Card, CardContent, CardHeader } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
+import { useUrlState } from "@/hooks/use-url-state";
 import { DeleteWorkspaceDialog } from "@/app/organizations/delete-workspace-dialog";
 import type { OrganizationRead, WorkspaceRead } from "@/lib/api/generated/model";
 import { formatUserDate } from "@/lib/date-time";
@@ -105,8 +106,8 @@ export function OrganizationWorkspacesList({
   workspaces,
 }: OrganizationWorkspacesListProps) {
   const router = useRouter();
-  const [filter, setFilter] = useState<WorkspaceFilter>("active");
-  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useUrlState<WorkspaceFilter>("workspaces-status", "active");
+  const [search, setSearch] = useUrlState("workspaces-query");
 
   const filteredWorkspaces = useMemo(() => {
     const query = search.trim().toLowerCase();

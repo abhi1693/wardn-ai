@@ -70,8 +70,33 @@ type DataTableProps<TData extends object> = {
   urlSyncKey?: string;
 };
 
-function queryParams() {
-  return typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+const tableStoragePrefix = "wardn:data-table:v1";
+
+function tableStorageKey(urlSyncKey: string) {
+  return `${tableStoragePrefix}:${window.location.pathname}:${urlSyncKey}`;
+}
+
+function queryParams(urlSyncKey?: string) {
+  if (typeof window === "undefined") {
+    return new URLSearchParams();
+  }
+  const params = new URLSearchParams(window.location.search);
+  if (!urlSyncKey) {
+    return params;
+  }
+  const prefix = `${urlSyncKey}-`;
+  if (Array.from(params.keys()).some((key) => key.startsWith(prefix))) {
+    return params;
+  }
+  try {
+    const stored = window.sessionStorage.getItem(tableStorageKey(urlSyncKey));
+    if (stored) {
+      new URLSearchParams(stored).forEach((value, key) => params.set(key, value));
+    }
+  } catch {
+    // URL state remains functional when session storage is unavailable.
+  }
+  return params;
 }
 
 function queryKey(prefix: string, value: string) {
@@ -91,7 +116,7 @@ export function DataTable<TData extends object>({
   selectable = false,
   urlSyncKey,
 }: DataTableProps<TData>) {
-  const initialParams = useMemo(() => queryParams(), []);
+  const initialParams = useMemo(() => queryParams(urlSyncKey), [urlSyncKey]);
   const initialSortId = urlSyncKey ? initialParams.get(queryKey(urlSyncKey, "sort")) : null;
   const [sorting, setSorting] = useState<SortingState>(() =>
     initialSortId
@@ -215,6 +240,18 @@ export function DataTable<TData extends object>({
     );
     for (const filter of filters) {
       setParam(filter.columnId, String(table.getColumn(filter.columnId)?.getFilterValue() ?? ""));
+    }
+    try {
+      const storedParams = new URLSearchParams();
+      const prefix = `${urlSyncKey}-`;
+      params.forEach((value, key) => {
+        if (key.startsWith(prefix)) {
+          storedParams.set(key, value);
+        }
+      });
+      window.sessionStorage.setItem(tableStorageKey(urlSyncKey), storedParams.toString());
+    } catch {
+      // URL state remains functional when session storage is unavailable.
     }
     const nextUrl = `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`;
     window.history.replaceState(window.history.state, "", nextUrl);

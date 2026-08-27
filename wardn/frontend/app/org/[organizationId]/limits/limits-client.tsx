@@ -2,7 +2,7 @@
 
 import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { Button } from "@/components/atoms/button";
 import {
@@ -33,6 +33,7 @@ import type {
   UserRead,
   WorkspaceRead,
 } from "@/lib/api/generated/model";
+import { useUrlState } from "@/hooks/use-url-state";
 
 import { displayLimitKey, formatDate, scopeLabel } from "./limit-display";
 
@@ -51,7 +52,7 @@ export function LimitsClient({
   organizations,
   workspaces,
 }: LimitsClientProps) {
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useUrlState("limits-scope", "all");
   const filteredLimits = useMemo(
     () => initialLimits.filter((limit) => filter === "all" || limit.scopeType === filter),
     [filter, initialLimits]

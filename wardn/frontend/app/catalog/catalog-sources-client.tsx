@@ -22,6 +22,7 @@ import { Button } from "@/components/atoms/button";
 import { AsyncFeedback } from "@/components/molecules/async-feedback";
 import { Card, CardContent, CardHeader } from "@/components/atoms/card";
 import { Input } from "@/components/atoms/input";
+import { useUrlState } from "@/hooks/use-url-state";
 import type { MCPOperationJobRead } from "@/lib/api/generated/model";
 import {
   organizationMcpCatalogDeleteSource,
@@ -144,8 +145,8 @@ export function CatalogSourcesClient({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [filter, setFilter] = useState<SourceFilter>("active");
-  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useUrlState<SourceFilter>("catalog-sources-status", "active");
+  const [search, setSearch] = useUrlState("catalog-sources-query");
   const { waitForJob } = useOperationJobPoller();
 
   const filteredSources = useMemo(() => {

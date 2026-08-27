@@ -33,6 +33,8 @@ import {
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import { SearchField } from "@/components/molecules/search-field";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useSessionState } from "@/hooks/use-session-state";
+import { useUrlState } from "@/hooks/use-url-state";
 import type {
   MCPRegistryListMetadata,
   MCPRegistryServerResponse,
@@ -124,17 +126,27 @@ export function CatalogListClient({
 }: CatalogListClientProps) {
   const installations = initialInstallations;
   const [servers, setServers] = useState<MCPRegistryServerResponse[]>(initialServers);
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
-  const [currentCursor, setCurrentCursor] = useState("");
-  const [nextCursor, setNextCursor] = useState(initialMetadata.nextCursor ?? "");
-  const [previousCursors, setPreviousCursors] = useState<string[]>([]);
+  const [search, setSearch] = useUrlState("catalog-query");
+  const [appliedSearch, setAppliedSearch] = useState(search);
+  const [currentCursor, setCurrentCursor] = useUrlState("catalog-cursor");
+  const [nextCursor, setNextCursor] = useState(
+    currentCursor ? "" : (initialMetadata.nextCursor ?? "")
+  );
+  const [previousCursors, setPreviousCursors] = useSessionState<string[]>(
+    "catalog-previous-cursors",
+    []
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const hasInitializedSearch = useRef(false);
+  const initialNavigation = useRef({
+    cursor: currentCursor,
+    previous: previousCursors,
+    query: search,
+  });
   const searchRequestId = useRef(0);
 
   const installationsByName = useMemo(
@@ -190,7 +202,7 @@ export function CatalogListClient({
         setIsLoading(false);
       }
     }
-  }, [organizationId]);
+  }, [organizationId, setCurrentCursor, setPreviousCursors]);
 
   async function loadNextPage() {
     if (!nextCursor) {
@@ -218,6 +230,10 @@ export function CatalogListClient({
   useEffect(() => {
     if (!hasInitializedSearch.current) {
       hasInitializedSearch.current = true;
+      const initial = initialNavigation.current;
+      if (initial.query || initial.cursor || initial.previous.length > 0) {
+        void loadServers(initial);
+      }
       return;
     }
 
