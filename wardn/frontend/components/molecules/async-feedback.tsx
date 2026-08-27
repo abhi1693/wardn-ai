@@ -12,23 +12,26 @@ const variantClasses: Record<AsyncFeedbackVariant, string> = {
 };
 
 type AsyncFeedbackProps = Omit<HTMLAttributes<HTMLDivElement>, "role"> & {
+  announceAs?: "alert" | "status";
   children: ReactNode;
   variant?: AsyncFeedbackVariant;
 };
 
 export function AsyncFeedback({
+  announceAs,
   children,
   className,
   variant = "info",
   ...props
 }: AsyncFeedbackProps) {
   const isError = variant === "error";
+  const role = announceAs ?? (isError ? "alert" : "status");
   return (
     <div
       aria-atomic="true"
-      aria-live={isError ? "assertive" : "polite"}
+      aria-live={role === "alert" ? "assertive" : "polite"}
       className={cn("rounded-md border px-3 py-2 text-sm", variantClasses[variant], className)}
-      role={isError ? "alert" : "status"}
+      role={role}
       {...props}
     >
       {children}

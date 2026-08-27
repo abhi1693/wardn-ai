@@ -14,7 +14,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/atoms/alert-dialog";
-import { AsyncFeedback } from "@/components/molecules/async-feedback";
+import { MutationErrorDetails } from "@/components/providers/mutation-feedback-provider";
 
 type ConfirmActionDialogProps = {
   actionLabel: string;
@@ -37,7 +37,7 @@ export function ConfirmActionDialog({
 }: ConfirmActionDialogProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   async function confirm(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -47,7 +47,9 @@ export function ConfirmActionDialog({
       await onConfirm();
       setOpen(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The action could not be completed.");
+      setError(
+        caught instanceof Error ? caught : new Error("The action could not be completed.")
+      );
     } finally {
       setPending(false);
     }
@@ -71,7 +73,7 @@ export function ConfirmActionDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        {error ? <AsyncFeedback variant="error">{error}</AsyncFeedback> : null}
+        {error ? <MutationErrorDetails error={error} /> : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

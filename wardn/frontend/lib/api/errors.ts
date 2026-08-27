@@ -1,17 +1,76 @@
 export class ApiError extends Error {
   readonly body: unknown;
+  readonly method?: string;
+  readonly path?: string;
+  readonly requestId?: string;
   readonly status: number;
 
-  constructor(status: number, body: unknown, fallback: string, options?: ErrorOptions) {
+  constructor(status: number, body: unknown, fallback: string, options: ApiErrorOptions = {}) {
     super(apiErrorMessage(body, fallback), options);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.method = options.method;
+    this.path = options.path;
+    this.requestId = options.requestId ?? requestIdFromBody(body);
   }
 
   get isRetryable() {
     return this.status === 0 || this.status === 408 || this.status === 429 || this.status >= 500;
   }
+
+  diagnostics() {
+    return apiErrorDiagnostics(this);
+  }
+}
+
+type ApiErrorOptions = ErrorOptions & {
+  method?: string;
+  path?: string;
+  requestId?: string;
+};
+
+function nonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function requestIdFromBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+  const record = body as Record<string, unknown>;
+  return nonEmptyString(record.requestId) ?? nonEmptyString(record.request_id);
+}
+
+export function apiRequestId(response: Response, body?: unknown) {
+  return (
+    nonEmptyString(response.headers.get("x-request-id")) ??
+    nonEmptyString(response.headers.get("x-correlation-id")) ??
+    requestIdFromBody(body)
+  );
+}
+
+function diagnosticPath(path: string | undefined) {
+  if (!path) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(path, "http://wardn.local");
+    return parsed.pathname;
+  } catch {
+    return path.split("?", 1)[0];
+  }
+}
+
+export function apiErrorDiagnostics(error: ApiError) {
+  return [
+    "Wardn API error",
+    `Time: ${new Date().toISOString()}`,
+    `Request ID: ${error.requestId ?? "Unavailable"}`,
+    `Request: ${[error.method, diagnosticPath(error.path)].filter(Boolean).join(" ") || "Unavailable"}`,
+    `Status: ${error.status || "Network error"}`,
+    `Message: ${error.message}`,
+  ].join("\n");
 }
 
 export function apiErrorMessage(body: unknown, fallback: string): string {

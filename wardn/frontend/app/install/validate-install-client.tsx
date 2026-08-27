@@ -549,6 +549,7 @@ async function loadToolsFromGateway(
           },
         }),
         cache: "no-store",
+        mutationFeedback: false,
         signal,
         timeoutMs: mcpToolDiscoveryTimeoutMs,
       }

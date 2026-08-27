@@ -41,6 +41,7 @@ import { LogoutButton } from "@/components/molecules/logout-button";
 import { ThemeSwitcher } from "@/components/molecules/theme-switcher";
 import { WorkspaceSelector } from "@/components/molecules/workspace-selector";
 import { AppShellCommandMenu } from "@/components/organisms/desktop-command-menu";
+import { MutationFeedbackOutlet } from "@/components/providers/mutation-feedback-provider";
 import { cn } from "@/lib/utils";
 import type { WorkspaceContext } from "@/lib/workspace-types";
 
@@ -604,7 +605,10 @@ function AppShellFrame({
               contentClassName
             )}
           >
-            <div className={cn("space-y-6", contentInnerClassName)}>{children}</div>
+            <div className={cn("space-y-6", contentInnerClassName)}>
+              <MutationFeedbackOutlet />
+              {children}
+            </div>
           </div>
         ) : (
           children
@@ -637,7 +641,10 @@ export function AppShell({ children, ...chrome }: AppShellProps) {
         chrome.contentClassName
       )}
     >
-      <div className={cn("space-y-6", chrome.contentInnerClassName)}>{children}</div>
+      <div className={cn("space-y-6", chrome.contentInnerClassName)}>
+        <MutationFeedbackOutlet />
+        {children}
+      </div>
     </div>
   );
 }

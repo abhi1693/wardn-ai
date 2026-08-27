@@ -1,4 +1,5 @@
-import { ApiError, readApiResponseBody } from "./errors";
+import { ApiError, apiRequestId, readApiResponseBody } from "./errors";
+import { publishMutationFeedback } from "./mutation-feedback-events";
 import { reportFrontendMetric } from "../frontend-telemetry";
 
 export { ApiError, apiErrorMessage } from "./errors";
@@ -12,6 +13,7 @@ declare global {
 }
 
 export type ApiRequestOptions = RequestInit & {
+  mutationFeedback?: boolean;
   timeoutMs?: number;
 };
 
@@ -50,11 +52,59 @@ function isAbortOrTimeoutError(cause: unknown) {
   );
 }
 
-function fetchTransportError(cause: unknown) {
+function fetchTransportError(cause: unknown, path?: string, method?: string) {
   if (isAbortOrTimeoutError(cause)) {
-    return new ApiError(0, undefined, "Wardn API request timed out.", { cause });
+    return new ApiError(0, undefined, "Wardn API request timed out.", { cause, method, path });
   }
-  return new ApiError(0, undefined, "Wardn API is unavailable.", { cause });
+  return new ApiError(0, undefined, "Wardn API is unavailable.", { cause, method, path });
+}
+
+function normalizedMethod(options: ApiRequestOptions) {
+  return options.method?.toUpperCase() ?? "GET";
+}
+
+function mutationMessages(method: string) {
+  if (method === "DELETE") {
+    return { pending: "Deleting...", success: "Deleted successfully." };
+  }
+  if (method === "PUT" || method === "PATCH") {
+    return { pending: "Saving changes...", success: "Changes saved." };
+  }
+  return { pending: "Working...", success: "Completed successfully." };
+}
+
+function mutationFeedbackEnabled(path: string, options: ApiRequestOptions) {
+  if (options.mutationFeedback === false || typeof window === "undefined") {
+    return false;
+  }
+  const method = normalizedMethod(options);
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    return false;
+  }
+  const pathname = path.split("?", 1)[0].toLowerCase();
+  return ![
+    "/auth/login",
+    "/auth/logout",
+    "/frontend-telemetry",
+    "/messages",
+    "/chat/",
+    "/webhooks/",
+  ].some((excluded) => pathname.includes(excluded));
+}
+
+function safelyRetryable(method: string, error: ApiError, options: ApiRequestOptions) {
+  const explicitlyIdempotent = new Headers(options.headers).has("idempotency-key");
+  return (
+    error.isRetryable &&
+    (method === "PUT" || method === "DELETE" || explicitlyIdempotent)
+  );
+}
+
+let mutationSequence = 0;
+
+function nextMutationId() {
+  mutationSequence += 1;
+  return `mutation-${Date.now()}-${mutationSequence}`;
 }
 
 function redirectBrowserOnUnauthorized(response: Response) {
@@ -92,7 +142,10 @@ function reportApiTiming(
 }
 
 export async function apiRawFetch(path: string, options: ApiRequestOptions = {}) {
-  const { timeoutMs = defaultTimeoutMs, ...init } = options;
+  const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
+  const init = { ...options };
+  delete init.mutationFeedback;
+  delete init.timeoutMs;
   const startedAt = apiTimingStart();
   let status = 0;
   try {
@@ -106,27 +159,75 @@ export async function apiRawFetch(path: string, options: ApiRequestOptions = {})
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
-    throw fetchTransportError(cause);
+    throw fetchTransportError(cause, path, normalizedMethod(options));
   } finally {
     reportApiTiming(path, init.method, startedAt, status);
   }
 }
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const method = normalizedMethod(options);
+  const feedbackEnabled = mutationFeedbackEnabled(path, options);
+  const feedbackId = feedbackEnabled ? nextMutationId() : undefined;
+  const messages = mutationMessages(method);
+  if (feedbackId) {
+    publishMutationFeedback({ id: feedbackId, message: messages.pending, type: "pending" });
+  }
+
   let response: Response;
   try {
     response = await apiRawFetch(path, options);
   } catch (cause) {
-    if (cause instanceof ApiError) {
-      throw cause;
+    const error =
+      cause instanceof ApiError
+        ? cause
+        : new ApiError(0, undefined, "Wardn API is unavailable.", { cause, method, path });
+    if (feedbackId) {
+      publishMutationFeedback({
+        error,
+        id: feedbackId,
+        message: error.message,
+        retry: safelyRetryable(method, error, options) ? () => apiRequest(path, options) : undefined,
+        type: "error",
+      });
     }
-    throw new ApiError(0, undefined, "Wardn API is unavailable.", { cause });
+    throw error;
   }
-  const body = await readApiResponseBody(response);
-  if (!response.ok) {
-    throw new ApiError(response.status, body, `API request failed (${response.status})`);
+
+  try {
+    const body = await readApiResponseBody(response);
+    if (!response.ok) {
+      throw new ApiError(response.status, body, `API request failed (${response.status})`, {
+        method,
+        path,
+        requestId: apiRequestId(response, body),
+      });
+    }
+    if (feedbackId) {
+      publishMutationFeedback({ id: feedbackId, message: messages.success, type: "success" });
+    }
+    return body as T;
+  } catch (cause) {
+    const error =
+      cause instanceof ApiError
+        ? cause
+        : new ApiError(0, undefined, "Wardn API response could not be read.", {
+            cause,
+            method,
+            path,
+            requestId: apiRequestId(response),
+          });
+    if (feedbackId) {
+      publishMutationFeedback({
+        error,
+        id: feedbackId,
+        message: error.message,
+        retry: safelyRetryable(method, error, options) ? () => apiRequest(path, options) : undefined,
+        type: "error",
+      });
+    }
+    throw error;
   }
-  return body as T;
 }
 
 export async function apiStreamFetch(input: RequestInfo | URL, init?: RequestInit) {
@@ -149,7 +250,7 @@ export async function apiStreamFetch(input: RequestInfo | URL, init?: RequestIni
     redirectBrowserOnUnauthorized(response);
     return response;
   } catch (cause) {
-    throw fetchTransportError(cause);
+    throw fetchTransportError(cause, metricPath, init?.method?.toUpperCase() ?? "GET");
   } finally {
     reportApiTiming(metricPath, init?.method, startedAt, status);
   }
