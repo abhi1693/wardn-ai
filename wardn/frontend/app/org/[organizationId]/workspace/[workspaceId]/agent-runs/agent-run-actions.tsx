@@ -1,10 +1,18 @@
 "use client";
 
-import { RefreshCw, RotateCcw, X } from "lucide-react";
+import { MessageSquare, MoreHorizontal, RefreshCw, RotateCcw, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/atoms/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/atoms/dropdown-menu";
 import { ConfirmActionDialog } from "@/components/molecules/confirm-action-dialog";
 import {
   workspaceAgentRunsCancel,
@@ -16,9 +24,10 @@ const rerunTimeoutMs = 10 * 60_000;
 type AgentRunActionsProps = {
   canCancel?: boolean;
   canRerun?: boolean;
+  chatHref?: string;
   organizationId: string;
   runId: string;
-  variant?: "icon" | "label";
+  variant?: "icon" | "label" | "menu";
   workspaceId: string;
 };
 
@@ -31,6 +40,7 @@ function runHref(organizationId: string, workspaceId: string, runId: string) {
 export function AgentRunActions({
   canCancel = false,
   canRerun = false,
+  chatHref,
   organizationId,
   runId,
   variant = "label",
@@ -38,6 +48,7 @@ export function AgentRunActions({
 }: AgentRunActionsProps) {
   const router = useRouter();
   const [busyAction, setBusyAction] = useState<"cancel" | "rerun" | "">("");
+  const [confirmation, setConfirmation] = useState<"cancel" | "rerun" | "">("");
   const iconOnly = variant === "icon";
 
   async function cancelRun() {
@@ -63,8 +74,76 @@ export function AgentRunActions({
     }
   }
 
-  if (!canCancel && !canRerun) {
+  if (!canCancel && !canRerun && !chatHref) {
     return null;
+  }
+
+  if (variant === "menu") {
+    return (
+      <>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={`More actions for ${runId}`}
+              disabled={Boolean(busyAction)}
+              size="icon"
+              title="More actions"
+              type="button"
+              variant="outline"
+            >
+              {busyAction ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : (
+                <MoreHorizontal className="size-4" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            {chatHref ? (
+              <DropdownMenuItem asChild>
+                <Link href={chatHref}>
+                  <MessageSquare className="size-4" />
+                  Open chat
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {canRerun ? (
+              <DropdownMenuItem onSelect={() => setConfirmation("rerun")}>
+                <RotateCcw className="size-4" />
+                Rerun
+              </DropdownMenuItem>
+            ) : null}
+            {canCancel ? <DropdownMenuSeparator /> : null}
+            {canCancel ? (
+              <DropdownMenuItem
+                onSelect={() => setConfirmation("cancel")}
+                variant="destructive"
+              >
+                <X className="size-4" />
+                Cancel run
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ConfirmActionDialog
+          actionLabel="Cancel run"
+          description="The agent will stop after its current operation. Completed work is retained."
+          onConfirm={cancelRun}
+          onOpenChange={(open) => setConfirmation(open ? "cancel" : "")}
+          open={confirmation === "cancel"}
+          title="Cancel this run?"
+          variant="destructive"
+        />
+        <ConfirmActionDialog
+          actionLabel="Rerun"
+          description="Provider-triggered runs will send the new reply to the same thread."
+          onConfirm={rerunRun}
+          onOpenChange={(open) => setConfirmation(open ? "rerun" : "")}
+          open={confirmation === "rerun"}
+          title="Rerun this run?"
+        />
+      </>
+    );
   }
 
   return (

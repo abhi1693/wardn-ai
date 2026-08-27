@@ -55,7 +55,8 @@ describe("desktop visual regression", () => {
 
   it("matches destructive confirmation focus and hierarchy", () => {
     cy.visit(`${workspaceBasePath}/agent-runs`);
-    cy.findByRole("button", { name: "Cancel run" }).click();
+    cy.findByRole("button", { name: "More actions for run-02" }).click();
+    cy.findByRole("menuitem", { name: "Cancel run" }).click();
     cy.findByRole("alertdialog", { name: "Cancel this run?" }).should("be.visible");
     cy.findByRole("button", { name: "Cancel" }).should("have.focus");
     stabilizePage();

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Copy, MessageSquare } from "lucide-react";
+import { ArrowRight, Copy } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -114,32 +114,28 @@ export function AgentRunsTable({ organizationId, runs, workspaceId }: AgentRunsT
         const run = row.original;
         return (
           <div className="flex justify-end gap-2">
-            <AgentRunActions
-              canCancel={run.canCancel}
-              canRerun={run.canRerun}
-              organizationId={organizationId}
-              runId={run.id}
-              variant="icon"
-              workspaceId={workspaceId}
-            />
-            {run.conversationId ? (
-              <Button asChild size="icon" title="Open chat" variant="outline">
-                <Link
-                  aria-label={`Open chat for ${run.id}`}
-                  href={chatHref(organizationId, workspaceId, run.conversationId)}
-                >
-                  <MessageSquare className="size-4" />
-                </Link>
-              </Button>
-            ) : null}
-            <Button asChild size="icon" title="Open run" variant="outline">
+            <Button asChild size="sm">
               <Link
-                aria-label={`Open ${run.id}`}
+                aria-label={`Open run ${run.id}`}
                 href={runHref(organizationId, workspaceId, run.id)}
               >
+                Open
                 <ArrowRight className="size-4" />
               </Link>
             </Button>
+            <AgentRunActions
+              canCancel={run.canCancel}
+              canRerun={run.canRerun}
+              chatHref={
+                run.conversationId
+                  ? chatHref(organizationId, workspaceId, run.conversationId)
+                  : undefined
+              }
+              organizationId={organizationId}
+              runId={run.id}
+              variant="menu"
+              workspaceId={workspaceId}
+            />
           </div>
         );
       },

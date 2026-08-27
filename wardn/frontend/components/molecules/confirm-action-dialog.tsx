@@ -19,9 +19,11 @@ import { MutationErrorDetails } from "@/components/providers/mutation-feedback-p
 type ConfirmActionDialogProps = {
   actionLabel: string;
   busyLabel?: string;
-  children: ReactElement;
+  children?: ReactElement;
   description: string;
   onConfirm: () => Promise<void> | void;
+  onOpenChange?: (open: boolean) => void;
+  open?: boolean;
   title: string;
   variant?: "default" | "destructive";
 };
@@ -32,12 +34,20 @@ export function ConfirmActionDialog({
   children,
   description,
   onConfirm,
+  onOpenChange,
+  open: controlledOpen,
   title,
   variant = "default",
 }: ConfirmActionDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const open = controlledOpen ?? internalOpen;
+
+  function setOpen(nextOpen: boolean) {
+    setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }
 
   async function confirm(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -67,7 +77,7 @@ export function ConfirmActionDialog({
       }}
       open={open}
     >
-      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      {children ? <AlertDialogTrigger asChild>{children}</AlertDialogTrigger> : null}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

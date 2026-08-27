@@ -70,7 +70,8 @@ describe("desktop accessibility", () => {
 
   it("keeps the destructive confirmation keyboard accessible", () => {
     cy.visit(`/org/${organizationId}/workspace/${workspaceId}/agent-runs`);
-    cy.findByRole("button", { name: "Cancel run" }).click();
+    cy.findByRole("button", { name: "More actions for run-02" }).click();
+    cy.findByRole("menuitem", { name: "Cancel run" }).click();
     cy.findByRole("alertdialog", { name: "Cancel this run?" }).should("be.visible");
     cy.findByRole("button", { name: "Cancel" }).should("have.focus");
     checkWcag();

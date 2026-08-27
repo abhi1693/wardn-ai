@@ -39,6 +39,17 @@ describe("operational data surfaces", () => {
     cy.findByRole("heading", { level: 1, name: "Runs" }).should("be.visible");
     cy.findByText("Page 1 of 2").should("be.visible");
     cy.assertDesktopFit();
+    cy.findByRole("link", { name: "Open run run-01" }).should("be.visible");
+    cy.findByRole("button", { name: "More actions for run-01" }).click();
+    cy.findByRole("menuitem", { name: "Open chat" }).should("be.visible");
+    cy.findByRole("button", { name: "Cancel run" }).should("not.exist");
+    cy.get("body").type("{esc}");
+
+    cy.findByRole("button", { name: "More actions for run-02" }).click();
+    cy.findByRole("menuitem", { name: "Cancel run" }).click();
+    cy.findByRole("alertdialog", { name: "Cancel this run?" }).should("be.visible");
+    cy.findByRole("button", { name: "Cancel" }).click();
+    cy.findByRole("alertdialog", { name: "Cancel this run?" }).should("not.exist");
     cy.screenshot("operational-runs-table", { capture: "viewport" });
     cy.findByRole("button", { name: "Next page" }).click();
     cy.findByText("Page 2 of 2").should("be.visible");
