@@ -2,6 +2,7 @@ export {};
 
 const organizationId = "org-1";
 const workspaceId = "workspace-1";
+const sidebarPreferenceKey = "wardn.sidebar.mode";
 
 const routes = [
   { name: "workspaces", path: `/org/${organizationId}/workspaces`, title: "Workspaces" },
@@ -59,5 +60,33 @@ describe("desktop UX details", () => {
     routes.forEach((route) => verifyRoute(route, "dark"));
     cy.reload();
     cy.get("html").should("have.class", "dark");
+  });
+
+  it("remembers a compact sidebar that fits a laptop viewport", () => {
+    cy.viewport(1280, 720);
+    cy.visit(`/org/${organizationId}/workspace/${workspaceId}/agent-runs`);
+
+    cy.findByRole("button", { name: "Collapse sidebar" }).click();
+    cy.get('aside[data-sidebar-mode="compact"]').should("have.css", "width", "72px");
+    cy.window().then((window) => {
+      expect(window.localStorage.getItem(sidebarPreferenceKey)).to.equal("compact");
+    });
+    cy.get('[data-testid="sidebar-navigation-scroll"]').then(($navigation) => {
+      const navigation = $navigation[0];
+      expect(navigation.scrollHeight).to.be.at.most(navigation.clientHeight);
+    });
+    cy.findByRole("link", { name: "Scheduled Tasks" }).focus();
+    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks");
+    cy.assertDesktopFit();
+
+    cy.reload();
+    cy.findByRole("button", { name: "Expand sidebar" }).should("be.visible");
+    cy.get('aside[data-sidebar-mode="compact"]').should("have.css", "width", "72px");
+
+    cy.findByRole("button", { name: "Expand sidebar" }).click();
+    cy.get('aside[data-sidebar-mode="expanded"]').should("have.css", "width", "260px");
+    cy.window().then((window) => {
+      expect(window.localStorage.getItem(sidebarPreferenceKey)).to.equal("expanded");
+    });
   });
 });

@@ -37,6 +37,18 @@ describe("desktop visual regression", () => {
     cy.compareSnapshot("runs-shell-table-dark");
   });
 
+  it("matches the compact laptop shell without sidebar scrolling", () => {
+    cy.visit(`${workspaceBasePath}/agent-runs`);
+    cy.findByRole("button", { name: "Collapse sidebar" }).click();
+    cy.findByRole("button", { name: "Expand sidebar" }).should("be.visible");
+    cy.get('[data-testid="sidebar-navigation-scroll"]').then(($navigation) => {
+      const navigation = $navigation[0];
+      expect(navigation.scrollHeight).to.be.at.most(navigation.clientHeight);
+    });
+    stabilizePage();
+    cy.compareSnapshot("runs-shell-table-compact-light");
+  });
+
   it("matches the dynamically loaded provider form", () => {
     cy.visit(`${workspaceBasePath}/chat-providers/new`);
     cy.findByRole("heading", { level: 1, name: "New Chat Provider" }).should("be.visible");

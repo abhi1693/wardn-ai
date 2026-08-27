@@ -76,6 +76,16 @@ describe("desktop accessibility", () => {
     cy.findByRole("button", { name: "Cancel" }).should("have.focus");
     checkWcag();
   });
+
+  it("keeps compact navigation named and keyboard accessible", () => {
+    cy.visit(`/org/${organizationId}/workspace/${workspaceId}/agent-runs`);
+    cy.findByRole("button", { name: "Collapse sidebar" }).click();
+    cy.findByRole("button", { name: "Expand sidebar" }).should("be.visible");
+    cy.findByRole("link", { name: "Scheduled Tasks" }).should("be.visible").focus();
+    cy.findByRole("tooltip").should("contain.text", "Scheduled Tasks");
+    cy.assertDesktopFit();
+    checkWcag();
+  });
 });
 
 export {};
