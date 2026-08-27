@@ -34,6 +34,7 @@ import {
 
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { DashboardPanel } from "@/components/molecules/dashboard-panel";
+import { DashboardSection } from "@/components/molecules/dashboard-section";
 import { HealthRow } from "@/components/molecules/health-row";
 import { SignalBar } from "@/components/molecules/signal-bar";
 import { Badge } from "@/components/atoms/badge";
@@ -315,7 +316,7 @@ function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
 
 function EmptyChart({ label }: { label: string }) {
   return (
-    <div className="flex h-64 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
       {label}
     </div>
   );
@@ -336,8 +337,18 @@ function ActivityTrendChart({ usage }: { usage: UsageSummaryResponse }) {
       description={`${usage.window.startDate} to ${usage.window.endDate}`}
       title="Workspace activity"
     >
-      {data.length === 0 ? (
-        <EmptyChart label="No workspace usage recorded in this window." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].dateLabel}: ${formatCount(data[0].requests)} requests, ${formatCount(
+                  data[0].toolCalls
+                )} tool calls, ${formatCompact(data[0].totalTokens)} tokens, ${formatCurrency(
+                  data[0].costUsd
+                )}. Add another day to show a trend.`
+              : "No workspace usage recorded in this window."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -405,8 +416,16 @@ function ModelSpendChart({ rows }: { rows: UsageSummaryBreakdownRow[] }) {
 
   return (
     <DashboardPanel description="Highest cost model routes in this workspace." title="Model spend">
-      {data.length === 0 ? (
-        <EmptyChart label="No model spend recorded." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].name}: ${formatCurrency(data[0].costUsd)}, ${formatCount(
+                  data[0].requests
+                )} requests, ${formatCompact(data[0].totalTokens)} tokens.`
+              : "No model spend recorded."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -460,8 +479,16 @@ function AgentDemandChart({
       description="Workspace assistant demand and tool coverage."
       title="Assistant workload"
     >
-      {usageRows.length === 0 ? (
-        <EmptyChart label="No workspace assistant activity yet." />
+      {usageRows.length < 2 ? (
+        <EmptyChart
+          label={
+            usageRows[0]
+              ? `${usageRows[0].name}: ${formatCount(
+                  usageRows[0].requests
+                )} requests and ${formatCount(usageRows[0].toolCalls)} tools.`
+              : "No workspace assistant activity yet."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -535,8 +562,18 @@ function ConnectionMixPanel({
       description="MCP connection mix and version posture."
       title="Connections"
     >
-      {runtimeRows.length === 0 ? (
-        <EmptyChart label="No MCP servers installed." />
+      {runtimeRows.length < 2 ? (
+        <EmptyChart
+          label={
+            runtimeRows[0]
+              ? `${runtimeRows[0].label}: ${formatCount(runtimeRows[0].total)} installed, ${formatCount(
+                  runtimeRows[0].enabled
+                )} enabled, ${formatCount(runtimeRows[0].attention)} need review, ${formatCount(
+                  updates
+                )} updates.`
+              : "No MCP servers installed."
+          }
+        />
       ) : (
         <div className="grid gap-5 md:grid-cols-[180px_minmax(0,1fr)]">
           <div className="h-48">
@@ -1137,7 +1174,7 @@ export function WorkspaceDashboardClient({
   });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
         <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="p-5 md:p-6">
@@ -1223,85 +1260,130 @@ export function WorkspaceDashboardClient({
         </div>
       </section>
 
-      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <WorkspaceHomePanel
-          activeAgents={activeAgents}
-          agentRunsPath={agentRunsPath}
-          agents={agents}
-          assignedTools={assignedTools}
-          attentionItems={attentionItems}
-          gatewayApprovals={gatewayApprovals}
-          installationAttention={installationAttention}
-          installations={installations}
-          installPath={installPath}
-          observability={observability}
-          paths={paths}
-          runtime={runtime}
-        />
-        <AttentionPanel items={attentionItems} />
-      </section>
+      <DashboardSection
+        defaultOpen={attentionItems.length > 0}
+        description="Broken state, approvals, and the next useful workspace action."
+        id="workspace-attention"
+        persistenceKey="wardn.dashboard.workspace.attention"
+        summary={
+          attentionItems.length === 0
+            ? "Clear"
+            : `${formatCount(attentionItems.length)} to review`
+        }
+        title="Needs attention"
+      >
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <WorkspaceHomePanel
+            activeAgents={activeAgents}
+            agentRunsPath={agentRunsPath}
+            agents={agents}
+            assignedTools={assignedTools}
+            attentionItems={attentionItems}
+            gatewayApprovals={gatewayApprovals}
+            installationAttention={installationAttention}
+            installations={installations}
+            installPath={installPath}
+            observability={observability}
+            paths={paths}
+            runtime={runtime}
+          />
+          <AttentionPanel items={attentionItems} />
+        </div>
+      </DashboardSection>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardMetricCard
-          badge={formatPercent(requestRate)}
-          detail={`${formatCount(usage.summary.failed)} failed · ${formatCompact(
-            usage.summary.totalTokens
-          )} tokens`}
-          href={observabilityPath}
-          icon={Activity}
-          label="Model requests"
-          tone={usage.summary.failed > 0 ? "warning" : "info"}
-          value={formatCompact(usage.summary.requests)}
-        />
-        <DashboardMetricCard
-          detail={`${formatCompact(usage.summary.totalTokens)} tokens in window`}
-          href={observabilityPath}
-          icon={CircleDollarSign}
-          label="Workspace spend"
-          tone={numberValue(usage.summary.costUsd) > 0 ? "success" : "neutral"}
-          value={formatCurrency(usage.summary.costUsd)}
-        />
-        <DashboardMetricCard
-          badge={formatPercent(toolRate)}
-          detail={`${formatRatioPercent(runtime.toolCalls.recentFailureRate)} recent failure · ${formatDuration(
-            toolUsage.summary.averageDurationMs
-          )} avg`}
-          href={runtimePath}
-          icon={Wrench}
-          label="MCP tool calls"
-          tone={runtime.toolCalls.recentFailureRate > 0 ? "warning" : "success"}
-          value={formatCompact(runtime.toolCalls.total)}
-        />
-        <DashboardMetricCard
-          badge={`${formatCount(activeAgents)}/${formatCount(agents.length)}`}
-          detail={`${formatCount(
-            assignedTools
-          )} assigned workspace ${pluralize(assignedTools, "tool")}`}
-          href={agentsPath}
-          icon={Bot}
-          label="Active agents"
-          tone={activeAgents > 0 ? "success" : "warning"}
-          value={formatCount(activeAgents)}
-        />
-      </section>
+      <DashboardSection
+        defaultOpen
+        description="Reliability, spend, tool activity, and assistant coverage."
+        id="workspace-overview"
+        persistenceKey="wardn.dashboard.workspace.overview"
+        summary="4 key metrics"
+        title="Overview"
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <DashboardMetricCard
+            badge={formatPercent(requestRate)}
+            detail={`${formatCount(usage.summary.failed)} failed · ${formatCompact(
+              usage.summary.totalTokens
+            )} tokens`}
+            href={observabilityPath}
+            icon={Activity}
+            label="Model requests"
+            tone={usage.summary.failed > 0 ? "warning" : "info"}
+            value={formatCompact(usage.summary.requests)}
+          />
+          <DashboardMetricCard
+            detail={`${formatCompact(usage.summary.totalTokens)} tokens in window`}
+            href={observabilityPath}
+            icon={CircleDollarSign}
+            label="Workspace spend"
+            tone={numberValue(usage.summary.costUsd) > 0 ? "success" : "neutral"}
+            value={formatCurrency(usage.summary.costUsd)}
+          />
+          <DashboardMetricCard
+            badge={formatPercent(toolRate)}
+            detail={`${formatRatioPercent(runtime.toolCalls.recentFailureRate)} recent failure · ${formatDuration(
+              toolUsage.summary.averageDurationMs
+            )} avg`}
+            href={runtimePath}
+            icon={Wrench}
+            label="MCP tool calls"
+            tone={runtime.toolCalls.recentFailureRate > 0 ? "warning" : "success"}
+            value={formatCompact(runtime.toolCalls.total)}
+          />
+          <DashboardMetricCard
+            badge={`${formatCount(activeAgents)}/${formatCount(agents.length)}`}
+            detail={`${formatCount(
+              assignedTools
+            )} assigned workspace ${pluralize(assignedTools, "tool")}`}
+            href={agentsPath}
+            icon={Bot}
+            label="Active agents"
+            tone={activeAgents > 0 ? "success" : "warning"}
+            value={formatCount(activeAgents)}
+          />
+        </div>
+      </DashboardSection>
 
-      <section className="grid gap-5 xl:grid-cols-3">
-        <ActivityTrendChart usage={usage} />
-        <RuntimePanel runtime={runtime} runtimePath={runtimePath} toolUsage={toolUsage} />
-      </section>
+      <DashboardSection
+        defaultOpen={
+          usage.daily.length > 1 ||
+          usage.byModel.length > 1 ||
+          usage.byAgent.length > 1 ||
+          installations.length > 1
+        }
+        description="Activity, runtime, model, assistant, and connection patterns."
+        id="workspace-trends"
+        persistenceKey="wardn.dashboard.workspace.trends"
+        summary="5 visual summaries"
+        title="Trends"
+      >
+        <div className="space-y-5">
+          <div className="grid gap-5 xl:grid-cols-3">
+            <ActivityTrendChart usage={usage} />
+            <RuntimePanel runtime={runtime} runtimePath={runtimePath} toolUsage={toolUsage} />
+          </div>
+          <div className="grid gap-5 xl:grid-cols-3">
+            <ModelSpendChart rows={usage.byModel} />
+            <AgentDemandChart agents={agents} rows={usage.byAgent} />
+            <ConnectionMixPanel installPath={installPath} installations={installations} />
+          </div>
+        </div>
+      </DashboardSection>
 
-      <section className="grid gap-5 xl:grid-cols-3">
-        <ModelSpendChart rows={usage.byModel} />
-        <AgentDemandChart agents={agents} rows={usage.byAgent} />
-        <ConnectionMixPanel installPath={installPath} installations={installations} />
-      </section>
-
-      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <TopToolsPanel toolUsage={toolUsage} />
-        <RecentRunsPanel agentRunsPath={agentRunsPath} runs={observability.recentRuns} />
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-3">
+      <DashboardSection
+        defaultOpen={false}
+        description="Recent tool and run activity plus workspace destinations."
+        id="workspace-details"
+        persistenceKey="wardn.dashboard.workspace.details"
+        summary={`${formatCount(toolUsage.toolCalls.length + observability.recentRuns.length)} events`}
+        title="Recent activity and links"
+      >
+        <div className="space-y-5">
+          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+            <TopToolsPanel toolUsage={toolUsage} />
+            <RecentRunsPanel agentRunsPath={agentRunsPath} runs={observability.recentRuns} />
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
         <Link
           className="flex min-h-24 items-center justify-between gap-3 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-colors hover:border-ring/35 hover:bg-muted/30"
           href={agentsPath}
@@ -1338,7 +1420,9 @@ export function WorkspaceDashboardClient({
           </div>
           <ArrowRight className="size-5 shrink-0 text-muted-foreground" />
         </Link>
-      </section>
+          </div>
+        </div>
+      </DashboardSection>
     </div>
   );
 }

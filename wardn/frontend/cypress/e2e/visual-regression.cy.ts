@@ -49,6 +49,16 @@ describe("desktop visual regression", () => {
     cy.compareSnapshot("runs-shell-table-compact-light");
   });
 
+  it("matches the action-first collapsed usage dashboard", () => {
+    cy.visit(`/org/${organizationId}/usage`);
+    cy.findByRole("heading", { level: 1, name: "Usage" }).should("be.visible");
+    cy.get('[data-testid="usage-sticky-controls"]').should("have.css", "position", "sticky");
+    cy.findByRole("button", { name: "Expand Needs attention" }).should("be.visible");
+    cy.findByText("By user", { exact: true }).should("not.exist");
+    stabilizePage();
+    cy.compareSnapshot("usage-dashboard-collapsed-light");
+  });
+
   it("matches the dynamically loaded provider form", () => {
     cy.visit(`${workspaceBasePath}/chat-providers/new`);
     cy.findByRole("heading", { level: 1, name: "New Chat Provider" }).should("be.visible");

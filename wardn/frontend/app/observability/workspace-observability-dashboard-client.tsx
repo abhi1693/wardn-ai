@@ -41,6 +41,7 @@ import {
 } from "@/components/atoms/table";
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { DashboardPanel } from "@/components/molecules/dashboard-panel";
+import { DashboardSection } from "@/components/molecules/dashboard-section";
 import { HealthRow } from "@/components/molecules/health-row";
 import { SignalBar } from "@/components/molecules/signal-bar";
 import type {
@@ -188,7 +189,7 @@ function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
 
 function EmptyChart({ label }: { label: string }) {
   return (
-    <div className="flex h-72 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
       {label}
     </div>
   );
@@ -222,8 +223,18 @@ function ActivityTrend({ dashboard }: { dashboard: WorkspaceObservabilityDashboa
       description={`${dashboard.window.startDate} to ${dashboard.window.endDate}`}
       title="Agent activity"
     >
-      {data.length === 0 ? (
-        <EmptyChart label="No workspace activity recorded in this window." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].dateLabel}: ${formatCount(data[0].requests)} model calls, ${formatCount(
+                  data[0].toolCalls
+                )} tool calls, ${formatCount(data[0].totalTokens)} tokens, ${formatCurrency(
+                  data[0].costUsd
+                )}. Add another day to show a trend.`
+              : "No workspace activity recorded in this window."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -322,27 +333,35 @@ function TopToolsPanel({ tools }: { tools: WorkspaceObservabilityTopToolRow[] })
         <EmptyChart label="No MCP tool calls recorded." />
       ) : (
         <div className="space-y-5">
-          <div className="h-64">
-            <ResponsiveContainer height="100%" width="100%">
-              <BarChart data={data} margin={{ left: 0, right: 12, top: 10 }}>
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                  tickLine={false}
-                  tickMargin={10}
-                />
-                <YAxis
-                  tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                  tickFormatter={(value) => formatCompact(Number(value))}
-                  tickLine={false}
-                />
-                <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="total" fill="#0891b2" name="Calls" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="failed" fill="#dc2626" name="Failed" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {data.length > 1 ? (
+            <div className="h-64">
+              <ResponsiveContainer height="100%" width="100%">
+                <BarChart data={data} margin={{ left: 0, right: 12, top: 10 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                    tickLine={false}
+                    tickMargin={10}
+                  />
+                  <YAxis
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                    tickFormatter={(value) => formatCompact(Number(value))}
+                    tickLine={false}
+                  />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Bar dataKey="total" fill="#0891b2" name="Calls" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="failed" fill="#dc2626" name="Failed" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyChart
+              label={`${data[0].name}: ${formatCount(data[0].total)} calls, ${formatCount(
+                data[0].failed
+              )} failed, p95 ${formatDuration(data[0].p95)}.`}
+            />
+          )}
           <div className="overflow-hidden rounded-md border border-border">
             {tools.slice(0, 5).map((tool) => (
               <HealthRow
@@ -516,129 +535,167 @@ export function WorkspaceObservabilityDashboardClient({
     summary.attributedLlmCalls +
     summary.unattributedLlmCalls;
   const attributedTotal = summary.attributedToolCalls + summary.attributedLlmCalls;
+  const attentionCount = dashboard.attention.filter(
+    (item) => item.severity !== "success"
+  ).length;
 
   return (
-    <div className="space-y-6">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardMetricCard
-          detail={`${summary.failedAgentRuns} failed, ${summary.runningAgentRuns} running`}
-          icon={ShieldAlert}
-          label="Health"
-          tone={healthTone(summary.healthScore)}
-          value={`${summary.healthScore}`}
-        />
-        <DashboardMetricCard
-          detail={`${formatPercent(summary.requestSuccessRate)} model success`}
-          icon={Bot}
-          label="Agent turns"
-          tone={summary.failedAgentRuns > 0 ? "warning" : "success"}
-          value={formatCount(summary.agentRuns)}
-        />
-        <DashboardMetricCard
-          detail={`${formatCount(summary.failedToolCalls)} failed, p95 ${formatDuration(
-            summary.p95ToolDurationMs
-          )}`}
-          icon={Network}
-          label="Tool calls"
-          tone={summary.failedToolCalls > 0 ? "warning" : "info"}
-          value={formatCount(summary.toolCalls)}
-        />
-        <DashboardMetricCard
-          detail={`${formatCount(summary.totalTokens)} tokens`}
-          icon={CircleDollarSign}
-          label="Model cost"
-          tone={numberValue(summary.costUsd) > 0 ? "info" : "neutral"}
-          value={formatCurrency(summary.costUsd)}
-        />
-        <DashboardMetricCard
-          detail={`${formatCount(attributedTotal)} of ${formatCount(attributionTotal)} events`}
-          icon={CheckCircle2}
-          label="Attribution"
-          tone={summary.unattributedToolCalls + summary.unattributedLlmCalls > 0 ? "warning" : "success"}
-          value={
-            attributionTotal > 0
-              ? formatPercent((attributedTotal / attributionTotal) * 100)
-              : "100.0%"
-          }
-        />
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-3">
-        <ActivityTrend dashboard={dashboard} />
+    <div className="space-y-4">
+      <DashboardSection
+        defaultOpen={attentionCount > 0}
+        description="Failures, slow paths, and audit gaps ranked for triage."
+        id="observability-attention"
+        persistenceKey="wardn.dashboard.observability.attention"
+        summary={attentionCount === 0 ? "Clear" : `${formatCount(attentionCount)} to review`}
+        title="Needs attention"
+      >
         <AttentionPanel basePath={basePath} dashboard={dashboard} />
-      </section>
+      </DashboardSection>
 
-      <section className="grid gap-5 xl:grid-cols-3">
-        <RunsTable
-          organizationId={organizationId}
-          runs={dashboard.recentRuns}
-          workspaceId={workspaceId}
-        />
-        <DashboardPanel description="Runtime and in-flight execution signals." title="Runtime posture">
-          <div className="grid gap-3 text-sm">
-            <div className="rounded-md border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <Activity className="size-4" />
-                  Active sessions
-                </span>
-                <span className="font-mono">{formatCount(summary.activeRuntimeSessions)}</span>
+      <DashboardSection
+        defaultOpen
+        description="Health, activity, cost, and attribution at a glance."
+        id="observability-overview"
+        persistenceKey="wardn.dashboard.observability.overview"
+        summary="5 key metrics"
+        title="Overview"
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <DashboardMetricCard
+            detail={`${summary.failedAgentRuns} failed, ${summary.runningAgentRuns} running`}
+            icon={ShieldAlert}
+            label="Health"
+            tone={healthTone(summary.healthScore)}
+            value={`${summary.healthScore}`}
+          />
+          <DashboardMetricCard
+            detail={`${formatPercent(summary.requestSuccessRate)} model success`}
+            icon={Bot}
+            label="Agent turns"
+            tone={summary.failedAgentRuns > 0 ? "warning" : "success"}
+            value={formatCount(summary.agentRuns)}
+          />
+          <DashboardMetricCard
+            detail={`${formatCount(summary.failedToolCalls)} failed, p95 ${formatDuration(
+              summary.p95ToolDurationMs
+            )}`}
+            icon={Network}
+            label="Tool calls"
+            tone={summary.failedToolCalls > 0 ? "warning" : "info"}
+            value={formatCount(summary.toolCalls)}
+          />
+          <DashboardMetricCard
+            detail={`${formatCount(summary.totalTokens)} tokens`}
+            icon={CircleDollarSign}
+            label="Model cost"
+            tone={numberValue(summary.costUsd) > 0 ? "info" : "neutral"}
+            value={formatCurrency(summary.costUsd)}
+          />
+          <DashboardMetricCard
+            detail={`${formatCount(attributedTotal)} of ${formatCount(attributionTotal)} events`}
+            icon={CheckCircle2}
+            label="Attribution"
+            tone={summary.unattributedToolCalls + summary.unattributedLlmCalls > 0 ? "warning" : "success"}
+            value={
+              attributionTotal > 0
+                ? formatPercent((attributedTotal / attributionTotal) * 100)
+                : "100.0%"
+            }
+          />
+        </div>
+      </DashboardSection>
+
+      <DashboardSection
+        defaultOpen={dashboard.activity.length > 1}
+        description="Agent request, tool, and cost movement across the selected window."
+        id="observability-trends"
+        persistenceKey="wardn.dashboard.observability.trends"
+        summary={`${formatCount(dashboard.activity.length)} data points`}
+        title="Trends"
+      >
+        <ActivityTrend dashboard={dashboard} />
+      </DashboardSection>
+
+      <DashboardSection
+        defaultOpen={false}
+        description="Runs, runtime posture, hotspots, attribution, and outcomes."
+        id="observability-details"
+        persistenceKey="wardn.dashboard.observability.details"
+        summary={`${formatCount(
+          dashboard.recentRuns.length + dashboard.topTools.length + dashboard.topModels.length
+        )} records`}
+        title="Detailed analysis"
+      >
+        <div className="space-y-5">
+          <div className="grid gap-5 xl:grid-cols-3">
+            <RunsTable
+              organizationId={organizationId}
+              runs={dashboard.recentRuns}
+              workspaceId={workspaceId}
+            />
+            <DashboardPanel description="Runtime and in-flight execution signals." title="Runtime posture">
+              <div className="grid gap-3 text-sm">
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <Activity className="size-4" />
+                      Active sessions
+                    </span>
+                    <span className="font-mono">{formatCount(summary.activeRuntimeSessions)}</span>
+                  </div>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <AlertTriangle className="size-4" />
+                      Sessions needing review
+                    </span>
+                    <span className="font-mono">
+                      {formatCount(summary.runtimeSessionsNeedingAttention)}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <Timer className="size-4" />
+                      Average tool latency
+                    </span>
+                    <span className="font-mono">{formatDuration(summary.averageToolDurationMs)}</span>
+                  </div>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <Clock3 className="size-4" />
+                      Running tools
+                    </span>
+                    <span className="font-mono">{formatCount(summary.runningToolCalls)}</span>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="rounded-md border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <AlertTriangle className="size-4" />
-                  Sessions needing review
-                </span>
-                <span className="font-mono">
-                  {formatCount(summary.runtimeSessionsNeedingAttention)}
-                </span>
-              </div>
-            </div>
-            <div className="rounded-md border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <Timer className="size-4" />
-                  Average tool latency
-                </span>
-                <span className="font-mono">{formatDuration(summary.averageToolDurationMs)}</span>
-              </div>
-            </div>
-            <div className="rounded-md border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <Clock3 className="size-4" />
-                  Running tools
-                </span>
-                <span className="font-mono">{formatCount(summary.runningToolCalls)}</span>
-              </div>
-            </div>
+            </DashboardPanel>
           </div>
-        </DashboardPanel>
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-3">
-        <TopToolsPanel tools={dashboard.topTools} />
-        <BreakdownPanel
-          description="Model routes by spend, token volume, and call count."
-          rows={dashboard.topModels}
-          title="Model spend"
-        />
-        <BreakdownPanel
-          description="Users driving model and tool activity."
-          rows={dashboard.topUsers}
-          title="Actor attribution"
-        />
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-2">
-        <BreakdownPanel
-          description="Agents generating requests and MCP calls."
-          rows={dashboard.topAgents}
-          title="Agent workload"
-        />
-        <DashboardPanel description="Outcome mix for this workspace window." title="Outcome mix">
+          <div className="grid gap-5 xl:grid-cols-3">
+            <TopToolsPanel tools={dashboard.topTools} />
+            <BreakdownPanel
+              description="Model routes by spend, token volume, and call count."
+              rows={dashboard.topModels}
+              title="Model spend"
+            />
+            <BreakdownPanel
+              description="Users driving model and tool activity."
+              rows={dashboard.topUsers}
+              title="Actor attribution"
+            />
+          </div>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <BreakdownPanel
+              description="Agents generating requests and MCP calls."
+              rows={dashboard.topAgents}
+              title="Agent workload"
+            />
+            <DashboardPanel description="Outcome mix for this workspace window." title="Outcome mix">
           <div className="space-y-5">
             <div>
               <div className="flex items-center justify-between gap-3 text-sm">
@@ -712,8 +769,10 @@ export function WorkspaceObservabilityDashboardClient({
               </div>
             </div>
           </div>
-        </DashboardPanel>
-      </section>
+            </DashboardPanel>
+          </div>
+        </div>
+      </DashboardSection>
     </div>
   );
 }

@@ -37,6 +37,7 @@ import {
 import { StatusDot } from "@/components/atoms/status-dot";
 import { DashboardMetricCard } from "@/components/molecules/dashboard-metric-card";
 import { DashboardPanel } from "@/components/molecules/dashboard-panel";
+import { DashboardSection } from "@/components/molecules/dashboard-section";
 import { HealthRow } from "@/components/molecules/health-row";
 import { SignalBar } from "@/components/molecules/signal-bar";
 import { Badge } from "@/components/atoms/badge";
@@ -193,7 +194,7 @@ function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
 
 function EmptyChart({ label }: { label: string }) {
   return (
-    <div className="flex h-72 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
       {label}
     </div>
   );
@@ -214,8 +215,18 @@ function CostTrendChart({ dashboard }: { dashboard: OrganizationDashboardRespons
       description={`${dashboard.window.startDate} to ${dashboard.window.endDate}`}
       title="Activity trend"
     >
-      {data.length === 0 ? (
-        <EmptyChart label="No usage recorded in this window." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].dateLabel}: ${formatCount(data[0].requests)} requests, ${formatCount(
+                  data[0].toolCalls
+                )} tool calls, ${formatCompact(data[0].totalTokens)} tokens, ${formatCurrency(
+                  data[0].costUsd
+                )}. Add another day to show a trend.`
+              : "No usage recorded in this window."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -284,8 +295,16 @@ function ModelSpendChart({ rows }: { rows: UsageSummaryBreakdownRow[] }) {
 
   return (
     <DashboardPanel description="Highest cost model routes in the selected window." title="Model spend">
-      {data.length === 0 ? (
-        <EmptyChart label="No model spend recorded." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].name}: ${formatCurrency(data[0].costUsd)}, ${formatCount(
+                  data[0].requests
+                )} requests, ${formatCompact(data[0].totalTokens)} tokens.`
+              : "No model spend recorded."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -324,8 +343,16 @@ function WorkspaceDemandChart({ rows }: { rows: OrganizationDashboardWorkspaceRo
 
   return (
     <DashboardPanel description="Workspaces ranked by requests and MCP activity." title="Workspace demand">
-      {data.length === 0 ? (
-        <EmptyChart label="No workspace activity recorded." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].name}: ${formatCount(data[0].requests)} requests, ${formatCount(
+                  data[0].toolCalls
+                )} tool calls, ${formatCurrency(data[0].costUsd)}.`
+              : "No workspace activity recorded."
+          }
+        />
       ) : (
         <div className="h-72">
           <ResponsiveContainer height="100%" width="100%">
@@ -365,8 +392,16 @@ function RuntimeMixChart({ dashboard }: { dashboard: OrganizationDashboardRespon
 
   return (
     <DashboardPanel description="Installed MCP server runtime distribution." title="Runtime mix">
-      {data.length === 0 ? (
-        <EmptyChart label="No MCP runtimes installed." />
+      {data.length < 2 ? (
+        <EmptyChart
+          label={
+            data[0]
+              ? `${data[0].name}: ${formatCount(data[0].total)} installed, ${formatCount(
+                  data[0].enabled
+                )} enabled, ${formatCount(data[0].attention)} need review.`
+              : "No MCP runtimes installed."
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
           <div className="h-56">
@@ -580,7 +615,7 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
     summary.stalledAgentRuns;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
         <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="p-5 md:p-6">
@@ -661,95 +696,131 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardMetricCard
-          detail={`${formatCurrency(summary.costUsd)} actual · ${budgetDetail}`}
-          href={`/org/${encodeURIComponent(organization.id)}/usage`}
-          icon={CircleDollarSign}
-          label="Monthly run-rate"
-          tone={summary.budgetUtilizationPercent && summary.budgetUtilizationPercent >= 80 ? "warning" : "success"}
-          value={formatCurrency(summary.projectedMonthlyCostUsd)}
-        />
-        <DashboardMetricCard
-          badge={formatPercent(summary.requestSuccessRate)}
-          detail={`${formatCount(summary.failedRequests)} failed · ${formatCompact(
-            summary.totalTokens
-          )} tokens`}
-          icon={Activity}
-          label="Model requests"
-          tone={summary.failedRequests > 0 ? "warning" : "info"}
-          value={formatCompact(summary.requests)}
-        />
-        <DashboardMetricCard
-          badge={formatPercent(summary.toolSuccessRate)}
-          detail={`${formatDuration(summary.averageToolDurationMs)} avg · ${formatCount(
-            summary.tools
-          )} tools`}
-          icon={Wrench}
-          label="MCP tool calls"
-          tone={summary.toolSuccessRate >= 98 ? "success" : "warning"}
-          value={formatCompact(summary.toolCalls)}
-        />
-        <DashboardMetricCard
-          detail={`${formatCount(summary.enabledServers)}/${formatCount(
-            summary.installedServers
-          )} enabled · ${formatCount(summary.serverUpdates)} updates`}
-          href={`/org/${encodeURIComponent(organization.id)}/catalog`}
-          icon={ServerCog}
-          label="MCP coverage"
-          tone={summary.serversNeedingAttention > 0 ? "danger" : "success"}
-          value={formatCompact(summary.installedServers)}
-        />
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-3">
-        <CostTrendChart dashboard={dashboard} />
-        <ModelSpendChart rows={dashboard.topModels} />
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-2">
-        <WorkspaceDemandChart rows={dashboard.workspaces} />
-        <RuntimeMixChart dashboard={dashboard} />
-      </section>
-
-      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0 space-y-5">
-          <WorkspaceTable organizationId={organization.id} rows={dashboard.workspaces} />
-          <ToolTable rows={dashboard.topTools} />
-        </div>
-        <div className="min-w-0 space-y-5">
-          <DashboardPanel
-            description="Pending approvals, failures, credentials, budget, and runtime risks."
-            title="Needs attention"
-          >
-            <div className="-m-4">
-              {dashboard.attention.length === 0 ? (
+      <DashboardSection
+        defaultOpen={attentionCount > 0}
+        description="Pending approvals, failures, credentials, budget, and runtime risks."
+        id="organization-attention"
+        persistenceKey="wardn.dashboard.organization.attention"
+        summary={attentionCount === 0 ? "Clear" : `${formatCount(attentionCount)} to review`}
+        title="Needs attention"
+      >
+        <div className="overflow-hidden rounded-md border border-border">
+          {dashboard.attention.length === 0 ? (
+            <HealthRow
+              badge="Clear"
+              detail="No pending approvals, failed tasks, credential gaps, or runtime risks detected"
+              icon={ShieldCheck}
+              label="No active items"
+              tone="success"
+            />
+          ) : (
+            dashboard.attention.map((item) => {
+              const tone = severityTone(item.severity);
+              return (
                 <HealthRow
-                  badge="Clear"
-                  detail="No pending approvals, failed tasks, credential gaps, or runtime risks detected"
-                  icon={ShieldCheck}
-                  label="No active items"
-                  tone="success"
+                  badge={item.severity}
+                  detail={item.detail}
+                  href={item.href || undefined}
+                  icon={tone === "danger" ? AlertTriangle : Activity}
+                  key={item.key}
+                  label={item.label}
+                  tone={tone}
                 />
-              ) : (
-                dashboard.attention.map((item) => {
-                  const tone = severityTone(item.severity);
-                  return (
-                    <HealthRow
-                      badge={item.severity}
-                      detail={item.detail}
-                      href={item.href || undefined}
-                      icon={tone === "danger" ? AlertTriangle : Activity}
-                      key={item.key}
-                      label={item.label}
-                      tone={tone}
-                    />
-                  );
-                })
-              )}
-            </div>
-          </DashboardPanel>
+              );
+            })
+          )}
+        </div>
+      </DashboardSection>
 
+      <DashboardSection
+        defaultOpen
+        description="Cost, request, tool, and MCP coverage at a glance."
+        id="organization-overview"
+        persistenceKey="wardn.dashboard.organization.overview"
+        summary="4 key metrics"
+        title="Overview"
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <DashboardMetricCard
+            detail={`${formatCurrency(summary.costUsd)} actual · ${budgetDetail}`}
+            href={`/org/${encodeURIComponent(organization.id)}/usage`}
+            icon={CircleDollarSign}
+            label="Monthly run-rate"
+            tone={summary.budgetUtilizationPercent && summary.budgetUtilizationPercent >= 80 ? "warning" : "success"}
+            value={formatCurrency(summary.projectedMonthlyCostUsd)}
+          />
+          <DashboardMetricCard
+            badge={formatPercent(summary.requestSuccessRate)}
+            detail={`${formatCount(summary.failedRequests)} failed · ${formatCompact(
+              summary.totalTokens
+            )} tokens`}
+            icon={Activity}
+            label="Model requests"
+            tone={summary.failedRequests > 0 ? "warning" : "info"}
+            value={formatCompact(summary.requests)}
+          />
+          <DashboardMetricCard
+            badge={formatPercent(summary.toolSuccessRate)}
+            detail={`${formatDuration(summary.averageToolDurationMs)} avg · ${formatCount(
+              summary.tools
+            )} tools`}
+            icon={Wrench}
+            label="MCP tool calls"
+            tone={summary.toolSuccessRate >= 98 ? "success" : "warning"}
+            value={formatCompact(summary.toolCalls)}
+          />
+          <DashboardMetricCard
+            detail={`${formatCount(summary.enabledServers)}/${formatCount(
+              summary.installedServers
+            )} enabled · ${formatCount(summary.serverUpdates)} updates`}
+            href={`/org/${encodeURIComponent(organization.id)}/catalog`}
+            icon={ServerCog}
+            label="MCP coverage"
+            tone={summary.serversNeedingAttention > 0 ? "danger" : "success"}
+            value={formatCompact(summary.installedServers)}
+          />
+        </div>
+      </DashboardSection>
+
+      <DashboardSection
+        defaultOpen={
+          dashboard.daily.length > 1 ||
+          dashboard.topModels.length > 1 ||
+          dashboard.workspaces.length > 1 ||
+          dashboard.runtimeMix.length > 1
+        }
+        description="Activity, spend, demand, and runtime distribution."
+        id="organization-trends"
+        persistenceKey="wardn.dashboard.organization.trends"
+        summary="4 visual summaries"
+        title="Trends"
+      >
+        <div className="space-y-5">
+          <div className="grid gap-5 xl:grid-cols-3">
+            <CostTrendChart dashboard={dashboard} />
+            <ModelSpendChart rows={dashboard.topModels} />
+          </div>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <WorkspaceDemandChart rows={dashboard.workspaces} />
+            <RuntimeMixChart dashboard={dashboard} />
+          </div>
+        </div>
+      </DashboardSection>
+
+      <DashboardSection
+        defaultOpen={false}
+        description="Workspace and tool tables plus readiness controls."
+        id="organization-details"
+        persistenceKey="wardn.dashboard.organization.details"
+        summary={`${formatCount(dashboard.workspaces.length + dashboard.topTools.length)} rows`}
+        title="Detailed breakdowns"
+      >
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="min-w-0 space-y-5">
+            <WorkspaceTable organizationId={organization.id} rows={dashboard.workspaces} />
+            <ToolTable rows={dashboard.topTools} />
+          </div>
+          <div className="min-w-0 space-y-5">
           <DashboardPanel description="Catalog sync and model credential coverage." title="Readiness">
             <div className="-m-4">
               <HealthRow
@@ -805,8 +876,9 @@ export function OrganizationDashboard({ dashboard, organization }: OrganizationD
               />
             </div>
           </DashboardPanel>
+          </div>
         </div>
-      </section>
+      </DashboardSection>
     </div>
   );
 }

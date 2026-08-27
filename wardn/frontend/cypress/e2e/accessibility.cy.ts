@@ -3,6 +3,10 @@ const workspaceId = "workspace-1";
 
 const routes = [
   {
+    path: `/org/${organizationId}/usage`,
+    title: "Usage",
+  },
+  {
     path: `/org/${organizationId}/workspaces`,
     title: "Workspaces",
   },

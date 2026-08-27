@@ -174,6 +174,15 @@ export default async function OrganizationUsagePage({
         ? await getMyUsage(filters)
         : null;
   const isOrganizationScope = selectedScope === "organization";
+  const attentionWorkspace = usage?.byWorkspace.length === 1 ? usage.byWorkspace[0] : null;
+  const attentionHref = attentionWorkspace
+    ? `/org/${encodeURIComponent(organization.id)}/workspace/${encodeURIComponent(
+        attentionWorkspace.id
+      )}/observability`
+    : `/org/${encodeURIComponent(organization.id)}/workspaces`;
+  const attentionActionLabel = attentionWorkspace
+    ? "Review workspace observability"
+    : "Choose a workspace";
 
   return (
     <AppShell
@@ -182,88 +191,111 @@ export default async function OrganizationUsagePage({
       title="Usage"
       workspaceContext={workspaceContext}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {isOrganizationScope ? (
-            <BarChart3 className="size-4" />
-          ) : (
-            <UserRound className="size-4" />
-          )}
-          {isOrganizationScope
-            ? "Organization usage by user, workspace, agent, and model"
-            : "Your attributed model requests, tokens, cost, and tool calls"}
-        </div>
-        <div
-          aria-label="Usage scope"
-          className="flex rounded-md border border-border bg-card p-1"
-          role="tablist"
-        >
-          <Button asChild size="sm" variant={isOrganizationScope ? "default" : "ghost"}>
-            <Link
-              aria-selected={isOrganizationScope}
-              href={usageHref(organization.id, "organization", filters)}
-              role="tab"
-            >
-              Organization
-            </Link>
-          </Button>
-          <Button asChild size="sm" variant={!isOrganizationScope ? "default" : "ghost"}>
-            <Link
-              aria-selected={!isOrganizationScope}
-              href={usageHref(organization.id, "me", filters)}
-              role="tab"
-            >
-              My usage
-            </Link>
-          </Button>
-        </div>
-      </div>
-      <form
-        className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-3"
-        method="get"
+      <div
+        className="sticky top-14 z-30 -mx-2 space-y-2 border-y border-border bg-background/95 px-2 py-2 backdrop-blur"
+        data-testid="usage-sticky-controls"
       >
-        <input name="scope" type="hidden" value={selectedScope} />
-        <div className="grid min-w-36 flex-1 gap-1.5 sm:flex-initial">
-          <Label htmlFor="usage-start-date">Start date</Label>
-          <Input
-            defaultValue={filters.startDate}
-            id="usage-start-date"
-            name="startDate"
-            type="date"
-          />
-        </div>
-        <div className="grid min-w-36 flex-1 gap-1.5 sm:flex-initial">
-          <Label htmlFor="usage-end-date">End date</Label>
-          <Input
-            defaultValue={filters.endDate}
-            id="usage-end-date"
-            name="endDate"
-            type="date"
-          />
-        </div>
-        <div className="grid min-w-32 flex-1 gap-1.5 sm:flex-initial">
-          <Label htmlFor="usage-breakdown-limit">Rows</Label>
-          <select
-            className="h-9 rounded-[var(--radius)] border border-input bg-card px-3 text-sm outline-none ring-offset-background focus-visible:border-ring focus-visible:ring-ring/15 focus-visible:ring-[3px]"
-            defaultValue={String(filters.breakdownLimit)}
-            id="usage-breakdown-limit"
-            name="breakdownLimit"
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {isOrganizationScope ? (
+              <BarChart3 className="size-4" />
+            ) : (
+              <UserRound className="size-4" />
+            )}
+            {isOrganizationScope
+              ? "Organization usage by user, workspace, agent, and model"
+              : "Your attributed model requests, tokens, cost, and tool calls"}
+          </div>
+          <div
+            aria-label="Usage scope"
+            className="flex rounded-md border border-border bg-card p-1"
+            role="tablist"
           >
-            {BREAKDOWN_LIMIT_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            <Button asChild size="sm" variant={isOrganizationScope ? "default" : "ghost"}>
+              <Link
+                aria-selected={isOrganizationScope}
+                href={usageHref(organization.id, "organization", filters)}
+                role="tab"
+              >
+                Organization
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant={!isOrganizationScope ? "default" : "ghost"}>
+              <Link
+                aria-selected={!isOrganizationScope}
+                href={usageHref(organization.id, "me", filters)}
+                role="tab"
+              >
+                My usage
+              </Link>
+            </Button>
+          </div>
         </div>
-        <Button className="min-w-24" size="sm" type="submit">
-          <ListFilter className="size-4" />
-          Apply
-        </Button>
-        <Button asChild size="sm" variant="outline">
-          <Link href={usageHref(organization.id, selectedScope)}>Reset</Link>
-        </Button>
-      </form>
+        <form
+          className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-2"
+          method="get"
+        >
+          <input name="scope" type="hidden" value={selectedScope} />
+          <div className="grid min-w-36 flex-1 gap-1 sm:flex-initial">
+            <Label htmlFor="usage-start-date">Start date</Label>
+            <Input
+              defaultValue={filters.startDate}
+              id="usage-start-date"
+              name="startDate"
+              type="date"
+            />
+          </div>
+          <div className="grid min-w-36 flex-1 gap-1 sm:flex-initial">
+            <Label htmlFor="usage-end-date">End date</Label>
+            <Input
+              defaultValue={filters.endDate}
+              id="usage-end-date"
+              name="endDate"
+              type="date"
+            />
+          </div>
+          <div className="grid min-w-32 flex-1 gap-1 sm:flex-initial">
+            <Label htmlFor="usage-breakdown-limit">Rows</Label>
+            <select
+              className="h-9 rounded-[var(--radius)] border border-input bg-card px-3 text-sm outline-none ring-offset-background focus-visible:border-ring focus-visible:ring-ring/15 focus-visible:ring-[3px]"
+              defaultValue={String(filters.breakdownLimit)}
+              id="usage-breakdown-limit"
+              name="breakdownLimit"
+            >
+              {BREAKDOWN_LIMIT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button className="min-w-24" size="sm" type="submit">
+            <ListFilter className="size-4" />
+            Apply
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href={usageHref(organization.id, selectedScope)}>Reset</Link>
+          </Button>
+        </form>
+        {usage ? (
+          <nav aria-label="Usage sections" className="flex flex-wrap items-center gap-1 text-sm">
+            {[
+              ["Attention", "#usage-attention"],
+              ["Overview", "#usage-overview"],
+              ["Trends", "#usage-trends"],
+              ["Breakdowns", "#usage-breakdowns"],
+            ].map(([label, href]) => (
+              <Link
+                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-ring/20 focus-visible:ring-[3px]"
+                href={href}
+                key={href}
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+        ) : null}
+      </div>
 
       {isOrganizationScope && !canViewUsage ? (
         <Card>
@@ -278,7 +310,12 @@ export default async function OrganizationUsagePage({
           </CardContent>
         </Card>
       ) : usage ? (
-        <UsageSummaryView mode={selectedScope} usage={usage} />
+        <UsageSummaryView
+          attentionActionLabel={attentionActionLabel}
+          attentionHref={attentionHref}
+          mode={selectedScope}
+          usage={usage}
+        />
       ) : (
         <Card>
           <CardHeader>

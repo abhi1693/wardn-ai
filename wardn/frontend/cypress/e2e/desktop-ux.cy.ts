@@ -29,8 +29,9 @@ function verifyRoute(route: (typeof routes)[number], theme: "light" | "dark") {
   );
   cy.get("html").should("have.class", theme);
   if (route.name === "usage") {
-    cy.get(".recharts-wrapper").first().should("be.visible");
-    cy.get(".recharts-pie-sector path").first().should("have.attr", "fill", "#2563eb");
+    cy.findByRole("button", { name: "Expand Usage trends" }).should("be.visible");
+    cy.findByText("0 charts, 4 summaries").should("be.visible");
+    cy.get(".recharts-wrapper").should("not.exist");
   }
   cy.assertDesktopFit();
   cy.screenshot(`${theme}-${route.name}`, { capture: "fullPage" });

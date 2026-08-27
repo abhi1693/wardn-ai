@@ -20,7 +20,14 @@ describe("usage summary scope", () => {
       "aria-selected",
       "true"
     );
+    cy.get('[data-testid="usage-sticky-controls"]').should("have.css", "position", "sticky");
+    cy.findByRole("navigation", { name: "Usage sections" })
+      .findAllByRole("link")
+      .should("have.length", 4);
     cy.findByText("Organization usage by user, workspace, agent, and model").should("be.visible");
+    cy.findByRole("button", { name: "Expand Needs attention" }).should("be.visible");
+    cy.findByText("By user", { exact: true }).should("not.exist");
+    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
     cy.findByText("By user", { exact: true }).should("be.visible");
 
     cy.findByRole("tab", { name: "My usage" }).click();
@@ -29,6 +36,7 @@ describe("usage summary scope", () => {
     cy.findByText("Your attributed model requests, tokens, cost, and tool calls").should(
       "be.visible"
     );
+    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
     cy.findByText("My models", { exact: true }).should("be.visible");
 
     cy.backendRequests().then((requests) => {
@@ -68,5 +76,19 @@ describe("usage summary scope", () => {
       expect(params.get("endDate")).to.equal("2026-06-30");
       expect(params.get("breakdownLimit")).to.equal("50");
     });
+  });
+
+  it("remembers expanded usage sections after a reload", () => {
+    cy.visit(`/org/${organizationId}/usage`);
+    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
+    cy.window().then((window) => {
+      expect(
+        window.localStorage.getItem("wardn.usage.sections.organization.breakdowns")
+      ).to.equal("open");
+    });
+
+    cy.reload();
+    cy.findByRole("button", { name: "Collapse Detailed breakdowns" }).should("be.visible");
+    cy.findByText("By user", { exact: true }).should("be.visible");
   });
 });
