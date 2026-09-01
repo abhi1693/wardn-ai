@@ -1277,31 +1277,39 @@ async def test_install_server_version_passes_network_policy_config(monkeypatch) 
         seen["network_policy"] = kwargs["network_policy"]
         return runtime_install()
 
+    async def require_limit_available(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(service.repository, "get_server_version", get_server_version)
     monkeypatch.setattr(service.repository, "get_installation", get_installation)
     monkeypatch.setattr(installation_service, "install_server_runtime", install_runtime)
+    monkeypatch.setattr(
+        installation_service.limits_service,
+        "require_limit_available",
+        require_limit_available,
+    )
     patch_runtime_provider(monkeypatch, "kubernetes")
     session = FakeSession()
 
     await service.install_server_version(
         session,
         "io.github.example/weather",
-            MCPServerInstallRequest(
-                version="latest",
-                installTarget="package",
-                networkPolicy={
-                    "allowKubernetesApi": True,
-                    "allowRemoteMcpEgress": True,
-                    "denyOtherEgress": True,
-                    "customEgress": [
-                        {
-                            "label": "unifi-access",
-                            "cidr": "192.168.3.1/32",
-                            "ports": [443],
-                        }
-                    ],
-                },
-            ),
+        MCPServerInstallRequest(
+            version="latest",
+            installTarget="package",
+            networkPolicy={
+                "allowKubernetesApi": True,
+                "allowRemoteMcpEgress": True,
+                "denyOtherEgress": True,
+                "customEgress": [
+                    {
+                        "label": "unifi-access",
+                        "cidr": "192.168.3.1/32",
+                        "ports": [443],
+                    }
+                ],
+            },
+        ),
         workspace_id=WORKSPACE_ID,
     )
 

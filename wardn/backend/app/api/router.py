@@ -10,6 +10,7 @@ from app.modules.guardrails.router import (
     workspace_settings_router as workspace_guardrail_settings_router,
 )
 from app.modules.health.router import router as health_router
+from app.modules.licensing.router import router as licensing_router
 from app.modules.limits.router import router as limits_router
 from app.modules.llm_providers.router import providers_router as llm_providers_router
 from app.modules.llm_providers.router import router as llm_provider_credentials_router
@@ -48,6 +49,7 @@ api_router.include_router(organization_membership_router)
 api_router.include_router(membership_invitation_router)
 api_router.include_router(secrets_router)
 api_router.include_router(limits_router)
+api_router.include_router(licensing_router)
 api_router.include_router(llm_providers_router)
 api_router.include_router(llm_provider_credentials_router)
 api_router.include_router(workspace_guardrail_settings_router)

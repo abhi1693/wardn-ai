@@ -12,7 +12,8 @@ about trust, credentials, policy, and auditability stay in Wardn instead of bein
 spread across local config files and one-off bots.
 
 [Product Areas](#product-areas) | [Typical Workflow](#typical-workflow) |
-[Local Development](#local-development) | [Production Notes](#production-notes)
+[Local Development](#local-development) | [Production Notes](#production-notes) |
+[License](#license)
 
 ## Documentation
 
@@ -253,3 +254,11 @@ Keep backend modules domain-oriented and frontend pages focused on complete prod
 workflows. Include focused tests for service behavior, OpenAPI contracts, and
 gateway error paths. When API schemas change, commit the regenerated OpenAPI and
 Orval artifacts with the backend change.
+
+## License
+
+Wardn AI is source-available under the
+[PolyForm Internal Use License 1.0.0 with an additional personal-use permission](LICENSE).
+Personal self-hosting and internal business use are permitted. Redistribution,
+resale, sublicensing, white-labeling, and third-party hosted or managed offerings
+require a separate written commercial agreement with the copyright holder.

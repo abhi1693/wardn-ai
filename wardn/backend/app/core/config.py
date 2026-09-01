@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     github_token: SecretStr = Field(default=SecretStr(""), max_length=4096)
     github_metadata_import_rate_limit: int = Field(default=10, ge=1, le=10_000)
     github_metadata_import_rate_window_seconds: int = Field(default=60, ge=1, le=86_400)
+    licensing_activation_key: SecretStr = Field(default=SecretStr(""), max_length=4096)
+    licensing_instance_name: str = Field(default="", max_length=200)
+    licensing_request_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    licensing_renewal_interval_seconds: int = Field(default=3_600, ge=300, le=86_400)
     mcp_tool_proposal_enabled: bool = True
     mcp_tool_proposal_api_token: SecretStr = Field(default=SecretStr(""), max_length=4096)
     mcp_tool_proposal_timeout_seconds: float = Field(default=10.0, gt=0, le=60)

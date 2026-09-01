@@ -127,11 +127,46 @@ async def test_effective_agent_chat_max_tool_rounds_uses_workspace_limit(
 
     monkeypatch.setattr(service.repository, "get_limit", get_limit)
 
+    async def current_entitlements(session):
+        return uuid.uuid4(), type(
+            "Entitlements",
+            (),
+            {"limits": {service.AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN: 100}},
+        )()
+
+    monkeypatch.setattr(service, "current_entitlements", current_entitlements)
+
     assert await service.effective_agent_chat_max_tool_rounds(
         RecordingSession(),
         organization_id=organization_id,
         workspace_id=workspace_id,
     ) == 42
+
+
+@pytest.mark.asyncio
+async def test_license_ceiling_cannot_be_raised_by_database(monkeypatch) -> None:
+    configured = resource_limit(limit_key=service.AGENTS_PER_ORGANIZATION, value=999)
+
+    async def effective_limit(*args, **kwargs):
+        return configured
+
+    async def current_entitlements(session):
+        return uuid.uuid4(), type(
+            "Entitlements",
+            (),
+            {"limits": {service.AGENTS_PER_ORGANIZATION: 10}},
+        )()
+
+    monkeypatch.setattr(service, "effective_limit", effective_limit)
+    monkeypatch.setattr(service, "current_entitlements", current_entitlements)
+
+    with pytest.raises(LimitExceededError, match="10/10"):
+        await service.require_limit_available(
+            RecordingSession(),
+            limit_key=service.AGENTS_PER_ORGANIZATION,
+            scope_chain=[("organization", uuid.uuid4())],
+            current_count=10,
+        )
 
 
 @pytest.mark.asyncio

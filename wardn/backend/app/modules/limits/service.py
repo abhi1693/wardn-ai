@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.licensing.service import current_entitlements
 from app.modules.limits import repository
 from app.modules.limits.exceptions import (
     InvalidLimitKeyError,
@@ -413,9 +414,13 @@ async def effective_agent_chat_max_tool_rounds(
             ("organization", organization_id),
         ],
     )
-    if limit is None:
-        return DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS
-    return max(limit.value, 0)
+    _, entitlements = await current_entitlements(session)
+    licensed_value = entitlements.limits.get(
+        AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN,
+        DEFAULT_AGENT_CHAT_MAX_TOOL_ROUNDS,
+    )
+    configured_value = limit.value if limit is not None else licensed_value
+    return max(min(configured_value, licensed_value), 0)
 
 
 async def require_limit_available(
@@ -427,11 +432,17 @@ async def require_limit_available(
     requested: int = 1,
 ) -> None:
     limit = await effective_limit(session, limit_key=limit_key, scope_chain=scope_chain)
-    if limit is None:
+    _, entitlements = await current_entitlements(session)
+    licensed_value = entitlements.limits.get(normalize_limit_key(limit_key))
+    configured_value = limit.value if limit is not None else None
+    values = [value for value in (licensed_value, configured_value) if value is not None]
+    if not values:
         return
-    if current_count + requested > limit.value:
+    effective_value = min(values)
+    if current_count + requested > effective_value:
         raise LimitExceededError(
-            f"{limit.limit_key} limit exceeded: {current_count}/{limit.value}"
+            f"{normalize_limit_key(limit_key)} limit exceeded: "
+            f"{current_count}/{effective_value}"
         )
 
 

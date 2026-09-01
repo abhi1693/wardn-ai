@@ -10,6 +10,10 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import engine
+from app.modules.licensing.worker import (
+    start_license_renewal_worker,
+    stop_license_renewal_worker,
+)
 from app.modules.mcp_gateway.oauth import well_known_router as mcp_gateway_oauth_well_known_router
 from app.modules.mcp_runtime.shutdown import teardown_local_runtime_processes
 
@@ -17,9 +21,11 @@ from app.modules.mcp_runtime.shutdown import teardown_local_runtime_processes
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
+    license_renewal_task = start_license_renewal_worker()
     async with AsyncExitStack() as cleanup:
         cleanup.push_async_callback(engine.dispose)
         cleanup.push_async_callback(teardown_local_runtime_processes)
+        cleanup.push_async_callback(stop_license_renewal_worker, license_renewal_task)
         yield
 
 

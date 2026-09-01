@@ -4733,6 +4733,119 @@
         "title": "LLMUsageSummary",
         "type": "object"
       },
+      "LicenseLeaseImport": {
+        "properties": {
+          "renewalToken": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renewaltoken"
+          },
+          "signedLease": {
+            "maxLength": 131072,
+            "minLength": 1,
+            "title": "Signedlease",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signedLease"
+        ],
+        "title": "LicenseLeaseImport",
+        "type": "object"
+      },
+      "LicenseStatus": {
+        "properties": {
+          "automaticRenewalConfigured": {
+            "title": "Automaticrenewalconfigured",
+            "type": "boolean"
+          },
+          "edition": {
+            "title": "Edition",
+            "type": "string"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "graceUntil": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graceuntil"
+          },
+          "instanceId": {
+            "format": "uuid",
+            "title": "Instanceid",
+            "type": "string"
+          },
+          "licenseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licenseid"
+          },
+          "limits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Limits",
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "community",
+              "licensed",
+              "grace"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instanceId",
+          "state",
+          "edition",
+          "features",
+          "limits",
+          "automaticRenewalConfigured"
+        ],
+        "title": "LicenseStatus",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -13059,6 +13172,163 @@
         "summary": "Register From Invitation",
         "tags": [
           "invitations"
+        ]
+      }
+    },
+    "/api/v1/license": {
+      "get": {
+        "operationId": "license_status",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "License Status Route",
+        "tags": [
+          "license"
+        ]
+      }
+    },
+    "/api/v1/license/lease": {
+      "put": {
+        "operationId": "license_lease_import",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LicenseLeaseImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import License Lease Route",
+        "tags": [
+          "license"
+        ]
+      }
+    },
+    "/api/v1/license/renew": {
+      "post": {
+        "operationId": "license_renew",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Renew License Route",
+        "tags": [
+          "license"
         ]
       }
     },
