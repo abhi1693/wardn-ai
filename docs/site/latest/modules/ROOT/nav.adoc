@@ -4,6 +4,7 @@
 * Getting Started
 ** xref:getting-started/overview.adoc[]
 ** xref:getting-started/quickstart.adoc[]
+** xref:getting-started/docker-compose.adoc[]
 ** xref:getting-started/local-development.adoc[]
 ** xref:getting-started/deployment-model.adoc[]
 

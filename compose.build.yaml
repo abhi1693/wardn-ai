@@ -1,0 +1,26 @@
+# Use together with compose.yaml to run the checked-out source on either CPU architecture.
+x-backend-build: &backend-build
+  image: wardn/worker:local
+  build:
+    context: ./wardn/backend
+    dockerfile: Dockerfile
+    target: worker
+    cache_from:
+      - type=registry,ref=ghcr.io/abhi1693/wardn-ai-worker:buildcache-wardn-ai-worker-linux-amd64
+      - type=registry,ref=ghcr.io/abhi1693/wardn-ai-worker:buildcache-wardn-ai-worker-linux-arm64
+
+services:
+  migrate:
+    <<: *backend-build
+  api:
+    <<: *backend-build
+  worker:
+    <<: *backend-build
+  frontend:
+    image: wardn/frontend:local
+    build:
+      context: .
+      dockerfile: wardn/frontend/Dockerfile
+      cache_from:
+        - type=registry,ref=ghcr.io/abhi1693/wardn-ai-frontend:buildcache-wardn-ai-frontend-linux-amd64
+        - type=registry,ref=ghcr.io/abhi1693/wardn-ai-frontend:buildcache-wardn-ai-frontend-linux-arm64
