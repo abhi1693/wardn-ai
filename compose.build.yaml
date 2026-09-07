@@ -9,18 +9,57 @@ x-backend-build: &backend-build
       - type=registry,ref=ghcr.io/abhi1693/wardn-ai-worker:buildcache-wardn-ai-worker-linux-amd64
       - type=registry,ref=ghcr.io/abhi1693/wardn-ai-worker:buildcache-wardn-ai-worker-linux-arm64
 
+x-backend-watch: &backend-watch
+  watch:
+    - action: rebuild
+      path: ./wardn/backend
+      ignore:
+        - .env
+        - .env.*
+        - .venv/
+        - .pytest_cache/
+        - .ruff_cache/
+        - .mypy_cache/
+        - '**/__pycache__/'
+        - data/
+        - tests/
+        # Schema changes need an explicit migration before restarting the apps.
+        - app/db/migrations/
+
 services:
   migrate:
     <<: *backend-build
+    # Watch must not replace the completed migration when the app image changes.
+    image: wardn/migrate:local
   api:
     <<: *backend-build
+    develop: *backend-watch
   worker:
     <<: *backend-build
+    develop: *backend-watch
   frontend:
     image: wardn/frontend:local
+    # Compose Watch can recreate watched dependencies without starting them.
+    # The proxy still waits for both API and frontend health before serving traffic.
+    depends_on: !reset {}
     build:
       context: .
       dockerfile: wardn/frontend/Dockerfile
       cache_from:
         - type=registry,ref=ghcr.io/abhi1693/wardn-ai-frontend:buildcache-wardn-ai-frontend-linux-amd64
         - type=registry,ref=ghcr.io/abhi1693/wardn-ai-frontend:buildcache-wardn-ai-frontend-linux-arm64
+    develop:
+      watch:
+        - action: rebuild
+          path: ./wardn/frontend
+          ignore:
+            - .env
+            - .env.*
+            - .next/
+            - node_modules/
+            - cypress/
+            - '*.tsbuildinfo'
+        - action: rebuild
+          path: ./package.json
+        - action: rebuild
+          path: ./package-lock.json

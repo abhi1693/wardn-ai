@@ -44,9 +44,10 @@ x-environment: &environment
   WARDN_GITHUB_TOKEN:
   WARDN_MCP_TOOL_PROPOSAL_ENABLED:
   WARDN_MCP_TOOL_PROPOSAL_API_TOKEN:
-  WARDN_OUTBOUND_HTTP_ALLOW_HTTP:
-  WARDN_OUTBOUND_HTTP_ALLOWED_PORTS:
-  WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST:
+  WARDN_OUTBOUND_HTTP_ALLOW_HTTP: ${WARDN_OUTBOUND_HTTP_ALLOW_HTTP:-true}
+  WARDN_OUTBOUND_HTTP_ALLOWED_PORTS: ${WARDN_OUTBOUND_HTTP_ALLOWED_PORTS:-443,8200}
+  WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST: ${WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST:-openbao}
+  WARDN_OPENBAO_AUTH_FILE_ROOT: /var/run/secrets/openbao
   WARDN_OPENBAO_AUTH_PROFILES_JSON:
   WARDN_CHAT_PROVIDER_WHATSAPP_BRIDGE_BASE_URL:
 
@@ -61,6 +62,7 @@ x-backend: &backend
   networks: [default, data]
   volumes:
     - mcp-installations:/var/lib/wardn/mcp-installations
+    - ./infra/compose/openbao/auth:/var/run/secrets/openbao:ro
 
 x-ready: &ready
   postgres:
@@ -75,6 +77,29 @@ x-healthcheck: &healthcheck
   start_period: 30s
 
 services:
+  openbao:
+    <<: *runtime
+    image: ghcr.io/openbao/openbao:2.6.2@sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
+    user: "100:1000"
+    entrypoint: [bao]
+    command: [server, -config=/openbao/config/compose.hcl]
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    mem_swappiness: 0
+    networks: [data, openbao-admin]
+    ports:
+      - target: 8200
+        published: ${WARDN_OPENBAO_PORT:-8200}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - openbao-data:/openbao/file
+      - ./infra/compose/openbao/config.hcl:/openbao/config/compose.hcl:ro
+    healthcheck:
+      <<: *healthcheck
+      # Reachability only: initialization/unseal is an explicit operator step.
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"]
+
   postgres:
     image: postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     restart: unless-stopped
@@ -159,9 +184,13 @@ services:
 
 networks:
   default:
+  # A dedicated bridge makes the loopback admin port reachable. Backend access
+  # still uses data; the frontend and public proxy do not join either network.
+  openbao-admin:
   data:
     internal: true
 
 volumes:
+  openbao-data:
   postgres-data:
   mcp-installations:

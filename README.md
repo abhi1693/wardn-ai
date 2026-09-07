@@ -120,7 +120,7 @@ agents, guardrails, limits, scheduled tasks, chat providers, and observability.
 
 ## Docker Compose
 
-Run the API, frontend, background worker, PostgreSQL, and same-origin proxy with Docker:
+Run the API, frontend, background worker, PostgreSQL, OpenBao, and same-origin proxy with Docker:
 
 ```bash
 cp compose.env.example .env
@@ -128,6 +128,7 @@ chmod 600 .env
 # Set three unique secrets in .env; generate each with: openssl rand -hex 32
 docker compose pull
 docker compose up -d --wait
+python3 scripts/compose/setup_openbao.py
 docker compose exec api python -m app.manage createsuperuser
 ```
 

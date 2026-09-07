@@ -28,6 +28,7 @@ The default public address is `http://localhost:3000`. For LAN access, set `WARD
 ----
 docker compose pull
 docker compose up -d --wait
+python3 scripts/compose/setup_openbao.py
 docker compose exec api python -m app.manage createsuperuser
 ----
 
@@ -39,12 +40,26 @@ By default, Compose pulls the `master` worker and frontend images. The API, migr
 
 [source,bash]
 ----
-docker compose -f compose.yaml -f compose.build.yaml build migrate frontend
+docker compose -f compose.yaml -f compose.build.yaml build
 docker compose -f compose.yaml -f compose.build.yaml up -d --wait
+python3 scripts/compose/setup_openbao.py
 docker compose -f compose.yaml -f compose.build.yaml exec api python -m app.manage createsuperuser
 ----
 
-Use both `-f` options for subsequent commands when running local builds. The override builds one backend/worker image and one frontend image, with published registry caches where available. It uses the checked-out branch, including uncommitted source changes. A plain `docker compose up` selects published images again.
+Use both `-f` options for subsequent commands when running local builds. The override builds the backend/worker and frontend images, plus a separate local tag for migrations, with published registry caches where available. It uses the checked-out branch, including uncommitted source changes. A plain `docker compose up` selects published images again.
+
+To rebuild changed services automatically while editing:
+
+[source,bash]
+----
+docker compose -f compose.yaml -f compose.build.yaml watch --no-up
+----
+
+Use Compose 2.24.4 or later for this override. Start and initialize the stack using the commands above, then run Watch separately so stopping the watcher leaves OpenBao and the other services running. The build override watches backend and frontend source and dependency files. Changes rebuild and recreate the affected containers; the containers retain their read-only runtime filesystems. Environment files, caches, local data, and backend migrations are excluded. Apply schema changes using the explicit migration/upgrade procedure below.
+
+`docker compose -f compose.yaml -f compose.build.yaml up --build --watch` is also supported. Stopping that foreground command stops the stack; after restarting it, rerun `python3 scripts/compose/setup_openbao.py` in another terminal to unseal OpenBao before using stored credentials.
+
+The development override gives migrations a separate local image tag and lets the frontend start independently of the API. This avoids Compose Watch replacing completed migrations or leaving watched dependencies stopped after a frontend rebuild. The proxy still requires healthy API and frontend services before serving traffic.
 
 == Services and storage
 
@@ -52,6 +67,7 @@ Use both `-f` options for subsequent commands when running local builds. The ove
 |===
 |Service |Purpose
 |`postgres` |PostgreSQL 18 on a private internal network with a persistent `postgres-data` volume. No database port is published.
+|`openbao` |OpenBao 2.6 with persistent Raft storage in `openbao-data`. Wardn connects privately over the data network; the admin UI/API is published only at `http://127.0.0.1:8200`.
 |`migrate` |Runs `alembic upgrade head` after PostgreSQL becomes healthy. API and worker startup require a successful migration.
 |`api` |FastAPI and interactive agent/MCP execution. It has no host port.
 |`worker` |Runs `runmcpjobs`, which also coordinates scheduled tasks, approval resumption, chat events, runtime maintenance, and secret cleanup. Wardn uses PostgreSQL jobs; no Redis service is required.
@@ -69,7 +85,27 @@ OIDC settings in `compose.env.example` are optional. Register the public callbac
 
 Backend containers can reach host services through `host.docker.internal`, including on Linux. Wardn's outbound HTTP policy still applies: explicitly allow the intended hostname, port, and HTTP transport when configuring local model, secret-store, or MCP endpoints. Do not use `localhost` to address the host from a container.
 
-OpenBao, the optional WhatsApp bridge, model providers, and remote MCP servers are configured separately. For file-based OpenBao authentication, mount operator credentials read-only into the API and worker using a local `compose.override.yaml`. Additional application settings must be explicitly listed under `environment` in an override; Compose does not forward every variable in `.env` automatically.
+The optional WhatsApp bridge, model providers, and remote MCP servers are configured separately. Additional application settings must be explicitly listed under `environment` in an override; Compose does not forward every variable in `.env` automatically.
+
+== Bundled OpenBao
+
+The setup command initializes the local server once, unseals it, enables KV v2 at `secret/`, and provisions the `wardn-compose` AppRole. Its policy permits secret access only beneath `secret/data/wardn/` and the corresponding metadata paths. Wardn receives AppRole credentials rather than a root token. No public registry or external secret server is contacted.
+
+For an existing `.env`, add the `WARDN_OPENBAO_AUTH_PROFILES_JSON` setting from `compose.env.example`. The API and worker need this profile and their read-only credential mount before they can authenticate. The setup helper uses only the loopback address. If you set `WARDN_OPENBAO_PORT` to another port, pass the corresponding `--url http://127.0.0.1:PORT`.
+
+In Wardn's Create OpenBao Backend form, use:
+
+* Name: a descriptive name, such as `Local OpenBao`.
+* OpenBao URL: `http://openbao:8200`.
+* Authentication profile: `compose`.
+
+The OpenBao UI is at `http://localhost:8200`. Its operator login is separate from your Wardn login. The helper saves the initialization root token and unseal key in `data/openbao/bootstrap.json` with mode `0600`, and AppRole files in `infra/compose/openbao/auth/` with mode `0600`. Both credential locations are ignored by Git and Docker builds. Keep a secure backup of recovery material separately from the encrypted OpenBao data. Wardn's application containers never receive the root token or unseal key.
+
+The local helper uses a single unseal share for this single-host stack. After restarting OpenBao, rerun `python3 scripts/compose/setup_openbao.py` to unseal it using the saved recovery file. Repeated runs preserve the AppRole secret ID and verify a KV write/read/delete round trip. If OpenBao is already initialized but the recovery file is absent, the helper stops without reinitializing it. For production use with multiple operators, configure your own initialization, recovery custody, and TLS/auto-unseal policy.
+
+The AppRole files must be readable by the API and worker's UID 1000. On Linux hosts using another UID, transfer ownership of those two files to UID 1000 after provisioning; retain mode `0600`. Subsequent operator runs need permission to read those files. Never use world-readable credentials to work around ownership.
+
+Compose allows HTTP to the `openbao` hostname on port 8200 for this private connection. If you override the outbound HTTP settings, retain `openbao` in `WARDN_OUTBOUND_HTTP_PRIVATE_HOST_ALLOWLIST`, port `8200` in `WARDN_OUTBOUND_HTTP_ALLOWED_PORTS`, and `WARDN_OUTBOUND_HTTP_ALLOW_HTTP=true` when using the bundled server.
 
 == Verify and operate
 
@@ -80,9 +116,9 @@ curl --fail http://localhost:3000/api/v1/health/ready
 docker compose logs --tail=100 migrate api worker
 ----
 
-Readiness checks cover PostgreSQL, API, frontend, and the public proxy. `worker` has no HTTP health endpoint; inspect its logs and job progress. `up --wait` checks that it is running, not that each background queue is making progress.
+Readiness checks cover PostgreSQL, API, frontend, and the public proxy. OpenBao's container health check verifies HTTP reachability even before initialization or while sealed; `docker compose exec openbao bao status` reports its initialized/unsealed state. `worker` has no HTTP health endpoint; inspect its logs and job progress. `up --wait` checks that it is running, not that each background queue is making progress.
 
-Before updating, back up PostgreSQL and the installation volume. To upgrade published images:
+Before updating, back up PostgreSQL, the installation volume, OpenBao storage, and recovery material. To upgrade published images:
 
 [source,bash]
 ----
@@ -90,6 +126,7 @@ docker compose pull
 docker compose stop proxy frontend api worker
 docker compose run --rm migrate
 docker compose up -d --wait
+python3 scripts/compose/setup_openbao.py
 ----
 
 Proceed to `up` only if migration succeeds. For source builds, rebuild with both `-f` options first, then use those options on every upgrade command. Downgrading application images does not roll back database migrations; restore a compatible backup if needed.
@@ -105,4 +142,4 @@ python3 scripts/ci/check_compose.py
 
 This renders synthetic settings without reading local credentials and checks migration gating, image/build overrides, port binding, network isolation, and credential routing. The Compose smoke test runs only against an empty disposable instance because it creates the initial account.
 
-See https://docs.docker.com/compose/how-tos/startup-order/[Docker's startup-order documentation] for health and successful-completion dependencies.
+See https://docs.docker.com/compose/how-tos/startup-order/[Docker's startup-order documentation] for health and successful-completion dependencies, https://docs.docker.com/compose/how-tos/file-watch/[Compose Watch] for rebuild behavior, and https://openbao.org/docs/commands/server/[OpenBao's server documentation] for initialization and sealing.

@@ -77,6 +77,8 @@ wardn/frontend/cypress/videos/
 docker-compose.override.yml
 compose.override.yml
 compose.override.yaml
+/infra/compose/openbao/auth/*
+!/infra/compose/openbao/auth/.gitkeep
 
 # Kubernetes / Helm generated artifacts
 *.tgz

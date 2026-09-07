@@ -39,3 +39,4 @@ embeddings
 models
 docs/research
 .codex
+infra/compose/openbao/auth

@@ -17,9 +17,7 @@ def render(values: dict[str, str], *, build: bool = False) -> dict:
     }
     with tempfile.TemporaryDirectory() as directory:
         env_file = Path(directory) / ".env"
-        env_file.write_text(
-            "".join(f"{key}={value}\n" for key, value in values.items())
-        )
+        env_file.write_text("".join(f"{key}={value}\n" for key, value in values.items()))
         command = [
             "docker",
             "compose",
@@ -65,10 +63,7 @@ def check() -> None:
         services = custom["services"]
         assert services["proxy"]["ports"][0]["host_ip"] == bind
         assert services["proxy"]["ports"][0]["published"] == "3101"
-        assert (
-            services["api"]["environment"]["WARDN_PUBLIC_BASE_URL"]
-            == "http://localhost:3101"
-        )
+        assert services["api"]["environment"]["WARDN_PUBLIC_BASE_URL"] == "http://localhost:3101"
 
     options = {
         "WARDN_PUBLIC_BASE_URL": "https://wardn.example.com",
@@ -86,8 +81,11 @@ def check() -> None:
         config = render({**secrets, **options}, build=build)
         services = config["services"]
         assert services["postgres"]["networks"] == {"data": None}
+        assert set(services["openbao"]["networks"]) == {"data", "openbao-admin"}
+        assert services["openbao"]["ports"][0]["host_ip"] == "127.0.0.1"
+        assert services["openbao"]["volumes"][0]["source"] == "openbao-data"
         for name, service in services.items():
-            assert bool(service.get("ports")) == (name == "proxy"), name
+            assert bool(service.get("ports")) == (name in {"proxy", "openbao"}), name
             assert not service.get("privileged"), name
             if name != "postgres":
                 assert service["read_only"], name
@@ -98,15 +96,13 @@ def check() -> None:
         for name in ("api", "worker", "migrate"):
             service = services[name]
             environment = service["environment"]
-            assert all(environment[key] == value for key, value in options.items()), (
-                name
-            )
-            assert (
-                environment["WARDN_FRONTEND_BASE_URL"]
-                == options["WARDN_PUBLIC_BASE_URL"]
-            )
+            assert all(environment[key] == value for key, value in options.items()), name
+            assert environment["WARDN_FRONTEND_BASE_URL"] == options["WARDN_PUBLIC_BASE_URL"]
             assert "host.docker.internal=host-gateway" in service["extra_hosts"]
             assert service["volumes"][0]["source"] == "mcp-installations"
+            credentials = service["volumes"][1]
+            assert credentials["target"] == "/var/run/secrets/openbao"
+            assert credentials["read_only"]
             if name != "migrate":
                 assert (
                     service["depends_on"]["migrate"]["condition"]
@@ -114,6 +110,11 @@ def check() -> None:
                 )
             if build:
                 assert service["build"]["target"] == "worker"
+                if name != "migrate":
+                    rules = service["develop"]["watch"]
+                    assert all(rule["action"] == "rebuild" for rule in rules)
+                    assert ".env" in rules[0]["ignore"]
+                    assert "app/db/migrations/" in rules[0]["ignore"]
             else:
                 assert "build" not in service
         assert services["migrate"]["restart"] == "no"
@@ -125,12 +126,19 @@ def check() -> None:
             "WARDN_SESSION_COOKIE_NAME",
         }
         assert frontend_environment["WARDN_BACKEND_URL"] == "http://api:8000"
-        assert (
-            frontend_environment["NEXT_PUBLIC_SITE_URL"]
-            == options["WARDN_PUBLIC_BASE_URL"]
-        )
+        assert frontend_environment["NEXT_PUBLIC_SITE_URL"] == options["WARDN_PUBLIC_BASE_URL"]
         assert services["frontend"]["networks"] == {"default": None}
         assert services["proxy"]["networks"] == {"default": None}
+        if build:
+            assert services["migrate"]["image"] != services["api"]["image"]
+            assert services["migrate"]["image"] != services["worker"]["image"]
+            assert not services["frontend"].get("depends_on")
+            assert services["proxy"]["depends_on"]["api"]["condition"] == "service_healthy"
+            assert services["proxy"]["depends_on"]["frontend"]["condition"] == "service_healthy"
+            rules = services["frontend"]["develop"]["watch"]
+            assert len(rules) == 3
+            assert all(rule["action"] == "rebuild" for rule in rules)
+            assert ".env" in rules[0]["ignore"]
 
     images = {
         "WARDN_WORKER_IMAGE": "registry.example/worker@sha256:" + "a" * 64,

@@ -71,7 +71,7 @@ jobs:
 
       - name: Build and start the checked-out source
         run: |
-          docker compose build migrate frontend
+          docker compose build
           docker compose up -d --wait --wait-timeout 180
 
       - name: Exercise the published application
@@ -81,6 +81,17 @@ jobs:
         run: |
           docker compose exec -T worker python -m app.manage runmcpjobs --once
           docker compose run --rm migrate
+
+      - name: Verify OpenBao bootstrap, AppRole access and persisted state
+        run: |
+          python3 scripts/compose/setup_openbao.py \
+            --state-dir "$RUNNER_TEMP/wardn-openbao" \
+            --credentials-dir "$RUNNER_TEMP/wardn-openbao-auth"
+          docker compose restart openbao
+          docker compose up -d --no-deps --wait openbao
+          python3 scripts/compose/setup_openbao.py \
+            --state-dir "$RUNNER_TEMP/wardn-openbao" \
+            --credentials-dir "$RUNNER_TEMP/wardn-openbao-auth"
 
       - name: Show failed service logs
         if: failure()
