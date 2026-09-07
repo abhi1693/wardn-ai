@@ -81,7 +81,7 @@ export function SecretBackendForm({
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const { isDirty } = useFormSafety({
+  const { isDirty, markSaved } = useFormSafety({
     currentValue: { authProfile, baseUrl, isActive, name },
     formId: "secret-backend-form",
     initialValue: initialForm,
@@ -135,6 +135,7 @@ export function SecretBackendForm({
         });
       }
 
+      markSaved();
       router.push(listPath);
       router.refresh();
     } catch (caught) {
@@ -260,7 +261,7 @@ export function SecretBackendForm({
             </AsyncFeedback>
           ) : null}
 
-          <StickyFormActions className="-mx-6 -mb-6 px-6" position="bottom">
+          <StickyFormActions className="-mx-4 -mb-4 rounded-b-md px-4" position="bottom">
             <Button asChild type="button" variant="outline">
               <Link href={listPath}>
                 <ArrowLeft className="size-4" />
