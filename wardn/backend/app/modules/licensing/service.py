@@ -45,8 +45,8 @@ COMMUNITY_LIMITS: dict[str, int] = {
     "llm_provider_credentials.per_user": 5,
 }
 COMMUNITY_FEATURES: dict[str, bool] = {}
-OFFICIAL_LICENSE_SERVER_URL = "https://license.wardnai.dev"
-OFFICIAL_LICENSE_ISSUER = "https://license.wardnai.dev"
+OFFICIAL_LICENSE_SERVER_URL = "https://licenses.wardnai.dev"
+OFFICIAL_LICENSE_ISSUER = "https://licenses.wardnai.dev"
 OFFICIAL_LICENSE_AUDIENCE = "wardn-ai"
 OFFICIAL_PUBLIC_KEY_JWKS: dict[str, dict[str, str]] = {
     "uZ8gOcCGUqlMhVgTuOK4pThU42hNcooIP_FAEg43Qic": {
