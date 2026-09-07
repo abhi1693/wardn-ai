@@ -6,6 +6,11 @@ from urllib.parse import urljoin
 import httpx
 
 from app.core.config import get_settings
+from app.modules.llm_providers.chatgpt_client import (
+    CODEX_COMPAT_ORIGINATOR,
+    CODEX_COMPAT_USER_AGENT,
+    CODEX_COMPAT_VERSION,
+)
 from app.modules.llm_providers.chatgpt_oauth import decode_jwt_payload, utc_now
 from app.modules.llm_providers.exceptions import InvalidLLMProviderCredentialAuthError
 from app.modules.llm_providers.schemas import LLMProviderModelRead, LLMProviderRead
@@ -15,17 +20,10 @@ OPENAI_API_KEY_PROVIDER = "openai"
 OPENAI_CHATGPT_PROVIDER = "openai_chatgpt"
 ANTHROPIC_PROVIDER = "anthropic"
 OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+CHATGPT_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 ANTHROPIC_API_BASE_URL = "https://api.anthropic.com"
 ANTHROPIC_MODELS_PATH = "/v1/models"
 OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS = 15.0
-OPENAI_CHATGPT_MODEL_IDS = (
-    "gpt-5.5",
-    "gpt-5.5-pro",
-    "gpt-5.4",
-    "gpt-5.4-pro",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex-spark",
-)
 
 
 @dataclass(frozen=True)
@@ -243,11 +241,68 @@ async def fetch_openai_models(bearer_token: str) -> list[LLMProviderModelRead]:
         models.append(LLMProviderModelRead(id=model_id, name=model_id))
     return sorted(models, key=lambda model: model.id)
 
-def openai_chatgpt_models() -> list[LLMProviderModelRead]:
-    return [
-        LLMProviderModelRead(id=model_id, name=model_id)
-        for model_id in OPENAI_CHATGPT_MODEL_IDS
-    ]
+async def fetch_chatgpt_models(
+    access_token: str,
+    *,
+    account_id: str,
+) -> list[LLMProviderModelRead]:
+    if not account_id.strip():
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT account ID is missing. Reconnect the ChatGPT credential."
+        )
+    try:
+        async with httpx.AsyncClient(
+            timeout=OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = await client.get(
+                CHATGPT_MODELS_URL,
+                params={"client_version": CODEX_COMPAT_VERSION},
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "ChatGPT-Account-ID": account_id.strip(),
+                    "originator": CODEX_COMPAT_ORIGINATOR,
+                    "User-Agent": CODEX_COMPAT_USER_AGENT,
+                    "Accept": "application/json",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT model discovery could not reach ChatGPT"
+        ) from exc
+
+    if response.status_code in {401, 403}:
+        raise InvalidLLMProviderCredentialAuthError("ChatGPT credential was rejected")
+    if not response.is_success:
+        raise InvalidLLMProviderCredentialAuthError(
+            f"ChatGPT model discovery failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT model discovery response is invalid"
+        ) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        raise InvalidLLMProviderCredentialAuthError(
+            "ChatGPT model discovery response is invalid"
+        )
+
+    models = []
+    seen: set[str] = set()
+    # Keep the provider's picker order. supported_in_api describes API-key access,
+    # so it must not exclude subscription-only models from this OAuth provider.
+    for entry in payload["models"]:
+        if not isinstance(entry, dict) or entry.get("visibility") != "list":
+            continue
+        slug = entry.get("slug")
+        if not isinstance(slug, str) or not (model_id := slug.strip()) or model_id in seen:
+            continue
+        seen.add(model_id)
+        display_name = entry.get("display_name")
+        name = display_name.strip() if isinstance(display_name, str) else ""
+        models.append(LLMProviderModelRead(id=model_id, name=name or model_id))
+    return models
 
 def validate_chatgpt_oauth_credential(
     *,

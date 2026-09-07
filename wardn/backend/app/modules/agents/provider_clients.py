@@ -1,6 +1,4 @@
 import json
-import os
-import platform
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -19,6 +17,18 @@ from app.modules.agents.types import (
     AgentToolCall,
 )
 from app.modules.llm_providers import repository as llm_provider_repository
+from app.modules.llm_providers.chatgpt_client import (
+    CODEX_COMPAT_ORIGINATOR as CODEX_COMPAT_ORIGINATOR,
+)
+from app.modules.llm_providers.chatgpt_client import (
+    CODEX_COMPAT_USER_AGENT as CODEX_COMPAT_USER_AGENT,
+)
+from app.modules.llm_providers.chatgpt_client import (
+    CODEX_COMPAT_VERSION as CODEX_COMPAT_VERSION,
+)
+from app.modules.llm_providers.chatgpt_client import (
+    DEFAULT_CODEX_COMPAT_VERSION as DEFAULT_CODEX_COMPAT_VERSION,
+)
 from app.modules.llm_providers.models import LLMProviderCredential
 from app.modules.llm_providers.provider_clients import (
     ANTHROPIC_API_BASE_URL,
@@ -33,13 +43,6 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 ANTHROPIC_MESSAGES_PATH = "/v1/messages"
 CHATGPT_CODEX_RESPONSES_WS_URL = "wss://chatgpt.com/backend-api/codex/responses"
 CHATGPT_CODEX_WEBSOCKET_BETA = "responses_websockets=2026-02-06"
-DEFAULT_CODEX_COMPAT_VERSION = "0.144.0"
-CODEX_COMPAT_VERSION = os.getenv("WARDN_CODEX_COMPAT_VERSION", DEFAULT_CODEX_COMPAT_VERSION)
-CODEX_COMPAT_ORIGINATOR = "codex_cli_rs"
-CODEX_COMPAT_USER_AGENT = (
-    f"{CODEX_COMPAT_ORIGINATOR}/{CODEX_COMPAT_VERSION} "
-    f"({platform.system()} {platform.release()}; {platform.machine()}) wardn"
-)
 AGENT_CHAT_TIMEOUT_SECONDS = 120.0
 CHATGPT_CODEX_INSTRUCTIONS_MAX_CHARS = 32_000
 REASONING_SUMMARY_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")

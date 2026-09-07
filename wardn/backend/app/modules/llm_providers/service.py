@@ -114,9 +114,6 @@ from app.modules.llm_providers.provider_clients import (
     OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS as OPENAI_API_KEY_VALIDATION_TIMEOUT_SECONDS,
 )
 from app.modules.llm_providers.provider_clients import (
-    OPENAI_CHATGPT_MODEL_IDS as OPENAI_CHATGPT_MODEL_IDS,
-)
-from app.modules.llm_providers.provider_clients import (
     OPENAI_CHATGPT_PROVIDER as OPENAI_CHATGPT_PROVIDER,
 )
 from app.modules.llm_providers.provider_clients import (
@@ -129,10 +126,10 @@ from app.modules.llm_providers.provider_clients import (
     fetch_anthropic_models as fetch_anthropic_models,
 )
 from app.modules.llm_providers.provider_clients import (
-    fetch_openai_models as fetch_openai_models,
+    fetch_chatgpt_models as fetch_chatgpt_models,
 )
 from app.modules.llm_providers.provider_clients import (
-    openai_chatgpt_models as openai_chatgpt_models,
+    fetch_openai_models as fetch_openai_models,
 )
 from app.modules.llm_providers.provider_clients import (
     supported_provider_responses as supported_provider_responses,
@@ -887,7 +884,15 @@ async def list_models_for_credential(
             oauth_refresh_token=secrets.oauth_refresh_token,
             oauth_expires_at=credential.oauth_expires_at,
         )
-        return LLMProviderModelListResponse(models=openai_chatgpt_models())
+        account_id = optional_string(read_record(credential.oauth_metadata).get("accountId"))
+        if not account_id:
+            account_id = chatgpt_oauth_metadata(secrets.oauth_access_token).get("accountId")
+        return LLMProviderModelListResponse(
+            models=await fetch_chatgpt_models(
+                secrets.oauth_access_token,
+                account_id=account_id or "",
+            )
+        )
     raise InvalidLLMProviderCredentialAuthError(
         f"unsupported provider/auth combination: {credential.provider}/{credential.auth_method}"
     )

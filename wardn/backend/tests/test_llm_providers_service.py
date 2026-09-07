@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -1252,12 +1254,23 @@ async def test_validate_provider_credential_returns_false_for_rejected_secret(mo
 
 
 @pytest.mark.asyncio
-async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("metadata", "expected_account"),
+    [({"accountId": "selected-account"}, "selected-account"), ({}, "token-account")],
+)
+async def test_list_provider_credential_models_uses_chatgpt_models_api(
+    monkeypatch, metadata, expected_account
+) -> None:
     organization_id = uuid4()
     credential_id = uuid4()
     user = User(id=uuid4(), email="owner@example.com", is_superuser=False)
     access_handle_id = uuid4()
     refresh_handle_id = uuid4()
+    token_payload = {chatgpt_oauth.OPENAI_CODEX_AUTH_CLAIM: {"chatgpt_account_id": "token-account"}}
+    encoded_payload = (
+        base64.urlsafe_b64encode(json.dumps(token_payload).encode()).decode().rstrip("=")
+    )
+    access_token = f"header.{encoded_payload}.signature"
     credential = LLMProviderCredential(
         id=credential_id,
         organization_id=organization_id,
@@ -1268,6 +1281,7 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
         oauth_provider="chatgpt",
         oauth_access_token_secret_handle_id=access_handle_id,
         oauth_refresh_token_secret_handle_id=refresh_handle_id,
+        oauth_metadata=metadata,
         base_url="",
         extra_headers={},
         is_active=True,
@@ -1295,17 +1309,24 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
         return credential
 
     async def fail_openai_model_fetch(*args, **kwargs):
-        raise AssertionError("ChatGPT OAuth should use the local model catalog")
+        raise AssertionError("ChatGPT OAuth must not call the API-key models endpoint")
+
+    discovered_credentials: list[tuple[str, str]] = []
+
+    async def fetch_chatgpt_models(access_token: str, *, account_id: str):
+        discovered_credentials.append((access_token, account_id))
+        return [LLMProviderModelRead(id="gpt-new-model", name="New model from ChatGPT")]
 
     org_repository = service.require_organization_member.__globals__["repository"]
     monkeypatch.setattr(org_repository, "get_organization_by_id", get_organization_by_id)
     monkeypatch.setattr(org_repository, "get_organization_membership", get_organization_membership)
     monkeypatch.setattr(service.repository, "get_credential", get_credential)
     monkeypatch.setattr(service, "fetch_openai_models", fail_openai_model_fetch)
+    monkeypatch.setattr(service, "fetch_chatgpt_models", fetch_chatgpt_models)
     patch_resolved_secrets(
         monkeypatch,
         {
-            access_handle_id: "access-token",
+            access_handle_id: access_token,
             refresh_handle_id: "refresh-token",
         },
     )
@@ -1317,7 +1338,11 @@ async def test_list_provider_credential_models_uses_chatgpt_catalog(monkeypatch)
         credential_id,
     )
 
-    assert [model.id for model in response.models] == list(service.OPENAI_CHATGPT_MODEL_IDS)
+    assert discovered_credentials == [(access_token, expected_account)]
+    assert [model.id for model in response.models] == ["gpt-new-model"]
+    assert response.models[0].name == "New model from ChatGPT"
+    assert await service.credential_supports_model(FakeSession(), credential, "gpt-new-model")
+    assert not await service.credential_supports_model(FakeSession(), credential, "gpt-5.5-pro")
 
 
 @pytest.mark.asyncio
