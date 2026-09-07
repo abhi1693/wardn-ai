@@ -18,18 +18,22 @@ permissions:
 
 jobs:
   backend:
-    name: Backend linux/arm64
+    name: Backend
     uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
     with:
-      runs-on: ubuntu-24.04-arm
+      matrix: |
+        [
+          {"runner":"ubuntu-24.04","platform":"linux/amd64"},
+          {"runner":"ubuntu-24.04-arm","platform":"linux/arm64"}
+        ]
       image: ghcr.io/abhi1693/wardn-ai-backend
       context: wardn/backend
       file: wardn/backend/Dockerfile
-      platforms: linux/arm64
-      cache-scope: wardn-ai-backend-arm64
+      cache-scope: wardn-ai-backend
       build-args: |
         APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
+        type=raw,value=master,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
         type=raw,value=${{ github.sha }}
@@ -40,18 +44,22 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   frontend:
-    name: Frontend linux/arm64
+    name: Frontend
     uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
     with:
-      runs-on: ubuntu-24.04-arm
+      matrix: |
+        [
+          {"runner":"ubuntu-24.04","platform":"linux/amd64"},
+          {"runner":"ubuntu-24.04-arm","platform":"linux/arm64"}
+        ]
       image: ghcr.io/abhi1693/wardn-ai-frontend
       context: .
       file: wardn/frontend/Dockerfile
-      platforms: linux/arm64
-      cache-scope: wardn-ai-frontend-arm64
+      cache-scope: wardn-ai-frontend
       build-args: |
         APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
+        type=raw,value=master,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
         type=raw,value=${{ github.sha }}
@@ -62,19 +70,23 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   worker:
-    name: Worker linux/arm64
+    name: Worker
     uses: abhi1693/actions/.github/workflows/docker-build-push.yml@master
     with:
-      runs-on: ubuntu-24.04-arm
+      matrix: |
+        [
+          {"runner":"ubuntu-24.04","platform":"linux/amd64"},
+          {"runner":"ubuntu-24.04-arm","platform":"linux/arm64"}
+        ]
       image: ghcr.io/abhi1693/wardn-ai-worker
       context: wardn/backend
       file: wardn/backend/Dockerfile
       target: worker
-      platforms: linux/arm64
-      cache-scope: wardn-ai-worker-arm64
+      cache-scope: wardn-ai-worker
       build-args: |
         APP_VERSION=${{ github.event.release.tag_name || inputs.version || format('0.0.0+{0}', github.sha) }}
       tags: |
+        type=raw,value=master,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         type=semver,pattern={{version}}
         type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
         type=raw,value=${{ github.sha }}
