@@ -12,8 +12,8 @@ about trust, credentials, policy, and auditability stay in Wardn instead of bein
 spread across local config files and one-off bots.
 
 [Product Areas](#product-areas) | [Typical Workflow](#typical-workflow) |
-[Local Development](#local-development) | [Production Notes](#production-notes) |
-[License](#license)
+[Docker Compose](#docker-compose) | [Local Development](#local-development) |
+[Production Notes](#production-notes) | [License](#license)
 
 ## Documentation
 
@@ -117,6 +117,24 @@ wardn/
 Core backend modules are organized by product domain, including users,
 organizations, MCP registry, MCP gateway, MCP runtime, secrets, LLM providers,
 agents, guardrails, limits, scheduled tasks, chat providers, and observability.
+
+## Docker Compose
+
+Run the API, frontend, background worker, PostgreSQL, and same-origin proxy with Docker:
+
+```bash
+cp compose.env.example .env
+chmod 600 .env
+# Set three unique secrets in .env; generate each with: openssl rand -hex 32
+docker compose pull
+docker compose up -d --wait
+docker compose exec api python -m app.manage createsuperuser
+```
+
+Open `http://localhost:3000`. Published images support Linux AMD64 and ARM64.
+To build the checked-out branch, use `compose.build.yaml` alongside `compose.yaml`.
+See the [Compose guide](docs/site/latest/modules/ROOT/pages/getting-started/docker-compose.adoc)
+for local builds, networking, authentication, MCP runtime boundaries, and upgrades.
 
 ## Local Development
 

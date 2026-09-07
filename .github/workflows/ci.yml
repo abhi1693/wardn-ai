@@ -39,6 +39,57 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: actionlint
 
+      - name: Validate Docker Compose contracts
+        run: python3 scripts/ci/check_compose.py
+
+  compose:
+    name: Compose smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_FILE: compose.yaml:compose.build.yaml
+      COMPOSE_PROJECT_NAME: wardn-compose-ci
+      COMPOSE_ENV_FILES: .env.compose-ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Generate disposable configuration
+        run: |
+          python3 - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          values = {name: secrets.token_hex(32) for name in (
+              "POSTGRES_PASSWORD", "WARDN_API_TOKEN_SECRET", "WARDN_SESSION_SECRET"
+          )}
+          values.update(WARDN_BIND_IP="127.0.0.1", WARDN_PORT="3137", WARDN_TELEMETRY="false")
+          path = Path(os.environ["COMPOSE_ENV_FILES"])
+          path.write_text("".join(f"{key}={value}\n" for key, value in values.items()))
+          path.chmod(0o600)
+          PY
+
+      - name: Build and start the checked-out source
+        run: |
+          docker compose build migrate frontend
+          docker compose up -d --wait --wait-timeout 180
+
+      - name: Exercise the published application
+        run: python3 scripts/ci/smoke_compose.py http://127.0.0.1:3137
+
+      - name: Check worker command and migration replay
+        run: |
+          docker compose exec -T worker python -m app.manage runmcpjobs --once
+          docker compose run --rm migrate
+
+      - name: Show failed service logs
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Remove disposable stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
   backend:
     name: Backend
     runs-on: ubuntu-latest

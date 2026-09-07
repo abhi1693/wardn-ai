@@ -76,6 +76,7 @@ wardn/frontend/cypress/videos/
 # Docker / compose local overrides
 docker-compose.override.yml
 compose.override.yml
+compose.override.yaml
 
 # Kubernetes / Helm generated artifacts
 *.tgz

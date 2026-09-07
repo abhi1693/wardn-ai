@@ -1,0 +1,108 @@
+= Docker Compose
+:revdate: 2026-09-07
+:page-revdate: {revdate}
+:description: Run Wardn AI with Docker Compose, persistent PostgreSQL, a background worker, and same-origin web access.
+
+The repository includes a single-host Compose deployment using published images, plus a build override for running your checked-out source. You need Docker Engine or Docker Desktop with the Compose v2 plugin. The published backend, worker, and frontend images support Linux AMD64 and ARM64.
+
+== Configure
+
+From the repository root:
+
+[source,bash]
+----
+cp compose.env.example .env
+chmod 600 .env
+openssl rand -hex 32
+----
+
+Run the generator three times. Set `POSTGRES_PASSWORD`, `WARDN_API_TOKEN_SECRET`, and `WARDN_SESSION_SECRET` to different generated values in `.env`. If a root `.env` already exists, add these settings without overwriting it. Compose does not load `wardn/backend/.env` or frontend environment files.
+
+The PostgreSQL password is interpolated into a URL; use hexadecimal as shown, or supply a correctly URL-encoded `WARDN_DATABASE_URL` override. Keep the signing secrets stable across restarts. Changing the PostgreSQL password in `.env` does not change the password of an existing database volume.
+
+The default public address is `http://localhost:3000`. For LAN access, set `WARDN_PUBLIC_BASE_URL` to the address users enter in their browser, for example `http://192.168.1.20:3000`. `WARDN_PORT` changes the published port; `WARDN_BIND_IP` defaults to `0.0.0.0`. Set the bind address to `127.0.0.1` for access only from this host.
+
+== Start from published images
+
+[source,bash]
+----
+docker compose pull
+docker compose up -d --wait
+docker compose exec api python -m app.manage createsuperuser
+----
+
+Create the first account before exposing the service to other users, then open `http://localhost:3000` and sign in. There are no default login credentials. The interactive command prompts for the password without adding it to shell history.
+
+By default, Compose pulls the `master` worker and frontend images. The API, migration job, and worker use the same worker image because local MCP calls need its Node/npm and Python tools. Set `WARDN_WORKER_IMAGE` and `WARDN_FRONTEND_IMAGE` to matching release or commit tags for repeatable installations; full digest references are supported. Older releases may contain ARM64 images only.
+
+== Build the current branch
+
+[source,bash]
+----
+docker compose -f compose.yaml -f compose.build.yaml build migrate frontend
+docker compose -f compose.yaml -f compose.build.yaml up -d --wait
+docker compose -f compose.yaml -f compose.build.yaml exec api python -m app.manage createsuperuser
+----
+
+Use both `-f` options for subsequent commands when running local builds. The override builds one backend/worker image and one frontend image, with published registry caches where available. It uses the checked-out branch, including uncommitted source changes. A plain `docker compose up` selects published images again.
+
+== Services and storage
+
+[cols="1,3"]
+|===
+|Service |Purpose
+|`postgres` |PostgreSQL 18 on a private internal network with a persistent `postgres-data` volume. No database port is published.
+|`migrate` |Runs `alembic upgrade head` after PostgreSQL becomes healthy. API and worker startup require a successful migration.
+|`api` |FastAPI and interactive agent/MCP execution. It has no host port.
+|`worker` |Runs `runmcpjobs`, which also coordinates scheduled tasks, approval resumption, chat events, runtime maintenance, and secret cleanup. Wardn uses PostgreSQL jobs; no Redis service is required.
+|`frontend` |Next.js, with only the internal API address and public UI settings. Database, OIDC, and signing credentials stay in backend services.
+|`proxy` |Nginx on the single published port. Routes `/api/v1` and `/.well-known` to FastAPI, and other paths, including `/api/auth/oidc`, to Next.js. Supports WebSocket upgrades and unbuffered streaming.
+|===
+
+The `mcp-installations` volume is shared by API, worker, and migration containers. Installed packages and their runtime files survive restarts. Treat this volume and the database as sensitive. Application containers run as their image's non-root user with a read-only root filesystem, temporary scratch space, dropped capabilities, and no Docker socket.
+
+The default `local` environment supports trusted npm/Python MCP packages running in the API/worker containers. This is the existing local process runtime, with access to the shared installation directory; it is not per-server isolation. Deno and other extra package runtimes need a custom worker image. Use the Kubernetes deployment model when each MCP server needs a separate sandbox.
+
+For a deployment using remote HTTP MCP servers only, set `WARDN_ENVIRONMENT=production` and `WARDN_MCP_RUNTIME_PROVIDER=remote`, place a TLS reverse proxy in front of the published port, and set `WARDN_PUBLIC_BASE_URL` to its HTTPS origin. Production cookies require HTTPS. The outer proxy should set `X-Forwarded-Proto: https` and preserve WebSocket upgrades. Restrict direct access to the Compose port when using an outer proxy.
+
+OIDC settings in `compose.env.example` are optional. Register the public callback `https://your-host/api/auth/oidc/callback` with the identity provider. Set `WARDN_OIDC_SUPERUSER_EMAILS` for operator access when using OIDC.
+
+Backend containers can reach host services through `host.docker.internal`, including on Linux. Wardn's outbound HTTP policy still applies: explicitly allow the intended hostname, port, and HTTP transport when configuring local model, secret-store, or MCP endpoints. Do not use `localhost` to address the host from a container.
+
+OpenBao, the optional WhatsApp bridge, model providers, and remote MCP servers are configured separately. For file-based OpenBao authentication, mount operator credentials read-only into the API and worker using a local `compose.override.yaml`. Additional application settings must be explicitly listed under `environment` in an override; Compose does not forward every variable in `.env` automatically.
+
+== Verify and operate
+
+[source,bash]
+----
+docker compose ps -a
+curl --fail http://localhost:3000/api/v1/health/ready
+docker compose logs --tail=100 migrate api worker
+----
+
+Readiness checks cover PostgreSQL, API, frontend, and the public proxy. `worker` has no HTTP health endpoint; inspect its logs and job progress. `up --wait` checks that it is running, not that each background queue is making progress.
+
+Before updating, back up PostgreSQL and the installation volume. To upgrade published images:
+
+[source,bash]
+----
+docker compose pull
+docker compose stop proxy frontend api worker
+docker compose run --rm migrate
+docker compose up -d --wait
+----
+
+Proceed to `up` only if migration succeeds. For source builds, rebuild with both `-f` options first, then use those options on every upgrade command. Downgrading application images does not roll back database migrations; restore a compatible backup if needed.
+
+`docker compose down` removes containers and networks while retaining named volumes. Use `down --volumes` only for disposable data. Changing the Compose project name selects different volumes.
+
+== Configuration checks
+
+[source,bash]
+----
+python3 scripts/ci/check_compose.py
+----
+
+This renders synthetic settings without reading local credentials and checks migration gating, image/build overrides, port binding, network isolation, and credential routing. The Compose smoke test runs only against an empty disposable instance because it creates the initial account.
+
+See https://docs.docker.com/compose/how-tos/startup-order/[Docker's startup-order documentation] for health and successful-completion dependencies.
