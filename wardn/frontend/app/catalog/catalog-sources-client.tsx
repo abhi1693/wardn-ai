@@ -1,5 +1,6 @@
 "use client";
 
+import { RuntimeLogsButton } from "@/components/organisms/runtime-logs";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -429,6 +430,7 @@ export function CatalogSourcesClient({
                       )}
                       Sync
                     </Button>
+                    <RuntimeLogsButton organizationId={organizationId} sourceId={source.id} />
                     {busyId !== null ? (
                       <Button
                         aria-label={`Edit ${source.name}`}

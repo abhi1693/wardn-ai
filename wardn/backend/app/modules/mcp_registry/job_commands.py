@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from typing import Annotated
 
 import typer
-from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.cli_utils import exit_with_code
 from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging
 from app.modules.agents.resume_worker import (
     run_agent_run_resume_worker_loop,
     run_agent_run_resume_worker_once,
@@ -37,13 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def configure_command_logging(*, verbose: bool) -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-    handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    configure_logging('worker', level="DEBUG" if verbose else None)
 
 
 def validate_worker_settings(settings: Settings, *, poll_interval_seconds: float) -> None:

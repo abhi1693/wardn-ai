@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.cli_utils import exit_with_code
+from app.core.logging import configure_logging
 from app.core.outbound_http import open_outbound_request
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
@@ -221,15 +222,7 @@ class RegistrySource(StrEnum):
 
 
 def configure_command_logging(*, verbose: bool) -> None:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    configure_logging('cli', level="DEBUG" if verbose else None)
 
 
 def _server_documents_from_payload(payload) -> list[dict]:

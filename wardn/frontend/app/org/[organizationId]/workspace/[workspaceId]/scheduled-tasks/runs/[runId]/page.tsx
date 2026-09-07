@@ -1,3 +1,4 @@
+import { RuntimeLogsButton } from "@/components/organisms/runtime-logs";
 import { ArrowLeft, Bot, CalendarClock, MessageSquare, Pencil } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -200,6 +201,7 @@ export default async function ScheduledTaskRunPage({ params }: ScheduledTaskRunP
       workspaceContext={workspaceContext}
     >
       <div className="space-y-4">
+        <RuntimeLogsButton organizationId={organizationId} kind="scheduled_task" jobId={runId} />
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-3">
             <div>

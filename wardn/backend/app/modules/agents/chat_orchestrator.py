@@ -114,6 +114,7 @@ from app.modules.llm_providers.service import (
     validate_chatgpt_oauth_credential,
 )
 from app.modules.observability import service as observability_service
+from app.modules.observability.job_logs import logged_agent_stream
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -497,6 +498,7 @@ async def preflight_blocked_tool_stream(
     yield AgentChatTextEvent(text=message)
 
 
+@logged_agent_stream
 async def run_agent_chat(
     agent: Agent,
     credential: LLMProviderCredential,

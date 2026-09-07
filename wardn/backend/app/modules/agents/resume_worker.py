@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from app.db.session import AsyncSessionLocal
 from app.modules.agents import approvals, repository
 from app.modules.agents.models import AgentRunResumeJob
+from app.modules.observability.job_logs import logged_job
 from app.modules.users import repository as users_repository
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ async def retry_or_fail_claimed_resume_job(
         )
 
 
+@logged_job("agent_run", phase="resume")
 async def execute_agent_run_resume_job(
     job: AgentRunResumeJob,
     *,

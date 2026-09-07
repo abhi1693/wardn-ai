@@ -272,7 +272,8 @@ async def validation_exception_handler(
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     request_id = request_id_for(request)
-    logger.exception("Unhandled request error", extra={"request_id": request_id})
+    if not getattr(request.state, "request_failure_logged", False):
+        logger.exception("Unhandled request error", extra={"request_id": request_id})
     return _problem_response(
         request,
         _definition(500, "internal_server_error"),

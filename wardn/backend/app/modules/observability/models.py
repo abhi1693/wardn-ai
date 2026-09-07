@@ -2,8 +2,20 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -41,9 +53,7 @@ class LLMModelPrice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class LLMTrace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "llm_traces"
-    __table_args__ = (
-        Index("ix_llm_traces_trace_span", "trace_id", "span_id"),
-    )
+    __table_args__ = (Index("ix_llm_traces_trace_span", "trace_id", "span_id"),)
 
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     span_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
@@ -141,3 +151,20 @@ class LLMUsageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     trace_id: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
     span_id: Mapped[str] = mapped_column(String(32), default="", nullable=False, index=True)
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class RuntimeJobLog(Base):
+    __tablename__ = "runtime_job_logs"
+    __table_args__ = (
+        Index("ix_runtime_job_logs_scope", "organization_id", "job_kind", "job_id", "id"),
+        Index("ix_runtime_job_logs_expiry", "expires_at"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    job_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    entry: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)

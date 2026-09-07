@@ -25,6 +25,7 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { RuntimeLogsButton } from "@/components/organisms/runtime-logs";
 import { Badge } from "@/components/atoms/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/atoms/card";
 import { apiErrorMessage, apiRequest } from "@/lib/api/client";
@@ -805,6 +806,7 @@ export function AgentRunDetailClient({
 
   return (
     <div className="space-y-4">
+      <RuntimeLogsButton organizationId={organizationId} kind="agent_run" jobId={agentRunId} />
       <section className="rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 px-5 py-4">
           <div className="min-w-0">

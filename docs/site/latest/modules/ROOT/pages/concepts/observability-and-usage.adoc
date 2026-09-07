@@ -1,5 +1,5 @@
 = Observability and Usage
-:revdate: 2026-08-09
+:revdate: 2026-09-08
 :page-revdate: {revdate}
 :description: Learn what Wardn records for runtime health, agent runs, LLM usage, and tool activity.
 
@@ -25,3 +25,46 @@ Usage records help teams understand model activity and costs. Pricing configurat
 
 Start with the agent run or operation job, then inspect related runtime sessions, tool call records, approval records, and worker logs.
 
+[#_application_logs]
+== Application logs
+
+The API, workers, management commands, and Alembic migrations use the same logging configuration, adapted from DevFeed. Logs go to stderr; management command results remain on stdout.
+
+`WARDN_LOG_FORMAT=text` produces readable console lines with time, service, severity, operation, duration, and related identifiers. Set `WARDN_LOG_FORMAT=json` for collectors that need UTC timestamps, stable event names, logger names, process IDs, and structured context. Both formats use `WARDN_LOG_LEVEL=INFO` by default; `DEBUG` includes additional sanitized diagnostics. Verbose management commands select DEBUG for their process.
+
+[source,bash]
+----
+docker compose logs -f api worker migrate
+----
+
+Request logs include method, sanitized URL, status, elapsed time, and request ID after the response finishes, including streamed responses. Wardn preserves valid `X-Request-ID` values for frontend/backend correlation and generates an ID otherwise. Healthy liveness/readiness requests are DEBUG events. An unhandled failure records one exception event and one request completion event.
+
+Worker context carries organization, workspace, job, attempt, and worker identifiers into nested asynchronous and thread work. Exception diagnostics retain exception types, stack locations, and causes. They exclude exception messages, source lines, locals, and arbitrary object representations. Structured fields are allowlisted and bounded; unknown message text and interpolated arguments are omitted. SQL and HTTP library debug output is suppressed even when application DEBUG logging is enabled. URLs redact sensitive query values, credentials, and invitation tokens.
+
+When adding a log, use a fixed event name such as `catalog_sync_started` and explicitly reviewed metadata fields. Do not put prompts, model responses, credentials, tool arguments, or raw exception strings in log messages. New legacy-style messages must be reviewed before inclusion in `app/core/log_events.py`.
+
+[#_runtime_job_logs]
+== Runtime job logs
+
+Organization administrators can open *Runtime logs* on catalog source cards, scheduled task runs, and agent run pages. The viewer polls new entries, supports severity and text filters, expands structured details, and downloads the currently filtered entries. Catalog source logs follow the latest synchronization job. The API also supports individual MCP operation job IDs.
+
+Job diagnostics capture DEBUG and higher independently of the console level. They are stored in Wardn's PostgreSQL, without an additional Redis service. Apply database migrations before starting updated API and worker processes:
+
+[source,bash]
+----
+cd wardn/backend
+uv run alembic upgrade head
+----
+
+In Compose, the migration service performs this step before application services start. Migration `202609080002` creates `runtime_job_logs` with organization/job and expiry indexes. Existing jobs have no retroactively captured logs.
+
+The default limits are seven days per entry, the latest 1000 entries per job, and 16 KiB per entry. Configure retention with `WARDN_JOB_LOG_TTL_SECONDS` (3600–2592000) and `WARDN_JOB_LOG_MAX_ENTRIES` (100–10000). Expired entries are excluded from reads immediately and deleted in bounded maintenance batches. Set `WARDN_JOB_LOGS_ENABLED=false` to stop new job capture; console logging and access to existing retained entries continue.
+
+Capture uses a bounded, nonblocking process queue and independent database transactions. Flushed logs survive an operation rollback, and overlapping attempts use a per-job database lock to preserve cursor ordering. Unflushed entries can be lost during process termination, queue overflow, or storage outages. These diagnostic logs supplement the existing audit and learning events; they do not replace them.
+
+The read endpoints are organization-admin-only and return `Cache-Control: no-store`:
+
+* `GET /api/v1/organizations/{organization_id}/runtime-logs/{kind}/{job_id}`
+* `GET /api/v1/organizations/{organization_id}/runtime-logs/catalog-sources/{source_id}`
+
+Kinds are `mcp_operation`, `scheduled_task`, and `agent_run`. Pagination uses the exclusive `after` cursor and `limit` (up to 500). Missing jobs return 404, unavailable log storage returns 503, and malformed entries are skipped with an explicit count in the response.

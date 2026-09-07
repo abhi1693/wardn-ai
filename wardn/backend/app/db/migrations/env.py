@@ -1,15 +1,16 @@
-from logging.config import fileConfig
+import logging
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
+from app.core.logging import configure_logging, log_context
 from app.db.base import Base, import_models
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+configure_logging("migration")
+logger = logging.getLogger("app.db.migrations")
 
 import_models()
 target_metadata = Base.metadata
@@ -47,7 +48,17 @@ def run_migrations_online() -> None:
             context.run_migrations()
 
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
+with log_context(service="migration"):
+    logger.info("migration_started")
+    try:
+        if context.is_offline_mode():
+            run_migrations_offline()
+        else:
+            run_migrations_online()
+    except Exception:
+        logger.exception("migration_failed")
+        # Alembic's CLI otherwise prints the raw exception (including SQL/parameters)
+        # after our sanitized diagnostic has already been emitted.
+        raise SystemExit(1) from None
+    else:
+        logger.info("migration_completed")

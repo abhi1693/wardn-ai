@@ -6,6 +6,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from app.db.session import AsyncSessionLocal
+from app.modules.observability.job_logs import logged_job
 from app.modules.scheduled_tasks import repository, service
 from app.modules.scheduled_tasks.models import WorkspaceScheduledTaskRun
 
@@ -148,6 +149,7 @@ async def retry_or_fail_claimed_run(
         await session.commit()
 
 
+@logged_job("scheduled_task", phase="execute")
 async def execute_task_run(
     run: WorkspaceScheduledTaskRun,
     *,

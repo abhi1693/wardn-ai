@@ -8,21 +8,14 @@ import typer
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.cli_utils import exit_with_code
+from app.core.logging import configure_logging
 from app.modules.mcp_runtime.reaper import run_runtime_reaper_once
 
 logger = logging.getLogger(__name__)
 
 
 def configure_command_logging(*, verbose: bool) -> None:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    configure_logging('maintenance', level="DEBUG" if verbose else None)
 
 
 async def reap_mcp_runtimes_from_args(args: SimpleNamespace) -> int:

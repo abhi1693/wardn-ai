@@ -21,6 +21,7 @@ from app.modules.mcp_registry.router import organization_catalog_router
 from app.modules.mcp_registry.router import organization_router as organization_mcp_registry_router
 from app.modules.mcp_registry.router import workspace_router as workspace_mcp_registry_router
 from app.modules.mcp_runtime.router import workspace_router as workspace_mcp_runtime_router
+from app.modules.observability.job_log_router import router as job_log_router
 from app.modules.observability.router import (
     organization_router as organization_observability_router,
 )
@@ -70,3 +71,5 @@ api_router.include_router(mcp_gateway_oauth_router)
 api_router.include_router(mcp_gateway_router)
 api_router.include_router(workspace_mcp_gateway_router)
 api_router.include_router(workspace_mcp_runtime_router)
+
+api_router.include_router(job_log_router)

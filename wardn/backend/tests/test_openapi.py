@@ -71,6 +71,8 @@ def test_openapi_exposes_expected_paths() -> None:
             "/{price_id}"
         ),
         "/api/v1/organizations/{organization_id}/usage/summary",
+        "/api/v1/organizations/{organization_id}/runtime-logs/{kind}/{job_id}",
+        "/api/v1/organizations/{organization_id}/runtime-logs/catalog-sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}",
         "/api/v1/organizations/{organization_id}/mcp/catalog/sources/{source_id}/sync",

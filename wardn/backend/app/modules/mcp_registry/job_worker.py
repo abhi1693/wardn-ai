@@ -12,6 +12,7 @@ from typing import Any
 from app.db.session import AsyncSessionLocal
 from app.modules.mcp_registry import job_repository
 from app.modules.mcp_registry.models import MCPOperationJob
+from app.modules.observability.job_logs import logged_job
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,7 @@ async def persist_job_failure(
         await session.commit()
 
 
+@logged_job("mcp_operation", phase="execute")
 async def execute_job(
     job: MCPOperationJob,
     *,
@@ -433,6 +435,7 @@ async def persist_cleanup_failure(
         await session.commit()
 
 
+@logged_job("mcp_operation", phase="cleanup")
 async def execute_cleanup(
     job: MCPOperationJob,
     *,

@@ -10,6 +10,12 @@ This page lists the main settings groups. See `wardn/backend/.env.example` and `
 
 * `WARDN_ENVIRONMENT`
 * `WARDN_LOG_LEVEL`
+* `WARDN_LOG_FORMAT` (`text` by default; `json` for structured collectors)
+* `WARDN_JOB_LOGS_ENABLED` (`true` by default)
+* `WARDN_JOB_LOG_MAX_ENTRIES` (latest `1000` entries per job by default)
+* `WARDN_JOB_LOG_TTL_SECONDS` (`604800`, or seven days, by default)
+
+See xref:concepts/observability-and-usage.adoc#_application_logs[Application logs] for console output, correlation, runtime log access, and retention.
 * `WARDN_TELEMETRY`
 * `WARDN_DATABASE_URL`
 * `WARDN_CORS_ORIGINS`

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
@@ -17,6 +18,8 @@ from app.modules.licensing.worker import (
 from app.modules.mcp_gateway.oauth import well_known_router as mcp_gateway_oauth_well_known_router
 from app.modules.mcp_runtime.shutdown import teardown_local_runtime_processes
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -26,7 +29,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cleanup.push_async_callback(engine.dispose)
         cleanup.push_async_callback(teardown_local_runtime_processes)
         cleanup.push_async_callback(stop_license_renewal_worker, license_renewal_task)
-        yield
+        logger.info("api_started")
+        try:
+            yield
+        finally:
+            logger.info("api_stopped")
 
 
 def create_app() -> FastAPI:

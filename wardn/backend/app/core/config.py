@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     environment: Literal["local", "development", "test", "staging", "production"] = "local"
     api_prefix: str = Field(default="/api/v1", pattern=r"^/[A-Za-z0-9/_-]*$")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    log_format: Literal["text", "json"] = "text"
+    job_logs_enabled: bool = True
+    job_log_max_entries: int = Field(default=1000, ge=100, le=10_000)
+    job_log_ttl_seconds: int = Field(default=604_800, ge=3600, le=2_592_000)
     api_token_secret: SecretStr = Field(
         default=SecretStr(DEVELOPMENT_API_TOKEN_SECRET),
         min_length=16,
@@ -239,6 +243,13 @@ class Settings(BaseSettings):
     database_pool_pre_ping: bool = True
     database_pool_use_lifo: bool = True
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("log_level", "log_format", mode="before")
+    @classmethod
+    def normalize_logging_setting(cls, value, info):
+        if isinstance(value, str):
+            return value.upper() if info.field_name == "log_level" else value.lower()
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod
