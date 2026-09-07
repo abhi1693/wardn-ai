@@ -172,6 +172,21 @@ async def count_active_organization_owners(
     return int(result.scalar_one())
 
 
+async def count_active_organization_members(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(OrganizationMembership)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.is_active.is_(True),
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def list_organization_admin_members(
     session: AsyncSession,
     *,

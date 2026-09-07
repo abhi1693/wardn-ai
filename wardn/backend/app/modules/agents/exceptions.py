@@ -20,3 +20,7 @@ class InvalidAgentToolAssignmentError(AgentError):
 
 class InvalidAgentRunError(AgentError):
     pass
+
+
+class AgentCapacityUnavailableError(AgentError):
+    pass

@@ -18,11 +18,13 @@ from app.modules.licensing.schemas import LicenseStatus
 from app.modules.users.models import User
 
 COMMUNITY_LIMITS: dict[str, int] = {
+    "members.per_organization": 1,
     "workspaces.per_organization": 3,
     "workspaces.created_per_user": 3,
     "agents.per_organization": 10,
     "agents.per_workspace": 5,
     "agents.per_workspace_per_user": 5,
+    "agent_runs.concurrent.per_organization": 1,
     "workspace_conversations.per_workspace": 100,
     "workspace_conversations.per_workspace_per_user": 100,
     "agent_chat.max_tool_rounds.per_run": 25,

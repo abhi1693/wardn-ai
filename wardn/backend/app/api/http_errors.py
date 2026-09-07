@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 
 from app.core.pagination import InvalidCursorError
 from app.modules.agents.exceptions import (
+    AgentCapacityUnavailableError,
     AgentNotFoundError,
     DuplicateAgentError,
     InvalidAgentRunError,
@@ -144,6 +145,7 @@ DOMAIN_ERRORS: dict[type[Exception], ErrorDefinition] = {
     InvalidLimitKeyError: _definition(400, "invalid_limit_key"),
     InvalidLimitScopeError: _definition(400, "invalid_limit_scope"),
     LimitExceededError: _definition(403, "limit_exceeded"),
+    AgentCapacityUnavailableError: _definition(429, "agent_capacity_unavailable"),
     AgentNotFoundError: _definition(404, "agent_not_found"),
     DuplicateAgentError: _definition(409, "agent_already_exists"),
     InvalidAgentRunError: _definition(400, "invalid_agent_run"),

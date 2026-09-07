@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents import repository
+from app.modules.agents import capacity, repository
 from app.modules.agents.approval_expiry import (
     agent_tool_approval_expires_at,
     agent_tool_approval_is_expired,
@@ -533,6 +533,10 @@ async def set_agent_tool_approval_running(
     workspace_id: uuid.UUID,
     approval: AgentToolApproval,
 ) -> None:
+    await capacity.require_resume_capacity(
+        session,
+        organization_id=organization_id,
+    )
     approval.status = "running"
     approval.error = ""
     await session.flush()

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.domain_types import MembershipRole
+from app.modules.limits import service as limits_service
 from app.modules.organizations import repository
 from app.modules.organizations.exceptions import (
     DuplicateInvitationError,
@@ -733,6 +734,28 @@ async def _accept_invitation(
         organization.id,
         user.id,
     )
+    if get_settings().hosted_cloud_mode and (
+        organization_membership is None or not organization_membership.is_active
+    ):
+        await limits_service.lock_quota_capacity(
+            session,
+            [
+                limits_service.quota_scope(
+                    limits_service.MEMBERS_PER_ORGANIZATION,
+                    organization.id,
+                )
+            ],
+        )
+        member_count = await repository.count_active_organization_members(
+            session,
+            organization.id,
+        )
+        await limits_service.require_limit_available(
+            session,
+            limit_key=limits_service.MEMBERS_PER_ORGANIZATION,
+            scope_chain=[("organization", organization.id)],
+            current_count=member_count,
+        )
     if invitation.scope_type == "organization":
         if organization_membership is not None and organization_membership.is_active:
             raise MembershipRoleError("user is already an organization member")

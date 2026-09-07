@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.modules.licensing.service import current_entitlements
 from app.modules.limits import repository
 from app.modules.limits.exceptions import (
@@ -38,6 +39,8 @@ WORKSPACES_CREATED_PER_USER = "workspaces.created_per_user"
 AGENTS_PER_ORGANIZATION = "agents.per_organization"
 AGENTS_PER_WORKSPACE = "agents.per_workspace"
 AGENTS_PER_WORKSPACE_PER_USER = "agents.per_workspace_per_user"
+MEMBERS_PER_ORGANIZATION = "members.per_organization"
+CONCURRENT_AGENT_RUNS_PER_ORGANIZATION = "agent_runs.concurrent.per_organization"
 WORKSPACE_CONVERSATIONS_PER_WORKSPACE = "workspace_conversations.per_workspace"
 WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER = (
     "workspace_conversations.per_workspace_per_user"
@@ -79,6 +82,8 @@ SUPPORTED_LIMIT_KEYS = {
     AGENTS_PER_ORGANIZATION,
     AGENTS_PER_WORKSPACE,
     AGENTS_PER_WORKSPACE_PER_USER,
+    MEMBERS_PER_ORGANIZATION,
+    CONCURRENT_AGENT_RUNS_PER_ORGANIZATION,
     WORKSPACE_CONVERSATIONS_PER_WORKSPACE,
     WORKSPACE_CONVERSATIONS_PER_WORKSPACE_PER_USER,
     AGENT_CHAT_MAX_TOOL_ROUNDS_PER_RUN,
@@ -431,9 +436,19 @@ async def require_limit_available(
     current_count: int,
     requested: int = 1,
 ) -> None:
-    limit = await effective_limit(session, limit_key=limit_key, scope_chain=scope_chain)
+    normalized_key = normalize_limit_key(limit_key)
+    limit = await effective_limit(session, limit_key=normalized_key, scope_chain=scope_chain)
+    settings = get_settings()
+    hosted_default = hosted_cloud_default_limit(settings, normalized_key)
+    if hosted_default is not None:
+        effective_value = limit.value if limit is not None else hosted_default
+        if current_count + requested > effective_value:
+            raise LimitExceededError(
+                f"{normalized_key} limit exceeded: {current_count}/{effective_value}"
+            )
+        return
     _, entitlements = await current_entitlements(session)
-    licensed_value = entitlements.limits.get(normalize_limit_key(limit_key))
+    licensed_value = entitlements.limits.get(normalized_key)
     configured_value = limit.value if limit is not None else None
     values = [value for value in (licensed_value, configured_value) if value is not None]
     if not values:
@@ -441,9 +456,22 @@ async def require_limit_available(
     effective_value = min(values)
     if current_count + requested > effective_value:
         raise LimitExceededError(
-            f"{normalize_limit_key(limit_key)} limit exceeded: "
+            f"{normalized_key} limit exceeded: "
             f"{current_count}/{effective_value}"
         )
+
+
+def hosted_cloud_default_limit(settings: Settings, limit_key: str) -> int | None:
+    if not settings.hosted_cloud_mode:
+        return None
+    return {
+        MEMBERS_PER_ORGANIZATION: settings.hosted_cloud_members_per_organization,
+        WORKSPACES_PER_ORGANIZATION: settings.hosted_cloud_workspaces_per_organization,
+        AGENTS_PER_ORGANIZATION: settings.hosted_cloud_agents_per_organization,
+        CONCURRENT_AGENT_RUNS_PER_ORGANIZATION: (
+            settings.hosted_cloud_concurrent_agent_runs_per_organization
+        ),
+    }.get(limit_key)
 
 
 def ensure_aware_utc(value: datetime) -> datetime:

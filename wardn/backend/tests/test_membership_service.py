@@ -3,6 +3,8 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.config import Settings
+from app.modules.limits.exceptions import LimitExceededError
 from app.modules.organizations import membership_service
 from app.modules.organizations.exceptions import (
     InvitationEmailMismatchError,
@@ -456,6 +458,70 @@ async def test_accept_workspace_invitation_creates_required_memberships(monkeypa
     assert invitation.status == "accepted"
     assert invitation.accepted_by_id == user.id
     assert response.workspace_id == workspace.id
+
+
+@pytest.mark.asyncio
+async def test_hosted_cloud_invitation_respects_organization_member_limit(monkeypatch) -> None:
+    organization = Organization(
+        id=uuid4(),
+        name="Platform",
+        slug="platform",
+        status="active",
+    )
+    invitation = MembershipInvitation(
+        id=uuid4(),
+        organization_id=organization.id,
+        scope_type="organization",
+        email="member@example.com",
+        role="member",
+        token_hash="hash",
+        status="pending",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+    )
+    user = User(id=uuid4(), email="member@example.com", is_active=True)
+
+    async def active_invitation(*args, **kwargs):
+        return invitation, organization, None
+
+    async def missing_membership(*args, **kwargs):
+        return None
+
+    async def no_op(*args, **kwargs) -> None:
+        return None
+
+    async def count_members(*args, **kwargs) -> int:
+        return 1
+
+    async def limit_exceeded(*args, **kwargs) -> None:
+        raise LimitExceededError("members.per_organization limit exceeded: 1/1")
+
+    monkeypatch.setattr(membership_service, "_active_invitation", active_invitation)
+    monkeypatch.setattr(
+        membership_service.repository,
+        "get_organization_membership_any",
+        missing_membership,
+    )
+    monkeypatch.setattr(
+        membership_service.repository,
+        "count_active_organization_members",
+        count_members,
+    )
+    monkeypatch.setattr(membership_service.limits_service, "lock_quota_capacity", no_op)
+    monkeypatch.setattr(
+        membership_service.limits_service,
+        "require_limit_available",
+        limit_exceeded,
+    )
+    monkeypatch.setattr(
+        membership_service,
+        "get_settings",
+        lambda: Settings(hosted_cloud_mode=True),
+    )
+
+    with pytest.raises(LimitExceededError, match="members.per_organization"):
+        await membership_service.accept_invitation(FakeSession(), "secret", user)
+
+    assert invitation.status == "pending"
 
 
 @pytest.mark.asyncio

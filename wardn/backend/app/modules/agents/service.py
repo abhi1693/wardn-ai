@@ -9,8 +9,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.pagination import CursorPageMetadata
-from app.modules.agents import repository
+from app.modules.agents import capacity, repository
 from app.modules.agents.approvals import (
     approval_continuation_prompt as approval_continuation_prompt,
 )
@@ -2700,16 +2701,20 @@ async def stream_agent_chat(
             persisted_messages,
             payload.messages,
         )
-    agent_run = await repository.create_agent_run(
-        session,
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-        conversation_id=conversation.id if conversation is not None else None,
-        previous_agent_run_id=previous_agent_run_id,
-        triggered_by_id=user.id,
-        trigger_type=trigger_type,
-    )
+    run_arguments = {
+        "organization_id": organization_id,
+        "workspace_id": workspace_id,
+        "agent_id": agent.id,
+        "conversation_id": conversation.id if conversation is not None else None,
+        "previous_agent_run_id": previous_agent_run_id,
+        "triggered_by_id": user.id,
+        "trigger_type": trigger_type,
+    }
+    if get_settings().hosted_cloud_mode and isinstance(session, AsyncSession):
+        await session.commit()
+        agent_run = await capacity.reserve_agent_run(**run_arguments)
+    else:
+        agent_run = await repository.create_agent_run(session, **run_arguments)
     if on_agent_run_created is not None:
         on_agent_run_created(agent_run.id)
     await repository.append_agent_run_step(

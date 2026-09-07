@@ -498,6 +498,26 @@ async def create_agent_run(
     return agent_run
 
 
+async def count_running_agent_runs(
+    session: AsyncSession,
+    *,
+    active_since: datetime,
+    organization_id: uuid.UUID | None = None,
+) -> int:
+    statement = (
+        select(func.count())
+        .select_from(AgentRun)
+        .where(
+            AgentRun.status == "running",
+            AgentRun.updated_at >= active_since,
+        )
+    )
+    if organization_id is not None:
+        statement = statement.where(AgentRun.organization_id == organization_id)
+    result = await session.execute(statement)
+    return int(result.scalar_one())
+
+
 async def mark_agent_run_running(
     session: AsyncSession,
     agent_run: AgentRun,

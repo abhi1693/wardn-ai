@@ -101,6 +101,19 @@ class Settings(BaseSettings):
     agent_run_resume_worker_heartbeat_seconds: int = Field(default=30, ge=1, le=600)
     agent_run_resume_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     agent_run_resume_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
+    hosted_cloud_mode: bool = False
+    hosted_cloud_members_per_organization: int = Field(default=1, ge=1, le=10_000)
+    hosted_cloud_workspaces_per_organization: int = Field(default=1, ge=1, le=10_000)
+    hosted_cloud_agents_per_organization: int = Field(default=3, ge=1, le=100_000)
+    hosted_cloud_concurrent_agent_runs_per_organization: int = Field(
+        default=1,
+        ge=1,
+        le=1_000,
+    )
+    hosted_cloud_global_concurrent_agent_runs: int = Field(default=8, ge=1, le=10_000)
+    hosted_cloud_agent_run_queue_wait_seconds: float = Field(default=30, ge=0, le=300)
+    hosted_cloud_agent_run_queue_poll_seconds: float = Field(default=0.25, gt=0, le=10)
+    hosted_cloud_agent_run_stale_seconds: int = Field(default=3600, ge=60, le=86_400)
     agent_tool_approval_expiry_seconds: int = Field(default=24 * 60 * 60, ge=60, le=2_592_000)
     agent_chat_websocket_response_timeout_seconds: float = Field(
         default=120.0,
