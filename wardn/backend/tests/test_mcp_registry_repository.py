@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
+from app.modules.limits.service import QuotaScope, quota_lock_id
 from app.modules.mcp_gateway.scope import GatewayScope
 from app.modules.mcp_registry import repository, tool_repository
 from app.modules.mcp_registry.models import MCPServerToolSchema, MCPServerVersion
@@ -30,6 +31,26 @@ class RecordingSession:
     async def execute(self, statement):
         self.statements.append(statement)
         return ScalarResult(self.values)
+
+
+@pytest.mark.asyncio
+async def test_catalog_write_lock_preserves_scope_and_rolling_upgrade_compatibility() -> None:
+    session = RecordingSession()
+    organization_id = uuid4()
+    other_organization_id = uuid4()
+    for scope_id in [organization_id, organization_id, other_organization_id]:
+        await repository.lock_catalog_versions(session, scope_id)
+
+    statements = [
+        statement.compile(dialect=postgresql.dialect()) for statement in session.statements
+    ]
+    assert all("pg_advisory_xact_lock" in str(statement) for statement in statements)
+    lock_ids = [next(iter(statement.params.values())) for statement in statements]
+    previous_lock = quota_lock_id(
+        QuotaScope("mcp_server_versions.per_organization", (organization_id,))
+    )
+    assert lock_ids[0] == lock_ids[1] == previous_lock
+    assert lock_ids[2] != previous_lock
 
 
 def server(

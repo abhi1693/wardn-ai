@@ -110,6 +110,14 @@ def test_agent_chat_tool_round_limit_key_is_supported() -> None:
     )
 
 
+def test_catalog_version_quota_cannot_be_configured() -> None:
+    with pytest.raises(InvalidLimitKeyError):
+        service.normalize_limit_key("mcp_server_versions.per_organization")
+
+    assert service.normalize_limit_key("mcp_catalog_sources.per_organization")
+    assert service.normalize_limit_key("mcp_server_installations.per_workspace")
+
+
 @pytest.mark.asyncio
 async def test_effective_agent_chat_max_tool_rounds_uses_workspace_limit(
     monkeypatch,

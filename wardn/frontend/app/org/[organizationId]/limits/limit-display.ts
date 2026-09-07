@@ -74,12 +74,6 @@ export const knownLimitKeys: Array<{
     defaultScope: "organization",
   },
   {
-    value: "mcp_server_versions.per_organization",
-    label: "MCP server versions per organization",
-    scopes: ["organization"],
-    defaultScope: "organization",
-  },
-  {
     value: "mcp_server_installations.per_workspace",
     label: "MCP server installs per workspace",
     scopes: ["workspace", "organization"],

@@ -31,6 +31,7 @@ def signed_lease(
     *,
     now: datetime,
     sequence: int = 1,
+    limits: dict[str, int] | None = None,
 ) -> str:
     payload = {
         "issuer": service.OFFICIAL_LICENSE_ISSUER,
@@ -39,7 +40,7 @@ def signed_lease(
         "instance_id": str(instance_id),
         "edition": "business",
         "features": {"advancedGuardrails": True},
-        "limits": {"agents.per_organization": 100},
+        "limits": limits if limits is not None else {"agents.per_organization": 100},
         "issued_at": now.isoformat(),
         "expires_at": (now + timedelta(hours=24)).isoformat(),
         "grace_until": (now + timedelta(days=7)).isoformat(),
@@ -81,6 +82,44 @@ def test_signed_lease_cannot_be_used_by_another_instance(monkeypatch) -> None:
         service.verify_signed_lease(
             signed_lease(key, uuid.uuid4(), now=now),
             instance_id=uuid.uuid4(),
+            settings=Settings(),
+        )
+
+
+def test_retired_catalog_quota_preserves_existing_signed_license(monkeypatch) -> None:
+    key = OKPKey.generate_key(auto_kid=True)
+    install_test_public_key(monkeypatch, key)
+    instance_id = uuid.uuid4()
+    now = datetime(2026, 9, 8, tzinfo=UTC)
+    claims = service.verify_signed_lease(
+        signed_lease(
+            key,
+            instance_id,
+            now=now,
+            limits={"agents.per_organization": 100, "mcp_server_versions.per_organization": 50},
+        ),
+        instance_id=instance_id,
+        settings=Settings(),
+    )
+
+    for at, expected_agents in [(now, 100), (now + timedelta(days=8), 10)]:
+        entitlements = service.entitlements_from_claims(claims, now=at)
+        assert "mcp_server_versions.per_organization" not in entitlements.limits
+        assert entitlements.limits["agents.per_organization"] == expected_agents
+        assert entitlements.limits["mcp_server_installations.per_workspace"] == 10
+        assert entitlements.limits["mcp_catalog_sources.per_organization"] == 3
+
+
+def test_signed_license_still_rejects_unknown_limit_keys(monkeypatch) -> None:
+    key = OKPKey.generate_key(auto_kid=True)
+    install_test_public_key(monkeypatch, key)
+    instance_id = uuid.uuid4()
+    with pytest.raises(InvalidLicenseLeaseError):
+        service.verify_signed_lease(
+            signed_lease(
+                key, instance_id, now=datetime.now(UTC), limits={"unknown.per_organization": 50}
+            ),
+            instance_id=instance_id,
             settings=Settings(),
         )
 

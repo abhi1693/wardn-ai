@@ -31,7 +31,6 @@ COMMUNITY_LIMITS: dict[str, int] = {
     "guardrail_policies.per_workspace": 5,
     "guardrail_policies.per_workspace_per_user": 5,
     "mcp_catalog_sources.per_organization": 3,
-    "mcp_server_versions.per_organization": 50,
     "mcp_server_installations.per_workspace": 10,
     "mcp_runtime_public_egress.per_workspace": 1,
     "mcp_runtime_private_egress.per_workspace": 0,
@@ -47,6 +46,7 @@ COMMUNITY_LIMITS: dict[str, int] = {
     "llm_provider_credentials.per_user": 5,
 }
 COMMUNITY_FEATURES: dict[str, bool] = {}
+RETIRED_LIMIT_KEYS = {"mcp_server_versions.per_organization"}
 OFFICIAL_LICENSE_SERVER_URL = "https://licenses.wardnai.dev"
 OFFICIAL_LICENSE_ISSUER = "https://licenses.wardnai.dev"
 OFFICIAL_LICENSE_AUDIENCE = "wardn-ai"
@@ -87,10 +87,11 @@ class LeaseClaims(BaseModel):
     def validate_limits(cls, value: dict[str, int]) -> dict[str, int]:
         if any(limit < 0 for limit in value.values()):
             raise ValueError("license limits cannot be negative")
-        unknown = set(value) - set(COMMUNITY_LIMITS)
+        unknown = set(value) - set(COMMUNITY_LIMITS) - RETIRED_LIMIT_KEYS
         if unknown:
             raise ValueError(f"license contains unsupported limits: {', '.join(sorted(unknown))}")
-        return value
+        # Existing signed leases remain valid after catalog count limits retire.
+        return {key: limit for key, limit in value.items() if key not in RETIRED_LIMIT_KEYS}
 
 
 @dataclass(frozen=True)

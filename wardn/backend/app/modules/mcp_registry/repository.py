@@ -1,3 +1,4 @@
+import hashlib
 import math
 import re
 import uuid
@@ -38,6 +39,16 @@ SERVER_CURSOR_FIELDS = 4
 SEARCH_CURSOR_FIELDS = 6
 REGISTRY_SEARCH_GENERIC_TERMS = frozenset({"mcp", "server", "servers"})
 REGISTRY_SEARCH_GENERIC_PHRASE = re.compile(r"\bmodel\s+context\s+protocol\b")
+
+
+async def lock_catalog_versions(session: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Serialize latest-version updates without limiting catalog size."""
+    # Preserve the previous lock identity during rolling upgrades. Catalog writes
+    # still need serialization even though the associated count quota is retired.
+    canonical = f"mcp_server_versions.per_organization:{organization_id}"
+    digest = hashlib.blake2b(canonical.encode(), digest_size=8, person=b"wardnquota").digest()
+    lock_id = int.from_bytes(digest, byteorder="big", signed=True)
+    await session.execute(select(func.pg_advisory_xact_lock(lock_id)))
 
 
 def normalize_registry_search_query(query: str) -> str:

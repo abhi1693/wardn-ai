@@ -911,15 +911,7 @@ async def create_server_version(
 ) -> MCPRegistryServerResponse:
     organization_id = await catalog_organization_id(session, organization_id)
     if organization_id is not None:
-        await limits_service.lock_quota_capacity(
-            session,
-            [
-                limits_service.quota_scope(
-                    limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
-                    organization_id,
-                )
-            ],
-        )
+        await repository.lock_catalog_versions(session, organization_id)
     existing = await repository.get_server_version(
         session,
         payload.name,
@@ -953,20 +945,6 @@ async def create_server_version(
             )
             return server_response(existing)
         raise DuplicateMCPServerVersionError("server version already exists")
-
-    if organization_id is not None:
-        version_count = await repository.count_server_versions_for_organization(
-            session,
-            organization_id,
-        )
-        await limits_service.require_limit_available(
-            session,
-            limit_key=limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
-            scope_chain=[
-                ("organization", organization_id),
-            ],
-            current_count=version_count,
-        )
 
     await repository.clear_latest_for_name(session, payload.name, organization_id=organization_id)
     server = MCPServerVersion(
@@ -1121,20 +1099,7 @@ async def sync_supported_servers(
         }.values()
     )
     duplicate_count = len(payloads) - len(unique_payloads)
-    current_version_count = 0
-    await limits_service.lock_quota_capacity(
-        session,
-        [
-            limits_service.quota_scope(
-                limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
-                organization_id,
-            )
-        ],
-    )
-    current_version_count = await repository.count_server_versions_for_organization(
-        session,
-        organization_id,
-    )
+    await repository.lock_catalog_versions(session, organization_id)
     upstream_latest_by_name = {
         payload.name: payload.version
         for payload in unique_payloads
@@ -1144,25 +1109,15 @@ async def sync_supported_servers(
         payload.name: upstream_latest_by_name.get(payload.name, payload.version)
         for payload in unique_payloads
     }
-    keys = {(payload.name, payload.version) for payload in unique_payloads}
-    existing_statuses = await repository.get_server_version_statuses(
-        session,
-        keys,
-        organization_id=organization_id,
-    )
     rows_with_metadata: list[dict] = []
     rows_without_metadata: list[dict] = []
     now = datetime.now(UTC)
-    activated_version_count = 0
     for payload in unique_payloads:
         values = server_values(
             payload,
             is_latest=latest_by_name[payload.name] == payload.version,
             catalog_source_id=catalog_source_id,
         )
-        key = (payload.name, payload.version)
-        if values["status"] != "deleted" and existing_statuses.get(key) in (None, "deleted"):
-            activated_version_count += 1
         values.update(id=uuid.uuid4(), organization_id=organization_id)
         if registry_metadata(payload) is not None:
             rows_with_metadata.append(values)
@@ -1170,13 +1125,6 @@ async def sync_supported_servers(
             values.update(published_at=now, status_changed_at=now)
             rows_without_metadata.append(values)
 
-    await limits_service.require_limit_available(
-        session,
-        limit_key=limits_service.MCP_SERVER_VERSIONS_PER_ORGANIZATION,
-        scope_chain=[("organization", organization_id)],
-        current_count=current_version_count,
-        requested=activated_version_count,
-    )
     await repository.clear_latest_for_names(
         session,
         {payload.name for payload in unique_payloads},
@@ -1201,7 +1149,6 @@ async def sync_supported_servers(
             "mcp_catalog_payload_count": len(payloads),
             "mcp_catalog_unique_count": len(unique_payloads),
             "mcp_catalog_duplicate_count": duplicate_count,
-            "mcp_catalog_activated_count": activated_version_count,
             "mcp_catalog_metadata_count": len(rows_with_metadata),
             "mcp_catalog_without_metadata_count": len(rows_without_metadata),
         },

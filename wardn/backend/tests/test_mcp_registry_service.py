@@ -115,17 +115,14 @@ class FakeSession:
         return None
 
 
-def patch_bulk_sync_dependencies(monkeypatch, *, statuses=None):
-    captured = {"cleared": [], "batches": []}
+def patch_bulk_sync_dependencies(monkeypatch):
+    captured = {"cleared": [], "batches": [], "locked": []}
 
-    async def no_op(*args, **kwargs):
-        return None
+    async def lock_catalog(session, organization_id):
+        captured["locked"].append(organization_id)
 
-    async def count_versions(*args, **kwargs):
-        return 0
-
-    async def get_statuses(*args, **kwargs):
-        return statuses or {}
+    async def reject_catalog_quota(*args, **kwargs):
+        raise AssertionError("Catalog metadata must not consume a resource quota")
 
     async def clear_names(session, names, **kwargs):
         captured["cleared"].append(names)
@@ -134,14 +131,8 @@ def patch_bulk_sync_dependencies(monkeypatch, *, statuses=None):
         if rows:
             captured["batches"].append((update_published_metadata, rows))
 
-    monkeypatch.setattr(service.limits_service, "lock_quota_capacity", no_op)
-    monkeypatch.setattr(service.limits_service, "require_limit_available", no_op)
-    monkeypatch.setattr(
-        service.repository,
-        "count_server_versions_for_organization",
-        count_versions,
-    )
-    monkeypatch.setattr(service.repository, "get_server_version_statuses", get_statuses)
+    monkeypatch.setattr(service.repository, "lock_catalog_versions", lock_catalog)
+    monkeypatch.setattr(service.limits_service, "require_limit_available", reject_catalog_quota)
     monkeypatch.setattr(service.repository, "clear_latest_for_names", clear_names)
     monkeypatch.setattr(service.repository, "bulk_upsert_server_versions", bulk_upsert)
     return captured
@@ -297,11 +288,17 @@ async def test_create_server_version_marks_new_version_latest(monkeypatch) -> No
     async def clear_latest(*args, **kwargs):
         calls.append(("clear_latest", args[1]))
 
+    async def reject_catalog_quota(*args, **kwargs):
+        raise AssertionError("Creating catalog metadata must not consume a resource quota")
+
     monkeypatch.setattr(service.repository, "get_server_version", missing_server)
     monkeypatch.setattr(service.repository, "clear_latest_for_name", clear_latest)
+    monkeypatch.setattr(service.limits_service, "require_limit_available", reject_catalog_quota)
     session = FakeSession()
 
-    response = await service.create_server_version(session, registry_payload())
+    response = await service.create_server_version(
+        session, registry_payload(), organization_id=ORGANIZATION_ID
+    )
 
     assert calls == [("clear_latest", "io.github.example/weather")]
     assert session.flushed is True
@@ -372,6 +369,31 @@ async def test_sync_supported_servers_upserts_curated_entries(monkeypatch) -> No
     assert update_metadata is False
     assert [row["version"] for row in rows] == ["1.0.0", "1.1.0"]
     assert [row["is_latest"] for row in rows] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_catalog_sync_has_no_cumulative_server_version_quota(monkeypatch) -> None:
+    captured = patch_bulk_sync_dependencies(monkeypatch)
+    session = FakeSession()
+    total = 0
+
+    for batch_index in range(3):
+        payloads = [
+            registry_payload().model_copy(
+                update={"name": f"io.github.example/server-{batch_index * 100 + index}"}
+            )
+            for index in range(100)
+        ]
+        total += await service.sync_supported_servers(
+            session, payloads, organization_id=ORGANIZATION_ID
+        )
+
+    rows = [row for _, batch in captured["batches"] for row in batch]
+    assert total == 300
+    assert len({row["name"] for row in rows}) == 300
+    assert all(row["organization_id"] == ORGANIZATION_ID for row in rows)
+    assert all(row["is_latest"] for row in rows)
+    assert captured["locked"] == [ORGANIZATION_ID] * 3
 
 
 @pytest.mark.asyncio
