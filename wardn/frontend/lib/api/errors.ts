@@ -6,7 +6,7 @@ export class ApiError extends Error {
   readonly status: number;
 
   constructor(status: number, body: unknown, fallback: string, options: ApiErrorOptions = {}) {
-    super(apiErrorMessage(body, fallback), options);
+    super(apiErrorMessage(body, statusErrorMessage(status, fallback)), options);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
@@ -29,6 +29,12 @@ type ApiErrorOptions = ErrorOptions & {
   path?: string;
   requestId?: string;
 };
+
+function statusErrorMessage(status: number, fallback: string) {
+  return [502, 503, 504].includes(status)
+    ? "Wardn is temporarily unavailable. Please try again shortly."
+    : fallback;
+}
 
 function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -75,6 +81,10 @@ export function apiErrorDiagnostics(error: ApiError) {
 
 export function apiErrorMessage(body: unknown, fallback: string): string {
   if (typeof body === "string" && body.trim()) {
+    // Proxy error documents are diagnostics, not messages for the user.
+    if (/<(?:!doctype\s+html|html|head|body)\b/i.test(body)) {
+      return fallback;
+    }
     return body;
   }
   if (Array.isArray(body)) {
@@ -94,10 +104,14 @@ export function apiErrorMessage(body: unknown, fallback: string): string {
     }
   }
   if (typeof record.msg === "string" && record.msg.trim()) {
+    const message = apiErrorMessage(record.msg, "");
+    if (!message) {
+      return fallback;
+    }
     const location = Array.isArray(record.loc)
       ? record.loc.filter((part) => part !== "body").join(".")
       : "";
-    return location ? `${location}: ${record.msg}` : record.msg;
+    return location ? `${location}: ${message}` : message;
   }
   return fallback;
 }
@@ -116,6 +130,9 @@ export async function readApiResponseBody(response: Response): Promise<unknown> 
     return undefined;
   }
   const contentType = response.headers.get("content-type")?.toLocaleLowerCase() ?? "";
+  if (!response.ok && contentType.includes("html")) {
+    return undefined;
+  }
   if (!contentType.includes("json")) {
     return text;
   }
@@ -127,5 +144,8 @@ export async function readApiResponseBody(response: Response): Promise<unknown> 
 }
 
 export async function responseErrorMessage(response: Response, fallback: string) {
-  return apiErrorMessage(await readApiResponseBody(response), fallback);
+  return apiErrorMessage(
+    await readApiResponseBody(response),
+    statusErrorMessage(response.status, fallback)
+  );
 }

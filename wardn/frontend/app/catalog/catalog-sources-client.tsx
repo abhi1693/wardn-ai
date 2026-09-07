@@ -193,7 +193,9 @@ export function CatalogSourcesClient({
     setError("");
     setNotice("");
     try {
-      const job = await organizationMcpCatalogSyncSource(organizationId, source.id);
+      const job = await organizationMcpCatalogSyncSource(organizationId, source.id, {
+        mutationFeedback: false,
+      });
       const payload = await waitForJob<CatalogSyncResult>({
         failureMessage: "Catalog synchronization failed.",
         fetchJob: (jobId, signal) =>
@@ -218,6 +220,7 @@ export function CatalogSourcesClient({
       if (isOperationJobPollingCancelled(caught)) {
         return;
       }
+      setNotice("");
       setError(caught instanceof Error ? caught.message : "Catalog sync failed.");
     } finally {
       setBusyId(null);
@@ -291,8 +294,12 @@ export function CatalogSourcesClient({
         <AsyncFeedback variant="error">{error}</AsyncFeedback>
       ) : null}
       {notice ? (
-        <AsyncFeedback className="flex items-center gap-2" variant="success">
-          <CheckCircle2 className="size-4" />
+        <AsyncFeedback className="flex items-center gap-2" variant={busyId ? "progress" : "success"}>
+          {busyId ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <CheckCircle2 className="size-4" />
+          )}
           {notice}
         </AsyncFeedback>
       ) : null}

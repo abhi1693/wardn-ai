@@ -5,7 +5,7 @@ import {
   MutationFeedbackProvider,
 } from "@/components/providers/mutation-feedback-provider";
 import { apiRequest } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, apiErrorMessage } from "@/lib/api/errors";
 
 function MutationHarness({ method = "POST" }: { method?: "DELETE" | "POST" | "PUT" }) {
   return (
@@ -101,5 +101,37 @@ describe("mutation feedback", () => {
     const error = new ApiError(409, { detail: "Conflict", requestId: "req-direct" }, "Failed");
     expect(error.requestId).to.equal("req-direct");
     expect(error.isRetryable).to.equal(false);
+  });
+
+  it("shows a readable error when the proxy returns an HTML gateway page", () => {
+    cy.intercept("POST", "/api/test-mutation*", {
+      body: "<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>",
+      headers: { "content-type": "text/html", "x-request-id": "req-proxy" },
+      statusCode: 502,
+    });
+    cy.mount(<MutationHarness />);
+
+    cy.findByRole("button", { name: "Run mutation" }).click();
+    cy.get("[data-mutation-feedback-outlet]").within(() => {
+      cy.findByText("Wardn is temporarily unavailable. Please try again shortly.")
+        .should("be.visible");
+      cy.findByText("Request ID: req-proxy").should("be.visible");
+    });
+    cy.get("body").should("not.contain.text", "<html>").and("not.contain.text", "nginx");
+  });
+
+  it("suppresses proxy documents without losing structured validation errors", () => {
+    const html = "<!DOCTYPE html><html><body>Gateway timeout</body></html>";
+    for (const status of [502, 503, 504]) {
+      const error = new ApiError(status, html, "Request failed");
+      expect(error.message).to.equal("Wardn is temporarily unavailable. Please try again shortly.");
+      expect(error.diagnostics()).to.include(`Status: ${status}`).and.not.to.include("<html>");
+    }
+    expect(apiErrorMessage({ detail: html }, "Request failed")).to.equal("Request failed");
+    expect(new ApiError(503, { detail: "Catalog provider unavailable." }, "Failed").message)
+      .to.equal("Catalog provider unavailable.");
+    expect(new ApiError(422, { detail: [{ loc: ["body", "name"], msg: "Required" }] }, "Failed").message)
+      .to.equal("name: Required");
+    expect(apiErrorMessage("Name must be unique.", "Failed")).to.equal("Name must be unique.");
   });
 });
