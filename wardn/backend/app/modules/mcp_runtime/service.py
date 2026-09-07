@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.modules.learning import capture as learning_capture
 from app.modules.mcp_registry import repository as mcp_registry_repository
 from app.modules.mcp_registry.models import MCPServerInstallation, MCPServerVersion
 from app.modules.mcp_runtime import repository
@@ -734,6 +735,7 @@ async def prepare_tool_call_tracking(
     )
     session.add(invocation)
     await session.flush()
+    await learning_capture.tool_started(session, invocation)
     add_runtime_event(
         session,
         runtime_session,
@@ -890,6 +892,7 @@ async def finalize_prepared_tool_call(
     else:
         raise ValueError("result or error is required to finalize a tool call")
     await session.flush()
+    await learning_capture.tool_finished(session, invocation)
 
 
 async def call_tool_with_tracking(
@@ -1204,6 +1207,8 @@ async def recover_stale_tool_invocations(
         invocation.is_error = True
         invocation.error = "Tool call did not finalize before the recovery deadline."
     await session.flush()
+    for invocation in invocations:
+        await learning_capture.tool_finished(session, invocation)
     return len(invocations)
 
 

@@ -20,6 +20,7 @@ from app.modules.agents.models import (
     WorkspaceConversation,
 )
 from app.modules.chat_providers.models import ChatProviderConnection, ChatProviderThread
+from app.modules.learning import capture as learning_capture
 from app.modules.mcp_registry.models import (
     MCPServerInstallation,
     MCPServerToolSchema,
@@ -430,6 +431,7 @@ async def append_conversation_message(
     session.add(message)
     await session.flush()
     await session.refresh(message)
+    await learning_capture.conversation_message(session, message)
     return message
 
 
@@ -476,6 +478,7 @@ async def create_agent_run(
     triggered_by_id: uuid.UUID | None,
     previous_agent_run_id: uuid.UUID | None = None,
     trigger_type: str = "chat",
+    scheduled_run_id: uuid.UUID | None = None,
     now: datetime | None = None,
 ) -> AgentRun:
     now = now or datetime.now(UTC)
@@ -495,6 +498,7 @@ async def create_agent_run(
     session.add(agent_run)
     await session.flush()
     await session.refresh(agent_run)
+    await learning_capture.agent_run_started(session, agent_run, scheduled_run_id=scheduled_run_id)
     return agent_run
 
 
@@ -522,11 +526,14 @@ async def mark_agent_run_running(
     session: AsyncSession,
     agent_run: AgentRun,
 ) -> AgentRun:
+    previous_status = agent_run.status
     agent_run.status = "running"
     agent_run.error = ""
     agent_run.finished_at = None
     await session.flush()
     await session.refresh(agent_run)
+    if previous_status != agent_run.status:
+        await learning_capture.agent_run_status(session, agent_run)
     return agent_run
 
 
@@ -562,6 +569,7 @@ async def append_agent_run_step(
     session.add(step)
     await session.flush()
     await session.refresh(step)
+    await learning_capture.agent_step(session, agent_run, step)
     return step
 
 
@@ -602,6 +610,7 @@ async def create_tool_approval(
     session.add(approval)
     await session.flush()
     await session.refresh(approval)
+    await learning_capture.approval_requested(session, approval)
     return approval
 
 
@@ -1084,11 +1093,14 @@ async def finish_agent_run(
     if agent_run.status == "canceled" and status != "canceled":
         await session.refresh(agent_run)
         return agent_run
+    previous_status = agent_run.status
     agent_run.status = status
     agent_run.error = error
     agent_run.finished_at = now or datetime.now(UTC)
     await session.flush()
     await session.refresh(agent_run)
+    if previous_status != agent_run.status:
+        await learning_capture.agent_run_status(session, agent_run)
     return agent_run
 
 

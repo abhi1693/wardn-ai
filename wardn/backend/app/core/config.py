@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     agent_run_resume_worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     agent_run_resume_worker_retry_max_seconds: int = Field(default=15 * 60, ge=1, le=86_400)
     hosted_cloud_mode: bool = False
+    learning_events_enabled: bool = True
     hosted_cloud_members_per_organization: int = Field(default=1, ge=1, le=10_000)
     hosted_cloud_workspaces_per_organization: int = Field(default=1, ge=1, le=10_000)
     hosted_cloud_agents_per_organization: int = Field(default=3, ge=1, le=100_000)

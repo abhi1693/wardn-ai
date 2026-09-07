@@ -2121,6 +2121,7 @@ async def prepare_agent_run_for_task(
         workspace_id=task.workspace_id,
         session_factory=session_factory,
         trigger_type=SCHEDULED_AGENT_TRIGGER,
+        scheduled_run_id=run.id,
         previous_agent_run_id=previous_agent_run.id if previous_agent_run is not None else None,
     )
     agent_run = await latest_scheduled_agent_run(

@@ -25,6 +25,7 @@ async def reserve_agent_run(
     previous_agent_run_id: uuid.UUID | None,
     trigger_type: str,
     settings: Settings | None = None,
+    scheduled_run_id: uuid.UUID | None = None,
 ) -> AgentRun:
     settings = settings or get_settings()
     deadline = (
@@ -84,6 +85,7 @@ async def reserve_agent_run(
                     previous_agent_run_id=previous_agent_run_id,
                     triggered_by_id=triggered_by_id,
                     trigger_type=trigger_type,
+                    scheduled_run_id=scheduled_run_id,
                 )
                 await session.commit()
                 return agent_run

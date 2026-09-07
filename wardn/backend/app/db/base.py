@@ -9,6 +9,7 @@ def import_models() -> None:
     from app.modules.agents import models as _agents_models  # noqa: F401
     from app.modules.chat_providers import models as _chat_provider_models  # noqa: F401
     from app.modules.guardrails import models as _guardrails_models  # noqa: F401
+    from app.modules.learning import models as _learning_models  # noqa: F401
     from app.modules.licensing import models as _licensing_models  # noqa: F401
     from app.modules.limits import models as _limits_models  # noqa: F401
     from app.modules.llm_providers import models as _llm_provider_models  # noqa: F401

@@ -248,8 +248,8 @@ async def persisted_agent_chat_stream(
     paused_for_confirmation = False
     activity_parts: dict[str, dict[str, Any]] = {}
     reasoning_summary_parts: dict[str, dict[str, Any]] = {}
-    yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
     try:
+        yield ui_message_sse_chunk({"type": "start", "messageId": message_id})
         async for event in stream:
             if isinstance(event, AgentChatTextEvent):
                 if not event.text:
@@ -338,6 +338,18 @@ async def persisted_agent_chat_stream(
                         payload=sanitize_run_payload(data),
                     )
             yield ui_message_sse_chunk(activity_part)
+    except (asyncio.CancelledError, GeneratorExit):
+        if agent_run is not None:
+            async with agent_stream_unit_of_work(session_factory) as session:
+                stored_run = await repository.get_agent_run(
+                    session,
+                    organization_id=agent_run.organization_id,
+                    workspace_id=agent_run.workspace_id,
+                    agent_run_id=agent_run.id,
+                )
+                if stored_run is not None:
+                    await repository.finish_agent_run(session, stored_run, status="canceled")
+        raise
     except Exception as exc:
         stream_error = str(exc)
         error_text = chat_stream_error_text(exc)
@@ -1464,12 +1476,26 @@ async def execute_agent_skill_tool_call_stream(
         arguments=tool_call.arguments,
         details={"skill": skill_tool_capability_metadata(tool_call.name)},
     )
+    snapshot_details = {}
     try:
         output = await execute_agent_skill_tool_call_with_context(
             tool_call.name,
             tool_call.arguments,
             approved_skills=approved_skills,
         )
+        try:
+            snapshot = json.loads(output)
+        except (TypeError, ValueError):
+            snapshot = None
+        if (
+            isinstance(snapshot, dict)
+            and not snapshot.get("rejected")
+            and snapshot.get("id")
+            and snapshot.get("hash")
+        ):
+            snapshot_details = {"externalSkillSnapshot": {
+                "id": snapshot["id"], "content_hash": snapshot["hash"],
+            }}
         execution = tool_execution_result(tool_name, output)
     except Exception as exc:
         execution = tool_execution_result(tool_name, f"Tool {tool_name} failed: {exc}")
@@ -1481,6 +1507,7 @@ async def execute_agent_skill_tool_call_stream(
         result=execution.result,
         details={
             **(execution.details or {}),
+            **snapshot_details,
             "skill": skill_tool_capability_metadata(tool_call.name),
         },
     )

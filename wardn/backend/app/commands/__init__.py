@@ -4,6 +4,7 @@ import typer
 
 
 def register_commands(app: typer.Typer) -> None:
+    from app.modules.learning.commands import register_learning_commands
     from app.modules.llm_providers.commands import register_llm_provider_commands
     from app.modules.mcp_registry.commands import register_mcp_registry_commands
     from app.modules.mcp_registry.job_commands import register_mcp_job_commands
@@ -11,6 +12,7 @@ def register_commands(app: typer.Typer) -> None:
     from app.modules.secrets.commands import register_secret_commands
     from app.modules.users.commands import register_user_commands
 
+    register_learning_commands(app)
     register_llm_provider_commands(app)
     register_mcp_registry_commands(app)
     register_mcp_job_commands(app)

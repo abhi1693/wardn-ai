@@ -6,6 +6,7 @@ from sqlalchemy import and_, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.modules.learning import capture as learning_capture
 from app.modules.scheduled_tasks.models import (
     WorkspaceScheduledTask,
     WorkspaceScheduledTaskDelivery,
@@ -528,6 +529,7 @@ async def claim_next_run(
     run.started_at = run.started_at or now
     run.error = ""
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
     return run
 
 
@@ -600,6 +602,7 @@ async def complete_run(
         if conversation_id is not None and task.conversation_policy == "reuse":
             task.conversation_id = conversation_id
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
     return True
 
 
@@ -632,6 +635,7 @@ async def pause_run_for_approval(
         if conversation_id is not None and task.conversation_policy == "reuse":
             task.conversation_id = conversation_id
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
     return True
 
 
@@ -661,6 +665,7 @@ async def complete_waiting_run(
         if run.conversation_id is not None and task.conversation_policy == "reuse":
             task.conversation_id = run.conversation_id
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
     return True
 
 
@@ -683,6 +688,7 @@ async def cancel_run(
         task.last_task_run_id = run.id
         task.last_agent_run_id = run.agent_run_id
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
 
 
 async def retry_or_fail_run(
@@ -715,6 +721,7 @@ async def retry_or_fail_run(
             task.last_task_run_id = run.id
             task.last_agent_run_id = run.agent_run_id
     await session.flush()
+    await learning_capture.scheduled_status(session, run)
     return run.status
 
 
@@ -749,6 +756,8 @@ async def recover_expired_leases(
                 task.last_status = "failed"
                 task.last_error = run.error
                 task.last_task_run_id = run.id
+        await session.flush()
+        await learning_capture.scheduled_status(session, run, now=now)
         recovered += 1
     return recovered
 

@@ -33,6 +33,7 @@ from app.modules.guardrails.service import (
     GuardrailEvaluationContext,
     evaluate_tool_call_guardrails,
 )
+from app.modules.learning import capture as learning_capture
 from app.modules.mcp_gateway.client import MCPGatewayUpstreamError
 from app.modules.mcp_runtime.providers.kubernetes import KubernetesRuntimeProviderError
 from app.modules.mcp_runtime.service import call_tool_with_isolated_tracking
@@ -658,7 +659,7 @@ async def execute_agent_tool_call(
     progress_callback=None,
 ) -> AgentToolExecutionResult:
     async with agent_stream_unit_of_work(session_factory) as session:
-        return await _execute_agent_tool_call(
+        result = await _execute_agent_tool_call(
             session,
             tools,
             tool_call,
@@ -673,3 +674,13 @@ async def execute_agent_tool_call(
             cancel_reason=cancel_reason,
             progress_callback=progress_callback,
         )
+        invocation_id = (
+            session.info.pop("learning_invocation_id", None)
+            if learning_capture.enabled(session) else None
+        )
+    # Isolated runtime tracking explicitly committed the preparation transaction.
+    # Record the handoff after leaving that transaction's context manager.
+    if invocation_id is not None:
+        async with agent_stream_unit_of_work(session_factory) as observation_session:
+            await learning_capture.tool_observed(observation_session, invocation_id=invocation_id)
+    return result

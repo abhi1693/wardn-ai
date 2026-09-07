@@ -2656,6 +2656,7 @@ async def stream_agent_chat(
     trigger_type: str = "chat",
     previous_agent_run_id: uuid.UUID | None = None,
     on_agent_run_created: Callable[[uuid.UUID], None] | None = None,
+    scheduled_run_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     agent, credential = await get_agent_model_for_run(
         session,
@@ -2710,6 +2711,8 @@ async def stream_agent_chat(
         "triggered_by_id": user.id,
         "trigger_type": trigger_type,
     }
+    if scheduled_run_id is not None:
+        run_arguments["scheduled_run_id"] = scheduled_run_id
     if get_settings().hosted_cloud_mode and isinstance(session, AsyncSession):
         await session.commit()
         agent_run = await capacity.reserve_agent_run(**run_arguments)
