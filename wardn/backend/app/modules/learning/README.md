@@ -14,6 +14,10 @@ Migration `202609070001` adds:
 | `learning_event_streams` | Transactional workspace sequence allocator |
 | `learning_worker_cursors` | One resumable checkpoint per workspace and named consumer |
 
+The separate migration `202609070002` repairs pre-existing missing timestamp defaults on
+`license_installations`, exposed by running the full suite against a fresh PostgreSQL database.
+It aligns the database with the existing model and fixes first-time workspace quota checks.
+
 An agent execution uses `AgentRun.id`; conversations keep `WorkspaceConversation.id`.
 Scheduled orchestration uses `WorkspaceScheduledTaskRun.id`, including failures before an agent
 exists, retries, approvals and delivery failures. Its agent execution has a separate agent-run
