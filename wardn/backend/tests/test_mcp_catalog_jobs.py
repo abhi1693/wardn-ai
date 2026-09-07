@@ -136,6 +136,7 @@ async def test_enqueue_catalog_sync_records_source_revision(monkeypatch) -> None
 @pytest.mark.asyncio
 async def test_catalog_worker_persists_success_and_progress(monkeypatch, caplog) -> None:
     source = catalog_source()
+    source.last_error = "name 'activated_version_count' is not defined"
     job = operation_job(source)
     reporter = FakeReporter()
     session_factory = FakeSessionFactory()
@@ -144,6 +145,8 @@ async def test_catalog_worker_persists_success_and_progress(monkeypatch, caplog)
         return source
 
     async def sync(*args, **kwargs):
+        assert source.last_error == ""
+        assert session_factory.session.commit_count == 1
         return SimpleNamespace(
             synced_count=7,
             model_dump=lambda **options: {"source": {"id": str(source.id)}, "syncedCount": 7},
@@ -157,7 +160,7 @@ async def test_catalog_worker_persists_success_and_progress(monkeypatch, caplog)
     result = await catalog_jobs.execute_catalog_source_sync(job, reporter)
 
     assert result["syncedCount"] == 7
-    assert session_factory.session.commit_count == 1
+    assert session_factory.session.commit_count == 2
     assert reporter.progress[-1] == (3, 3, "Synchronized 7 server definitions")
     assert "Synchronizing MCP catalog source." in caplog.text
     assert "Synchronized MCP catalog source." in caplog.text

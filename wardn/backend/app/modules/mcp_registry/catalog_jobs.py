@@ -167,6 +167,11 @@ async def execute_catalog_source_sync(
                 code="catalog_source_changed",
                 retryable=False,
             )
+        # A previous failure is no longer the current state once this retry starts.
+        # Keep the old error on its job record for diagnostics.
+        if source.last_error:
+            source.last_error = ""
+            await session.commit()
         await reporter.update(
             2,
             3,
