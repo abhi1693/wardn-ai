@@ -52,11 +52,25 @@ export const getOrganizationObservabilityCreateLlmModelPriceUrl = (organizationI
 export const organizationObservabilityCreateLlmModelPrice = async (organizationId: string,
     lLMModelPriceCreate: LLMModelPriceCreate, options?: Parameters<typeof apiRequest>[1]): Promise<LLMModelPriceRead> => {
 
-  return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityCreateLlmModelPriceUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityCreateLlmModelPriceUrl(organizationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lLMModelPriceCreate)
   }
 );}
@@ -135,11 +149,25 @@ export const organizationObservabilityUpdateLlmModelPrice = async (organizationI
     priceId: string,
     lLMModelPriceUpdate: LLMModelPriceUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<LLMModelPriceRead> => {
 
-  return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityUpdateLlmModelPriceUrl(organizationId,priceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<LLMModelPriceRead>(getOrganizationObservabilityUpdateLlmModelPriceUrl(organizationId,priceId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lLMModelPriceUpdate)
   }
 );}

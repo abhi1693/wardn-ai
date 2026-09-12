@@ -54,11 +54,25 @@ export const getOrganizationsCreateUrl = () => {
  */
 export const organizationsCreate = async (organizationCreate: OrganizationCreate, options?: Parameters<typeof apiRequest>[1]): Promise<OrganizationRead> => {
 
-  return apiRequest<OrganizationRead>(getOrganizationsCreateUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<OrganizationRead>(getOrganizationsCreateUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(organizationCreate)
   }
 );}
@@ -101,11 +115,25 @@ export const getOrganizationsUpdateUrl = (organizationId: string,) => {
 export const organizationsUpdate = async (organizationId: string,
     organizationUpdate: OrganizationUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<OrganizationRead> => {
 
-  return apiRequest<OrganizationRead>(getOrganizationsUpdateUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<OrganizationRead>(getOrganizationsUpdateUrl(organizationId),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(organizationUpdate)
   }
 );}
@@ -148,11 +176,25 @@ export const getWorkspacesCreateUrl = (organizationId: string,) => {
 export const workspacesCreate = async (organizationId: string,
     workspaceCreate: WorkspaceCreate, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceRead> => {
 
-  return apiRequest<WorkspaceRead>(getWorkspacesCreateUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceRead>(getWorkspacesCreateUrl(organizationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceCreate)
   }
 );}
@@ -233,11 +275,25 @@ export const workspacesUpdate = async (organizationId: string,
     workspaceId: string,
     workspaceUpdate: WorkspaceUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceRead> => {
 
-  return apiRequest<WorkspaceRead>(getWorkspacesUpdateUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceRead>(getWorkspacesUpdateUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceUpdate)
   }
 );}

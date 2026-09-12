@@ -55,11 +55,25 @@ export const getLlmProviderCredentialsCreateUrl = (organizationId: string,) => {
 export const llmProviderCredentialsCreate = async (organizationId: string,
     lLMProviderCredentialCreate: LLMProviderCredentialCreate, options?: Parameters<typeof apiRequest>[1]): Promise<LLMProviderCredentialRead> => {
 
-  return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsCreateUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsCreateUrl(organizationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lLMProviderCredentialCreate)
   }
 );}
@@ -79,11 +93,25 @@ export const getLlmProviderCredentialsChatgptDeviceCompleteUrl = (organizationId
 export const llmProviderCredentialsChatgptDeviceComplete = async (organizationId: string,
     chatGPTDeviceAuthorizationCompleteRequest: ChatGPTDeviceAuthorizationCompleteRequest, options?: Parameters<typeof apiRequest>[1]): Promise<ChatGPTDeviceAuthorizationCompleteResponse> => {
 
-  return apiRequest<ChatGPTDeviceAuthorizationCompleteResponse>(getLlmProviderCredentialsChatgptDeviceCompleteUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<ChatGPTDeviceAuthorizationCompleteResponse>(getLlmProviderCredentialsChatgptDeviceCompleteUrl(organizationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(chatGPTDeviceAuthorizationCompleteRequest)
   }
 );}
@@ -153,11 +181,25 @@ export const llmProviderCredentialsUpdate = async (organizationId: string,
     credentialId: string,
     lLMProviderCredentialUpdate: LLMProviderCredentialUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<LLMProviderCredentialRead> => {
 
-  return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsUpdateUrl(organizationId,credentialId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<LLMProviderCredentialRead>(getLlmProviderCredentialsUpdateUrl(organizationId,credentialId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lLMProviderCredentialUpdate)
   }
 );}

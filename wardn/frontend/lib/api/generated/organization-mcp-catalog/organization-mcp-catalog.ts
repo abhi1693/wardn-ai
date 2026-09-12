@@ -76,11 +76,25 @@ export const getOrganizationMcpCatalogCreateSourceUrl = (organizationId: string,
 export const organizationMcpCatalogCreateSource = async (organizationId: string,
     mCPCatalogSourceCreate: MCPCatalogSourceCreate, options?: Parameters<typeof apiRequest>[1]): Promise<MCPCatalogSourceRead> => {
 
-  return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogCreateSourceUrl(organizationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogCreateSourceUrl(organizationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mCPCatalogSourceCreate)
   }
 );}
@@ -152,11 +166,25 @@ export const organizationMcpCatalogUpdateSource = async (organizationId: string,
     sourceId: string,
     mCPCatalogSourceUpdate: MCPCatalogSourceUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<MCPCatalogSourceRead> => {
 
-  return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogUpdateSourceUrl(organizationId,sourceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<MCPCatalogSourceRead>(getOrganizationMcpCatalogUpdateSourceUrl(organizationId,sourceId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mCPCatalogSourceUpdate)
   }
 );}

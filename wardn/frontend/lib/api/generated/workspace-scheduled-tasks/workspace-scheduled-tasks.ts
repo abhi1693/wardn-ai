@@ -61,11 +61,25 @@ export const workspaceScheduledTasksCreate = async (organizationId: string,
     workspaceId: string,
     workspaceScheduledTaskCreate: WorkspaceScheduledTaskCreate, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRead> => {
 
-  return apiRequest<WorkspaceScheduledTaskRead>(getWorkspaceScheduledTasksCreateUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceScheduledTaskRead>(getWorkspaceScheduledTasksCreateUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceScheduledTaskCreate)
   }
 );}
@@ -87,11 +101,25 @@ export const workspaceScheduledTasksPreview = async (organizationId: string,
     workspaceId: string,
     workspaceScheduledTaskSchedulePreviewRequest: WorkspaceScheduledTaskSchedulePreviewRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskSchedulePreviewResponse> => {
 
-  return apiRequest<WorkspaceScheduledTaskSchedulePreviewResponse>(getWorkspaceScheduledTasksPreviewUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceScheduledTaskSchedulePreviewResponse>(getWorkspaceScheduledTasksPreviewUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceScheduledTaskSchedulePreviewRequest)
   }
 );}
@@ -174,11 +202,25 @@ export const workspaceScheduledTasksTestRoute = async (organizationId: string,
     workspaceId: string,
     workspaceScheduledTaskRouteTestRequest: WorkspaceScheduledTaskRouteTestRequest, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRouteTestResponse> => {
 
-  return apiRequest<WorkspaceScheduledTaskRouteTestResponse>(getWorkspaceScheduledTasksTestRouteUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceScheduledTaskRouteTestResponse>(getWorkspaceScheduledTasksTestRouteUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceScheduledTaskRouteTestRequest)
   }
 );}
@@ -256,11 +298,25 @@ export const workspaceScheduledTasksUpdate = async (organizationId: string,
     taskId: string,
     workspaceScheduledTaskUpdate: WorkspaceScheduledTaskUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<WorkspaceScheduledTaskRead> => {
 
-  return apiRequest<WorkspaceScheduledTaskRead>(getWorkspaceScheduledTasksUpdateUrl(organizationId,workspaceId,taskId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<WorkspaceScheduledTaskRead>(getWorkspaceScheduledTasksUpdateUrl(organizationId,workspaceId,taskId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceScheduledTaskUpdate)
   }
 );}

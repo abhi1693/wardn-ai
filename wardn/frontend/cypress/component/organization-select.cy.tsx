@@ -4,6 +4,7 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 
 function routerContext(push = cy.stub().as("push")) {
   return {
+    bfcacheId: "test-router",
     back: cy.stub(),
     forward: cy.stub(),
     prefetch: cy.stub(),
