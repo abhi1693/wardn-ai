@@ -165,7 +165,7 @@ jobs:
       - name: Validate Docker Compose contracts
         run: python3 scripts/ci/check_compose.py
   images:
-    uses: abhi1693/actions/.github/workflows/container-images.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/container-images.yml@98222de88f6768904e43a1a92a32e2bdc9a16e4c
     with:
       manifest: .github/images.json
       publish: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
