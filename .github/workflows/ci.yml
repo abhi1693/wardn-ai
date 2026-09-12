@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   workflow-validation:
-    uses: abhi1693/actions/.github/workflows/security.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/security.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       secret-scan: false
       workflow-lint: true
@@ -66,7 +66,7 @@ jobs:
         if: always()
         run: docker compose down --volumes --remove-orphans
   backend:
-    uses: abhi1693/actions/.github/workflows/python-uv-tests.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/python-ci.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       runs-on: ubuntu-latest
       timeout-minutes: 20
@@ -81,7 +81,7 @@ jobs:
       database-url-scheme: postgresql+asyncpg
     name: Backend
   frontend:
-    uses: abhi1693/actions/.github/workflows/node-ci.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/node-ci.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       checks: '["generate", "lint", "build"]'
       scripts: '{"generate": "ci:frontend-generate", "lint": "web:lint", "build": "ci:frontend-build"}'
@@ -94,7 +94,7 @@ jobs:
       generated-paths: '["wardn/frontend/openapi","wardn/frontend/lib/api/generated"]'
     name: Frontend static validation
   frontend-components:
-    uses: abhi1693/actions/.github/workflows/node-ci.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/node-ci.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       checks: '["test"]'
       scripts: '{"test": "web:test:components"}'
@@ -108,7 +108,7 @@ jobs:
       test-results-name: frontend-components
     name: Frontend component tests
   frontend-e2e:
-    uses: abhi1693/actions/.github/workflows/node-ci.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/node-ci.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       checks: '["test"]'
       scripts: '{"test": "web:e2e"}'
@@ -122,7 +122,7 @@ jobs:
       test-results-name: frontend-e2e
     name: Frontend end-to-end tests
   docs:
-    uses: abhi1693/actions/.github/workflows/node-ci.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/node-ci.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       checks: '["generate", "build"]'
       scripts: '{"generate": "docs:sync:openapi", "build": "docs:build"}'
@@ -134,7 +134,7 @@ jobs:
       generated-paths: '["docs/site/latest/modules/ROOT/attachments/openapi/wardn-api.json"]'
     name: Docs
   security:
-    uses: abhi1693/actions/.github/workflows/security.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/security.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       secret-scan: false
       workflow-lint: false
@@ -146,7 +146,7 @@ jobs:
       python-version: '3.12'
       python-include-dev: false
   docs-security:
-    uses: abhi1693/actions/.github/workflows/security.yml@34e92ba1eee6a47e9b10f13e2180114fc01b6027
+    uses: abhi1693/actions/.github/workflows/security.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       secret-scan: false
       workflow-lint: false
@@ -165,7 +165,7 @@ jobs:
       - name: Validate Docker Compose contracts
         run: python3 scripts/ci/check_compose.py
   images:
-    uses: abhi1693/actions/.github/workflows/container-images.yml@98222de88f6768904e43a1a92a32e2bdc9a16e4c
+    uses: abhi1693/actions/.github/workflows/container-images.yml@59178a1adfb1547da9ba94fdd46962c510b8eb1f
     with:
       manifest: .github/images.json
       publish: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
