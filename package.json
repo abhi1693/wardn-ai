@@ -28,6 +28,8 @@
     "backend:test:unit": "cd wardn/backend && uv run --extra dev pytest -m 'not integration'",
     "backend:test:integration": "cd wardn/backend && uv run --extra dev pytest -m integration",
     "backend:lint": "cd wardn/backend && uv run --extra dev ruff check .",
-    "backend:typecheck": "cd wardn/backend && uv run --extra dev mypy"
+    "backend:typecheck": "cd wardn/backend && uv run --extra dev mypy",
+    "ci:frontend-generate": "bash .github/scripts/frontend-generate.sh",
+    "ci:frontend-build": "bash .github/scripts/frontend-build.sh"
   }
 }

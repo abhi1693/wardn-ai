@@ -1,0 +1,81 @@
+{
+  "schema-version": 1,
+  "images": [
+    {
+      "id": "backend",
+      "image": "ghcr.io/abhi1693/wardn-ai-backend",
+      "context": "wardn/backend",
+      "file": "wardn/backend/Dockerfile",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "build-args": {
+        "APP_VERSION": "{version}"
+      },
+      "paths": [
+        "wardn/backend/**"
+      ]
+    },
+    {
+      "id": "frontend",
+      "image": "ghcr.io/abhi1693/wardn-ai-frontend",
+      "context": ".",
+      "file": "wardn/frontend/Dockerfile",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "build-args": {
+        "APP_VERSION": "{version}"
+      },
+      "paths": [
+        "wardn/frontend/**",
+        "wardn/backend/**",
+        "package.json"
+      ]
+    },
+    {
+      "id": "worker",
+      "image": "ghcr.io/abhi1693/wardn-ai-worker",
+      "context": "wardn/backend",
+      "file": "wardn/backend/Dockerfile",
+      "target": "worker",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "build-args": {
+        "APP_VERSION": "{version}"
+      },
+      "paths": [
+        "wardn/backend/**"
+      ]
+    },
+    {
+      "id": "mcp-runtime",
+      "image": "ghcr.io/abhi1693/wardn-ai-mcp-runtime",
+      "context": "wardn/mcp-runtime",
+      "file": "wardn/mcp-runtime/Dockerfile",
+      "platforms": [
+        "linux/arm64"
+      ],
+      "paths": [
+        "wardn/mcp-runtime/**"
+      ]
+    },
+    {
+      "id": "whatsapp-bridge",
+      "image": "ghcr.io/abhi1693/wardn-ai-whatsapp-bridge",
+      "context": ".",
+      "file": "wardn/whatsapp-bridge/Dockerfile",
+      "platforms": [
+        "linux/arm64"
+      ],
+      "paths": [
+        "wardn/whatsapp-bridge/**",
+        "package.json"
+      ]
+    }
+  ]
+}
