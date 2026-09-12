@@ -149,11 +149,25 @@ export const workspaceAgentsUpdateWorkspaceAssistantModel = async (organizationI
     workspaceId: string,
     workspaceAgentModelUpdate: WorkspaceAgentModelUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
 
-  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantModelUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantModelUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceAgentModelUpdate)
   }
 );}
@@ -175,11 +189,25 @@ export const workspaceAgentsUpdateWorkspaceAssistantPersonality = async (organiz
     workspaceId: string,
     workspaceAgentPersonalityUpdate: WorkspaceAgentPersonalityUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<AgentRead> => {
 
-  return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantPersonalityUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<AgentRead>(getWorkspaceAgentsUpdateWorkspaceAssistantPersonalityUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(workspaceAgentPersonalityUpdate)
   }
 );}
@@ -230,11 +258,25 @@ export const workspaceAgentsChat = async (organizationId: string,
     agentId: string,
     agentChatRequest: AgentChatRequest, options?: Parameters<typeof apiRequest>[1]): Promise<string> => {
 
-  return apiRequest<string>(getWorkspaceAgentsChatUrl(organizationId,workspaceId,agentId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<string>(getWorkspaceAgentsChatUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(agentChatRequest)
   }
 );}
@@ -258,11 +300,25 @@ export const workspaceAgentsUpdateSkills = async (organizationId: string,
     agentId: string,
     agentSkillUpdateRequest: AgentSkillUpdateRequest, options?: Parameters<typeof apiRequest>[1]): Promise<AgentSkillAgentRead> => {
 
-  return apiRequest<AgentSkillAgentRead>(getWorkspaceAgentsUpdateSkillsUrl(organizationId,workspaceId,agentId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<AgentSkillAgentRead>(getWorkspaceAgentsUpdateSkillsUrl(organizationId,workspaceId,agentId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(agentSkillUpdateRequest)
   }
 );}
@@ -317,11 +373,25 @@ export const workspaceAgentsDecideToolApproval = async (organizationId: string,
     approvalId: string,
     agentToolApprovalDecisionRequest: AgentToolApprovalDecisionRequest, options?: Parameters<typeof apiRequest>[1]): Promise<AgentToolApprovalDecisionResponse> => {
 
-  return apiRequest<AgentToolApprovalDecisionResponse>(getWorkspaceAgentsDecideToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<AgentToolApprovalDecisionResponse>(getWorkspaceAgentsDecideToolApprovalUrl(organizationId,workspaceId,agentId,approvalId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(agentToolApprovalDecisionRequest)
   }
 );}

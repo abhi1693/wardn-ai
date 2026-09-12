@@ -24,11 +24,25 @@ export const getUsersBootstrapUrl = () => {
  */
 export const usersBootstrap = async (bootstrapUserCreate: BootstrapUserCreate, options?: Parameters<typeof apiRequest>[1]): Promise<UserRead> => {
 
-  return apiRequest<UserRead>(getUsersBootstrapUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<UserRead>(getUsersBootstrapUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(bootstrapUserCreate)
   }
 );}

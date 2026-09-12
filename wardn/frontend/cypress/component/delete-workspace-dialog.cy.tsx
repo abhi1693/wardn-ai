@@ -29,6 +29,7 @@ const workspace: WorkspaceRead = {
 
 function routerContext() {
   return {
+    bfcacheId: "test-router",
     back: cy.stub(),
     forward: cy.stub(),
     prefetch: cy.stub(),

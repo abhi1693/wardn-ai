@@ -89,11 +89,25 @@ export const workspaceMcpRegistryValidateInstalledServerTool = async (organizati
     installationId: string,
     mCPServerInstallationToolValidationRequest: MCPServerInstallationToolValidationRequest, options?: Parameters<typeof apiRequest>[1]): Promise<MCPServerInstallationToolValidationResponse> => {
 
-  return apiRequest<MCPServerInstallationToolValidationResponse>(getWorkspaceMcpRegistryValidateInstalledServerToolUrl(organizationId,workspaceId,installationId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<MCPServerInstallationToolValidationResponse>(getWorkspaceMcpRegistryValidateInstalledServerToolUrl(organizationId,workspaceId,installationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mCPServerInstallationToolValidationRequest)
   }
 );}
@@ -149,11 +163,25 @@ export const workspaceMcpRegistryUpdateInstalledServers = async (organizationId:
     workspaceId: string,
     mCPServerBulkUpdateRequest: MCPServerBulkUpdateRequest, options?: Parameters<typeof apiRequest>[1]): Promise<MCPOperationJobRead> => {
 
-  return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryUpdateInstalledServersUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryUpdateInstalledServersUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mCPServerBulkUpdateRequest)
   }
 );}
@@ -204,11 +232,25 @@ export const workspaceMcpRegistryInstallServerVersion = async (organizationId: s
     serverName: string,
     mCPServerInstallRequest: MCPServerInstallRequest, options?: Parameters<typeof apiRequest>[1]): Promise<MCPOperationJobRead> => {
 
-  return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryInstallServerVersionUrl(organizationId,workspaceId,serverName),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<MCPOperationJobRead>(getWorkspaceMcpRegistryInstallServerVersionUrl(organizationId,workspaceId,serverName),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mCPServerInstallRequest)
   }
 );}

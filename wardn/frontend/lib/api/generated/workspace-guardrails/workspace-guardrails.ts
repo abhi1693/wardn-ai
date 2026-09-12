@@ -56,11 +56,25 @@ export const workspaceGuardrailsUpdateSettings = async (organizationId: string,
     workspaceId: string,
     guardrailSettingsUpdate: GuardrailSettingsUpdate, options?: Parameters<typeof apiRequest>[1]): Promise<GuardrailSettingsRead> => {
 
-  return apiRequest<GuardrailSettingsRead>(getWorkspaceGuardrailsUpdateSettingsUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<GuardrailSettingsRead>(getWorkspaceGuardrailsUpdateSettingsUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(guardrailSettingsUpdate)
   }
 );}
@@ -82,11 +96,25 @@ export const workspaceGuardrailsSimulatePolicy = async (organizationId: string,
     workspaceId: string,
     guardrailPolicySimulationRequest: GuardrailPolicySimulationRequest, options?: Parameters<typeof apiRequest>[1]): Promise<GuardrailPolicySimulationResponse> => {
 
-  return apiRequest<GuardrailPolicySimulationResponse>(getWorkspaceGuardrailsSimulatePolicyUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<GuardrailPolicySimulationResponse>(getWorkspaceGuardrailsSimulatePolicyUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(guardrailPolicySimulationRequest)
   }
 );}
@@ -108,11 +136,25 @@ export const workspaceGuardrailsCreateStarterPolicies = async (organizationId: s
     workspaceId: string,
     guardrailStarterPoliciesRequest: GuardrailStarterPoliciesRequest, options?: Parameters<typeof apiRequest>[1]): Promise<GuardrailStarterPoliciesResponse> => {
 
-  return apiRequest<GuardrailStarterPoliciesResponse>(getWorkspaceGuardrailsCreateStarterPoliciesUrl(organizationId,workspaceId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiRequest<GuardrailStarterPoliciesResponse>(getWorkspaceGuardrailsCreateStarterPoliciesUrl(organizationId,workspaceId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(guardrailStarterPoliciesRequest)
   }
 );}
