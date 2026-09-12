@@ -103,8 +103,8 @@ jobs:
       node-version: '22'
       browser: cypress
       browser-results-path: |-
-        wardn/frontend/cypress/screenshots
-        wardn/frontend/cypress/videos
+        wardn/frontend/cypress/snapshots/actual
+        wardn/frontend/cypress/snapshots/diff
       test-results-name: frontend-components
     name: Frontend component tests
   frontend-e2e:
@@ -117,8 +117,8 @@ jobs:
       node-version: '22'
       browser: cypress
       browser-results-path: |-
-        wardn/frontend/cypress/screenshots
-        wardn/frontend/cypress/videos
+        wardn/frontend/cypress/snapshots/actual
+        wardn/frontend/cypress/snapshots/diff
       test-results-name: frontend-e2e
     name: Frontend end-to-end tests
   docs:

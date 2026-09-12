@@ -6,8 +6,7 @@ RUN npm ci --ignore-scripts
 
 FROM node:22-slim AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/package.json /app/package-lock.json ./
+COPY --from=deps /app ./
 COPY . .
 RUN npm run web:build
 

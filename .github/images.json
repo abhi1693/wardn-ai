@@ -32,7 +32,8 @@
       "paths": [
         "wardn/frontend/**",
         "wardn/backend/**",
-        "package.json"
+        "package.json",
+        "package-lock.json"
       ]
     },
     {
