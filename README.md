@@ -1,7 +1,6 @@
 # Wardn AI
 
 [![CI](https://github.com/abhi1693/wardn-ai/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/abhi1693/wardn-ai/actions/workflows/ci.yml)
-[![Container Images](https://github.com/abhi1693/wardn-ai/actions/workflows/container.yml/badge.svg?branch=master)](https://github.com/abhi1693/wardn-ai/actions/workflows/container.yml)
 
 Wardn AI is a control plane for governed AI tool access.
 
