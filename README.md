@@ -13,6 +13,24 @@ spread across local config files and one-off bots.
 [Product Areas](#product-areas) | [Typical Workflow](#typical-workflow) |
 [Docker Compose](#docker-compose) | [Local Development](#local-development) | [Production Notes](#production-notes)
 
+## Sponsored by
+
+<table>
+  <tr>
+    <td width="180" align="center" valign="middle">
+      <a href="https://devfeed.tech">
+        <img src=".github/assets/devfeed-mark.png" alt="DevFeed logo" width="160" height="160" />
+      </a>
+    </td>
+    <td valign="middle">
+      <h3><a href="https://devfeed.tech">DevFeed</a></h3>
+      <p>A personal reading feed for developer news, tutorials, and releases. Follow your favorite sources and topics in one place.</p>
+      <p>Proud sponsor of Wardn AI.</p>
+      <p><a href="https://devfeed.tech">Explore DevFeed →</a></p>
+    </td>
+  </tr>
+</table>
+
 ## Documentation
 
 Wardn's public documentation source lives in `docs/`. It uses Antora and AsciiDoc
