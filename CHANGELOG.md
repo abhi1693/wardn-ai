@@ -41,3 +41,6 @@ smoke test and an unsuppressed npm audit gate before image publication.
 
 Install the shared atomic library explicitly when copying the Node 26 binary
 into the Python/Deno runtimes; the full official Node image already provides it.
+
+Pin the current official Python 3.12.15 API/worker and Python 3.13.17 MCP
+runtime patch images, with verified ARM64 and AMD64 manifests.
