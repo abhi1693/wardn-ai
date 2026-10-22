@@ -53,7 +53,7 @@ describe("desktop visual regression", () => {
     cy.visit(`/org/${organizationId}/usage`);
     cy.findByRole("heading", { level: 1, name: "Usage" }).should("be.visible");
     cy.get('[data-testid="usage-sticky-controls"]').should("have.css", "position", "sticky");
-    cy.findByRole("button", { name: "Expand Needs attention" }).should("be.visible");
+    cy.findByRole("button", { name: /^Needs attention\b/ }).should("be.visible").and("have.attr", "aria-expanded", "false");
     cy.findByText("By user", { exact: true }).should("not.exist");
     stabilizePage();
     cy.compareSnapshot("usage-dashboard-collapsed-light");

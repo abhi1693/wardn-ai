@@ -67,6 +67,12 @@ describe("desktop accessibility", () => {
         cy.findByRole("heading", { level: 1, name: route.title }).should("be.visible");
         cy.get("html").should("have.class", theme);
         cy.assertDesktopFit();
+        cy.findByRole("button", { name: "Search Ctrl K" })
+          .should("have.attr", "aria-keyshortcuts", "Control+k Meta+k");
+        if (route.title === "Runs") {
+          cy.findByRole("link", { name: "Scheduled Tasks Alpha" }).should("be.visible");
+          cy.findByRole("link", { name: "Skills Alpha" }).should("be.visible");
+        }
         checkWcag();
       });
     }

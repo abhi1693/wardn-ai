@@ -44,3 +44,7 @@ into the Python/Deno runtimes; the full official Node image already provides it.
 
 Pin the current official Python 3.12.15 API/worker and Python 3.13.17 MCP
 runtime patch images, with verified ARM64 and AMD64 manifests.
+
+Use native visible-text names for command search, expanded navigation links and
+usage disclosures, keeping disclosure state in aria-expanded. The updated axe
+checks cover both themes and compact navigation without disabling any rules.

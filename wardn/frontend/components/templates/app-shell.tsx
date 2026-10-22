@@ -611,7 +611,7 @@ function AppShellFrame({
                 <Link
                   aria-current={item.active ? "page" : undefined}
                   aria-label={
-                    item.maturity
+                    sidebarCompact && item.maturity
                       ? `${item.label}, ${featureMaturityLabel(item.maturity)}`
                       : undefined
                   }
@@ -635,7 +635,7 @@ function AppShellFrame({
                   </span>
                   {!sidebarCompact && item.maturity ? (
                     <FeatureMaturityBadge
-                      aria-hidden="true"
+                      aria-label={undefined}
                       className="px-1 py-0 text-[9px]"
                       maturity={item.maturity}
                     />

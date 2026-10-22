@@ -27,7 +27,7 @@ describe("desktop route foundation", () => {
     cy.viewport(1280, 800);
     cy.visit(workspacesPath);
 
-    cy.findByRole("button", { name: "Open command menu" }).should("be.visible");
+    cy.findByRole("button", { name: "Search Ctrl K" }).should("be.visible");
     cy.findByRole("link", { name: "New workspace" }).should("be.visible");
     cy.findByRole("button", { name: "Switch to dark theme" }).should("be.visible");
     cy.findByRole("button", { name: "Sign out" }).should("be.visible");

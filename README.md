@@ -295,3 +295,8 @@ Version 0.0.38 is prepared in [the changelog](CHANGELOG.md). Dependency updates
 include the complete package locks and the tested local brace-depth security fix.
 Use Node.js 26.12.1 for frontend/CLI checks. ESLint 9 and TypeScript 6 remain at
 the latest versions supported by the current lint plugins.
+
+The 0.0.38 dependency update retains the current axe accessibility checks.
+Search, expanded navigation and usage disclosure names follow their visible
+labels; keyboard shortcuts and disclosure state remain available to assistive
+technology.

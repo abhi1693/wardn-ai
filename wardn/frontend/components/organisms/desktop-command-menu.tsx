@@ -61,7 +61,7 @@ export function DesktopCommandMenu({ destinations, onNavigate }: DesktopCommandM
   return (
     <>
       <Button
-        aria-label="Open command menu"
+        aria-keyshortcuts="Control+k Meta+k"
         className="h-8 w-40 justify-start gap-2 border-border bg-background px-2.5 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground 2xl:w-52"
         onClick={() => setOpen(true)}
         type="button"

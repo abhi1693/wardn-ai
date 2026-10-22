@@ -47,7 +47,7 @@ function verifyRoute(route: (typeof routes)[number], theme: "light" | "dark") {
   );
   cy.get("html").should("have.class", theme);
   if (route.name === "usage") {
-    cy.findByRole("button", { name: "Expand Usage trends" }).should("be.visible");
+    cy.findByRole("button", { name: /^Usage trends\b/ }).should("be.visible").and("have.attr", "aria-expanded", "false");
     cy.findByText("0 charts, 4 summaries").should("be.visible");
     cy.get(".recharts-wrapper").should("not.exist");
   }

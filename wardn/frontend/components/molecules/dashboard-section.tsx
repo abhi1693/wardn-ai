@@ -81,7 +81,6 @@ export function DashboardSection({
             <button
               aria-controls={contentId}
               aria-expanded={isOpen}
-              aria-label={`${isOpen ? "Collapse" : "Expand"} ${title}`}
               className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-ring/20 focus-visible:ring-[3px]"
               onClick={toggleSection}
               type="button"
