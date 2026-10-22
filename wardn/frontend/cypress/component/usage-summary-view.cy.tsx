@@ -53,7 +53,8 @@ describe("UsageSummaryView", () => {
     cy.get(".recharts-wrapper").should("have.length", 2);
     cy.get(".recharts-pie-sector path").first().should("have.attr", "fill", "#2563eb");
     cy.findByText("owner@example.com").should("not.exist");
-    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false").click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.findByText("owner@example.com").should("be.visible");
     cy.findAllByText("Operations agent").last().should("be.visible");
     cy.document().then((document) => {
@@ -72,7 +73,8 @@ describe("UsageSummaryView", () => {
     cy.findByText("My workspace tokens", { exact: true }).should("be.visible");
     cy.findByText("My tool calls", { exact: true }).should("be.visible");
     cy.findByText("By user", { exact: true }).should("not.exist");
-    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false").click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.findByText("My models", { exact: true }).should("be.visible");
   });
 
@@ -85,7 +87,8 @@ describe("UsageSummaryView", () => {
       );
 
     mountView();
-    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false").click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.window().then((window) => {
       expect(
         window.localStorage.getItem("wardn.usage.sections.organization.breakdowns")
@@ -113,7 +116,8 @@ describe("UsageSummaryView", () => {
     );
 
     cy.findByRole("button", { name: /^Needs attention\b/ }).should("be.visible").and("have.attr", "aria-expanded", "false");
-    cy.findByRole("button", { name: /^Usage trends\b/ }).should("have.attr", "aria-expanded", "false").click();
+    cy.findByRole("button", { name: /^Usage trends\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Usage trends\b/ }).click();
     cy.get(".recharts-wrapper").should("not.exist");
     cy.findByText("One recorded day", { exact: true }).should("be.visible");
     cy.findAllByText("One contributor", { exact: true }).should("have.length", 2);
