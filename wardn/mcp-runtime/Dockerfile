@@ -24,7 +24,7 @@ COPY structured-content-proxy.mjs /opt/wardn-runtime/structured-content-proxy.mj
 COPY package.json package-lock.json /opt/wardn-runtime/
 
 RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates libstdc++ libffi xz-libs sqlite-libs libbz2 gdbm ncurses-libs readline \
+    && apk add --no-cache ca-certificates libatomic libstdc++ libffi xz-libs sqlite-libs libbz2 gdbm ncurses-libs readline \
     && update-ca-certificates \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \

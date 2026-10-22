@@ -38,3 +38,6 @@ regenerate the OpenAPI/client/docs attachments with the updated backend.
 Lock the Supergateway runtime separately and update its same-major MCP SDK
 security overrides, with a real stdio-to-HTTP initialization/discovery/tool-call
 smoke test and an unsuppressed npm audit gate before image publication.
+
+Install the shared atomic library explicitly when copying the Node 26 binary
+into the Python/Deno runtimes; the full official Node image already provides it.
