@@ -16,7 +16,6 @@ export interface OrganizationDashboardSummary {
   budgetUtilizationPercent?: number | null;
   catalogErrors: number;
   catalogSources: number;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   enabledCatalogSources: number;
   enabledServers: number;
@@ -33,7 +32,6 @@ export interface OrganizationDashboardSummary {
   monthlyBudgetUsd?: string | null;
   pendingInvitations: number;
   pendingToolApprovals: number;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   projectedMonthlyCostUsd: string;
   providerCredentials: number;
   requestSuccessRate: number;

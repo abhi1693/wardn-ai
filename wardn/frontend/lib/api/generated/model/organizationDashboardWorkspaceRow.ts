@@ -9,7 +9,6 @@ export interface OrganizationDashboardWorkspaceRow {
   activeAgents: number;
   activeRuntimeSessions: number;
   agents: number;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   enabledInstallations: number;
   failedRequests: number;

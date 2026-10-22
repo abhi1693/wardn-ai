@@ -7,17 +7,19 @@ WORKDIR /src
 RUN git clone "$WA_MEOW_REPOSITORY" . \
     && git checkout "$WA_MEOW_REF"
 
-FROM golang:1.26-alpine3.24@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
+FROM golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 WORKDIR /app
 
-COPY --from=source /src/go.mod /src/go.sum ./
-RUN go get golang.org/x/crypto@v0.55.0 golang.org/x/net@v0.57.0 golang.org/x/text@v0.41.0 \
-    && go mod download
+# Review and lock every runtime module in this repository; never resolve floating
+# dependency versions while publishing an image.
+COPY wardn/whatsapp-bridge/go.mod wardn/whatsapp-bridge/go.sum ./
+RUN go mod download && go mod verify
 
 COPY --from=source /src/cmd/server ./cmd/server
+RUN go test ./cmd/server
 RUN CGO_ENABLED=1 GOOS=linux go build -o whatsapp-server ./cmd/server
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b

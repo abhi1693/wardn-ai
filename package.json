@@ -5,12 +5,11 @@
     "wardn/frontend"
   ],
   "overrides": {
-    "minimatch": "10.2.6",
     "next": {
-      "postcss": "8.5.25",
-      "sharp": "0.35.4"
+      "postcss": "8.5.31",
+      "sharp": "0.35.5"
     },
-    "js-yaml": "4.3.2"
+    "braces": "$braces"
   },
   "scripts": {
     "api:openapi": "cd wardn/backend && uv run --extra dev python -m app.openapi --output ../frontend/openapi/wardn-api.json",
@@ -31,6 +30,11 @@
     "backend:lint": "cd wardn/backend && uv run --extra dev ruff check .",
     "backend:typecheck": "cd wardn/backend && uv run --extra dev mypy",
     "ci:frontend-generate": "bash .github/scripts/frontend-generate.sh",
-    "ci:frontend-build": "bash .github/scripts/frontend-build.sh"
+    "ci:frontend-build": "bash .github/scripts/frontend-build.sh",
+    "test:dependency-security": "node --test tests/braces.test.cjs",
+    "docs:test:dependency-security": "npm --prefix docs run test:dependency-security"
+  },
+  "devDependencies": {
+    "braces": "file:packages/braces"
   }
 }

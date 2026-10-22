@@ -6,7 +6,6 @@
  */
 
 export interface UsageSummaryTotals {
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   failed: number;
   inputTokens: number;

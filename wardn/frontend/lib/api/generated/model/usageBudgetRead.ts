@@ -16,6 +16,5 @@ export interface UsageBudgetRead {
   scopeType: string;
   unit: string;
   updatedAt: string;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   value: string;
 }

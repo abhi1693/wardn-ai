@@ -10,14 +10,12 @@ export interface LLMModelPriceRead {
   cacheWriteUsdPer1mTokens?: string | null;
   createdAt: string;
   id: string;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   inputUsdPer1mTokens: string;
   /**
      * @minLength 1
      * @maxLength 255
      */
   model: string;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   outputUsdPer1mTokens: string;
   /**
      * @minLength 1

@@ -72,7 +72,7 @@ jobs:
       timeout-minutes: 20
       python-version: '3.12'
       enable-cache: true
-      node-version: '22'
+      node-version: '26'
       sync-command: uv sync --project wardn/backend --locked --extra dev
       lint-command: bash .github/scripts/backend-lint.sh
       test-command: bash .github/scripts/backend-tests.sh
@@ -87,7 +87,7 @@ jobs:
       scripts: '{"generate": "ci:frontend-generate", "lint": "web:lint", "build": "ci:frontend-build"}'
       timeout-minutes: 20
       runs-on: ubuntu-latest
-      node-version: '22'
+      node-version: '26'
       python-version: '3.12'
       uv-directory: wardn/backend
       uv-sync-args: '["--extra","dev"]'
@@ -100,7 +100,7 @@ jobs:
       scripts: '{"test": "web:test:components"}'
       timeout-minutes: 20
       runs-on: ubuntu-latest
-      node-version: '22'
+      node-version: '26'
       browser: cypress
       browser-results-path: |-
         wardn/frontend/cypress/snapshots/actual
@@ -114,7 +114,7 @@ jobs:
       scripts: '{"test": "web:e2e"}'
       timeout-minutes: 30
       runs-on: ubuntu-latest
-      node-version: '22'
+      node-version: '26'
       browser: cypress
       browser-results-path: |-
         wardn/frontend/cypress/snapshots/actual
@@ -124,11 +124,11 @@ jobs:
   docs:
     uses: abhi1693/actions/.github/workflows/node-ci.yml@v1
     with:
-      checks: '["generate", "build"]'
-      scripts: '{"generate": "docs:sync:openapi", "build": "docs:build"}'
+      checks: '["generate", "test", "build"]'
+      scripts: '{"generate": "docs:sync:openapi", "test": "docs:test:dependency-security", "build": "docs:build"}'
       timeout-minutes: 15
       runs-on: ubuntu-latest
-      node-version: '22'
+      node-version: '26'
       cache-dependency-path: docs/package-lock.json
       install-directory: docs
       generated-paths: '["docs/site/latest/modules/ROOT/attachments/openapi/wardn-api.json"]'
@@ -139,7 +139,7 @@ jobs:
       secret-scan: false
       workflow-lint: false
       npm-audit: true
-      node-version: '22'
+      node-version: '26'
       npm-severity: moderate
       python-audit: true
       python-directory: wardn/backend
@@ -151,10 +151,32 @@ jobs:
       secret-scan: false
       workflow-lint: false
       npm-audit: true
-      node-version: '22'
+      node-version: '26'
       npm-directory: docs
       npm-severity: moderate
       artifact-prefix: docs-security
+  mcp-runtime:
+    name: MCP runtime compatibility
+    uses: abhi1693/actions/.github/workflows/node-ci.yml@v1
+    with:
+      checks: '["test"]'
+      scripts: '{"test": "test"}'
+      timeout-minutes: 10
+      runs-on: ubuntu-latest
+      node-version: '26'
+      working-directory: wardn/mcp-runtime
+      cache-dependency-path: wardn/mcp-runtime/package-lock.json
+      ignore-scripts: true
+  mcp-runtime-security:
+    uses: abhi1693/actions/.github/workflows/security.yml@v1
+    with:
+      secret-scan: false
+      workflow-lint: false
+      npm-audit: true
+      node-version: '26'
+      npm-directory: wardn/mcp-runtime
+      npm-severity: moderate
+      artifact-prefix: mcp-runtime-security
   configuration:
     name: Workflow validation
     runs-on: ubuntu-latest
@@ -186,3 +208,5 @@ jobs:
       - security
       - docs-security
       - configuration
+      - mcp-runtime
+      - mcp-runtime-security

@@ -1,0 +1,11 @@
+{
+  "name": "@devfeed/braces",
+  "version": "3.0.3-devfeed.1",
+  "private": true,
+  "description": "Braces 3.0.3 with bounded parser and AST recursion for CVE-2026-93687",
+  "license": "MIT",
+  "main": "index.js",
+  "dependencies": {
+    "fill-range": "^7.1.1"
+  }
+}

@@ -6,7 +6,6 @@
  */
 
 export interface UsageTrendPoint {
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   date: string;
   inputTokens: number;

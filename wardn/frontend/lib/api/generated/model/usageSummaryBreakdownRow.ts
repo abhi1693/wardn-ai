@@ -6,7 +6,6 @@
  */
 
 export interface UsageSummaryBreakdownRow {
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   id: string;
   inputTokens: number;

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "setuptools-scm>=8"]
+requires = ["setuptools>=84.2.1", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,31 +8,31 @@ dynamic = ["version"]
 description = "Wardn AI backend API"
 requires-python = ">=3.12"
 dependencies = [
-  "alembic>=1.14.0",
-  "asyncpg>=0.30.0",
-  "email-validator>=2.2.0",
-  "fastapi>=0.115.0",
-  "greenlet>=3.1.0",
-  "httpx>=0.28.0",
-  "kubernetes>=31.0.0",
-  "psycopg[binary]>=3.2.0",
-  "pydantic-settings>=2.6.0",
-  "pwdlib[argon2]>=0.2.1",
-  "python-json-logger>=2.0.7",
-  "sqlalchemy[asyncio]>=2.0.36",
-  "tzdata>=2026.2",
-  "uvicorn[standard]>=0.32.0",
-  "websockets>=16.0",
-  "joserfc>=1.7.2",
-  "typer>=0.27.0",
+  "alembic>=1.20.1",
+  "asyncpg>=0.32.0",
+  "email-validator>=2.3.0",
+  "fastapi>=0.161.0",
+  "greenlet>=3.5.6",
+  "httpx>=0.28.1",
+  "kubernetes>=37.0.1",
+  "psycopg[binary]>=3.3.6",
+  "pydantic-settings>=2.16.1",
+  "pwdlib[argon2]>=0.3.1",
+  "python-json-logger>=4.2.0",
+  "sqlalchemy[asyncio]>=2.1.6",
+  "tzdata>=2026.5",
+  "uvicorn[standard]>=0.54.0",
+  "websockets>=17.3",
+  "joserfc>=1.7.7",
+  "typer>=0.27.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "mypy>=2.2.0",
-  "pytest>=8.3.0",
-  "pytest-asyncio>=0.24.0",
-  "ruff>=0.8.0"
+  "mypy>=2.4.0",
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+  "ruff>=0.17.2"
 ]
 
 [tool.setuptools.packages.find]

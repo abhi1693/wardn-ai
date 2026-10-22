@@ -8,7 +8,6 @@
 export interface WorkspaceObservabilityAgentRunRow {
   agentId: string;
   agentName: string;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   error: string;
   failedRequests: number;

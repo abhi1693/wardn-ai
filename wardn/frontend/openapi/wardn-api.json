@@ -656,7 +656,6 @@
           },
           "costUsd": {
             "default": "0",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -3476,7 +3475,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3492,7 +3490,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3508,7 +3505,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -3527,7 +3523,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -3570,7 +3565,6 @@
           "cacheReadUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3582,7 +3576,6 @@
           "cacheWriteUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3598,7 +3591,6 @@
           "inputUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3614,7 +3606,6 @@
           "outputUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3656,7 +3647,6 @@
           "cacheReadUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3668,7 +3658,6 @@
           "cacheWriteUsdPer1mTokens": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3688,7 +3677,6 @@
             "type": "string"
           },
           "inputUsdPer1mTokens": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Inputusdper1Mtokens",
             "type": "string"
           },
@@ -3699,7 +3687,6 @@
             "type": "string"
           },
           "outputUsdPer1mTokens": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Outputusdper1Mtokens",
             "type": "string"
           },
@@ -3736,7 +3723,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3752,7 +3738,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3768,7 +3753,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -3797,7 +3781,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -4559,7 +4542,6 @@
             "title": "Agentrunid"
           },
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -4705,7 +4687,6 @@
             "type": "integer"
           },
           "totalCostUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Totalcostusd",
             "type": "string"
           },
@@ -7697,7 +7678,6 @@
             "type": "integer"
           },
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -7738,7 +7718,6 @@
           "monthlyBudgetUsd": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -7756,7 +7735,6 @@
             "type": "integer"
           },
           "projectedMonthlyCostUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Projectedmonthlycostusd",
             "type": "string"
           },
@@ -7970,7 +7948,6 @@
             "type": "integer"
           },
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -8931,7 +8908,6 @@
             "type": "string"
           },
           "value": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Value",
             "type": "string"
           }
@@ -9031,7 +9007,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -9050,7 +9025,6 @@
       "UsageSummaryBreakdownRow": {
         "properties": {
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -9155,7 +9129,6 @@
       "UsageSummaryTotals": {
         "properties": {
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -9239,7 +9212,6 @@
       "UsageTrendPoint": {
         "properties": {
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -9975,7 +9947,6 @@
             "type": "string"
           },
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
@@ -10229,7 +10200,6 @@
             "title": "Averagetooldurationms"
           },
           "costUsd": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Costusd",
             "type": "string"
           },
