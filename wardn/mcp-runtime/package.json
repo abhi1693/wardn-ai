@@ -1,0 +1,18 @@
+{
+  "name": "@wardn/mcp-runtime-dependencies",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "supergateway": "4.2.0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1"
+  }
+}

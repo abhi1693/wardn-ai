@@ -10,6 +10,21 @@ addCompareSnapshotCommand({
   pixelmatchOptions: { threshold: 0.1 },
 });
 
+// Give each browser the same system preference without adding storage entries.
+// Explicit theme selections and their reload persistence remain controlled by the app.
+beforeEach(() => {
+  cy.on("window:before:load", (window) => {
+    const matchMedia = window.matchMedia.bind(window);
+    cy.stub(window, "matchMedia").callsFake((query: string) => {
+      const result = matchMedia(query);
+      if (query === "(prefers-color-scheme: dark)") {
+        Object.defineProperty(result, "matches", { value: false });
+      }
+      return result;
+    });
+  });
+});
+
 Cypress.on("uncaught:exception", (error) => {
   // Cypress instruments the document before Next hydrates its root element in production mode.
   if (error.message.includes("Minified React error #418") && error.message.includes("args[]=HTML")) {

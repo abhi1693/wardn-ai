@@ -11,7 +11,6 @@ export interface WorkspaceObservabilityDashboardSummary {
   attributedLlmCalls: number;
   attributedToolCalls: number;
   averageToolDurationMs?: number | null;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   failedAgentRuns: number;
   failedRequests: number;

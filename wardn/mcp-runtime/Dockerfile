@@ -1,9 +1,9 @@
-FROM ghcr.io/astral-sh/uv:0.12.10@sha256:2bb3ebca0a796a155094a27773d290c4b074572e6107f171d88d086682fd2500 AS uv
-FROM node:22-alpine3.24@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS node
-FROM python:3.13-alpine3.24@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a AS python
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS node
+FROM python:3.13.17-alpine3.24@sha256:fa0bb0d0cd7c7d6cef30a69094d32ac2b71c7304c87c6107fec100e1ee4eda02 AS python
 
 # The official Alpine Deno image includes its isolated glibc compatibility libraries.
-FROM denoland/deno:alpine@sha256:aa665f8777136863b5b8a0445a5cdfccff8103b5f40c9a877de5276b04facb1e
+FROM denoland/deno:alpine@sha256:75749604f68aea01d39bead15fd1c86343639e44eb8c58ab051da8a924799d01
 
 ENV DENO_DIR=/tmp/deno \
     HOME=/tmp \
@@ -21,13 +21,16 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY structured-content-proxy.mjs /opt/wardn-runtime/structured-content-proxy.mjs
+COPY package.json package-lock.json /opt/wardn-runtime/
 
 RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates libstdc++ libffi xz-libs sqlite-libs libbz2 gdbm ncurses-libs readline \
+    && apk add --no-cache ca-certificates libatomic libstdc++ libffi xz-libs sqlite-libs libbz2 gdbm ncurses-libs readline \
     && update-ca-certificates \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install --global npm@12.0.2 supergateway@3.4.3 \
+    && npm install --global npm@12.2.1 \
+    && npm ci --prefix /opt/wardn-runtime --omit=dev --ignore-scripts \
+    && ln -s /opt/wardn-runtime/node_modules/.bin/supergateway /usr/local/bin/supergateway \
     && npm pkg delete devDependencies workspaces --prefix /usr/local/lib/node_modules/npm --workspaces=false \
     && npm update --prefix /usr/local/lib/node_modules/npm --workspaces=false --omit=dev --ignore-scripts \
     && npm cache clean --force \

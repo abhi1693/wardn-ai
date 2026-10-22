@@ -25,9 +25,10 @@ describe("usage summary scope", () => {
       .findAllByRole("link")
       .should("have.length", 4);
     cy.findByText("Organization usage by user, workspace, agent, and model").should("be.visible");
-    cy.findByRole("button", { name: "Expand Needs attention" }).should("be.visible");
+    cy.findByRole("button", { name: /^Needs attention\b/ }).should("be.visible").and("have.attr", "aria-expanded", "false");
     cy.findByText("By user", { exact: true }).should("not.exist");
-    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.findByText("By user", { exact: true }).should("be.visible");
 
     cy.findByRole("tab", { name: "My usage" }).click();
@@ -36,7 +37,8 @@ describe("usage summary scope", () => {
     cy.findByText("Your attributed model requests, tokens, cost, and tool calls").should(
       "be.visible"
     );
-    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.findByText("My models", { exact: true }).should("be.visible");
 
     cy.backendRequests().then((requests) => {
@@ -80,7 +82,8 @@ describe("usage summary scope", () => {
 
   it("remembers expanded usage sections after a reload", () => {
     cy.visit(`/org/${organizationId}/usage`);
-    cy.findByRole("button", { name: "Expand Detailed breakdowns" }).click();
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("have.attr", "aria-expanded", "false");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).click();
     cy.window().then((window) => {
       expect(
         window.localStorage.getItem("wardn.usage.sections.organization.breakdowns")
@@ -88,7 +91,7 @@ describe("usage summary scope", () => {
     });
 
     cy.reload();
-    cy.findByRole("button", { name: "Collapse Detailed breakdowns" }).should("be.visible");
+    cy.findByRole("button", { name: /^Detailed breakdowns\b/ }).should("be.visible").and("have.attr", "aria-expanded", "true");
     cy.findByText("By user", { exact: true }).should("be.visible");
   });
 });

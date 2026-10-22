@@ -44,7 +44,7 @@ describe("desktop interaction foundation", () => {
   it("opens from the visible shell control and reports an empty search", () => {
     cy.mount(<DesktopCommandMenu destinations={destinations} onNavigate={cy.stub()} />);
 
-    cy.findByRole("button", { name: "Open command menu" }).click();
+    cy.findByRole("button", { name: "Search Ctrl K" }).click();
     cy.findByRole("combobox", { name: "Search destinations" }).type("not available");
     cy.findByText("No matching destination.").should("be.visible");
     cy.get("body").type("{esc}");

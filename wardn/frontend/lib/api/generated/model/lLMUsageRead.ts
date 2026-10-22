@@ -9,7 +9,6 @@ export interface LLMUsageRead {
   agentId?: string | null;
   agentName: string;
   agentRunId?: string | null;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   costUsd: string;
   error: string;
   finishedAt?: string | null;

@@ -13,7 +13,6 @@ export interface LLMUsageSummary {
   running: number;
   succeeded: number;
   totalCalls: number;
-  /** @pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ */
   totalCostUsd: string;
   totalTokens: number;
   unattributed: number;
